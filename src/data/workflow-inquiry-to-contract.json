@@ -1,0 +1,450 @@
+{
+  "id": "inquiry_to_contract_workflow",
+  "name": "客户询价到合同流程",
+  "description": "完整的B2B外贸业务流程：从客户询价、内部报价、多级审批、客户反馈到合同签订",
+  "version": "1.0.0",
+  "stages": [
+    {
+      "id": "inquiry_stage",
+      "name": "📋 询价阶段",
+      "description": "客户发起询价，内部协调获取成本底价",
+      "order": 1,
+      "steps": [
+        {
+          "id": "customer_inquiry",
+          "action": "客户发送询价单",
+          "description": "客户通过Customer Portal提交产品询价单，填写产品需求、数量、交期等信息",
+          "actor": "customer",
+          "required_fields": ["product_list", "quantity", "delivery_date", "shipping_address"],
+          "triggers": [
+            {
+              "type": "form_submit",
+              "form": "customer_inquiry_form",
+              "condition": "form.status === 'submitted'"
+            }
+          ],
+          "next_steps": ["system_distribute_inquiry"]
+        },
+        {
+          "id": "system_distribute_inquiry",
+          "action": "系统自动分发询价单",
+          "description": "系统同时通知Admin财务和对应区域的业务员，确保双方及时获知客户需求",
+          "actor": "system",
+          "required_fields": [],
+          "triggers": [
+            {
+              "type": "auto",
+              "condition": "previous_step_completed",
+              "actions": [
+                "notify_admin_finance",
+                "notify_regional_sales"
+              ]
+            }
+          ],
+          "next_steps": ["sales_remind_finance"]
+        },
+        {
+          "id": "sales_remind_finance",
+          "action": "区域业务员提醒财务报价",
+          "description": "区域业务员查看询价单后，向财务部门发送报价提醒，注明紧急程度和客户背景",
+          "actor": "regional_sales",
+          "required_fields": ["urgency_level", "customer_background", "expected_response_time"],
+          "triggers": [
+            {
+              "type": "button_click",
+              "button": "remind_finance",
+              "condition": "inquiry_reviewed"
+            }
+          ],
+          "next_steps": ["finance_create_supplier_inquiry"]
+        },
+        {
+          "id": "finance_create_supplier_inquiry",
+          "action": "财务生成工厂询价单",
+          "description": "Admin财务根据客户需求，创建并发送工厂询价单给对应供应商",
+          "actor": "admin_finance",
+          "required_fields": ["supplier_list", "inquiry_details", "response_deadline"],
+          "triggers": [
+            {
+              "type": "form_submit",
+              "form": "supplier_inquiry_form",
+              "condition": "form.suppliers.length > 0"
+            }
+          ],
+          "next_steps": ["supplier_feedback"]
+        },
+        {
+          "id": "supplier_feedback",
+          "action": "工厂反馈询价单",
+          "description": "供应商通过Supplier Portal查看询价单，提交报价和交期信息",
+          "actor": "supplier",
+          "required_fields": ["unit_price", "moq", "lead_time", "payment_terms"],
+          "triggers": [
+            {
+              "type": "form_submit",
+              "form": "supplier_quotation_form",
+              "condition": "form.status === 'submitted'"
+            }
+          ],
+          "next_steps": ["finance_provide_cost"]
+        },
+        {
+          "id": "finance_provide_cost",
+          "action": "财务提供成本底价",
+          "description": "财务汇总供应商报价，计算成本底价和建议售价，发送给区域业务员",
+          "actor": "admin_finance",
+          "required_fields": ["cost_price", "suggested_selling_price", "profit_margin", "notes"],
+          "triggers": [
+            {
+              "type": "form_submit",
+              "form": "cost_analysis_form",
+              "condition": "all_suppliers_responded"
+            }
+          ],
+          "next_steps": ["sales_create_quotation"]
+        }
+      ]
+    },
+    {
+      "id": "quotation_stage",
+      "name": "💰 报价阶段",
+      "description": "区域业务员创建客户报价单",
+      "order": 2,
+      "steps": [
+        {
+          "id": "sales_create_quotation",
+          "action": "区域业务员创建报价单",
+          "description": "业务员基于成本底价，结合客户情况和市场竞争，创建客户报价单",
+          "actor": "regional_sales",
+          "required_fields": ["quoted_price", "validity_period", "payment_terms", "delivery_terms", "total_amount"],
+          "triggers": [
+            {
+              "type": "form_submit",
+              "form": "customer_quotation_form",
+              "condition": "quoted_price >= cost_price"
+            }
+          ],
+          "next_steps": ["amount_routing"]
+        },
+        {
+          "id": "amount_routing",
+          "action": "金额自动路由审批",
+          "description": "系统根据报价总金额自动路由：<2万美金→区域经理，≥20万美金→销售总监",
+          "actor": "system",
+          "required_fields": [],
+          "triggers": [
+            {
+              "type": "auto",
+              "condition": "quotation_created",
+              "routing_rules": [
+                {
+                  "condition": "total_amount < 20000",
+                  "route_to": "regional_manager_approval"
+                },
+                {
+                  "condition": "total_amount >= 200000",
+                  "route_to": "sales_director_approval"
+                },
+                {
+                  "condition": "total_amount >= 20000 && total_amount < 200000",
+                  "route_to": "regional_manager_approval"
+                }
+              ]
+            }
+          ],
+          "next_steps": ["regional_manager_approval", "sales_director_approval"]
+        }
+      ]
+    },
+    {
+      "id": "approval_stage",
+      "name": "✅ 审批阶段",
+      "description": "多级审批流程，确保报价合理性",
+      "order": 3,
+      "steps": [
+        {
+          "id": "regional_manager_approval",
+          "action": "区域经理审核报价单",
+          "description": "区域经理审核报价单的价格合理性、利润率、付款条件等（适用于<20万美金订单）",
+          "actor": "regional_manager",
+          "required_fields": ["approval_status", "approval_comments"],
+          "triggers": [
+            {
+              "type": "button_click",
+              "button": "approve_or_reject",
+              "condition": "total_amount < 200000"
+            }
+          ],
+          "next_steps": ["approval_feedback"]
+        },
+        {
+          "id": "sales_director_approval",
+          "action": "销售总监审核报价单",
+          "description": "销售总监审核大额订单（≥20万美金），评估风险和战略价值",
+          "actor": "sales_director",
+          "required_fields": ["approval_status", "risk_assessment", "strategic_value", "approval_comments"],
+          "triggers": [
+            {
+              "type": "button_click",
+              "button": "approve_or_reject",
+              "condition": "total_amount >= 200000"
+            }
+          ],
+          "next_steps": ["approval_feedback"]
+        },
+        {
+          "id": "approval_feedback",
+          "action": "审核结果反馈",
+          "description": "系统通知业务员审核结果，如果不通过需说明原因和改进建议",
+          "actor": "system",
+          "required_fields": [],
+          "triggers": [
+            {
+              "type": "auto",
+              "condition": "approval_decision_made",
+              "branches": [
+                {
+                  "condition": "approval_status === 'approved'",
+                  "action": "notify_sales_approved",
+                  "next": "sales_submit_to_customer"
+                },
+                {
+                  "condition": "approval_status === 'rejected'",
+                  "action": "notify_sales_rejected",
+                  "next": "sales_view_rejection_reason"
+                }
+              ]
+            }
+          ],
+          "next_steps": ["sales_submit_to_customer", "sales_view_rejection_reason"]
+        },
+        {
+          "id": "sales_view_rejection_reason",
+          "action": "业务员查看不通过原因",
+          "description": "业务员查看审批不通过的具体原因，修改报价单后重新提交审批",
+          "actor": "regional_sales",
+          "required_fields": [],
+          "triggers": [
+            {
+              "type": "button_click",
+              "button": "view_and_revise",
+              "condition": "approval_status === 'rejected'"
+            }
+          ],
+          "next_steps": ["sales_create_quotation"]
+        }
+      ]
+    },
+    {
+      "id": "customer_feedback_stage",
+      "name": "💬 客户反馈阶段",
+      "description": "提交报价给客户并处理客户反馈",
+      "order": 4,
+      "steps": [
+        {
+          "id": "sales_submit_to_customer",
+          "action": "区域业务员提交报价给客户",
+          "description": "审核通过后，业务员通过系统将报价单正式发送给客户",
+          "actor": "regional_sales",
+          "required_fields": ["quotation_pdf", "cover_email", "submission_date"],
+          "triggers": [
+            {
+              "type": "button_click",
+              "button": "send_to_customer",
+              "condition": "approval_status === 'approved'"
+            }
+          ],
+          "next_steps": ["customer_receive_quotation"]
+        },
+        {
+          "id": "customer_receive_quotation",
+          "action": "客户收到Admin报价",
+          "description": "客户通过Customer Portal查看报价单详情，包括产品明细、价格、交期等",
+          "actor": "customer",
+          "required_fields": [],
+          "triggers": [
+            {
+              "type": "auto",
+              "condition": "quotation_sent",
+              "action": "send_notification_to_customer"
+            }
+          ],
+          "next_steps": ["customer_feedback"]
+        },
+        {
+          "id": "customer_feedback",
+          "action": "客户反馈报价",
+          "description": "客户对报价进行反馈：同意、议价或拒绝，并填写具体意见",
+          "actor": "customer",
+          "required_fields": ["feedback_type", "feedback_comments"],
+          "triggers": [
+            {
+              "type": "form_submit",
+              "form": "customer_feedback_form",
+              "condition": "feedback_type in ['accept', 'negotiate', 'reject']"
+            }
+          ],
+          "next_steps": ["sales_handle_feedback"]
+        },
+        {
+          "id": "sales_handle_feedback",
+          "action": "业务员处理客户反馈",
+          "description": "根据客户反馈类型采取不同行动：同意→生成合同，议价→上报区域经理，拒绝→跟进了解原因",
+          "actor": "regional_sales",
+          "required_fields": ["action_plan"],
+          "triggers": [
+            {
+              "type": "auto",
+              "condition": "customer_feedback_received",
+              "branches": [
+                {
+                  "condition": "feedback_type === 'accept'",
+                  "action": "proceed_to_contract",
+                  "next": "generate_contract"
+                },
+                {
+                  "condition": "feedback_type === 'negotiate'",
+                  "action": "escalate_to_manager",
+                  "next": "manager_negotiate"
+                },
+                {
+                  "condition": "feedback_type === 'reject'",
+                  "action": "follow_up_reason",
+                  "next": "sales_follow_up"
+                }
+              ]
+            }
+          ],
+          "next_steps": ["generate_contract", "manager_negotiate", "sales_follow_up"]
+        },
+        {
+          "id": "manager_negotiate",
+          "action": "区域经理处理议价",
+          "description": "区域经理评估客户议价要求，决定是否接受或提出折中方案",
+          "actor": "regional_manager",
+          "required_fields": ["negotiation_decision", "revised_price", "justification"],
+          "triggers": [
+            {
+              "type": "form_submit",
+              "form": "negotiation_decision_form",
+              "condition": "feedback_type === 'negotiate'"
+            }
+          ],
+          "next_steps": ["sales_submit_to_customer"]
+        },
+        {
+          "id": "sales_follow_up",
+          "action": "业务员跟进拒绝原因",
+          "description": "业务员联系客户了解拒绝的具体原因，记录反馈用于后续改进",
+          "actor": "regional_sales",
+          "required_fields": ["rejection_reason", "follow_up_notes", "future_opportunity"],
+          "triggers": [
+            {
+              "type": "form_submit",
+              "form": "follow_up_form",
+              "condition": "feedback_type === 'reject'"
+            }
+          ],
+          "next_steps": []
+        }
+      ]
+    },
+    {
+      "id": "contract_stage",
+      "name": "📄 合同阶段",
+      "description": "生成销售合同并进行审核",
+      "order": 5,
+      "steps": [
+        {
+          "id": "generate_contract",
+          "action": "生成销售合同",
+          "description": "系统根据确认的报价单自动生成销售合同，业务员可补充特殊条款",
+          "actor": "regional_sales",
+          "required_fields": ["contract_terms", "special_clauses", "payment_schedule", "delivery_schedule"],
+          "triggers": [
+            {
+              "type": "button_click",
+              "button": "generate_contract",
+              "condition": "customer_accepted_quotation"
+            }
+          ],
+          "next_steps": ["manager_review_contract"]
+        },
+        {
+          "id": "manager_review_contract",
+          "action": "区域经理审核合同",
+          "description": "区域经理审核合同条款的完整性、合规性和风险点",
+          "actor": "regional_manager",
+          "required_fields": ["contract_approval_status", "review_comments", "risk_notes"],
+          "triggers": [
+            {
+              "type": "button_click",
+              "button": "approve_or_reject_contract",
+              "condition": "contract_generated"
+            }
+          ],
+          "next_steps": ["contract_approved", "contract_revision"]
+        },
+        {
+          "id": "contract_approved",
+          "action": "合同审核通过",
+          "description": "合同审核通过后，发送给客户签署，同时通知财务和物流部门准备",
+          "actor": "system",
+          "required_fields": [],
+          "triggers": [
+            {
+              "type": "auto",
+              "condition": "contract_approval_status === 'approved'",
+              "actions": [
+                "send_contract_to_customer",
+                "notify_finance",
+                "notify_logistics"
+              ]
+            }
+          ],
+          "next_steps": []
+        },
+        {
+          "id": "contract_revision",
+          "action": "合同修订",
+          "description": "合同审核不通过，业务员根据反馈意见修改合同后重新提交",
+          "actor": "regional_sales",
+          "required_fields": ["revision_notes"],
+          "triggers": [
+            {
+              "type": "auto",
+              "condition": "contract_approval_status === 'rejected'"
+            }
+          ],
+          "next_steps": ["manager_review_contract"]
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "created_at": "2024-11-27",
+    "created_by": "福建高盛达富建材有限公司",
+    "business_type": "B2B外贸",
+    "applicable_regions": ["北美", "南美", "欧非"],
+    "roles_involved": [
+      "customer",
+      "regional_sales",
+      "regional_manager",
+      "sales_director",
+      "admin_finance",
+      "supplier",
+      "system"
+    ],
+    "key_features": [
+      "多级审批",
+      "金额路由",
+      "条件分支",
+      "客户反馈处理",
+      "议价机制"
+    ],
+    "approval_thresholds": {
+      "regional_manager": "< 200,000 USD",
+      "sales_director": "≥ 200,000 USD"
+    }
+  }
+}

@@ -1,0 +1,381 @@
+/**
+ * Document Number Generator for B2B Trade System
+ * Supports: RFQ, QUO, SC, CI, PL, YS, SK, INQ, QR, XJ, BJ, QT, SO, PO
+ * Format: {TYPE}-{REGION}-YYMMDD-XXXX
+ * 
+ * Important: Sequence numbers are cumulative and NEVER reset daily.
+ * The date part reflects the document creation date, but the sequence continues incrementing.
+ * 
+ * Examples:
+ * Day 1 (Nov 21): SC-NA-251121-0001, SC-NA-251121-0002
+ * Day 2 (Nov 22): SC-NA-251122-0003, SC-NA-251122-0004
+ * Day 3 (Nov 23): SC-NA-251123-0005, SC-NA-251123-0006
+ */
+
+const DOCUMENT_COUNTER_KEY = 'document_counter_data';
+
+// 🌍 Region code mapping
+export type RegionType = 'North America' | 'South America' | 'Europe & Africa';
+
+export const REGION_CODES: Record<RegionType, string> = {
+  'North America': 'NA',
+  'South America': 'SA',
+  'Europe & Africa': 'EA'  // Changed from EU to EA for better representation
+};
+
+// 📋 Document types
+export type DocumentType = 'RFQ' | 'QUO' | 'SC' | 'CI' | 'PL' | 'YS' | 'SK' | 'INQ' | 'QR' | 'XJ' | 'BJ' | 'QT' | 'SO' | 'PO';
+
+interface DocumentCounterData {
+  counters: {
+    [key: string]: number; // Key format: "{TYPE}-{REGION}" (e.g., "RFQ-NA", "QT-EA", "PO-SA")
+    // Each counter is cumulative and never resets
+  };
+}
+
+/**
+ * Get current date in YYMMDD format
+ */
+function getCurrentDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear().toString().slice(-2); // Last 2 digits of year
+  const month = (now.getMonth() + 1).toString().padStart(2, '0');
+  const day = now.getDate().toString().padStart(2, '0');
+  return `${year}${month}${day}`;
+}
+
+/**
+ * Get or initialize counter data from localStorage
+ */
+function getCounterData(): DocumentCounterData {
+  try {
+    const stored = localStorage.getItem(DOCUMENT_COUNTER_KEY);
+    if (stored) {
+      const data: DocumentCounterData = JSON.parse(stored);
+      return data;
+    }
+  } catch (error) {
+    console.error('Error reading document counter data:', error);
+  }
+  
+  // Initialize if not found
+  return {
+    counters: {}
+  };
+}
+
+/**
+ * Save counter data to localStorage
+ */
+function saveCounterData(data: DocumentCounterData): void {
+  try {
+    localStorage.setItem(DOCUMENT_COUNTER_KEY, JSON.stringify(data));
+  } catch (error) {
+    console.error('Error saving document counter data:', error);
+  }
+}
+
+/**
+ * Generate next document number
+ * Format: {TYPE}-{REGION}-YYMMDD-XXXX
+ * @param type Document type (e.g., "RFQ", "QT", "PO")
+ * @param region Region type (e.g., "North America")
+ * @returns {string} Generated document number
+ */
+export function generateDocumentNumber(type: DocumentType, region: RegionType): string {
+  const counterData = getCounterData();
+  
+  // Get region code
+  const regionCode = REGION_CODES[region];
+  
+  // Initialize counter if not exists
+  const key = `${type}-${regionCode}`;
+  if (!counterData.counters[key]) {
+    counterData.counters[key] = 0;
+  }
+  
+  // Increment counter
+  counterData.counters[key] += 1;
+  
+  // Save updated counter
+  saveCounterData(counterData);
+  
+  // Format counter as 4-digit number
+  const sequenceNumber = counterData.counters[key].toString().padStart(4, '0');
+  
+  // Generate document number
+  const documentNumber = `${type}-${regionCode}-${getCurrentDateString()}-${sequenceNumber}`;
+  
+  console.log('✅ Generated Document Number:', documentNumber);
+  
+  return documentNumber;
+}
+
+/**
+ * Parse document number to extract type, region, date and sequence
+ * @param documentNumber Document number string (e.g., "RFQ-NA-251120-0001")
+ * @returns Parsed data or null if invalid
+ */
+export function parseDocumentNumber(documentNumber: string): { type: string; region: string; date: string; sequence: number } | null {
+  // Try new format first: {TYPE}-{REGION}-YYMMDD-XXXX
+  const newFormatMatch = documentNumber.match(/^([A-Z]{2,3})-([A-Z]{2})-(\d{6})-(\d{4})$/);
+  if (newFormatMatch) {
+    return {
+      type: newFormatMatch[1],
+      region: newFormatMatch[2],
+      date: newFormatMatch[3],
+      sequence: parseInt(newFormatMatch[4], 10)
+    };
+  }
+  
+  return null;
+}
+
+/**
+ * Format document date to readable format
+ * @param dateString Date in YYMMDD format (e.g., "251101")
+ * @returns Formatted date string (e.g., "Nov 01, 2025")
+ */
+export function formatDocumentDate(dateString: string): string {
+  if (dateString.length !== 6) {
+    return dateString;
+  }
+  
+  const year = parseInt('20' + dateString.slice(0, 2), 10);
+  const month = parseInt(dateString.slice(2, 4), 10) - 1;
+  const day = parseInt(dateString.slice(4, 6), 10);
+  
+  const date = new Date(year, month, day);
+  
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit'
+  });
+}
+
+/**
+ * Reset counter for testing purposes
+ */
+export function resetDocumentCounter(): void {
+  try {
+    localStorage.removeItem(DOCUMENT_COUNTER_KEY);
+    console.log('✅ Document counter reset');
+  } catch (error) {
+    console.error('Error resetting document counter:', error);
+  }
+}
+
+// ========== Convenience Functions ==========
+
+/**
+ * Generate RFQ (Request for Quotation) number
+ * Format: RFQ-{REGION}-YYMMDD-XXXX
+ */
+export function generateRFQNumber(region: RegionType): string {
+  return generateDocumentNumber('RFQ', region);
+}
+
+/**
+ * Generate Quotation number
+ * Format: QUO-{REGION}-YYMMDD-XXXX
+ */
+export function generateQuotationNumber(region: RegionType): string {
+  return generateDocumentNumber('QUO', region);
+}
+
+/**
+ * Generate Sales Contract number
+ * Format: SC-{REGION}-YYMMDD-XXXX
+ */
+export function generateSalesContractNumber(region: RegionType): string {
+  return generateDocumentNumber('SC', region);
+}
+
+/**
+ * Generate Commercial Invoice number
+ * Format: CI-{REGION}-YYMMDD-XXXX
+ */
+export function generateCommercialInvoiceNumber(region: RegionType): string {
+  return generateDocumentNumber('CI', region);
+}
+
+/**
+ * Generate Packing List number
+ * Format: PL-{REGION}-YYMMDD-XXXX
+ */
+export function generatePackingListNumber(region: RegionType): string {
+  return generateDocumentNumber('PL', region);
+}
+
+/**
+ * Generate Accounts Receivable number
+ * Format: YS-{REGION}-YYMMDD-XXXX
+ */
+export function generateAccountsReceivableNumber(region: RegionType): string {
+  return generateDocumentNumber('YS', region);
+}
+
+/**
+ * Generate Payment Collection number
+ * Format: SK-{REGION}-YYMMDD-XXXX
+ */
+export function generatePaymentCollectionNumber(region: RegionType): string {
+  return generateDocumentNumber('SK', region);
+}
+
+/**
+ * Generate Purchase Order number
+ * Format: PO-{REGION}-YYMMDD-XXXX
+ * @deprecated Use generateSalesContractNumber instead
+ */
+export function generatePONumber(region: RegionType): string {
+  return generateDocumentNumber('SC', region);
+}
+
+// ========== Backward Compatibility ==========
+
+/**
+ * Parse RFQ number (backward compatible)
+ * @deprecated Use parseDocumentNumber instead
+ */
+export function parseRFQNumber(rfqNumber: string): { region: string; date: string; sequence: number } | null {
+  const parsed = parseDocumentNumber(rfqNumber);
+  if (parsed && parsed.type === 'RFQ') {
+    return {
+      region: parsed.region,
+      date: parsed.date,
+      sequence: parsed.sequence
+    };
+  }
+  
+  // Fallback to old format: RFQ-YYMMDD-XXXX (for backward compatibility)
+  const oldFormatMatch = rfqNumber.match(/^RFQ-(\d{6})-(\d{4})$/);
+  if (oldFormatMatch) {
+    return {
+      region: 'N/A',
+      date: oldFormatMatch[1],
+      sequence: parseInt(oldFormatMatch[2], 10)
+    };
+  }
+  
+  return null;
+}
+
+/**
+ * Format RFQ date (backward compatible)
+ * @deprecated Use formatDocumentDate instead
+ */
+export function formatRFQDate(dateString: string): string {
+  return formatDocumentDate(dateString);
+}
+
+/**
+ * Reset RFQ counter (backward compatible)
+ * @deprecated Use resetDocumentCounter instead
+ */
+export function resetRFQCounter(): void {
+  resetDocumentCounter();
+}
+
+// ========== 7-Level Numbering System Functions ==========
+
+/**
+ * Generate INQ (Customer Inquiry) number
+ * Format: INQ-{REGION}-YYMMDD-XXXX
+ */
+export function generateINQNumber(region: RegionType): string {
+  return generateDocumentNumber('INQ', region);
+}
+
+/**
+ * Generate QR (Purchase Requirement) number
+ * Format: QR-{REGION}-YYMMDD-XXXX
+ */
+export function generateQRNumber(region: RegionType): string {
+  return generateDocumentNumber('QR', region);
+}
+
+/**
+ * Generate XJ (RFQ to Supplier) number
+ * Format: XJ-YYMMDD-XXXX (no region, admin generates it)
+ */
+export function generateXJNumber(): string {
+  const counterData = getCounterData();
+  
+  // XJ doesn't have region code (similar to BJ)
+  const key = 'XJ';
+  if (!counterData.counters[key]) {
+    counterData.counters[key] = 0;
+  }
+  
+  // Increment counter
+  counterData.counters[key] += 1;
+  
+  // Save updated counter
+  saveCounterData(counterData);
+  
+  // Format counter as 4-digit number
+  const sequenceNumber = counterData.counters[key].toString().padStart(4, '0');
+  
+  // Generate XJ number (no region)
+  const xjNumber = `XJ-${getCurrentDateString()}-${sequenceNumber}`;
+  
+  console.log('✅ Generated XJ Number:', xjNumber);
+  
+  return xjNumber;
+}
+
+/**
+ * Generate BJ (Supplier Quotation) number
+ * Format: BJ-YYMMDD-XXXX (no region, supplier generates it)
+ */
+export function generateBJNumber(): string {
+  const counterData = getCounterData();
+  
+  // BJ doesn't have region code
+  const key = 'BJ';
+  if (!counterData.counters[key]) {
+    counterData.counters[key] = 0;
+  }
+  
+  // Increment counter
+  counterData.counters[key] += 1;
+  
+  // Save updated counter
+  saveCounterData(counterData);
+  
+  // Format counter as 4-digit number
+  const sequenceNumber = counterData.counters[key].toString().padStart(4, '0');
+  
+  // Generate BJ number (no region)
+  const bjNumber = `BJ-${getCurrentDateString()}-${sequenceNumber}`;
+  
+  console.log('✅ Generated BJ Number:', bjNumber);
+  
+  return bjNumber;
+}
+
+/**
+ * Generate QT (Sales Quotation) number
+ * Format: QT-{REGION}-YYMMDD-XXXX
+ */
+export function generateQTNumber(region: RegionType): string {
+  return generateDocumentNumber('QT', region);
+}
+
+/**
+ * Generate SO (Sales Order) number
+ * Format: SO-{REGION}-YYMMDD-XXXX
+ */
+export function generateSONumber(region: RegionType): string {
+  return generateDocumentNumber('SO', region);
+}
+
+/**
+ * Generate PO (Purchase Order to Supplier) number
+ * Format: PO-{REGION}-YYMMDD-XXXX
+ */
+export function generatePurchaseOrderNumber(region: RegionType): string {
+  return generateDocumentNumber('PO', region);
+}

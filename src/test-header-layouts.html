@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>页眉布局方案预览 - 跳转指引</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            background: white;
+            color: #333;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #F96302;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .button {
+            display: inline-block;
+            background: #F96302;
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 18px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(249, 99, 2, 0.3);
+        }
+        .button:hover {
+            background: #d75502;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(249, 99, 2, 0.4);
+        }
+        .info {
+            background: #f0f9ff;
+            border-left: 4px solid #0ea5e9;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .features {
+            margin-top: 30px;
+        }
+        .features h3 {
+            color: #F96302;
+            margin-bottom: 15px;
+        }
+        .features ul {
+            list-style: none;
+            padding: 0;
+        }
+        .features li {
+            padding: 8px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+        .features li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #F96302;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 B2B外贸文档页眉布局方案</h1>
+        <p class="subtitle">5种专业布局方案对比 - 台湾大厂 & 欧美大厂风格</p>
+        
+        <div class="info">
+            <strong>📋 包含的布局方案：</strong><br>
+            • 方案1：台湾制造业风格（富士康/台达/华硕）<br>
+            • 方案2：欧美简约风格（Apple/Google/Amazon）<br>
+            • 方案3：欧美工业风格（西门子/GE/ABB）<br>
+            • 方案4：正式法律文档风格（律师事务所/银行）<br>
+            • 方案5：现代极简风格（当前使用的优化版）
+        </div>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="#" class="button" onclick="openPreview(); return false;">
+                🚀 查看完整布局方案对比
+            </a>
+        </div>
+
+        <div class="features">
+            <h3>💡 每个方案包含：</h3>
+            <ul>
+                <li>真实的 Logo 和公司信息展示</li>
+                <li>Sales Contract 标题位置设计</li>
+                <li>合同编号、日期、参考号排版</li>
+                <li>适用场景和行业建议</li>
+                <li>实际视觉效果预览</li>
+            </ul>
+        </div>
+
+        <div class="info" style="margin-top: 30px; background: #fef3c7; border-left-color: #f59e0b;">
+            <strong>⚡ 如何访问：</strong><br>
+            在浏览器控制台执行：<code style="background: white; padding: 2px 6px; border-radius: 3px;">window.location.hash = '#/header-layout-options'</code>
+        </div>
+    </div>
+
+    <script>
+        function openPreview() {
+            // 修改 URL hash 来导航到页眉布局对比页面
+            window.location.hash = '#/header-layout-options';
+        }
+
+        // 自动跳转（3秒后）
+        setTimeout(() => {
+            if (confirm('是否立即跳转到页眉布局方案对比页面？')) {
+                openPreview();
+            }
+        }, 2000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>打印功能测试</title>
+  <style>
+    /* 基础样式 */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    
+    .test-container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+      color: #F96302;
+      margin-bottom: 20px;
+    }
+    
+    .test-section {
+      margin-bottom: 30px;
+      padding: 20px;
+      background: #f9f9f9;
+      border-left: 4px solid #F96302;
+    }
+    
+    button {
+      background: #F96302;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-right: 10px;
+    }
+    
+    button:hover {
+      background: #E55A00;
+    }
+    
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 4px;
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+    
+    /* 打印专用样式 */
+    @media print {
+      body.printing-test > *:not(.print-content) {
+        display: none !important;
+      }
+      
+      .print-content {
+        display: block !important;
+        position: static !important;
+        width: 100% !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      
+      @page {
+        size: A4 portrait;
+        margin: 15mm;
+      }
+      
+      .test-document {
+        background: white !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <h1>🖨️ 打印功能测试页面</h1>
+    
+    <div class="test-section">
+      <h2>测试1: Body类控制法</h2>
+      <p>这个方法通过给body添加特定的类来控制打印内容。</p>
+      <button onclick="testBodyClassMethod()">测试打印</button>
+      <div class="status" id="status1" style="display: none;"></div>
+    </div>
+    
+    <div class="test-section">
+      <h2>测试2: 检查CSS规则</h2>
+      <p>检查打印相关的CSS规则是否正确加载。</p>
+      <button onclick="checkCSSRules()">检查CSS</button>
+      <div class="status" id="status2" style="display: none;"></div>
+    </div>
+    
+    <div class="test-section">
+      <h2>测试3: 模拟Dialog结构</h2>
+      <p>模拟Radix UI Dialog的结构进行测试。</p>
+      <button onclick="testDialogStructure()">打开模拟Dialog</button>
+      <div class="status" id="status3" style="display: none;"></div>
+    </div>
+  </div>
+  
+  <!-- 打印内容 -->
+  <div class="print-content" style="display: none;">
+    <div class="test-document">
+      <h1>THE COSUN BM</h1>
+      <h2>SALES CONTRACT</h2>
+      <p>Contract No.: SC-2024-001</p>
+      <p>Date: 2024-12-14</p>
+      <table border="1" style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Qty</th>
+            <th>Unit Price</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Product A</td>
+            <td>100</td>
+            <td>$10.00</td>
+            <td>$1,000.00</td>
+          </tr>
+          <tr>
+            <td>Product B</td>
+            <td>200</td>
+            <td>$15.00</td>
+            <td>$3,000.00</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="3">Total</th>
+            <th>$4,000.00</th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+  
+  <script>
+    // 测试1: Body类控制法
+    function testBodyClassMethod() {
+      const status = document.getElementById('status1');
+      status.style.display = 'block';
+      status.textContent = '正在添加打印类...';
+      
+      // 显示打印内容
+      document.querySelector('.print-content').style.display = 'block';
+      
+      // 添加打印类
+      document.body.classList.add('printing-test');
+      
+      status.textContent = '打印类已添加，正在触发打印...';
+      
+      // 触发打印
+      setTimeout(() => {
+        window.print();
+        
+        // 监听打印完成事件
+        const afterPrint = () => {
+          document.body.classList.remove('printing-test');
+          document.querySelector('.print-content').style.display = 'none';
+          status.textContent = '✅ 打印完成，类已移除';
+          window.removeEventListener('afterprint', afterPrint);
+        };
+        
+        window.addEventListener('afterprint', afterPrint);
+      }, 500);
+    }
+    
+    // 测试2: 检查CSS规则
+    function checkCSSRules() {
+      const status = document.getElementById('status2');
+      status.style.display = 'block';
+      
+      let result = '检查结果:\n';
+      let hasBodyClass = false;
+      let hasPrintMedia = false;
+      
+      // 检查所有样式表
+      for (let i = 0; i < document.styleSheets.length; i++) {
+        try {
+          const rules = document.styleSheets[i].cssRules || document.styleSheets[i].rules;
+          for (let j = 0; j < rules.length; j++) {
+            const rule = rules[j];
+            if (rule.media && rule.media.mediaText === 'print') {
+              hasPrintMedia = true;
+              // 检查是否有body类规则
+              if (rule.cssRules) {
+                for (let k = 0; k < rule.cssRules.length; k++) {
+                  if (rule.cssRules[k].selectorText && rule.cssRules[k].selectorText.includes('body.printing-')) {
+                    hasBodyClass = true;
+                    result += `✅ 找到body类规则: ${rule.cssRules[k].selectorText}\n`;
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // 跨域样式表可能无法访问
+        }
+      }
+      
+      result += `\n@media print规则: ${hasPrintMedia ? '✅ 存在' : '❌ 不存在'}\n`;
+      result += `body类规则: ${hasBodyClass ? '✅ 存在' : '❌ 不存在'}`;
+      
+      status.textContent = result;
+      status.style.whiteSpace = 'pre-wrap';
+    }
+    
+    // 测试3: 模拟Dialog结构
+    function testDialogStructure() {
+      const status = document.getElementById('status3');
+      status.style.display = 'block';
+      status.textContent = '创建模拟Dialog...';
+      
+      // 创建模拟的Radix Portal
+      const portal = document.createElement('div');
+      portal.setAttribute('data-radix-portal', '');
+      portal.style.cssText = 'position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5);';
+      
+      // 创建Dialog内容
+      const dialogContent = document.createElement('div');
+      dialogContent.setAttribute('data-radix-dialog-content', '');
+      dialogContent.style.cssText = 'background: white; padding: 30px; border-radius: 8px; max-width: 800px; max-height: 90vh; overflow: auto;';
+      
+      // 添加打印内容的副本
+      const printArea = document.createElement('div');
+      printArea.className = 'sales-contract-print-area';
+      printArea.innerHTML = document.querySelector('.print-content').innerHTML;
+      
+      // 添加关闭按钮
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '关闭';
+      closeBtn.style.cssText = 'position: absolute; top: 10px; right: 10px;';
+      closeBtn.onclick = () => {
+        document.body.removeChild(portal);
+        status.textContent = 'Dialog已关闭';
+      };
+      
+      // 添加打印按钮
+      const printBtn = document.createElement('button');
+      printBtn.textContent = '打印';
+      printBtn.style.cssText = 'margin: 20px 0;';
+      printBtn.onclick = () => {
+        document.body.classList.add('printing-sales-contract');
+        window.print();
+        window.addEventListener('afterprint', () => {
+          document.body.classList.remove('printing-sales-contract');
+        }, { once: true });
+      };
+      
+      dialogContent.appendChild(closeBtn);
+      dialogContent.appendChild(printBtn);
+      dialogContent.appendChild(printArea);
+      portal.appendChild(dialogContent);
+      document.body.appendChild(portal);
+      
+      status.textContent = '✅ 模拟Dialog已创建，可以测试打印';
+    }
+  </script>
+</body>
+</html>
