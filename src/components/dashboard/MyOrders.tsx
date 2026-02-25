@@ -249,7 +249,7 @@ export function MyOrders({
           </TabsContent>
 
           <TabsContent value="tracking" className="m-0">
-            <OrderTracking />
+            <OrderTracking onTabChange={setActiveTab} />
           </TabsContent>
 
           <TabsContent value="create" className="m-0">

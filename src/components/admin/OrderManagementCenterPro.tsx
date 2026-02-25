@@ -30,13 +30,15 @@ import { SalesContractManagement } from '../salesperson/SalesContractManagement'
 import { ApprovalCenter } from './ApprovalCenter'; // 🔥 审批中心
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：获取待审批数量
-import { useApproval } from '../../contexts/ApprovalContext'; // 🔥 新增：审批Context
 import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 新增：获取当前用户
 import { QuotationPDFTemplate } from './QuotationPDFTemplate';
 import { SalesContractTemplate } from './SalesContractTemplate';
 import { SalesContractDocumentPaginated } from '../documents/SalesContractDocumentPaginated'; // 🔥 分页版销售合同
 import { SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 销售合同数据类型
 import { exportToPDF, generatePDFFilename } from '../../utils/pdfExport';
+import { apiFetchJson } from '../../api/backend-auth';
+const APPROVAL_CENTER_CACHE_PREFIX = 'approval_center_cache_v1';
+const getApprovalCenterCacheKey = (email: string) => `${APPROVAL_CENTER_CACHE_PREFIX}:${email || 'anonymous'}`;
 
 // 🔥 增强的报价产品接口
 interface QuotationProduct {
@@ -95,6 +97,15 @@ export default function OrderManagementCenterPro() {
   
   // 🔒 获取当前用户角色
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    const pendingTargetTab = localStorage.getItem('orderManagementCenterActiveTab');
+    if (!pendingTargetTab) return;
+    if (['overview', 'inquiries', 'cost-inquiry', 'quotations', 'orders', 'collections', 'approvals'].includes(pendingTargetTab)) {
+      setActiveTab(pendingTargetTab as any);
+    }
+    localStorage.removeItem('orderManagementCenterActiveTab');
+  }, []);
   
   useEffect(() => {
     const currentUserStr = localStorage.getItem('cosun_current_user');
@@ -123,13 +134,75 @@ export default function OrderManagementCenterPro() {
   const contractPDFRef = useRef<HTMLDivElement>(null);
   
   const { notifications, unreadCount, addNotification } = useNotifications();
-  const { getPendingApprovals } = useApproval(); // 🔥 获取待审批函数
   
   // 🔥 计算当前用户的待审批数量
   const currentUser = getCurrentUser();
   const currentUserEmail = currentUser?.email || '';
-  const myPendingApprovals = getPendingApprovals(currentUserEmail);
-  const myPendingCount = myPendingApprovals.length;
+  const [myPendingCount, setMyPendingCount] = useState(() => {
+    if (!currentUserEmail) return 0;
+    try {
+      const raw = localStorage.getItem(getApprovalCenterCacheKey(currentUserEmail));
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed?.pending) ? parsed.pending.length : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  useEffect(() => {
+    if (!currentUserEmail) {
+      setMyPendingCount(0);
+      return;
+    }
+
+    // 先显示缓存值，避免切角色后红点先显示 0
+    try {
+      const raw = localStorage.getItem(getApprovalCenterCacheKey(currentUserEmail));
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed?.pending)) {
+        setMyPendingCount(parsed.pending.length);
+      }
+    } catch {}
+
+    const loadPendingCount = async () => {
+      try {
+        const [qtRes, scRes] = await Promise.all([
+          apiFetchJson<{
+            pending: any[];
+            approved: any[];
+            rejected: any[];
+            submitted: any[];
+          }>(`/api/approval-center/quotation-requests?asEmail=${encodeURIComponent(currentUserEmail)}`),
+          apiFetchJson<{
+            pending: any[];
+            approved: any[];
+            rejected: any[];
+            submitted: any[];
+          }>(`/api/approval-center/contract-requests?asEmail=${encodeURIComponent(currentUserEmail)}`),
+        ]);
+
+        const count = (qtRes?.pending?.length || 0) + (scRes?.pending?.length || 0);
+        setMyPendingCount(count);
+      } catch (error) {
+        console.error('❌ [OrderManagementCenterPro] 加载待审批数量失败:', error);
+      }
+    };
+
+    void loadPendingCount();
+
+    const handlePendingChanged = (event: Event) => {
+      const customEvent = event as CustomEvent<{ count?: number }>;
+      const next = Number(customEvent?.detail?.count ?? 0);
+      if (Number.isFinite(next)) {
+        setMyPendingCount(next);
+      }
+    };
+
+    window.addEventListener('approvalPendingCountChanged', handlePendingChanged as EventListener);
+    return () => {
+      window.removeEventListener('approvalPendingCountChanged', handlePendingChanged as EventListener);
+    };
+  }, [currentUserEmail]);
 
   // 初始化模拟数据
   useEffect(() => {

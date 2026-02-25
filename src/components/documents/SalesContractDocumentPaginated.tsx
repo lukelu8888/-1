@@ -16,8 +16,18 @@ interface SalesContractDocumentPaginatedProps {
 
 export const SalesContractDocumentPaginated = forwardRef<HTMLDivElement, SalesContractDocumentPaginatedProps>(
   ({ data }, ref) => {
+    const toSafeNumber = (value: unknown): number => {
+      if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+      if (typeof value === 'string') {
+        const normalized = value.replace(/[^0-9.\-]/g, '').trim();
+        if (!normalized) return 0;
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      return 0;
+    };
     
-    const total = data.products.reduce((sum, item) => sum + item.amount, 0);
+    const total = data.products.reduce((sum, item) => sum + toSafeNumber(item.amount), 0);
     
     const extractTradeTerm = (tradeTerms: string): string => {
       const upperTerms = tradeTerms.toUpperCase();
@@ -81,8 +91,8 @@ export const SalesContractDocumentPaginated = forwardRef<HTMLDivElement, SalesCo
             }
             
             .contract-page {
-              width: 210mm;
-              height: 297mm;
+              width: 794px;
+              height: 1123px;
               background: white;
               margin: 0 auto 20px auto;
               padding: 20mm;
@@ -196,6 +206,7 @@ export const SalesContractDocumentPaginated = forwardRef<HTMLDivElement, SalesCo
                   <tr className="bg-gray-100">
                     <th className="border border-gray-300 px-1.5 py-1 text-left w-8">No.</th>
                     <th className="border border-gray-300 px-1.5 py-1 text-left w-20">Model</th>
+                    <th className="border border-gray-300 px-1.5 py-1 text-center w-16">Image</th>
                     <th className="border border-gray-300 px-1.5 py-1 text-left">Description / Specification</th>
                     <th className="border border-gray-300 px-1.5 py-1 text-right w-16">Qty</th>
                     <th className="border border-gray-300 px-1.5 py-1 text-right w-20">Unit Price</th>
@@ -207,25 +218,31 @@ export const SalesContractDocumentPaginated = forwardRef<HTMLDivElement, SalesCo
                     <tr key={product.no}>
                       <td className="border border-gray-300 px-1.5 py-1 text-center">{product.no}</td>
                       <td className="border border-gray-300 px-1.5 py-1 text-[8pt]">{product.modelNo || '-'}</td>
+                      <td className="border border-gray-300 px-1 py-1 text-center">
+                        {product.imageUrl ? (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.description}
+                            className="w-8 h-8 object-cover mx-auto rounded"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 bg-gray-100 mx-auto rounded flex items-center justify-center text-[7pt] text-gray-400">
+                            N/A
+                          </div>
+                        )}
+                      </td>
                       <td className="border border-gray-300 px-1.5 py-1">
                         <div className="font-semibold text-[9pt]">{product.description}</div>
                         <div className="text-[8pt] text-gray-600">{product.specification}</div>
                       </td>
                       <td className="border border-gray-300 px-1.5 py-1 text-right">{product.quantity.toLocaleString()}</td>
-                      <td className="border border-gray-300 px-1.5 py-1 text-right">{product.currency} {product.unitPrice.toFixed(2)}</td>
-                      <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">{product.currency} {product.amount.toFixed(2)}</td>
+                      <td className="border border-gray-300 px-1.5 py-1 text-right">{product.currency} {toSafeNumber(product.unitPrice).toFixed(2)}</td>
+                      <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">{product.currency} {toSafeNumber(product.amount).toFixed(2)}</td>
                     </tr>
                   ))}
-                  {needsSecondPage && (
-                    <tr>
-                      <td colSpan={6} className="border border-gray-300 px-1.5 py-1 text-center italic text-gray-500 text-[8pt]">
-                        ... Continued on next page ...
-                      </td>
-                    </tr>
-                  )}
                   {!needsSecondPage && (
                     <tr className="bg-gray-100 font-bold">
-                      <td colSpan={5} className="border border-gray-300 px-1.5 py-1.5 text-right text-sm">
+                      <td colSpan={6} className="border border-gray-300 px-1.5 py-1.5 text-right text-sm">
                         Total Value ({tradeTerm}):
                       </td>
                       <td className="border border-gray-300 px-1.5 py-1.5 text-right font-semibold text-sm">
@@ -320,8 +337,7 @@ export const SalesContractDocumentPaginated = forwardRef<HTMLDivElement, SalesCo
             )}
 
             {/* Page footer */}
-            <div className="absolute bottom-3 left-0 right-0 px-[20mm] flex justify-between items-center text-[7pt] text-gray-500">
-              <div>https://www.figma.com/make</div>
+            <div className="absolute bottom-3 left-0 right-0 px-[20mm] flex justify-end items-center text-[7pt] text-gray-500">
               <div>Page 1 of {totalPages}</div>
             </div>
           </div>
@@ -337,6 +353,7 @@ export const SalesContractDocumentPaginated = forwardRef<HTMLDivElement, SalesCo
                     <tr className="bg-gray-100">
                       <th className="border border-gray-300 px-1.5 py-1 text-left w-8">No.</th>
                       <th className="border border-gray-300 px-1.5 py-1 text-left w-20">Model</th>
+                      <th className="border border-gray-300 px-1.5 py-1 text-center w-16">Image</th>
                       <th className="border border-gray-300 px-1.5 py-1 text-left">Description / Specification</th>
                       <th className="border border-gray-300 px-1.5 py-1 text-right w-16">Qty</th>
                       <th className="border border-gray-300 px-1.5 py-1 text-right w-20">Unit Price</th>
@@ -348,19 +365,32 @@ export const SalesContractDocumentPaginated = forwardRef<HTMLDivElement, SalesCo
                       <tr key={product.no}>
                         <td className="border border-gray-300 px-1.5 py-1 text-center">{product.no}</td>
                         <td className="border border-gray-300 px-1.5 py-1 text-[8pt]">{product.modelNo || '-'}</td>
+                        <td className="border border-gray-300 px-1 py-1 text-center">
+                          {product.imageUrl ? (
+                            <img
+                              src={product.imageUrl}
+                              alt={product.description}
+                              className="w-8 h-8 object-cover mx-auto rounded"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 bg-gray-100 mx-auto rounded flex items-center justify-center text-[7pt] text-gray-400">
+                              N/A
+                            </div>
+                          )}
+                        </td>
                         <td className="border border-gray-300 px-1.5 py-1">
                           <div className="font-semibold text-[9pt]">{product.description}</div>
                           <div className="text-[8pt] text-gray-600">{product.specification}</div>
                         </td>
                         <td className="border border-gray-300 px-1.5 py-1 text-right">{product.quantity.toLocaleString()}</td>
-                        <td className="border border-gray-300 px-1.5 py-1 text-right">{product.currency} {product.unitPrice.toFixed(2)}</td>
-                        <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">{product.currency} {product.amount.toFixed(2)}</td>
+                        <td className="border border-gray-300 px-1.5 py-1 text-right">{product.currency} {toSafeNumber(product.unitPrice).toFixed(2)}</td>
+                        <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">{product.currency} {toSafeNumber(product.amount).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="bg-gray-100 font-bold">
-                      <td colSpan={5} className="border border-gray-300 px-1.5 py-1.5 text-right text-sm">
+                      <td colSpan={6} className="border border-gray-300 px-1.5 py-1.5 text-right text-sm">
                         Total Value ({tradeTerm}):
                       </td>
                       <td className="border border-gray-300 px-1.5 py-1.5 text-right font-semibold text-sm">
@@ -449,8 +479,7 @@ export const SalesContractDocumentPaginated = forwardRef<HTMLDivElement, SalesCo
               </div>
 
               {/* Page footer */}
-              <div className="absolute bottom-3 left-0 right-0 px-[20mm] flex justify-between items-center text-[7pt] text-gray-500">
-                <div>https://www.figma.com/make</div>
+              <div className="absolute bottom-3 left-0 right-0 px-[20mm] flex justify-end items-center text-[7pt] text-gray-500">
                 <div>Page 2 of {totalPages}</div>
               </div>
             </div>

@@ -102,8 +102,8 @@ export const PurchaseRequirementDocument = forwardRef<HTMLDivElement, PurchaseRe
             
             /* 文档容器 - A4标准宽度 210mm */
             .qr-document {
-              width: 210mm !important;
-              max-width: 210mm !important;
+              width: 794px !important;
+              max-width: 794px !important;
               margin: 0 !important;
               padding: 0 !important;
               box-shadow: none !important;
@@ -154,14 +154,14 @@ export const PurchaseRequirementDocument = forwardRef<HTMLDivElement, PurchaseRe
           @media screen {
             .qr-document {
               box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-              min-height: 297mm;
+              min-height: 1123px;
             }
           }
         `}</style>
         
         <div 
           ref={ref}
-          className="qr-document bg-white w-[210mm] mx-auto"
+          className="qr-document bg-white w-[794px] min-h-[1123px] mx-auto"
           style={{ 
             fontFamily: '"Microsoft YaHei", "SimHei", Arial, sans-serif',
             fontSize: '10pt',

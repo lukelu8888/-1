@@ -21,6 +21,15 @@ interface CustomerInquiryViewProps {
 export const CustomerInquiryView = forwardRef<HTMLDivElement, CustomerInquiryViewProps>(
   ({ inquiry, zoom = 100 }, ref) => {
     const { user } = useUser();
+    const toSafeNumber = (value: unknown): number | undefined => {
+      if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+      if (typeof value === 'string') {
+        const normalized = value.replace(/[^0-9.-]/g, '');
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : undefined;
+      }
+      return undefined;
+    };
 
     // 转换为文档模板数据格式
     const convertToDocumentData = (): CustomerInquiryData => {
@@ -67,9 +76,9 @@ export const CustomerInquiryView = forwardRef<HTMLDivElement, CustomerInquiryVie
           imageUrl: product.image || undefined,
           productName: product.productName || product.name || 'N/A',
           specification: extractSpecification(product.specification || product.specifications || product.specs || undefined),
-          quantity: product.quantity || 0,
+          quantity: toSafeNumber(product.quantity) || 0,
           unit: product.unit || 'pcs',
-          targetPrice: product.targetPrice || product.unitPrice || product.price || undefined,
+          targetPrice: toSafeNumber(product.targetPrice ?? product.unitPrice ?? product.price),
           currency: 'USD',
           description: product.description || undefined,
         };

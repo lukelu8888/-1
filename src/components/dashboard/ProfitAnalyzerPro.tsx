@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Card, CardContent } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -8,9 +8,12 @@ import { useUser } from '../../contexts/UserContext';
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import * as kv from '../../supabase/functions/server/kv_store';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 // 🔥 中国主要港口列表
 const CHINA_PORTS = ['Yantian', 'Guangzhou', 'Shantou', 'Xiamen', 'Fuzhou', 'Ningbo', 'Shanghai', 'Qingdao', 'Dalian'];
+const PROFIT_ANALYSIS_STORAGE_PREFIX = 'profit_analyzer_saved_analyses_v1';
 
 interface SupplierData {
   id: string;
@@ -178,6 +181,16 @@ export function ProfitAnalyzerPro({ onNavigate }: ProfitAnalyzerProProps) {
   const [savedAnalyses, setSavedAnalyses] = useState<any[]>([]);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
+  const [bridgeQuote] = useState<any | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const payload = localStorage.getItem('profitAnalyzer_selectedQuotePayload');
+    if (!payload) return null;
+    try {
+      return JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  });
 
   const quotations = user?.email 
     ? getQuotationsByCustomer(user.email).filter(q => 
@@ -186,6 +199,41 @@ export function ProfitAnalyzerPro({ onNavigate }: ProfitAnalyzerProProps) {
         q.customerStatus === 'negotiating' || q.customerStatus === 'expired'
       )
     : [];
+
+  const normalizeQuote = React.useCallback((raw: any) => {
+    if (!raw) return null;
+    const id = String(raw.id ?? raw.quotationId ?? raw.qtNumber ?? raw.quotationNumber ?? '');
+    const qtNumber = String(raw.qtNumber ?? raw.quotationNumber ?? '');
+    if (!id || !qtNumber) return null;
+    return {
+      ...raw,
+      id,
+      qtNumber,
+      totalPrice: Number(raw.totalPrice ?? raw.totalAmount ?? 0) || 0,
+      createdAt: raw.createdAt ?? raw.quotationDate ?? new Date().toISOString(),
+      region: (raw.region ?? 'NA') as 'NA' | 'SA' | 'EU',
+      items: Array.isArray(raw.items) ? raw.items : Array.isArray(raw.products)
+        ? raw.products.map((p: any, idx: number) => ({
+            id: String(p.id ?? idx),
+            quantity: Number(p.quantity ?? 0) || 0,
+            productName: p.productName ?? p.name ?? 'Product',
+          }))
+        : [],
+    };
+  }, []);
+
+  const availableQuotations = React.useMemo(() => {
+    const merged = new Map<string, any>();
+    quotations.forEach((q) => {
+      const normalized = normalizeQuote(q);
+      if (normalized) merged.set(normalized.id, normalized);
+    });
+    const normalizedBridgeQuote = normalizeQuote(bridgeQuote);
+    if (normalizedBridgeQuote && !merged.has(normalizedBridgeQuote.id)) {
+      merged.set(normalizedBridgeQuote.id, normalizedBridgeQuote);
+    }
+    return Array.from(merged.values());
+  }, [quotations, bridgeQuote, normalizeQuote]);
 
   // 🔥 BusinessType → 权重策略映射
   const getStrategyFromBusinessType = (businessType?: string): string => {
@@ -236,11 +284,11 @@ export function ProfitAnalyzerPro({ onNavigate }: ProfitAnalyzerProProps) {
 
   // 加载报价
   const handleLoadQuote = React.useCallback((quoteId: string) => {
-    const quote = quotations.find(q => q.id === quoteId);
-    if (!quote) return;
+    const quote = availableQuotations.find(q => q.id === quoteId);
+    if (!quote) return false;
 
     setSelectedQuoteId(quoteId);
-    const totalQty = quote.items?.reduce((sum: number, item: any) => sum + item.quantity, 0) || 1000;
+    const totalQty = quote.items?.reduce((sum: number, item: any) => sum + (Number(item.quantity) || 0), 0) || 1000;
     setQuantity(totalQty);
 
     const regionRates: Record<string, { duty: number; vat: number }> = {
@@ -299,18 +347,28 @@ export function ProfitAnalyzerPro({ onNavigate }: ProfitAnalyzerProProps) {
     };
 
     setSuppliers([baseSupplier]);
-  }, [quotations]);
+    return true;
+  }, [availableQuotations]);
 
   // 🔥 组件挂载时检查localStorage，自动加载报价
   React.useEffect(() => {
     const savedQuoteId = localStorage.getItem('profitAnalyzer_selectedQuoteId');
-    if (savedQuoteId && quotations.length > 0) {
+    const savedQuoteNo = localStorage.getItem('profitAnalyzer_selectedQuoteNo');
+    if (availableQuotations.length > 0 && (savedQuoteId || savedQuoteNo)) {
       console.log('🔥 [ProfitAnalyzerPro] Auto-loading quote from localStorage:', savedQuoteId);
-      handleLoadQuote(savedQuoteId);
-      // 🔥 清除localStorage，避免重复加载
+      const loadedById = savedQuoteId ? handleLoadQuote(savedQuoteId) : false;
+      if (!loadedById && savedQuoteNo) {
+        const quoteByNo = availableQuotations.find((q: any) =>
+          q.qtNumber === savedQuoteNo || q.quotationNumber === savedQuoteNo
+        );
+        if (quoteByNo?.id) {
+          handleLoadQuote(quoteByNo.id);
+        }
+      }
       localStorage.removeItem('profitAnalyzer_selectedQuoteId');
+      localStorage.removeItem('profitAnalyzer_selectedQuoteNo');
     }
-  }, [quotations, handleLoadQuote]);
+  }, [availableQuotations, handleLoadQuote]);
 
   // 🔥 拖动弹窗处理函数
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -373,7 +431,7 @@ export function ProfitAnalyzerPro({ onNavigate }: ProfitAnalyzerProProps) {
         userId: user?.email || 'anonymous',
         timestamp,
         quotationId: selectedQuoteId,
-        quotationNumber: quotations.find(q => q.id === selectedQuoteId)?.quotationNumber || 'N/A',
+        quotationNumber: availableQuotations.find(q => q.id === selectedQuoteId)?.qtNumber || 'N/A',
         suppliers,
         quantity,
         importDutyRate,
@@ -1175,7 +1233,7 @@ export function ProfitAnalyzerPro({ onNavigate }: ProfitAnalyzerProProps) {
               className="flex-1 min-w-0 h-9 px-3 border-2 border-gray-300 rounded text-sm font-medium focus:border-[#F96302] focus:ring-2 focus:ring-[#F96302]/20 outline-none"
             >
               <option value="">-- Select a received quotation --</option>
-              {quotations.map(q => (
+              {availableQuotations.map(q => (
                 <option key={q.id} value={q.id}>
                   {q.qtNumber} - ${q.totalPrice?.toLocaleString()} - {new Date(q.createdAt || '').toLocaleDateString()}
                 </option>

@@ -11,6 +11,15 @@
 import type { SalesContractData } from '@/components/documents/templates/SalesContractDocument';
 import type { QuotationData } from '@/components/documents/templates/QuotationDocument';
 
+const toSafeNumber = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(/,/g, '').trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+};
+
 /**
  * 🔥 订单数据 → 销售合同数据适配器
  * 
@@ -47,11 +56,16 @@ export function adaptOrderToSalesContract(orderData: {
   portOfLoading?: string;
   portOfDestination?: string;
 }): SalesContractData {
+  const normalizedOrderDate = new Date(orderData.date);
+  const safeOrderDate = Number.isFinite(normalizedOrderDate.getTime())
+    ? normalizedOrderDate
+    : new Date();
+  const totalAmount = toSafeNumber(orderData.totalAmount);
   
   // 生成销售合同编号（如果没有的话）
   const contractNo = orderData.quotationNumber 
     ? orderData.quotationNumber.replace('QT-', 'SC-')
-    : `SC-${orderData.region || 'NA'}-${new Date(orderData.date).toISOString().slice(0, 10).replace(/-/g, '')}-${orderData.orderNumber.slice(-3)}`;
+    : `SC-${orderData.region || 'NA'}-${safeOrderDate.toISOString().slice(0, 10).replace(/-/g, '')}-${orderData.orderNumber.slice(-3)}`;
   
   // 推断区域
   const region = orderData.region || detectRegionFromCustomer(orderData.customer, orderData.customerCountry);
@@ -94,29 +108,33 @@ export function adaptOrderToSalesContract(orderData: {
     },
     
     // 产品列表
-    products: orderData.products.map((product, index) => ({
+    products: orderData.products.map((product, index) => {
+      const quantity = toSafeNumber(product.quantity);
+      const unitPrice = toSafeNumber(product.unitPrice);
+      const amount = toSafeNumber(product.totalPrice) || quantity * unitPrice;
+      return {
       no: index + 1,
       modelNo: product.modelNo,
       imageUrl: product.imageUrl,
       description: product.name,
       specification: product.specs || 'Standard',
       hsCode: product.hsCode,
-      quantity: product.quantity,
+      quantity,
       unit: product.unit || 'pcs',
-      unitPrice: product.unitPrice,
+      unitPrice,
       currency: orderData.currency,
-      amount: product.totalPrice,
+      amount,
       deliveryTime: orderData.expectedDelivery
-    })),
+    }}),
     
     // 合同条款
     terms: {
-      totalAmount: orderData.totalAmount,
+      totalAmount,
       currency: orderData.currency,
       tradeTerms: orderData.tradeTerms || determinePriceTerm(region),
       paymentTerms: orderData.paymentTerms || '30% T/T deposit, 70% balance before shipment',
-      depositAmount: orderData.totalAmount * 0.3,
-      balanceAmount: orderData.totalAmount * 0.7,
+      depositAmount: totalAmount * 0.3,
+      balanceAmount: totalAmount * 0.7,
       deliveryTime: `${calculateDeliveryDays(orderData.date, orderData.expectedDelivery)} days after deposit received`,
       portOfLoading: orderData.portOfLoading || 'Xiamen, China',
       portOfDestination: orderData.portOfDestination || determineDestinationPort(region),

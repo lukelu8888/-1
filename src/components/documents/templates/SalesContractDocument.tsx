@@ -111,7 +111,6 @@ interface SalesContractDocumentProps {
 
 export const SalesContractDocument = forwardRef<HTMLDivElement, SalesContractDocumentProps>(
   ({ data }, ref) => {
-    
     const total = data.products.reduce((sum, item) => sum + item.amount, 0);
     
     // Extract trade term abbreviation (EXW, FOB, CNF, CIF) from tradeTerms
@@ -188,7 +187,7 @@ export const SalesContractDocument = forwardRef<HTMLDivElement, SalesContractDoc
             }
           }
         `}</style>
-        <A4DocumentContainer ref={ref}>
+        <A4DocumentContainer ref={ref} pageWidth="794px" pageMinHeight="1123px">
           <div className="sales-contract-content">{/* Header - Taiwan Enterprise Compact Style */}
             <div className="mb-3">
               {/* First Row: Logo + Sales Contract Title + Contract Info */}

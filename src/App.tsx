@@ -78,16 +78,9 @@ import { AppErrorBoundary } from './components/AppErrorBoundary';
 // import CategoryDemo from './pages/CategoryDemo';
 // import ShipmentDemo from './pages/ShipmentDemo';
 
-// 🔥 导入数据恢复工具
-import './utils/testOrderData'; // 订单测试数据
-import './utils/recoverAllData'; // 完整数据恢复
-import './utils/clearFinanceData'; // 清空财务数据
-import './utils/clearPaymentData'; // 清空收款管理数据
-import { initAllTestData } from './utils/initTestData'; // 🔥 测试数据初始化
-
 function AppContent() {
   const { currentPage, categoryParams, navigateTo } = useRouter();
-  const { user, setUser, clearUser, logout } = useUser();
+  const { user, logout } = useUser();
   const { setRegion } = useRegion();
   const [showHomeDepotDemo, setShowHomeDepotDemo] = useState(false);
   const isKnownPublicPage =
@@ -127,48 +120,6 @@ function AppContent() {
       'test-inquiry-flow',
       'init-database',
     ].includes(currentPage) || currentPage.startsWith('category-');
-
-  // 🚨🚨🚨 调试：监控 user 对象的变化
-  useEffect(() => {
-    console.log('🔍🔍🔍 [App.tsx] user 对象变化了:', user);
-    if (user) {
-      console.log('🔍🔍🔍 [App.tsx] user.type:', user.type);
-      console.log('🔍🔍🔍 [App.tsx] user.email:', user.email);
-      console.log('🔍🔍🔍 [App.tsx] user.role:', user.role);
-      console.log('🔍🔍🔍 [App.tsx] 完整 user 对象:', JSON.stringify(user, null, 2));
-    }
-  }, [user]);
-
-  // 🚨🚨🚨 调试：输出路由判断结果
-  useEffect(() => {
-    console.log('🎯🎯🎯 [App.tsx] 路由判断:');
-    console.log('  - user 存在:', !!user);
-    console.log('  - user?.type:', user?.type);
-    console.log('  - user?.type === "admin":', user?.type === 'admin');
-    console.log('  - user?.type === "supplier":', user?.type === 'supplier');
-    console.log('  - user?.type === "customer":', user?.type === 'customer');
-    console.log('  - currentPage:', currentPage);
-    
-    if (user && user.type === 'admin') {
-      console.log('  ✅ 应该显示: AdminDashboard');
-    } else if (user && user.type === 'supplier') {
-      console.log('  ✅ 应该显示: SupplierDashboard');
-    } else if (user && user.type === 'customer' && currentPage === 'dashboard') {
-      console.log('  ✅ 应该显示: CustomerDashboard');
-    } else {
-      console.log('  ✅ 应该显示: 主网站（Header + Footer）');
-    }
-  }, [user, currentPage]);
-
-  // 🔥 应用启动时初始化测试数据（仅首次运行）
-  useEffect(() => {
-    const hasInitialized = localStorage.getItem('test_data_initialized');
-    if (!hasInitialized) {
-      console.log('🚀 首次启动，初始化测试数据...');
-      initAllTestData();
-      localStorage.setItem('test_data_initialized', 'true');
-    }
-  }, []);
 
   // 🔥 临时预览类目导航Demo - 注释下面这行恢复正常网站
   // return <CategoryDemo />;

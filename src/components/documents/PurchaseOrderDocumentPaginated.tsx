@@ -19,8 +19,18 @@ interface PurchaseOrderDocumentPaginatedProps {
 
 export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, PurchaseOrderDocumentPaginatedProps>(
   ({ data }, ref) => {
+    const toSafeNumber = (value: unknown): number => {
+      if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+      if (typeof value === 'string') {
+        const normalized = value.replace(/[^0-9.\-]/g, '').trim();
+        if (!normalized) return 0;
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      return 0;
+    };
     
-    const total = data.products.reduce((sum, item) => sum + item.amount, 0);
+    const total = data.products.reduce((sum, item) => sum + toSafeNumber(item.amount), 0);
     
     // 🔥 智能分页：根据产品数量决定是否需要第二页
     // 第一页显示2个产品，为12条12px字体的合同条款和签章区留出足够空间
@@ -220,8 +230,8 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                       </td>
                       <td className="border border-gray-300 px-1.5 py-1 text-center">{product.unit}</td>
                       <td className="border border-gray-300 px-1.5 py-1 text-right">{product.quantity.toLocaleString()}</td>
-                      <td className="border border-gray-300 px-1.5 py-1 text-right">{product.currency}{product.unitPrice.toFixed(2)}</td>
-                      <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">{product.currency}{product.amount.toFixed(2)}</td>
+                      <td className="border border-gray-300 px-1.5 py-1 text-right">{product.currency}{toSafeNumber(product.unitPrice).toFixed(2)}</td>
+                      <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">{product.currency}{toSafeNumber(product.amount).toFixed(2)}</td>
                     </tr>
                   ))}
                   {needsSecondPage && (
@@ -237,7 +247,7 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                         采购订单总金额：
                       </td>
                       <td className="border border-gray-300 px-1.5 py-1.5 text-right font-bold text-sm text-[#F96302]">
-                        {data.products[0].currency}{total.toFixed(2)}
+                        {(data.products[0]?.currency || data.terms.currency)}{total.toFixed(2)}
                       </td>
                     </tr>
                   )}
@@ -358,8 +368,8 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                         </td>
                         <td className="border border-gray-300 px-1.5 py-1 text-center">{product.unit}</td>
                         <td className="border border-gray-300 px-1.5 py-1 text-right">{product.quantity.toLocaleString()}</td>
-                        <td className="border border-gray-300 px-1.5 py-1 text-right">{product.currency}{product.unitPrice.toFixed(2)}</td>
-                        <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">{product.currency}{product.amount.toFixed(2)}</td>
+                        <td className="border border-gray-300 px-1.5 py-1 text-right">{product.currency}{toSafeNumber(product.unitPrice).toFixed(2)}</td>
+                        <td className="border border-gray-300 px-1.5 py-1 text-right font-semibold">{product.currency}{toSafeNumber(product.amount).toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -369,7 +379,7 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                         采购订单总金额：
                       </td>
                       <td className="border border-gray-300 px-1.5 py-1.5 text-right font-bold text-sm text-[#F96302]">
-                        {data.products[0].currency}{total.toFixed(2)}
+                        {(data.products[0]?.currency || data.terms.currency)}{total.toFixed(2)}
                       </td>
                     </tr>
                   </tfoot>

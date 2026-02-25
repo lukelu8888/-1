@@ -84,6 +84,7 @@ export default function QuoteCreationIntelligent({
   
   // 产品列表
   const [items, setItems] = useState<QuoteItem[]>([]);
+  const latestItemsRef = React.useRef<QuoteItem[]>([]);
   
   // 展开/折叠产品计算详情
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
@@ -187,40 +188,64 @@ export default function QuoteCreationIntelligent({
   }, [isDragging, dragOffset]);
 
   // 🔥 核心算法：智能价格计算（移到前面，避免依赖问题）
+  const toSafeNumber = (value: unknown, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const normalizeItem = (item: QuoteItem): QuoteItem => {
+    const exchangeRate = toSafeNumber(item.exchangeRate, 7.2);
+    const safeExchangeRate = exchangeRate > 0 ? exchangeRate : 7.2;
+
+    return {
+      ...item,
+      supplierPrice: toSafeNumber(item.supplierPrice, 0),
+      exchangeRate: safeExchangeRate,
+      taxRate: toSafeNumber(item.taxRate, 0),
+      exportRebateRate: toSafeNumber(item.exportRebateRate, 0),
+      domesticFeesCNY: toSafeNumber(item.domesticFeesCNY, 0),
+      profitMargin: toSafeNumber(item.profitMargin, 0),
+      freight: toSafeNumber(item.freight, 0),
+      insuranceRate: toSafeNumber(item.insuranceRate, 0),
+      quantity: toSafeNumber(item.quantity, 0)
+    };
+  };
+
   const calculatePrice = React.useCallback((item: QuoteItem): QuoteItem => {
+    const safeItem = normalizeItem(item);
     let costUSD = 0;
     let rebateAmountCNY = 0; // 🔥 退税金额CNY
     
     // 步骤1：计算实际成本USD
-    if (item.priceType === 'usd') {
+    if (safeItem.priceType === 'usd') {
       // 情况1：供货价已经是美金
-      costUSD = item.supplierPrice;
-    } else if (item.priceType === 'cny_no_tax') {
+      costUSD = safeItem.supplierPrice;
+    } else if (safeItem.priceType === 'cny_no_tax') {
       // 情况2：供货价是不含税人民币
-      costUSD = item.supplierPrice / item.exchangeRate;
-    } else if (item.priceType === 'cny_with_tax') {
+      costUSD = safeItem.supplierPrice / safeItem.exchangeRate;
+    } else if (safeItem.priceType === 'cny_with_tax') {
       // 情况3：供货价是含税人民币（需计算退税）
-      const taxRateDecimal = item.taxRate / 100;
-      const rebateRateDecimal = item.exportRebateRate / 100;
+      const taxRateDecimal = safeItem.taxRate / 100;
+      const rebateRateDecimal = safeItem.exportRebateRate / 100;
       
       // 含税价 → 不含税价
-      const priceNoTax = item.supplierPrice / (1 + taxRateDecimal);
+      const priceNoTax = safeItem.supplierPrice / (1 + taxRateDecimal);
       
       // 退税额（CNY）
       rebateAmountCNY = priceNoTax * rebateRateDecimal;
       
       // 实际成本 = 含税价 - 退税额
-      const actualCostCNY = item.supplierPrice - rebateAmountCNY;
+      const actualCostCNY = safeItem.supplierPrice - rebateAmountCNY;
       
       // 转为USD
-      costUSD = actualCostCNY / item.exchangeRate;
+      costUSD = actualCostCNY / safeItem.exchangeRate;
     }
     
     // 步骤2：加上国内费用
-    const totalCost = costUSD + item.domesticFeesCNY / item.exchangeRate;
+    const totalCost = costUSD + safeItem.domesticFeesCNY / safeItem.exchangeRate;
     
     // 步骤3：计算利润
-    const profitUSD = totalCost * (item.profitMargin / 100);
+    const profitUSD = totalCost * (safeItem.profitMargin / 100);
     
     // 步骤4：计算FOB价
     const fobPrice = totalCost + profitUSD;
@@ -228,22 +253,26 @@ export default function QuoteCreationIntelligent({
     // 步骤5：根据贸易术语计算最终报价
     let finalPrice = fobPrice;
     
-    if (item.tradeTerms === 'CFR') {
-      finalPrice = fobPrice + item.freight;
-    } else if (item.tradeTerms === 'CIF') {
+    if (safeItem.tradeTerms === 'CFR') {
+      finalPrice = fobPrice + safeItem.freight;
+    } else if (safeItem.tradeTerms === 'CIF') {
       // CIF = (FOB + 运费) / (1 - 保险费率)
-      const insuranceRateDecimal = item.insuranceRate / 100;
-      finalPrice = (fobPrice + item.freight) / (1 - insuranceRateDecimal);
+      const insuranceRateDecimal = safeItem.insuranceRate / 100;
+      finalPrice = (fobPrice + safeItem.freight) / (1 - insuranceRateDecimal);
     }
     
     return {
-      ...item,
+      ...safeItem,
       costUSD: Number(costUSD.toFixed(4)),
       profitUSD: Number(profitUSD.toFixed(4)),
       quotePrice: Number(finalPrice.toFixed(4)),
       rebateAmountCNY: Number(rebateAmountCNY.toFixed(2)) // 🔥 存储退税金额
     };
   }, []);
+
+  useEffect(() => {
+    latestItemsRef.current = items;
+  }, [items]);
 
   // 初始化：从采购需求单导入产品
   useEffect(() => {
@@ -317,7 +346,7 @@ export default function QuoteCreationIntelligent({
             taxRate: item.taxRate || globalDefaults.taxRate,
             exportRebateRate: item.exportRebateRate || globalDefaults.exportRebateRate,
             domesticFeesCNY: item.domesticFeesCNY || globalDefaults.domesticFeesCNY,
-            profitMargin: globalDefaults.profitMargin, // 🔥 强制使用全局默认利润率20%
+            profitMargin: item.profitMargin ?? globalDefaults.profitMargin,
             
             tradeTerms: (item.tradeTerms || globalDefaults.tradeTerms) as TradeTerms,
             freight: item.freight || 0,
@@ -427,8 +456,8 @@ export default function QuoteCreationIntelligent({
 
   // 批量应用全局默认值
   const applyGlobalDefaults = () => {
-    setItems(prevItems =>
-      prevItems.map(item => {
+    const sourceItems = latestItemsRef.current;
+    const updatedItems = sourceItems.map(item => {
         const updated = {
           ...item,
           priceType: globalDefaults.priceType, // 🔥 新增：批量应用供货价类型
@@ -441,8 +470,9 @@ export default function QuoteCreationIntelligent({
           insuranceRate: globalDefaults.insuranceRate
         };
         return calculatePrice(updated);
-      })
-    );
+      });
+    latestItemsRef.current = updatedItems;
+    setItems(updatedItems);
     toast.success(`已批量应用全局默认值（利润率：${globalDefaults.profitMargin}%）`);
   };
 
@@ -461,6 +491,10 @@ export default function QuoteCreationIntelligent({
 
   // 提交报价（保存草稿）
   const handleSaveDraft = () => {
+    const computedItems = latestItemsRef.current.map(item => calculatePrice(item));
+    latestItemsRef.current = computedItems;
+    setItems(computedItems);
+
     // 🔥 从采购需求单提取真实客户和区域信息
     const customerInfo = {
       region: requirement.region || 'NA', // 🔥 区域信息
@@ -471,10 +505,10 @@ export default function QuoteCreationIntelligent({
     };
     
     // 🔥 计算真实的利润率
-    const actualTotalCost = items.reduce((sum, item) => 
+    const actualTotalCost = computedItems.reduce((sum, item) => 
       sum + (item.costUSD + item.domesticFeesCNY / item.exchangeRate) * item.quantity, 0
     );
-    const actualTotalAmount = items.reduce((sum, item) => 
+    const actualTotalAmount = computedItems.reduce((sum, item) => 
       sum + item.quotePrice * item.quantity, 0
     );
     const actualTotalProfit = actualTotalAmount - actualTotalCost;
@@ -493,7 +527,7 @@ export default function QuoteCreationIntelligent({
       ...customerInfo,
       
       // 🔥 产品信息（完整的核算数据）
-      items: items.map(item => ({
+      items: computedItems.map(item => ({
         id: item.id,
         productName: item.productName,
         specification: item.specification,
@@ -553,6 +587,10 @@ export default function QuoteCreationIntelligent({
       alert('请填写提交给上级的审批说明');
       return;
     }
+
+    const computedItems = latestItemsRef.current.map(item => calculatePrice(item));
+    latestItemsRef.current = computedItems;
+    setItems(computedItems);
     
     // 🔥 从采购需求单提取真实客户和区域信息
     const customerInfo = {
@@ -564,10 +602,10 @@ export default function QuoteCreationIntelligent({
     };
     
     // 🔥 计算真实的利润率
-    const actualTotalCost = items.reduce((sum, item) => 
+    const actualTotalCost = computedItems.reduce((sum, item) => 
       sum + (item.costUSD + item.domesticFeesCNY / item.exchangeRate) * item.quantity, 0
     );
-    const actualTotalAmount = items.reduce((sum, item) => 
+    const actualTotalAmount = computedItems.reduce((sum, item) => 
       sum + item.quotePrice * item.quantity, 0
     );
     const actualTotalProfit = actualTotalAmount - actualTotalCost;
@@ -589,7 +627,7 @@ export default function QuoteCreationIntelligent({
       ...customerInfo,
       
       // 🔥 产品信息（完整的核算数据）
-      items: items.map(item => ({
+      items: computedItems.map(item => ({
         id: item.id,
         productName: item.productName,
         specification: item.specification,
@@ -1501,7 +1539,7 @@ export default function QuoteCreationIntelligent({
                   <Save className="w-4 h-4 mr-1.5" />
                   保存草稿
                 </Button>
-                <Button onClick={handleSaveDraft} className="bg-orange-500 hover:bg-orange-600 h-9">
+                <Button onClick={handleSubmitForApproval} className="bg-orange-500 hover:bg-orange-600 h-9">
                   <Send className="w-4 h-4 mr-1.5" />
                   提交复核
                 </Button>

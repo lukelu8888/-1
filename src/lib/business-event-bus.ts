@@ -2,6 +2,13 @@
 // 用于解耦业务模块，实现事件驱动的单证管理系统
 
 import { createClient } from '@supabase/supabase-js';
+const isDev = import.meta.env.DEV;
+const debugLog = (...args: unknown[]) => {
+  if (isDev) console.log(...args);
+};
+const debugWarn = (...args: unknown[]) => {
+  if (isDev) console.warn(...args);
+};
 
 // ============ 事件类型定义 ============
 export type BusinessEvent = 
@@ -52,7 +59,7 @@ class BusinessEventBus {
     }
     this.listeners.get(eventType)!.push(callback as EventCallback);
     
-    console.log(`📡 [EventBus] 订阅事件: ${eventType}`);
+    debugLog(`📡 [EventBus] 订阅事件: ${eventType}`);
   }
 
   /**
@@ -75,7 +82,7 @@ class BusinessEventBus {
    * @param payload 事件载荷
    */
   async publish<T = any>(payload: EventPayload<T>) {
-    console.log(`📢 [EventBus] 发布事件: ${payload.eventType}`, {
+    debugLog(`📢 [EventBus] 发布事件: ${payload.eventType}`, {
       orderId: payload.orderId,
       operator: payload.operator,
       timestamp: payload.timestamp
@@ -84,7 +91,7 @@ class BusinessEventBus {
     // 1. 执行所有监听器
     const callbacks = this.listeners.get(payload.eventType);
     if (callbacks && callbacks.length > 0) {
-      console.log(`📋 [EventBus] 执行 ${callbacks.length} 个监听器...`);
+      debugLog(`📋 [EventBus] 执行 ${callbacks.length} 个监听器...`);
       
       for (const callback of callbacks) {
         try {
@@ -94,7 +101,7 @@ class BusinessEventBus {
         }
       }
     } else {
-      console.warn(`⚠️ [EventBus] 没有监听器订阅事件: ${payload.eventType}`);
+      debugWarn(`⚠️ [EventBus] 没有监听器订阅事件: ${payload.eventType}`);
     }
     
     // 2. 保存事件日志到数据库
@@ -110,7 +117,7 @@ class BusinessEventBus {
    */
   private async saveEventLog<T = any>(payload: EventPayload<T>) {
     if (!this.supabase) {
-      console.warn('⚠️ [EventBus] Supabase未初始化，跳过事件日志保存');
+      debugWarn('⚠️ [EventBus] Supabase未初始化，跳过事件日志保存');
       return;
     }
 
@@ -130,7 +137,7 @@ class BusinessEventBus {
       if (error) {
         console.error('❌ [EventBus] 保存事件日志失败:', error);
       } else {
-        console.log(`✅ [EventBus] 事件日志已保存: ${payload.eventType}`);
+        debugLog(`✅ [EventBus] 事件日志已保存: ${payload.eventType}`);
       }
     } catch (error) {
       console.error('❌ [EventBus] 保存事件日志异常:', error);
@@ -170,7 +177,7 @@ class BusinessEventBus {
    */
   clear() {
     this.listeners.clear();
-    console.log('🧹 [EventBus] 所有监听器已清除');
+    debugLog('🧹 [EventBus] 所有监听器已清除');
   }
 }
 

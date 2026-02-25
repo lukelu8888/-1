@@ -12,6 +12,11 @@ import QuotationDetailView from './QuotationDetailView';
 import { Quotation } from '../admin/QuotationManagement';
 import { toast } from 'sonner';
 import { apiFetchJson } from '../../api/backend-auth';
+import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { canDeleteQuotation } from '../../lib/erp-core/delete-guard';
+import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
+import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
+import { subscribeErpEvent } from '../../lib/erp-core/event-bus';
 
 interface QuotationReceivedProps {
   onNavigate?: (view: string) => void;
@@ -32,6 +37,10 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
   const [reloadKey, setReloadKey] = useState(0);
 
   const { user } = useUser();
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [user?.email]);
 
   // 🔥 从服务器加载“客户收到的报价”（接口：GET /api/sales-quotations，customer 角色会自动按 customer_email 过滤）
   useEffect(() => {
@@ -66,6 +75,21 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
     };
   }, [user?.email, reloadKey]);
 
+  useEffect(() => {
+    const unsubscribe = subscribeErpEvent((event) => {
+      if (event.domain !== 'quotation') return;
+      if (
+        event.key === ERP_EVENT_KEYS.QUOTATION_CREATED ||
+        event.key === ERP_EVENT_KEYS.QUOTATION_SENT ||
+        event.key === ERP_EVENT_KEYS.QUOTATION_ACCEPTED ||
+        event.key === ERP_EVENT_KEYS.QUOTATION_DELETED
+      ) {
+        setReloadKey((k) => k + 1);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
   // 🔥 组件挂载时检查localStorage，自动打开指定报价
   React.useEffect(() => {
     const autoOpenId = localStorage.getItem('quotationDetail_autoOpenId');
@@ -88,9 +112,17 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
   console.log('  - 接口报价数量:', serverQuotations.length);
   
   // 🔥 后端已按customer_email过滤，这里只做状态兜底过滤
-  const quotations = (serverQuotations || []).filter((q: any) =>
-    ['sent', 'viewed', 'accepted', 'rejected', 'negotiating', 'expired'].includes(q.customerStatus)
-  );
+  const quotations = (serverQuotations || [])
+    .filter((q: any) =>
+      filterNotDeleted('quotation', [q], (item: any) => [
+        String(item?.id || ''),
+        String(item?.qtNumber || ''),
+        String(item?.quotationNumber || ''),
+      ]).length > 0
+    )
+    .filter((q: any) =>
+      ['sent', 'viewed', 'accepted', 'rejected', 'negotiating', 'expired'].includes(q.customerStatus)
+    );
   
   console.log('  - 筛选后的报价数量:', quotations.length);
   console.log('  - 筛选后的报价:', quotations);
@@ -281,21 +313,23 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
     return matchesSearch && matchesFilter;
   });
 
-  const totalQuotations = quotations.length;
-  const pendingQuotations = quotations.filter(q => q.customerStatus === 'sent' || q.customerStatus === 'viewed').length; // 🔥 修复：使用customerStatus
-  const acceptedQuotations = quotations.filter(q => q.customerStatus === 'accepted').length; // 🔥 修复：使用customerStatus
-  const expiredQuotations = quotations.filter(q => q.customerStatus === 'expired').length;
+  const isQuotationDeletable = (quotation: any) => canDeleteQuotation(quotation);
 
   // 🆕 批量选择逻辑
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(filteredQuotations.map(q => q.id));
+      setSelectedIds(filteredQuotations.filter((q) => isQuotationDeletable(q)).map(q => q.id));
     } else {
       setSelectedIds([]);
     }
   };
 
   const handleSelectOne = (id: string, checked: boolean) => {
+    const target = filteredQuotations.find((q) => q.id === id);
+    if (target && !isQuotationDeletable(target)) {
+      toast.error('This quotation already moved to next workflow. Please delete it from the final workflow stage.');
+      return;
+    }
     if (checked) {
       setSelectedIds([...selectedIds, id]);
     } else {
@@ -303,137 +337,77 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
     }
   };
 
-  const handleBatchDelete = () => {
+  const handleBatchDelete = async () => {
     if (selectedIds.length === 0) {
       toast.error('Please select at least one quotation to delete');
       return;
     }
 
-    if (confirm(`Are you sure you want to delete ${selectedIds.length} quotation(s)? This action cannot be undone.`)) {
-      // 客户侧暂不提供真实删除（避免影响业务员端数据）；这里只做本地隐藏
+    const selectedQuotations = filteredQuotations.filter((q) => selectedIds.includes(q.id));
+    const blocked = selectedQuotations.filter((q) => !isQuotationDeletable(q));
+    if (blocked.length > 0) {
+      toast.error(`Cannot delete ${blocked.length} quotation(s): already progressed to next workflow.`);
+      return;
+    }
+
+    if (confirm(`Are you sure you want to permanently delete ${selectedIds.length} quotation(s)? This action cannot be undone.`)) {
+      const selectedRows = filteredQuotations.filter((q) => selectedIds.includes(q.id));
+      const deletionMarkers = selectedRows.flatMap((q) => [
+        String(q?.id || ''),
+        String(q?.qtNumber || ''),
+        String(q?.quotationNumber || ''),
+      ]).filter(Boolean);
+
+      const deletedIds: string[] = [];
+      const apiFailedIds: string[] = [];
+      for (const id of selectedIds) {
+        try {
+          await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(String(id))}`, {
+            method: 'DELETE',
+          });
+          deletedIds.push(id);
+        } catch (e: any) {
+          const msg = String(e?.message || '');
+          if (msg.includes('QUOTATION_ALREADY_PROGRESSED')) {
+            toast.error('Quotation already progressed to next workflow. Delete it from final workflow stage.');
+          } else if (
+            msg.includes('DELETE method is not supported') ||
+            msg.includes('Supported methods: OPTIONS')
+          ) {
+            apiFailedIds.push(id);
+          } else {
+            apiFailedIds.push(id);
+            toast.error(`Delete failed for ${id}: ${msg || 'Unknown error'}`);
+          }
+        }
+      }
+
+      if (deletionMarkers.length > 0) {
+        addTombstones('quotation', deletionMarkers, {
+          reason: 'manual_delete',
+          deletedBy: user?.email || 'unknown',
+        });
+      }
+
       setServerQuotations(prev => prev.filter(q => !selectedIds.includes(q.id)));
-      
-      toast.success(`Successfully deleted ${selectedIds.length} quotation(s)`, {
-        duration: 3000
-      });
-      
-      setSelectedIds([]);
+      if (deletedIds.length > 0) {
+        toast.success(`Permanently deleted ${deletedIds.length} quotation(s)`, { duration: 3000 });
+      }
+      if (apiFailedIds.length > 0) {
+        toast.success(`${apiFailedIds.length} quotation(s) deleted locally (sync pending).`, { duration: 3500 });
+      }
+
+      const allDeletedNow = new Set([...deletedIds, ...apiFailedIds]);
+      setSelectedIds(prev => prev.filter((id) => !allDeletedNow.has(id)));
     }
   };
 
-  const isAllSelected = filteredQuotations.length > 0 && selectedIds.length === filteredQuotations.length;
-  const isSomeSelected = selectedIds.length > 0 && selectedIds.length < filteredQuotations.length;
+  const deletableFilteredQuotations = filteredQuotations.filter((q) => isQuotationDeletable(q));
+  const isAllSelected = deletableFilteredQuotations.length > 0 && selectedIds.length === deletableFilteredQuotations.length;
+  const isSomeSelected = selectedIds.length > 0 && selectedIds.length < deletableFilteredQuotations.length;
 
   return (
     <div className="space-y-6" style={{ fontFamily: 'var(--hd-font)' }}>
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-gray-500">
-          {loading ? 'Loading quotations...' : `Loaded: ${quotations.length}`}
-          {lastFetchedAt ? ` · last fetch: ${new Date(lastFetchedAt).toLocaleString()}` : ''}
-          {lastError ? ` · error: ${lastError}` : ''}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => {
-            setReloadKey((k) => k + 1);
-          }}
-        >
-          Refresh
-        </Button>
-      </div>
-      {/* 提示：销售合同在 Active Orders 查看 */}
-      <div className="mb-3 text-xs text-gray-600 bg-blue-50 border border-blue-200 rounded px-3 py-2 flex items-center gap-2 flex-wrap">
-        <span>Contracts sent to you (销售合同) appear in</span>
-        <button
-          type="button"
-          onClick={() => onSwitchMyOrdersTab?.('active') ?? onNavigate?.('active')}
-          className="font-semibold text-[#F96302] hover:underline"
-        >
-          Active Orders
-        </button>
-        <span>— click to open that tab to view and sign.</span>
-      </div>
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all group">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <div className="text-gray-600 uppercase tracking-wide mb-2 text-[10px]" style={{ fontWeight: 500, letterSpacing: '0.5px' }}>
-                Total Quotations
-              </div>
-              <div className="text-gray-900 text-3xl" style={{ fontWeight: 700, lineHeight: 1 }}>
-                {totalQuotations}
-              </div>
-              <div className="text-gray-500 mt-1.5 text-[11px]" style={{ fontWeight: 400 }}>
-                All received quotes
-              </div>
-            </div>
-            <div className="bg-[#0D3B66] w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0 group-hover:bg-[#0A2F52] transition-colors">
-              <DollarSign className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all group">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <div className="text-gray-600 uppercase tracking-wide mb-2 text-[10px]" style={{ fontWeight: 500, letterSpacing: '0.5px' }}>
-                Pending Review
-              </div>
-              <div className="text-gray-900 text-3xl" style={{ fontWeight: 700, lineHeight: 1 }}>
-                {pendingQuotations}
-              </div>
-              <div className="text-gray-500 mt-1.5 text-[11px]" style={{ fontWeight: 400 }}>
-                Awaiting your decision
-              </div>
-            </div>
-            <div className="bg-[#F59E0B] w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0 group-hover:bg-[#D97706] transition-colors">
-              <Clock className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all group">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <div className="text-gray-600 uppercase tracking-wide mb-2 text-[10px]" style={{ fontWeight: 500, letterSpacing: '0.5px' }}>
-                Accepted
-              </div>
-              <div className="text-gray-900 text-3xl" style={{ fontWeight: 700, lineHeight: 1 }}>
-                {acceptedQuotations}
-              </div>
-              <div className="text-gray-500 mt-1.5 text-[11px]" style={{ fontWeight: 400 }}>
-                Converted to orders
-              </div>
-            </div>
-            <div className="bg-[#2E7D32] w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0 group-hover:bg-[#256428] transition-colors">
-              <CheckCircle2 className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all group">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <div className="text-gray-600 uppercase tracking-wide mb-2 text-[10px]" style={{ fontWeight: 500, letterSpacing: '0.5px' }}>
-                Expired
-              </div>
-              <div className="text-gray-900 text-3xl" style={{ fontWeight: 700, lineHeight: 1 }}>
-                {expiredQuotations}
-              </div>
-              <div className="text-gray-500 mt-1.5 text-[11px]" style={{ fontWeight: 400 }}>
-                Past validity date
-              </div>
-            </div>
-            <div className="bg-[#DC2626] w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0 group-hover:bg-[#B91C1C] transition-colors">
-              <XCircle className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Quotations Table */}
       <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm">
         <div className="border-b-2 border-gray-200">
@@ -458,6 +432,14 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                 className="pl-10"
               />
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-10"
+              onClick={() => setReloadKey((k) => k + 1)}
+            >
+              Refresh
+            </Button>
             {/* 🆕 批量删除按钮 */}
             <Button
               variant="destructive"
@@ -549,6 +531,13 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                     : 'N/A';
                   
                   const isSelected = selectedIds.includes(quotation.id);
+                  const canDelete = isQuotationDeletable(quotation);
+                  const quotationNo = String(quotation.qtNumber || quotation.quotationNumber || quotation.id || '');
+                  const numberDisplay = resolveDisplayNumber({
+                    domain: 'quotation',
+                    internalNo: quotationNo,
+                    companyId: (user as any)?.companyId ? String((user as any).companyId) : undefined,
+                  });
                   
                   return (
                     <TableRow key={quotation.id} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
@@ -556,6 +545,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                       <TableCell>
                         <Checkbox
                           checked={isSelected}
+                          disabled={!canDelete}
                           onCheckedChange={(checked) => handleSelectOne(quotation.id, checked as boolean)}
                           aria-label={`Select quotation ${quotation.qtNumber}`}
                         />
@@ -572,8 +562,13 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                           }}
                           className="font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                         >
-                          {quotation.qtNumber} {/* 🔥 使用qtNumber */}
+                          {quotationNo}
                         </button>
+                        {numberDisplay.externalNo && (
+                          <div className="text-[11px] text-gray-500 mt-0.5">
+                            Customer ERP: {numberDisplay.externalNo}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs text-gray-700">{quotation.inqNumber}</TableCell> {/* 🔥 使用inqNumber */}
                       <TableCell className="text-xs text-gray-700">{quotationDate}</TableCell>
@@ -636,8 +631,26 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
           // 🔥 导航到左侧栏的Profit Analyzer页面
           console.log('🔥 [QuotationReceived] Opening Profit Analyzer for quotation:', quotation.id);
           
-          // 🔥 将报价ID存储到localStorage，供ProfitAnalyzerPro读取
-          localStorage.setItem('profitAnalyzer_selectedQuoteId', quotation.id);
+          // 🔥 将报价信息存储到localStorage，供ProfitAnalyzerPro读取（兼容id/编号/上下文不同步场景）
+          const quoteId = String(
+            (quotation as any)?.id ??
+            (quotation as any)?.quotationId ??
+            (quotation as any)?.qtNumber ??
+            (quotation as any)?.quotationNumber ??
+            ''
+          );
+          const quoteNo = String(
+            (quotation as any)?.qtNumber ??
+            (quotation as any)?.quotationNumber ??
+            ''
+          );
+          if (quoteId) {
+            localStorage.setItem('profitAnalyzer_selectedQuoteId', quoteId);
+          }
+          if (quoteNo) {
+            localStorage.setItem('profitAnalyzer_selectedQuoteNo', quoteNo);
+          }
+          localStorage.setItem('profitAnalyzer_selectedQuotePayload', JSON.stringify(quotation));
           
           // 🔥 关闭详情Dialog
           setIsDetailOpen(false);

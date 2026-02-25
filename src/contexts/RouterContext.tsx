@@ -108,8 +108,8 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       // Clear category params when navigating away from category pages
       setCategoryParams(undefined);
     }
-    // Scroll to top when navigating
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Keep navigation snappy: avoid animated scroll on each route change
+    window.scrollTo({ top: 0, behavior: 'auto' });
   };
 
   return (

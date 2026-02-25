@@ -6,9 +6,10 @@ import { Card } from '../ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Checkbox } from '../ui/checkbox';
 import {
   Search, Plus, Eye, CheckCircle2, XCircle, DollarSign, 
-  TrendingUp, Calendar, Building2, FileText, CreditCard, Banknote
+  TrendingUp, Calendar, Building2, FileText, CreditCard, Banknote, Trash2
 } from 'lucide-react';
 import { usePayments, PaymentRecord } from '../../contexts/PaymentContext';
 import { useFinance } from '../../contexts/FinanceContext';
@@ -21,6 +22,7 @@ export default function CollectionManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [viewPayment, setViewPayment] = useState<PaymentRecord | null>(null);
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<string[]>([]);
   
   // 🎯 多维度筛选状态 (老板角色专用)
   const [filterRegion, setFilterRegion] = useState('all');
@@ -76,8 +78,43 @@ export default function CollectionManagement() {
     return matchesSearch && matchesFilter && matchesRegion && matchesCustomer;
   });
   
+  React.useEffect(() => {
+    const visibleIds = new Set(filteredPayments.map((p) => p.id));
+    setSelectedPaymentIds((prev) => prev.filter((id) => visibleIds.has(id)));
+  }, [filteredPayments]);
+  
   // 🎯 从数据中提取唯一值用于筛选选项
   const uniqueCustomers = [...new Set(payments.map(p => p.customerName).filter(Boolean))];
+  const allSelected = filteredPayments.length > 0 && selectedPaymentIds.length === filteredPayments.length;
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedPaymentIds(filteredPayments.map((p) => p.id));
+      return;
+    }
+    setSelectedPaymentIds([]);
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedPaymentIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      return;
+    }
+    setSelectedPaymentIds((prev) => prev.filter((x) => x !== id));
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedPaymentIds.length === 0) {
+      toast.error('请先勾选要删除的收款记录');
+      return;
+    }
+
+    if (!window.confirm(`确认删除选中的 ${selectedPaymentIds.length} 条收款记录？`)) return;
+
+    selectedPaymentIds.forEach((id) => deletePayment(id));
+    setSelectedPaymentIds([]);
+    toast.success(`已删除 ${selectedPaymentIds.length} 条收款记录`);
+  };
 
   // 获取状态配置
   const getStatusConfig = (status: string) => {
@@ -188,6 +225,17 @@ export default function CollectionManagement() {
               清除
             </Button>
 
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleBatchDelete}
+              disabled={selectedPaymentIds.length === 0}
+              className="h-9 px-3 text-xs gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              批量删除{selectedPaymentIds.length > 0 ? ` (${selectedPaymentIds.length})` : ''}
+            </Button>
+
             {/* 状态筛选 */}
             <Select value={filterStatus} onValueChange={setFilterStatus}>
               <SelectTrigger className="w-[130px] h-9 text-xs bg-white">
@@ -242,6 +290,13 @@ export default function CollectionManagement() {
           <Table>
             <TableHeader>
               <TableRow className="bg-gray-50 hover:bg-gray-50">
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
+                  />
+                </TableHead>
+                <TableHead className="text-xs py-3 w-14">序号</TableHead>
                 <TableHead className="text-xs py-3">收款编号</TableHead>
                 <TableHead className="text-xs">应收账款号</TableHead>
                 <TableHead className="text-xs">订单号</TableHead>
@@ -255,10 +310,17 @@ export default function CollectionManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredPayments.map((payment) => {
+              {filteredPayments.map((payment, index) => {
                 const PaymentIcon = getPaymentMethodIcon(payment.paymentMethod);
                 return (
                   <TableRow key={payment.id} className="hover:bg-emerald-50/30">
+                    <TableCell className="py-3">
+                      <Checkbox
+                        checked={selectedPaymentIds.includes(payment.id)}
+                        onCheckedChange={(checked) => handleSelectOne(payment.id, Boolean(checked))}
+                      />
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-500">{index + 1}</TableCell>
                     <TableCell className="py-3">
                       <button
                         onClick={() => handleViewPayment(payment)}

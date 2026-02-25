@@ -41,6 +41,10 @@ import { SalesContractDocument } from '../documents/templates/SalesContractDocum
 import { adaptOrderToSalesContract } from '../../utils/documentDataAdapters'; // 🔥 使用数据适配器
 import { PaymentProofDialog } from '../admin/PaymentProofDialog'; // 🔥 用于查看凭证
 import { UploadPaymentProofDialog } from './UploadPaymentProofDialog'; // 🔥 用于上传凭证
+import { filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { canDeleteOrder } from '../../lib/erp-core/delete-guard';
+import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
+import { getCurrentUser } from '../../utils/dataIsolation';
 
 interface ActiveOrdersProps {
   orders?: any[];
@@ -49,6 +53,15 @@ interface ActiveOrdersProps {
 }
 
 export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOrdersProps) {
+  const toSafeNumber = (value: unknown): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number(value.replace(/,/g, '').trim());
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -75,9 +88,11 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   const [viewProofOrder, setViewProofOrder] = useState<any>(null);
 
   // 🔥 使用Context获取真实数据
-  const { orders: allOrders, updateOrder } = useOrders();
+  const { orders: allOrders, updateOrder, deleteOrder } = useOrders();
   const { user } = useUser();
   const { addAccountReceivable } = useFinance();
+  const currentUser = getCurrentUser() as any;
+  const effectiveUpdateOrder = onUpdateOrder || updateOrder;
 
   // 🔥 筛选当前用户的活跃订单
   const activeOrders = allOrders.filter(order => 
@@ -102,46 +117,33 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
     }
   }, [initialOrderId, activeOrders]);
 
-  console.log('🔍 [ActiveOrders] 订单筛选调试:');
-  console.log('  - 当前用户邮箱:', user?.email);
-  console.log('  - 所有订单数量:', allOrders.length);
-  console.log('  - 所有订单:', allOrders);
-  console.log('  - 筛选后的活跃订单:', activeOrders.length);
-  console.log('  - 活跃订单详情:', activeOrders);
-  
-  // 🔥 调试：检查localStorage中的实际数据
-  if (user?.email) {
-    const storageKey = `orders_${user.email}`;
-    const rawData = localStorage.getItem(storageKey);
-    console.log('  - 🔍 localStorage检查:');
-    console.log('    • Key:', storageKey);
-    console.log('    • RawData存在:', rawData !== null);
-    console.log('    • RawData长度:', rawData?.length || 0);
-    if (rawData) {
-      try {
-        const parsed = JSON.parse(rawData);
-        console.log('    • 解析后订单数:', Array.isArray(parsed) ? parsed.length : 'NOT_ARRAY');
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          console.log('    • 第一个订单:', parsed[0].orderNumber, '| Status:', parsed[0].status);
-        }
-      } catch (e) {
-        console.error('    ❌ 解析失败:', e);
-      }
-    } else {
-      console.error('    ❌ localStorage中没有数据！');
-    }
-  }
-
-  // 🔥 详细打印第一个订单的结构
-  if (activeOrders.length > 0) {
-    console.log('  - 第一个订单完整数据:', JSON.stringify(activeOrders[0], null, 2));
-  }
-
   // 🔥 直接使用activeOrders，不再依赖props
-  const displayOrders = activeOrders;
-  
-  console.log('  - 最终显示的订单数量:', displayOrders.length);
-  console.log('  - 最终显示的订单:', displayOrders);
+  const displayOrders = filterNotDeleted('order', activeOrders, (order) => [
+    String(order?.id || ''),
+    String(order?.orderNumber || ''),
+    String(order?.quotationNumber || ''),
+  ]);
+
+  const normalizeRegionToken = (value: string): string =>
+    value
+      .replace(/North\s*America/gi, 'NA')
+      .replace(/South\s*America/gi, 'SA')
+      .replace(/Europe/gi, 'EU')
+      .replace(/EMEA/gi, 'EMEA');
+
+  const sanitizeDisplayText = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    let text = String(value);
+    try {
+      if (/%[0-9A-Fa-f]{2}/.test(text)) {
+        text = decodeURIComponent(text);
+      }
+    } catch {
+      // ignore invalid URI sequence
+    }
+    text = normalizeRegionToken(text);
+    return text.replace(/\uFFFD/g, '');
+  };
 
   const getStatusBadge = (status: string) => {
     // 🔥 优化：根据订单整体业务流程显示清晰的状态
@@ -507,6 +509,8 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
     (order.id || order.orderNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     order.products.some(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  const getOrderRowId = (order: any, index: number) => order.id || order.orderNumber || `temp-order-${index}`;
   
   // 🔥 批量删除处理
   const handleBatchDelete = () => {
@@ -515,9 +519,17 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
       return;
     }
     
-    // 删除选中的订单
+    const selectedOrders = filteredOrders.filter((order, index) =>
+      selectedOrderIds.includes(getOrderRowId(order, index)),
+    );
+    const blockedOrders = selectedOrders.filter((order) => !canDeleteOrder(order));
+    if (blockedOrders.length > 0) {
+      toast.error(`Cannot delete ${blockedOrders.length} order(s) that already reached final workflow.`);
+      return;
+    }
+
     selectedOrderIds.forEach(orderId => {
-      updateOrder(orderId, { status: 'cancelled' });
+      deleteOrder(orderId);
     });
     
     toast.success(`Successfully deleted ${selectedOrderIds.length} order(s)!`);
@@ -526,8 +538,12 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   
   // 🔥 全选/取消全选
   const handleSelectAll = (checked: boolean) => {
+    const deletableOrderIds = filteredOrders
+      .map((order, index) => ({ order, id: getOrderRowId(order, index) }))
+      .filter((row) => canDeleteOrder(row.order))
+      .map((row) => row.id);
     if (checked) {
-      setSelectedOrderIds(filteredOrders.map(o => o.id || o.orderNumber));
+      setSelectedOrderIds(deletableOrderIds);
     } else {
       setSelectedOrderIds([]);
     }
@@ -535,68 +551,49 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   
   // 🔥 单个选择
   const handleSelectOrder = (orderId: string, checked: boolean) => {
-    console.log('🔍 [handleSelectOrder] 调试信息:', {
-      orderId,
-      checked,
-      currentSelected: selectedOrderIds
-    });
-    
     if (checked) {
-      setSelectedOrderIds(prev => {
-        const newSelected = [...prev, orderId];
-        console.log('  ✅ 添加选择:', orderId, '新数组:', newSelected);
-        return newSelected;
-      });
+      setSelectedOrderIds(prev => [...prev, orderId]);
     } else {
-      setSelectedOrderIds(prev => {
-        const newSelected = prev.filter(id => id !== orderId);
-        console.log('  ❌ 取消选择:', orderId, '新数组:', newSelected);
-        return newSelected;
-      });
+      setSelectedOrderIds(prev => prev.filter(id => id !== orderId));
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl text-gray-900">Active Orders</h1>
-        <p className="text-gray-600 mt-1">Track your ongoing orders in real-time</p>
-      </div>
-
-      {/* Search */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search by order ID or product name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            
-            {/* 🔥 批量删除按钮 */}
-            {selectedOrderIds.length > 0 && (
-              <Button
-                variant="destructive"
-                size="default"
-                onClick={handleBatchDelete}
-                className="gap-2"
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete ({selectedOrderIds.length})
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Orders Table */}
       <Card>
         <CardContent className="p-0">
+          <div className="border-b border-gray-200 px-6 py-4 flex items-center gap-3">
+            <Package className="w-5 h-5 text-[#F96302]" strokeWidth={2.5} />
+            <h3 className="text-gray-900 uppercase tracking-wide" style={{ fontSize: '14px', fontWeight: 600 }}>
+              Active Order List
+            </h3>
+          </div>
+          <div className="p-5 border-b border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search by order ID or product name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              {selectedOrderIds.length > 0 && (
+                <Button
+                  variant="destructive"
+                  size="default"
+                  onClick={handleBatchDelete}
+                  className="gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete ({selectedOrderIds.length})
+                </Button>
+              )}
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -604,8 +601,12 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                   {/* 🔥 全选checkbox列 */}
                   <TableHead className="w-12">
                     <Checkbox
-                      checked={selectedOrderIds.length === filteredOrders.length && filteredOrders.length > 0}
+                      checked={
+                        filteredOrders.filter((order) => canDeleteOrder(order)).length > 0 &&
+                        selectedOrderIds.length === filteredOrders.filter((order) => canDeleteOrder(order)).length
+                      }
                       onCheckedChange={handleSelectAll}
+                      disabled={filteredOrders.filter((order) => canDeleteOrder(order)).length === 0}
                     />
                   </TableHead>
                   {/* 🔥 序号列 */}
@@ -627,32 +628,31 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                   const productSummary = order.products.length > 1 
                     ? `${firstProduct.name} +${order.products.length - 1} more`
                     : firstProduct.name;
-                  
-                  // 🔥 修复：确保每个订单都有唯一的ID，优先使用order.id，其次orderNumber，最后使用index
-                  const orderId = order.id || order.orderNumber || `temp-order-${index}`;
-                  const isSelected = selectedOrderIds.includes(orderId);
-                  
-                  // 🔍 调试：打印每个订单的ID
-                  console.log(`🔍 订单 ${index + 1}:`, {
-                    orderId,
-                    'order.id': order.id,
-                    'order.orderNumber': order.orderNumber,
-                    isSelected,
-                    selectedOrderIds
+                  const orderDisplayNo = sanitizeDisplayText(order.orderNumber || order.id);
+                  const orderDisplayDate = sanitizeDisplayText(order.orderDate || order.date);
+                  const productDisplaySummary = sanitizeDisplayText(productSummary);
+                  const numberDisplay = resolveDisplayNumber({
+                    domain: 'order',
+                    internalNo: String(order.orderNumber || order.id || ''),
+                    companyId: currentUser?.companyId
+                      ? String(currentUser.companyId)
+                      : undefined,
                   });
                   
+                  // 🔥 修复：确保每个订单都有唯一的ID，优先使用order.id，其次orderNumber，最后使用index
+                  const orderId = getOrderRowId(order, index);
+                  const isSelected = selectedOrderIds.includes(orderId);
+                  
+                  const canDelete = canDeleteOrder(order);
+
                   return (
                     <TableRow key={orderId} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
                       {/* 🔥 checkbox列 */}
                       <TableCell>
                         <Checkbox
                           checked={isSelected}
+                          disabled={!canDelete}
                           onCheckedChange={(checked) => {
-                            console.log(`🔍 Checkbox点击 - 订单 ${index + 1}:`, {
-                              orderId,
-                              checked,
-                              type: typeof checked
-                            });
                             handleSelectOrder(orderId, checked as boolean);
                           }}
                         />
@@ -669,13 +669,18 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                           }}
                           className="font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
                         >
-                          {order.orderNumber || order.id}
+                          {orderDisplayNo}
                           <ExternalLink className="h-3 w-3" />
                         </button>
+                        {numberDisplay.externalNo && (
+                          <div className="text-[11px] text-gray-500 mt-0.5">
+                            Customer ERP: {numberDisplay.externalNo}
+                          </div>
+                        )}
                       </TableCell>
-                      <TableCell className="text-xs text-gray-700">{order.orderDate || order.date}</TableCell>
+                      <TableCell className="text-xs text-gray-700">{orderDisplayDate}</TableCell>
                       <TableCell className="text-xs font-medium text-gray-900 max-w-xs truncate">
-                        {productSummary}
+                        {productDisplaySummary}
                       </TableCell>
                       <TableCell className="text-xs text-gray-700">{totalQty} pcs</TableCell>
                       <TableCell className="text-xs font-medium text-gray-900">${order.totalAmount.toLocaleString()}</TableCell>
@@ -774,7 +779,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto p-4">
           <div className="sticky top-0 bg-white z-10 border-b px-4 py-3">
             <DialogTitle className="text-lg">
-              Sales Contract - {selectedOrder?.orderNumber || selectedOrder?.id}
+              Sales Contract - {sanitizeDisplayText(selectedOrder?.orderNumber || selectedOrder?.id)}
             </DialogTitle>
             <DialogDescription className="text-sm">
               View and download your sales contract
@@ -782,19 +787,6 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
           </div>
           {selectedOrder && (
             <div className="py-4">
-              {/* 🔍 调试日志 */}
-              {console.log('🔥 [ActiveOrders Contract View] 订单数据:', {
-                orderNumber: selectedOrder.orderNumber || selectedOrder.id,
-                customer: selectedOrder.customer,
-                date: selectedOrder.date,
-                expectedDelivery: selectedOrder.contractTerms?.expectedDelivery || selectedOrder.expectedDelivery,
-                totalAmount: selectedOrder.totalAmount,
-                products: selectedOrder.products,
-                contractTerms: selectedOrder.contractTerms,
-                paymentTerms: selectedOrder.contractTerms?.paymentTerms || selectedOrder.paymentTerms,
-                deliveryTerms: selectedOrder.contractTerms?.deliveryTerms || selectedOrder.deliveryTerms
-              })}
-              
               {/* 合同模板 - 放大32% (1.2 × 1.1 = 1.32) */}
               <div className="flex justify-center">
                 <div style={{ 
@@ -812,19 +804,22 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                       customerPhone: selectedOrder.contactPhone || selectedOrder.phone,
                       date: selectedOrder.date,
                       expectedDelivery: selectedOrder.deliveryTime || selectedOrder.expectedDelivery || '25-30 days',
-                      totalAmount: selectedOrder.totalAmount,
+                      totalAmount: toSafeNumber(selectedOrder.totalAmount),
                       currency: selectedOrder.currency || 'USD',
-                      products: selectedOrder.products.map((p: any) => ({ 
+                      products: (Array.isArray(selectedOrder.products) ? selectedOrder.products : []).map((p: any) => {
+                        const quantity = toSafeNumber(p.quantity ?? p.qty);
+                        const unitPrice = toSafeNumber(p.price ?? p.unitPrice);
+                        return {
                         name: p.name,
                         specs: p.specification || p.specs,
-                        quantity: p.quantity,
-                        unitPrice: p.price || p.unitPrice,
-                        totalPrice: (p.quantity * (p.price || p.unitPrice)),
+                        quantity,
+                        unitPrice,
+                        totalPrice: toSafeNumber(p.totalPrice) || (quantity * unitPrice),
                         unit: p.unit || 'pcs',
                         hsCode: p.hsCode,
                         modelNo: p.modelNo,
                         imageUrl: p.imageUrl
-                      })),
+                      }}),
                       shippingMethod: selectedOrder.shippingMethod,
                       quotationNumber: selectedOrder.quotationNumber,
                       region: (selectedOrder.region || 'NA') as 'NA' | 'SA' | 'EU',
@@ -1174,7 +1169,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
         onOpenChange={setIsPaymentProofOpen}
         order={selectedOrder}
         user={user}
-        updateOrder={updateOrder}
+        updateOrder={effectiveUpdateOrder}
         sendNotificationToUser={sendNotificationToUser}
         paymentAmount={paymentAmount}
         setPaymentAmount={setPaymentAmount}

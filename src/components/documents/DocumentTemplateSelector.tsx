@@ -19,14 +19,14 @@ import {
   DOCUMENT_CATEGORIES 
 } from '../../lib/services/document-template-service';
 import { A4PageContainer } from './A4PageContainer';
-import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
-import { QuotationDocument } from './templates/QuotationDocument';
 import { SalesContractDocument } from './templates/SalesContractDocument';
-import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument';
 import { StatementOfAccountDocument } from './templates/StatementOfAccountDocument';
 import { CommercialInvoiceDocument } from './templates/CommercialInvoiceDocument';
 import { PackingListDocument } from './templates/PackingListDocument';
 import { ProformaInvoiceDocument } from './templates/ProformaInvoiceDocument';
+import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
+import { QuotationDocument } from './templates/QuotationDocument';
+import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 

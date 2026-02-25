@@ -19,7 +19,11 @@ export interface CustomerProfile {
   businessType: 'Retailer' | 'Importer' | 'Wholesaler' | 'Distributor' | 'E-commerce' | 'Other';
 }
 
-export function CustomerProfile() {
+interface CustomerProfileProps {
+  forceEditToken?: number;
+}
+
+export function CustomerProfile({ forceEditToken }: CustomerProfileProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [profile, setProfile] = useState<CustomerProfile>({
     companyName: '',
@@ -54,6 +58,12 @@ export function CustomerProfile() {
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (forceEditToken) {
+      setIsEditing(true);
+    }
+  }, [forceEditToken]);
 
   const handleSave = () => {
     // Validate required fields

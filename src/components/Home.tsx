@@ -741,8 +741,8 @@ export function Home() {
 
       {/* Order Editing Banner */}
       <OrderEditingBanner onReturnToOrder={handleReturnToOrder} />
-      {/* Live Banner */}
-      <LiveBanner />
+      {/* Live Banner (temporarily disabled) */}
+      {false && <LiveBanner />}
     </div>
   );
 }

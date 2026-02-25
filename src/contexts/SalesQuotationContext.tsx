@@ -1,4 +1,8 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
+import { getCurrentUser } from '../utils/dataIsolation';
+import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
+import { emitErpEvent } from '../lib/erp-core/event-bus';
+import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
 
 // 🎯 销售报价单（QT）- 业务员创建，需要审批
 
@@ -130,6 +134,31 @@ interface SalesQuotationContextType {
 
 const SalesQuotationContext = createContext<SalesQuotationContextType | undefined>(undefined);
 
+const getSalesQuotationMarkers = (quotation: Partial<SalesQuotation>): string[] => {
+  return [quotation.id, quotation.qtNumber, quotation.qrNumber, quotation.inqNumber]
+    .filter(Boolean)
+    .map((v) => String(v));
+};
+
+const emitSalesQuotationEvent = (
+  key: string,
+  quotation: Partial<SalesQuotation> & { id: string },
+  metadata?: Record<string, unknown>,
+) => {
+  const currentUser = getCurrentUser() as any;
+  emitErpEvent({
+    id: `evt-sales-quotation-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    key: key as any,
+    domain: 'quotation',
+    recordId: String(quotation.id),
+    internalNo: String(quotation.qtNumber || quotation.id),
+    companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
+    source: currentUser?.type === 'admin' ? 'admin' : 'client',
+    occurredAt: new Date().toISOString(),
+    metadata,
+  });
+};
+
 export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // 从localStorage加载初始数据
   const [quotations, setQuotations] = useState<SalesQuotation[]>(() => {
@@ -139,12 +168,13 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
+          const visible = filterNotDeleted('quotation', parsed, (q) => getSalesQuotationMarkers(q));
           console.log('✅ [SalesQuotation] 从localStorage加载销售报价单，总数:', parsed.length);
           console.log('📋 [SalesQuotation] 加载的报价单列表:');
-          parsed.forEach((qt: SalesQuotation, index: number) => {
+          visible.forEach((qt: SalesQuotation, index: number) => {
             console.log(`  ${index + 1}. ${qt.qtNumber} - 业务员: ${qt.salesPerson} - 状态: ${qt.approvalStatus}`);
           });
-          return parsed;
+          return visible;
         } catch (e) {
           console.error('❌ [SalesQuotation] 加载销售报价单失败:', e);
         }
@@ -166,12 +196,13 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
         if (saved) {
           try {
             const parsed = JSON.parse(saved);
+            const visible = filterNotDeleted('quotation', parsed, (q) => getSalesQuotationMarkers(q));
             console.log('  - 重新加载销售报价单，总数:', parsed.length);
             console.log('  - 报价单列表:');
-            parsed.forEach((qt: SalesQuotation, index: number) => {
+            visible.forEach((qt: SalesQuotation, index: number) => {
               console.log(`    ${index + 1}. ${qt.qtNumber} - 业务员: ${qt.salesPerson} - 状态: ${qt.approvalStatus}`);
             });
-            setQuotations(parsed);
+            setQuotations(visible);
           } catch (e) {
             console.error('  - ❌ 重新加载失败:', e);
             setQuotations([]);
@@ -226,18 +257,42 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
       
       return newQuotations;
     });
+    emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, quotation, {
+      approvalStatus: quotation.approvalStatus,
+      customerStatus: quotation.customerStatus,
+    });
   };
 
   const updateQuotation = (id: string, updates: Partial<SalesQuotation>) => {
     console.log('🔄 [SalesQuotation] 更新销售报价单:', id, updates);
+    const currentQuotation = quotations.find((qt) => qt.id === id);
     setQuotations(prev =>
       prev.map(qt => qt.id === id ? { ...qt, ...updates, updatedAt: new Date().toISOString() } : qt)
     );
+    if (updates.customerStatus === 'sent' || updates.customerStatus === 'viewed') {
+      emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_SENT, { id, qtNumber: String(currentQuotation?.qtNumber || id) }, { customerStatus: updates.customerStatus });
+    }
+    if (updates.customerStatus === 'accepted') {
+      emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_ACCEPTED, { id, qtNumber: String(currentQuotation?.qtNumber || id) }, { customerStatus: updates.customerStatus });
+    }
   };
 
   const deleteQuotation = (id: string) => {
     console.log('🗑️ [SalesQuotation] 删除销售报价单:', id);
-    setQuotations(prev => prev.filter(qt => qt.id !== id));
+    const currentQuotation = quotations.find((qt) => qt.id === id);
+    const markers = currentQuotation ? getSalesQuotationMarkers(currentQuotation) : [String(id)];
+    addTombstones('quotation', markers, {
+      reason: 'manual_delete',
+      deletedBy: (getCurrentUser() as any)?.email || 'unknown',
+    });
+    setQuotations((prev) =>
+      filterNotDeleted(
+        'quotation',
+        prev.filter((qt) => qt.id !== id),
+        (q) => getSalesQuotationMarkers(q),
+      ),
+    );
+    emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_DELETED, { id, qtNumber: String(currentQuotation?.qtNumber || id) });
   };
 
   const getQuotationById = (id: string) => {

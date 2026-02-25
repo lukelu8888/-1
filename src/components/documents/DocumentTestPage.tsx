@@ -1,14 +1,5 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { FileText, Eye, Download, ArrowLeft, Printer, ZoomIn, ZoomOut, Maximize2, GripVertical } from 'lucide-react';
-import { Button } from '../ui/button';
-import { A4PageContainer } from './A4PageContainer';
+import React, { useState } from 'react';
 import { DraggableDocNav, DocType } from './DraggableDocNav'; // 🔥 导入可拖拽导航栏
-import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
-import { QuotationDocument } from './templates/QuotationDocument';
-import { SalesContractDocument } from './templates/SalesContractDocument';
-import { SalesContractDocumentPaginated } from './SalesContractDocumentPaginated'; // 🔥 新增分页版本
-// import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument'; // 🔥 已弃用，使用分页版本
-import { PurchaseOrderDocumentPaginated } from './PurchaseOrderDocumentPaginated'; // 🔥 采购订单分页版本
 import { StatementOfAccountDocument } from './templates/StatementOfAccountDocument';
 import { CommercialInvoiceDocument } from './templates/CommercialInvoiceDocument';
 import { PackingListDocument } from './templates/PackingListDocument';
@@ -16,6 +7,10 @@ import { ProformaInvoiceDocument } from './templates/ProformaInvoiceDocument';
 import { SupplierRFQDocument } from './templates/SupplierRFQDocument'; // 🔥 供应商询价单
 import { SupplierQuotationDocument } from './templates/SupplierQuotationDocument'; // 🔥 供应商报价单
 import { PurchaseRequirementDocument } from './templates/PurchaseRequirementDocument'; // 🔥 采购需求单
+import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
+import { QuotationDocument } from './templates/QuotationDocument';
+import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument';
+import { SalesContractDocumentPaginated } from './SalesContractDocumentPaginated';
 import type { CustomerInquiryData } from './templates/CustomerInquiryDocument';
 import type { QuotationData } from './templates/QuotationDocument';
 import type { SalesContractData } from './templates/SalesContractDocument';
@@ -27,8 +22,6 @@ import type { ProformaInvoiceData } from './templates/ProformaInvoiceDocument';
 import type { SupplierRFQData } from './templates/SupplierRFQDocument'; // 🔥 供应商询价单类型
 import type { SupplierQuotationData } from './templates/SupplierQuotationDocument'; // 🔥 供应商报价单类型
 import type { PurchaseRequirementDocumentData } from './templates/PurchaseRequirementDocument'; // 🔥 采购需求单类型
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 
 /**
  * 📄 文档测试页面
@@ -41,8 +34,15 @@ import jsPDF from 'jspdf';
 
 export function DocumentTestPage() {
   const [activeDoc, setActiveDoc] = useState<'inquiry' | 'quotation' | 'sc' | 'po' | 'rfq' | 'supplier-quotation' | 'soa' | 'ci' | 'pl' | 'pi' | 'pr' | null>('inquiry');
-  const [zoom, setZoom] = useState(100); // 🔍 缩放状态
-  const documentRef = useRef<HTMLDivElement>(null);
+  const [salesContractZoom, setSalesContractZoom] = useState(50);
+
+  const handleSalesContractZoomIn = () => {
+    setSalesContractZoom((prev) => Math.min(150, prev + 10));
+  };
+
+  const handleSalesContractZoomOut = () => {
+    setSalesContractZoom((prev) => Math.max(40, prev - 10));
+  };
 
   // 示例数据：客户询价单
   const sampleInquiryData: CustomerInquiryData = {
@@ -1018,137 +1018,6 @@ export function DocumentTestPage() {
     }
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const handleDownload = async () => {
-    const element = documentRef.current;
-    if (!element) return;
-
-    try {
-      // 获取文档名称
-      const getDocumentName = () => {
-        switch (activeDoc) {
-          case 'inquiry': return `Inquiry_${sampleInquiryData.inquiryNo}`;
-          case 'quotation': return `Quotation_${sampleQuotationData.quotationNo}`;
-          case 'sc': return `Sales_Contract_${sampleSCData.contractNo}`;
-          case 'po': return `Purchase_Order_${samplePOData.poNo}`;
-          case 'rfq': return `Supplier_RFQ_${sampleRFQData.rfqNo}`; // 🔥 供应商询价单
-          case 'supplier-quotation': return `Supplier_Quotation_${sampleSupplierQuotationData.quotationNo}`; // 🔥 供应商报价单
-          case 'pr': return `Purchase_Requirement_${samplePRData.requirementNo}`; // 🔥 采购需求单
-          case 'soa': return `Statement_${sampleSOAData.statementNo}`;
-          case 'ci': return `Commercial_Invoice_${sampleCIData.invoiceNo}`;
-          case 'pl': return `Packing_List_${samplePLData.plNo}`;
-          case 'pi': return `Proforma_Invoice_${samplePIData.invoiceNo}`;
-          default: return 'Document';
-        }
-      };
-
-      // 显示加载提示
-      const loadingToast = document.createElement('div');
-      loadingToast.innerHTML = '正在生成PDF，请稍候...';
-      loadingToast.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
-        padding: 20px 40px;
-        border-radius: 8px;
-        z-index: 10000;
-        font-size: 16px;
-      `;
-      document.body.appendChild(loadingToast);
-
-      // 生成Canvas
-      const canvas = await html2canvas(element, {
-        scale: 2, // 提高清晰度
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-
-      // A4尺寸（mm）
-      const a4Width = 210;
-      const a4Height = 297;
-      
-      // 创建PDF
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      
-      // 获取canvas尺寸
-      const imgWidth = a4Width;
-      const imgHeight = (canvas.height * a4Width) / canvas.width;
-      
-      // 如果内容高度超过一页，需要分页
-      let heightLeft = imgHeight;
-      let position = 0;
-      
-      // 添加第一页
-      pdf.addImage(
-        canvas.toDataURL('image/png'),
-        'PNG',
-        0,
-        position,
-        imgWidth,
-        imgHeight,
-        undefined,
-        'FAST'
-      );
-      
-      heightLeft -= a4Height;
-      
-      // 添加后续页面
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(
-          canvas.toDataURL('image/png'),
-          'PNG',
-          0,
-          position,
-          imgWidth,
-          imgHeight,
-          undefined,
-          'FAST'
-        );
-        heightLeft -= a4Height;
-      }
-      
-      // 保存PDF
-      pdf.save(`${getDocumentName()}.pdf`);
-      
-      // 移除加载提示
-      document.body.removeChild(loadingToast);
-      
-      // 显示成功提示
-      const successToast = document.createElement('div');
-      successToast.innerHTML = '✓ PDF已成功下载';
-      successToast.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: #10B981;
-        color: white;
-        padding: 12px 24px;
-        border-radius: 8px;
-        z-index: 10000;
-        font-size: 14px;
-        animation: fadeIn 0.3s ease-in;
-      `;
-      document.body.appendChild(successToast);
-      
-      setTimeout(() => {
-        document.body.removeChild(successToast);
-      }, 3000);
-      
-    } catch (error) {
-      console.error('PDF生成失败:', error);
-      alert('PDF生成失败，请重试');
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gray-100">
       {/* 顶部导航 */}
@@ -1156,53 +1025,11 @@ export function DocumentTestPage() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             {/* 🔥 可拖拽导航栏 */}
-            <div className="flex-1 mr-4">
-              <DraggableDocNav 
+            <div className="flex-1">
+              <DraggableDocNav
                 activeDoc={activeDoc as DocType | null}
                 onDocChange={(docType) => setActiveDoc(docType)}
               />
-            </div>
-            
-            <div className="flex gap-2 flex-shrink-0">
-              {/* 🔍 缩放控制按钮 */}
-              <div className="flex items-center gap-1 mr-2 border border-gray-300 rounded-md px-1">
-                <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  onClick={() => setZoom(Math.max(50, zoom - 10))}
-                  disabled={zoom <= 50}
-                  className="h-7 px-2"
-                >
-                  <ZoomOut className="w-3.5 h-3.5" />
-                </Button>
-                <span className="text-sm min-w-[60px] text-center">{zoom}%</span>
-                <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  onClick={() => setZoom(Math.min(200, zoom + 10))}
-                  disabled={zoom >= 200}
-                  className="h-7 px-2"
-                >
-                  <ZoomIn className="w-3.5 h-3.5" />
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  onClick={() => setZoom(100)}
-                  className="h-7 px-2"
-                  title="重置缩放"
-                >
-                  <Maximize2 className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-              
-              <Button size="sm" variant="outline" onClick={handlePrint}>
-                打印
-              </Button>
-              <Button size="sm" className="bg-[#F96302] hover:bg-[#F96302]/90" onClick={handleDownload}>
-                <Download className="w-4 h-4 mr-2" />
-                下载PDF
-              </Button>
             </div>
           </div>
         </div>
@@ -1210,45 +1037,68 @@ export function DocumentTestPage() {
 
       {/* 文档预览区域 */}
       <div className="py-8" style={{ background: '#525659', minHeight: '100vh' }}>
-        <div 
-          className="max-w-none transition-transform duration-200 ease-out"
-          style={{ 
-            transform: `scale(${zoom / 100})`,
-            transformOrigin: 'top center'
-          }}
-        >
+        {activeDoc === 'sc' && (
+          <div className="fixed right-6 top-1/2 -translate-y-1/2 z-30">
+            <div className="bg-white border border-gray-300 rounded-lg shadow-md overflow-hidden">
+              <button
+                type="button"
+                onClick={handleSalesContractZoomIn}
+                disabled={salesContractZoom >= 150}
+                className="w-10 h-10 text-lg font-semibold border-b border-gray-200 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-label="放大销售合同"
+              >
+                +
+              </button>
+              <div className="w-10 h-10 flex items-center justify-center text-xs font-semibold text-gray-700 border-b border-gray-200">
+                {salesContractZoom}%
+              </div>
+              <button
+                type="button"
+                onClick={handleSalesContractZoomOut}
+                disabled={salesContractZoom <= 40}
+                className="w-10 h-10 text-lg font-semibold hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-label="缩小销售合同"
+              >
+                -
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="max-w-none">
           {activeDoc === 'inquiry' && (
-            <CustomerInquiryDocument ref={documentRef} data={sampleInquiryData} />
+            <CustomerInquiryDocument data={sampleInquiryData} />
           )}
           {activeDoc === 'quotation' && (
-            <QuotationDocument ref={documentRef} data={sampleQuotationData} />
+            <QuotationDocument data={sampleQuotationData} />
           )}
           {activeDoc === 'sc' && (
-            <SalesContractDocumentPaginated ref={documentRef} data={sampleSCData} /> // 🔥 使用分页版本
+            <div style={{ zoom: `${salesContractZoom}%` }}>
+              <SalesContractDocumentPaginated data={sampleSCData} />
+            </div>
           )}
           {activeDoc === 'po' && (
-            <PurchaseOrderDocumentPaginated ref={documentRef} data={samplePOData} /> // 🔥 采购订单分页版本
+            <PurchaseOrderDocument data={samplePOData} />
           )}
           {activeDoc === 'rfq' && (
-            <SupplierRFQDocument ref={documentRef} data={sampleRFQData} /> // 🔥 供应商询价单
+            <SupplierRFQDocument data={sampleRFQData} /> // 🔥 供应商询价单
           )}
           {activeDoc === 'supplier-quotation' && (
-            <SupplierQuotationDocument ref={documentRef} data={sampleSupplierQuotationData} /> // 🔥 供应商报价单
+            <SupplierQuotationDocument data={sampleSupplierQuotationData} /> // 🔥 供应商报价单
           )}
           {activeDoc === 'pr' && (
-            <PurchaseRequirementDocument ref={documentRef} data={samplePRData} /> // 🔥 采购需求单
+            <PurchaseRequirementDocument data={samplePRData} /> // 🔥 采购需求单
           )}
           {activeDoc === 'soa' && (
-            <StatementOfAccountDocument ref={documentRef} data={sampleSOAData} />
+            <StatementOfAccountDocument data={sampleSOAData} />
           )}
           {activeDoc === 'ci' && (
-            <CommercialInvoiceDocument ref={documentRef} data={sampleCIData} />
+            <CommercialInvoiceDocument data={sampleCIData} />
           )}
           {activeDoc === 'pl' && (
-            <PackingListDocument ref={documentRef} data={samplePLData} />
+            <PackingListDocument data={samplePLData} />
           )}
           {activeDoc === 'pi' && (
-            <ProformaInvoiceDocument ref={documentRef} data={samplePIData} />
+            <ProformaInvoiceDocument data={samplePIData} />
           )}
         </div>
       </div>

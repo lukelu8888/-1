@@ -34,13 +34,12 @@ import {
   FileText // 🔥 新增：文档图标
 } from 'lucide-react';
 import { SalesContractContext, useSalesContracts } from '../../contexts/SalesContractContext';
-import { useOrders, generateTestOrders } from '../../contexts/OrderContext'; // 🔥 导入generateTestOrders
+import { useOrders } from '../../contexts/OrderContext';
 import { useApproval } from '../../contexts/ApprovalContext'; // 🔥 添加审批Context
 import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext'; // 🔥 新增：采购订单Context
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 新增：采购需求Context（溯源用）
-import { useRFQs } from '../../contexts/RFQContext'; // 🔥 新增：RFQ Context（溯源用）
-import { useQuotationRequests } from '../../contexts/QuotationRequestContext'; // 🔥 新增：询价请求Context（溯源用）
+import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
+import { generateCQNumber } from '../../utils/purchaseOrderNumberGenerator';
 import { apiFetchJson } from '../../api/backend-auth';
 import { toast } from 'sonner@2.0.3';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog'; // 🔥 新增：Dialog组件
@@ -51,13 +50,11 @@ interface SalesContractManagementProps {
 }
 
 export function SalesContractManagement({ highlightScNumber }: SalesContractManagementProps = {}) {
-  const { contracts, deleteContract, submitForApproval, sendToCustomer, generatePurchaseOrder, clearAllContracts, updateContract, refreshFromBackend } = useSalesContracts();
+  const { contracts, deleteContract, submitForApproval, sendToCustomer, clearAllContracts, updateContract, refreshFromBackend } = useSalesContracts();
   const { orders } = useOrders(); // 🔥 获取订单数据
   const { addApprovalRequest } = useApproval(); // 🔥 审批功能
-  const { addPurchaseOrder } = usePurchaseOrders(); // 🔥 新增：采购订单功能
-  const { requirements: purchaseRequirements = [], addRequirement } = usePurchaseRequirements(); // 🔥 新增：采购需求数据，默认空数组
-  const { rfqs = [] } = useRFQs(); // 🔥 新增：RFQ数据，默认空数组
-  const { quotationRequests = [] } = useQuotationRequests(); // 🔥 新增：询价请求数据，默认空数组
+  const { purchaseOrders, addPurchaseOrder, updatePurchaseOrder } = usePurchaseOrders(); // 🔥 新增：采购订单功能
+  const { addRequirement } = usePurchaseRequirements();
   const currentUser = getCurrentUser();
   const persistPurchaseRequest = (contract: any, newPO: any, poNumber: string) => {
     void (async () => {
@@ -163,11 +160,97 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   // 🔥 新增：文档预览状态
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
   const [selectedContract, setSelectedContract] = useState<any>(null);
+  const requestProcurementFromContract = (contract: any) => {
+    const livePOs = getLivePurchaseOrdersForContract(contract);
+    if (livePOs.length > 0) {
+      // 允许业务员“重新激活”已有采购请求，避免按钮长期灰置且请求链路断裂
+      livePOs.forEach((po: any) => {
+        updatePurchaseOrder(po.id, {
+          procurementRequestStatus: 'pending_procurement_assignment',
+          status: 'pending',
+          updatedDate: new Date().toISOString(),
+        } as any);
+      });
+      toast.success('已重新激活采购请求', {
+        description: `采购来源号：${livePOs.map((po: any) => po.poNumber).join(', ')}`,
+        duration: 3500
+      });
+      return;
+    }
+
+    const poNumber = generateCQNumber();
+    const items = (contract.products || []).map((product: any, index: number) => ({
+      id: String(product?.id || product?.productId || `item-${index + 1}`),
+      productName: product?.productName || 'Unknown Product',
+      modelNo: product?.modelNo || product?.productName || '-',
+      specification: product?.specification || '',
+      quantity: Number(product?.quantity || 0),
+      unit: product?.unit || 'PCS',
+      unitPrice: 0,
+      currency: contract?.currency || 'USD',
+      subtotal: 0,
+      hsCode: product?.hsCode || '',
+      packingRequirement: product?.packingRequirement || '',
+      remarks: product?.remarks || ''
+    }));
+
+    addPurchaseOrder({
+      id: `po-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      poNumber,
+      sourceRef: contract.contractNumber,
+      sourceSONumber: contract.contractNumber,
+      salesContractNumber: contract.contractNumber,
+      quotationNumber: contract.quotationNumber,
+      rfqNumber: contract.inquiryNumber || '',
+      requirementNo: '',
+      supplierName: '待采购分配',
+      supplierCode: 'TBD',
+      region: contract.region,
+      items,
+      totalAmount: 0,
+      currency: contract.currency || 'USD',
+      paymentTerms: '待采购确认',
+      deliveryTerms: contract.deliveryTime || '待采购确认',
+      orderDate: new Date().toISOString(),
+      expectedDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'pending',
+      paymentStatus: 'unpaid',
+      remarks: `📋 业务员请求采购（不含供应商信息）\n来源销售合同: ${contract.contractNumber}\n来源询价: ${contract.inquiryNumber || ''}\n待采购员分配供应商`,
+      createdBy: currentUser?.email || 'system',
+      createdDate: new Date().toISOString(),
+      procurementRequestStatus: 'pending_procurement_assignment',
+    } as any);
+
+    persistPurchaseRequest(contract, { items }, poNumber);
+
+    toast.success('✅ 已请求采购', {
+      description: `采购单号：${poNumber}（待采购员分配供应商）`,
+      duration: 4500
+    });
+  };
+
+  const isContractDeletable = (contract: any): boolean => {
+    const status = String(contract?.status || '').toLowerCase();
+    return ![
+      'sent',
+      'sent_to_customer',
+      'customer_confirmed',
+      'customer_rejected',
+      'customer_requested_changes',
+      'deposit_uploaded',
+      'deposit_confirmed',
+      'po_generated',
+      'production',
+      'shipped',
+      'completed',
+    ].includes(status);
+  };
   
   // 🔥 全选/取消全选
   const handleSelectAll = (checked: boolean) => {
+    const deletableIds = myContracts.filter((c) => isContractDeletable(c)).map((c) => c.id);
     if (checked) {
-      setSelectedIds(myContracts.map(c => c.id));
+      setSelectedIds(deletableIds);
     } else {
       setSelectedIds([]);
     }
@@ -275,8 +358,39 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     }
     sendToCustomer(contract.id);
   };
+
+  const formatContractNumberForDisplay = (contractNumber: string) => {
+    return String(contractNumber || '')
+      .replace('SC-North America-', 'SC-NA-')
+      .replace('SC-South America-', 'SC-SA-')
+      .replace('SC-Europe & Africa-', 'SC-EA-');
+  };
+
+  const getLivePurchaseOrdersForContract = (contract: any) => {
+    const contractNo = String(contract?.contractNumber || '').trim();
+    const idsFromContract = Array.isArray(contract?.purchaseOrderNumbers)
+      ? new Set(contract.purchaseOrderNumbers.map((v: any) => String(v)))
+      : new Set<string>();
+    return (purchaseOrders || []).filter((po: any) => {
+      const poNo = String(po?.poNumber || '').trim();
+      const sourceRef = String(po?.sourceRef || '').trim();
+      const sourceSONumber = String(po?.sourceSONumber || '').trim();
+      const salesContractNumber = String(po?.salesContractNumber || '').trim();
+      const reqStatus = String((po as any)?.procurementRequestStatus || '').trim();
+      const isCq = poNo.startsWith('CQ-');
+      if (!isCq) return false;
+      // 已下推供应商后的历史请求不阻止再次“请求采购”
+      if (reqStatus === 'pushed_supplier' || reqStatus === 'allocated_completed') return false;
+      return (
+        (poNo && idsFromContract.has(poNo)) ||
+        (sourceRef && sourceRef === contractNo) ||
+        (sourceSONumber && sourceSONumber === contractNo) ||
+        (salesContractNumber && salesContractNumber === contractNo)
+      );
+    });
+  };
   
-  // 🔥 筛选业务员自己的合同
+  // 🔥 筛选：只做状态、搜索筛选；数据来自接口，后端已按权限过滤
   const myContracts = useMemo(() => {
     console.log('🔍 [SalesContractManagement] 筛选业务员合同:');
     console.log('  - 总合同数:', contracts.length);
@@ -288,14 +402,9 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     })));
     
     return contracts.filter(contract => {
-      // 只显示当前业务员的合同
-      const isMySalesContract = contract.salesPerson === currentUser?.email;
-      console.log(`  - ${contract.contractNumber}: salesPerson=${contract.salesPerson}, match=${isMySalesContract}`);
-      
-      if (!isMySalesContract) {
-        return false;
-      }
-      
+      // 🔥 数据来自接口：后端已按登录用户过滤，前端不再按 salesPerson 硬过滤
+      console.log(`  - ${contract.contractNumber}: salesPerson=${contract.salesPerson}`);
+
       // 状态筛选
       if (filterStatus !== 'all') {
         if (filterStatus === 'pending' && !['pending_supervisor', 'pending_director'].includes(contract.status)) {
@@ -312,8 +421,10 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       // 搜索筛选
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
+        const displayContractNo = formatContractNumberForDisplay(contract.contractNumber).toLowerCase();
         return (
           contract.contractNumber.toLowerCase().includes(term) ||
+          displayContractNo.includes(term) ||
           contract.quotationNumber.toLowerCase().includes(term) ||
           contract.customerCompany.toLowerCase().includes(term) ||
           contract.customerName.toLowerCase().includes(term)
@@ -444,96 +555,6 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                 清空所有
               </Button>
               
-              {/* 🔍 调试按钮：查看localStorage数据 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const storedContracts = localStorage.getItem('salesContracts');
-                  const storedOrders = localStorage.getItem('orders');
-                  console.log('═══════════════════════════════════════════════════════');
-                  console.log('🔍 [调试] localStorage中的销售合同数据:');
-                  console.log('  - 原始数据:', storedContracts);
-                  if (storedContracts) {
-                    const parsed = JSON.parse(storedContracts);
-                    console.log('  - 解析后数据:', parsed);
-                    console.log('  - 合同数量:', parsed.length);
-                    parsed.forEach((c: any, i: number) => {
-                      console.log(`  - 合同${i + 1}:`, {
-                        contractNumber: c.contractNumber,
-                        salesPerson: c.salesPerson,
-                        customerEmail: c.customerEmail,
-                        quotationNumber: c.quotationNumber,
-                        status: c.status,
-                        sentToCustomerAt: c.sentToCustomerAt
-                      });
-                    });
-                  } else {
-                    console.log('  - localStorage中没有销售合同数据！');
-                  }
-                  console.log('');
-                  console.log('🔍 [调试] localStorage中的订单数据:');
-                  if (storedOrders) {
-                    const parsedOrders = JSON.parse(storedOrders);
-                    console.log('  - 订单数量:', parsedOrders.length);
-                    parsedOrders.forEach((o: any, i: number) => {
-                      console.log(`  - 订单${i + 1}:`, {
-                        orderNumber: o.orderNumber,
-                        customerEmail: o.customerEmail,
-                        status: o.status,
-                        customerFeedback: o.customerFeedback,
-                        depositPaymentProof: o.depositPaymentProof ? {
-                          amount: o.depositPaymentProof.amount,
-                          uploadedAt: o.depositPaymentProof.uploadedAt,
-                          uploadedBy: o.depositPaymentProof.uploadedBy
-                        } : null
-                      });
-                    });
-                  } else {
-                    console.log('  - localStorage中没有订单数据！');
-                  }
-                  console.log('  - Context中的合同数量:', contracts.length);
-                  console.log('  - 当前用户邮箱:', currentUser?.email);
-                  console.log('═══════════════════════════════════════════════════════');
-                  
-                  const contractCount = storedContracts ? JSON.parse(storedContracts).length : 0;
-                  const orderCount = storedOrders ? JSON.parse(storedOrders).length : 0;
-                  
-                  toast.info('📊 调试信息已输出到控制台', {
-                    description: `localStorage合同: ${contractCount} 条\nContext合同: ${contracts.length} 条\nlocalStorage订单: ${orderCount} 条\n当前用户: ${currentUser?.email}`,
-                    duration: 8000
-                  });
-                }}
-                className="gap-1"
-              >
-                🔍 调试数据
-              </Button>
-              
-              {/* 🔥 生成测试订单按钮 */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (window.confirm('🎯 确定要生成测试订单吗？\\n\\n这将创建5个包含完整付款/收款凭证的测试订单：\\n\\n1. SC-NA-251220-0001 - 定金待确认\\n2. SC-EU-251215-0002 - 定金已确认+收款凭证\\n3. SC-SA-251210-0003 - 余款待确认\\n4. SC-NA-251205-0004 - 余款已确认+收款凭证\\n5. SC-EU-251222-0005 - 定金被驳回')) {
-                    console.log('🎯 [生成测试订单] 开始...');
-                    generateTestOrders();
-                    
-                    // 刷新页面以重新加载数据
-                    setTimeout(() => {
-                      window.location.reload();
-                    }, 500);
-                    
-                    toast.success('✅ 测试订单生成成功！', {
-                      description: '页面即将刷新以显示新数据...',
-                      duration: 3000
-                    });
-                  }
-                }}
-                className="gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700"
-              >
-                🎯 生成测试订单
-              </Button>
-              
               {/* 状态筛选标签 */}
               <div className="flex gap-2">
                 <Button 
@@ -590,13 +611,15 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
               <TableRow className="bg-gray-50 text-[12px]">
                 <TableHead className="w-12">
                   <Checkbox
-                    checked={selectedIds.length > 0 && selectedIds.length === myContracts.length}
+                    checked={
+                      selectedIds.length > 0 &&
+                      selectedIds.length === myContracts.filter((c) => isContractDeletable(c)).length
+                    }
                     onCheckedChange={handleSelectAll}
                   />
                 </TableHead>
                 <TableHead className="w-16">序号</TableHead>
                 <TableHead className="w-40">合同编号</TableHead>
-                <TableHead className="w-32">报价单号</TableHead>
                 <TableHead className="w-24">区域</TableHead>
                 <TableHead>客户信息</TableHead>
                 <TableHead>产品信息</TableHead>
@@ -608,7 +631,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
             <TableBody className="text-[12px]">
               {myContracts.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-12 text-gray-500">
+                  <TableCell colSpan={9} className="text-center py-12 text-gray-500">
                     <AlertCircle className="h-12 w-12 mx-auto mb-3 text-gray-400" />
                     <p>暂无销售合同</p>
                     <p className="text-sm mt-1">在报价管理模块中，客户接受报价后可生成销售合同</p>
@@ -621,6 +644,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                   // 🔥 查找对应的订单数据，检查定金支付状态
                   const correspondingOrder = orders.find(o => o.orderNumber === contract.contractNumber);
                   const depositConfirmed = correspondingOrder?.depositPaymentProof?.status === 'confirmed';
+                  const hasLiveProcurementRequest = getLivePurchaseOrdersForContract(contract).length > 0;
                   
                   return (
                     <TableRow 
@@ -633,6 +657,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                       <TableCell>
                         <Checkbox
                           checked={selectedIds.includes(contract.id)}
+                          disabled={!isContractDeletable(contract)}
                           onCheckedChange={(checked) => handleSelectOne(contract.id, checked as boolean)}
                         />
                       </TableCell>
@@ -647,10 +672,12 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                         }}
                         title="点击查看合同文档"
                       >
-                        {contract.contractNumber}
-                      </TableCell>
-                      <TableCell className="font-mono text-blue-600">
-                        {contract.quotationNumber}
+                        <div className="space-y-0.5">
+                          <div>{formatContractNumberForDisplay(contract.contractNumber)}</div>
+                          <div className="text-[11px] font-normal text-blue-600">
+                            报价单编号：{contract.quotationNumber}
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-[11px]">
@@ -738,87 +765,6 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
                           
-                          {/* 🔥 调试按钮：查看状态详情 */}
-                          <Button 
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const order = orders.find(o => o.orderNumber === contract.contractNumber);
-                              console.log('═══════════════════════════════════════════════════════');
-                              console.log('🔍 [订单状态调试] 合同编号:', contract.contractNumber);
-                              console.log('');
-                              console.log('📋 合同状态:');
-                              console.log('  - status:', contract.status);
-                              console.log('  - approvalFlow:', contract.approvalFlow);
-                              console.log('  - sentToCustomerAt:', contract.sentToCustomerAt);
-                              console.log('  - customerConfirmedAt:', contract.customerConfirmedAt);
-                              console.log('');
-                              console.log('📦 订单状态:');
-                              if (order) {
-                                console.log('  - orderNumber:', order.orderNumber);
-                                console.log('  - status:', order.status);
-                                console.log('  - customerFeedback:', order.customerFeedback);
-                                console.log('  - depositPaymentProof:', order.depositPaymentProof);
-                                console.log('  - depositReceiptProof:', order.depositReceiptProof);
-                              } else {
-                                console.log('  ⚠️ 未找到对应的订单数据！');
-                              }
-                              console.log('');
-                              console.log('🎯 状态判断:');
-                              console.log('  - depositConfirmed:', correspondingOrder?.depositPaymentProof?.status === 'confirmed');
-                              console.log('  - 应该显示的按钮:', (() => {
-                                if (contract.status === 'draft') return '提交审批';
-                                if (contract.status === 'approved') return '发送客户 ⬅️ 当前状态';
-                                if (contract.status === 'sent') return '已发客户(禁用)';
-                                if (contract.status === 'customer_confirmed') {
-                                  if (correspondingOrder?.depositPaymentProof?.status === 'confirmed') {
-                                    return '通知采购部';
-                                  } else {
-                                    return '等待定金确认';
-                                  }
-                                }
-                                return '未知状态';
-                              })());
-                              console.log('═══════════════════════════════════════════════════════');
-                              
-                              // 🔥 弹出详细的状态提示
-                              const statusInfo = `
-📋 合同状态: ${contract.status}
-${contract.sentToCustomerAt ? '✅ 已发送客户时间: ' + new Date(contract.sentToCustomerAt).toLocaleString('zh-CN') : '❌ 未发送客户'}
-${contract.customerConfirmedAt ? '✅ 客户确认时间: ' + new Date(contract.customerConfirmedAt).toLocaleString('zh-CN') : '❌ 客户未确认'}
-
-📦 订单状态: ${order ? order.status : '未找到订单'}
-${order?.customerFeedback ? '✅ 客户反馈: ' + order.customerFeedback.status : '❌ 无客户反馈'}
-${order?.depositPaymentProof ? '✅ 定金凭证: ' + (order.depositPaymentProof.status || '已上传·待确认') : '❌ 未上传定金'}
-
-🎯 当前应显示: ${(() => {
-                                if (contract.status === 'draft') return '提交审批';
-                                if (contract.status === 'approved') return '发送客户 ⬅️ 当前状态';
-                                if (contract.status === 'sent') return '已发客户(禁用)';
-                                if (contract.status === 'customer_confirmed') {
-                                  if (order?.depositPaymentProof?.status === 'confirmed') {
-                                    return '通知采购部';
-                                  } else {
-                                    return '等待定金确认';
-                                  }
-                                }
-                                return '未知状态';
-                              })()}
-                              `.trim();
-                              
-                              alert(statusInfo);
-                              
-                              toast.info('🔍 状态详情', {
-                                description: `合同状态: ${contract.status}\n订单找到: ${order ? '是' : '否'}\n定金状态: ${order?.depositPaymentProof?.status || '未上传'}`,
-                                duration: 8000
-                              });
-                            }}
-                            className="gap-1 h-7 text-[11px] px-2 bg-yellow-50 hover:bg-yellow-100"
-                            title="调试：查看状态详情"
-                          >
-                            🔍
-                          </Button>
-                          
                           {/* 🔥 临时修复按钮：强制更新状态为customer_confirmed */}
                           {contract.status === 'approved' && correspondingOrder?.depositPaymentProof?.status === 'confirmed' && (
                             <Button 
@@ -865,35 +811,19 @@ ${order?.depositPaymentProof ? '✅ 定金凭证: ' + (order.depositPaymentProof
                             </Button>
                           )}
                           
-                          {/* 🔥 已发送客户：显示“已发”并支持改回未发送 */}
+                          {/* 🔥 已发送客户：只显示已发状态 */}
                           {(contract.status === 'sent' || contract.status === 'sent_to_customer') && (
-                            <>
-                              <Button 
-                                size="sm"
-                                disabled
-                                className="gap-1 bg-gray-400 text-white cursor-not-allowed h-7 text-[11px]"
-                              >
-                                <Send className="h-3 w-3" />
-                                已发客户
-                              </Button>
-                              <Button 
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  if (window.confirm('确定将本合同改回“未发送”吗？客户侧 Active Orders 中对应订单不会自动删除，仅合同状态会恢复为已批准。')) {
-                                    updateContract(contract.id, { status: 'approved', sentToCustomerAt: null as any });
-                                    refreshFromBackend();
-                                  }
-                                }}
-                                className="gap-1 h-7 text-[11px] border-amber-300 text-amber-700 hover:bg-amber-50"
-                                title="将状态改回已批准，可再次发送客户"
-                              >
-                                改为未发送
-                              </Button>
-                            </>
+                            <Button 
+                              size="sm"
+                              disabled
+                              className="gap-1 bg-gray-400 text-white cursor-not-allowed h-7 text-[11px]"
+                            >
+                              <Send className="h-3 w-3" />
+                              已发客户
+                            </Button>
                           )}
                           
-                          {/* 🔥 客户已确认状态 - 根据定金状态显示不同按钮 */}
+                          {/* 🔥 客户确认但未到款：显示等待定金确认 */}
                           {contract.status === 'customer_confirmed' && !depositConfirmed && (
                             <Button 
                               size="sm"
@@ -906,401 +836,18 @@ ${order?.depositPaymentProof ? '✅ 定金凭证: ' + (order.depositPaymentProof
                             </Button>
                           )}
                           
-                          {/* 🔥 定金已确认 - 下推采购 */}
-                          {contract.status === 'customer_confirmed' && depositConfirmed && (
-                            <Button 
+                          {/* 🔥 定金已确认即可请求采购：不再受合同状态字符串卡死 */}
+                          {depositConfirmed && (
+                            <Button
                               size="sm"
-                              onClick={() => {
-                                if (Array.isArray(contract.purchaseOrderNumbers) && contract.purchaseOrderNumbers.length > 0) {
-                                  toast.info('该合同已下推采购', {
-                                    description: `采购来源号：${contract.purchaseOrderNumbers.join(', ')}`,
-                                    duration: 3500
-                                  });
-                                  return;
-                                }
-                                console.log('🚀 [下推采购] 开始创建采购订单...');
-                                console.log('  - 销售合同号:', contract.contractNumber);
-                                console.log('  - 报价单号:', contract.quotationNumber);
-                                
-                                // 🔥 步骤1: 生成采购订单编号（CG-区域-YYMMDD-0001）
-                                const regionCode = contract.region || 'NA';
-                                const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '').slice(2); // YYMMDD
-                                
-                                // 🔥 获取今天已有的CG订单数量，生成序号
-                                const existingPOs = JSON.parse(localStorage.getItem('purchaseOrders') || '[]');
-                                const todayPrefix = `CG-${regionCode}-${dateStr}`;
-                                const todayPOs = existingPOs.filter((po: any) => po.poNumber?.startsWith(todayPrefix));
-                                const nextSeq = (todayPOs.length + 1).toString().padStart(4, '0');
-                                const poNumber = `${todayPrefix}-${nextSeq}`;
-                                
-                                console.log('  - 生成采购单号:', poNumber);
-                                console.log('  - 今天已有PO数量:', todayPOs.length);
-                                
-                                // 🔥 步骤2: 溯源 - 从报价单找到原始询价需求
-                                const quotationNumber = contract.quotationNumber; // QT-NA-251220-0001
-                                console.log('🔍 [溯源] 开始查找询价报价记录...');
-                                console.log('  - 报价单号:', quotationNumber);
-                                console.log('  - 销售合同号:', contract.contractNumber);
-                                console.log('  - purchaseRequirements可用:', purchaseRequirements ? 'Yes' : 'No');
-                                console.log('  - purchaseRequirements数量:', purchaseRequirements?.length || 0);
-                                console.log('  - rfqs可用:', rfqs ? 'Yes' : 'No');
-                                
-                                // 🔥 调试：输出所有采购需求的关键字段
-                                if (purchaseRequirements && purchaseRequirements.length > 0) {
-                                  console.log('  - 所有采购需求的关联信息:');
-                                  purchaseRequirements.forEach((req: any, idx: number) => {
-                                    console.log(`    [${idx}] ${req.requirementNo}:`);
-                                    console.log(`      - quotationNumber: "${req.quotationNumber}"`);
-                                    console.log(`      - salesContractNumber: "${req.salesContractNumber}"`);
-                                    console.log(`      - sourceRef: "${req.sourceRef}"`);
-                                    console.log(`      - hasPurchaserFeedback: ${!!req.purchaserFeedback}`);
-                                    console.log(`      - 完整对象:`, req);
-                                  });
-                                }
-                                
-                                // 从QT反推到QR（采购需求）- 添加安全检查
-                                const relatedRequirement = purchaseRequirements?.find?.(req => 
-                                  req.quotationNumber === quotationNumber || 
-                                  req.salesContractNumber === contract.contractNumber
-                                );
-                                
-                                console.log('  - 找到采购需求:', relatedRequirement?.requirementNo);
-                                console.log('  - 采购需求详情:', relatedRequirement);
-                                
-                                // 从采购需求找到XJ（询价单）- 添加安全检查
-                                const relatedRFQ = relatedRequirement ? rfqs?.find?.(rfq => 
-                                  rfq.requirementNo === relatedRequirement.requirementNo ||
-                                  rfq.rfqNumber === relatedRequirement.rfqNumber
-                                ) : null;
-                                
-                                console.log('  - 找到询价单(XJ):', relatedRFQ?.rfqNumber);
-                                
-                                // 从XJ找到供应商报价（BJ）- 获取采购员反馈的成本信息
-                                const purchaserFeedback = relatedRequirement?.purchaserFeedback;
-                                console.log('  - 采购反馈:', purchaserFeedback);
-                                console.log('  - 采购反馈.products:', purchaserFeedback?.products);
-                                console.log('  - 采购反馈.products数量:', purchaserFeedback?.products?.length);
-                                
-                                // 🔥 步骤3: 获取采购反馈并匹配供应商和成本（与蓝色按钮逻辑一致）
-                                if (!purchaserFeedback || !purchaserFeedback.products || purchaserFeedback.products.length === 0) {
-                                  console.log('⚠️ [溯源失败] 未找到采购反馈，创建空采购订单');
-                                  
-                                  const newPO = {
-                                    id: `po_${Date.now()}`,
-                                    poNumber: poNumber,
-                                    salesContractNumber: contract.contractNumber,
-                                    quotationNumber: contract.quotationNumber,
-                                    supplierName: '待选择供应商',
-                                    supplierCode: 'TBD',
-                                    region: contract.region,
-                                    items: contract.products.map((p: any) => ({
-                                      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                                      productName: p.productName,
-                                      modelNo: p.modelNo || p.productName,
-                                      specification: p.specification || '',
-                                      quantity: p.quantity,
-                                      unit: p.unit || 'PCS',
-                                      unitPrice: 0,
-                                      subtotal: 0,
-                                      currency: 'USD',
-                                      hsCode: p.hsCode || '',
-                                      packingRequirement: contract.packing || 'Standard Export Packing',
-                                      remarks: p.remarks || ''
-                                    })),
-                                    totalAmount: 0,
-                                    currency: 'USD',
-                                    paymentTerms: '待确认',
-                                    deliveryTerms: '待确认',
-                                    orderDate: new Date().toISOString(),
-                                    expectedDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
-                                    status: 'pending' as const,
-                                    paymentStatus: 'unpaid' as const,
-                                    remarks: `待采购员补全供应商与价格\\n来源: ${contract.contractNumber}`,
-                                    createdBy: currentUser?.email || 'system',
-                                    createdDate: new Date().toISOString()
-                                  };
-                                  
-                                  addPurchaseOrder(newPO);
-                                  persistPurchaseRequest(contract, newPO, poNumber);
-                                  return;
-                                }
-                                
-                                console.log('✅ [溯源成功] 找到采购反馈，自动填充供应商和成本信息');
-                                
-                                // 🔥 从采购反馈中提取供应商信息（与蓝色按钮逻辑一致）
-                                const supplierName = purchaserFeedback.linkedSupplier || '待选择供应商';
-                                const supplierCode = purchaserFeedback.linkedSupplier ? 
-                                  purchaserFeedback.linkedSupplier.replace(/\s+/g, '_').toUpperCase() : 'TBD';
-                                
-                                // 🔥 匹配产品成本价格（与蓝色按钮逻辑一致）
-                                const itemsWithCost = contract.products.map((contractProduct: any) => {
-                                  const feedbackProduct = purchaserFeedback.products.find((fp: any) => 
-                                    fp.productName === contractProduct.productName ||
-                                    fp.productId === contractProduct.productId
-                                  );
-                                  
-                                  console.log(`    - 产品 ${contractProduct.productName} 匹配成本:`, feedbackProduct?.costPrice || 0, '供应商报价:', feedbackProduct);
-                                  
-                                  return {
-                                    id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                                    productName: contractProduct.productName,
-                                    modelNo: contractProduct.modelNo || contractProduct.productName,
-                                    specification: contractProduct.specification || '',
-                                    quantity: contractProduct.quantity,
-                                    unit: contractProduct.unit || 'PCS',
-                                    unitPrice: feedbackProduct?.costPrice || 0,
-                                    subtotal: (feedbackProduct?.costPrice || 0) * contractProduct.quantity,
-                                    currency: feedbackProduct?.currency || contract.currency || 'USD',
-                                    hsCode: contractProduct.hsCode || '',
-                                    packingRequirement: contract.packing || 'Standard Export Packing',
-                                    remarks: contractProduct.remarks || ''
-                                  };
-                                });
-                                
-                                // 🔥 计算采购订单总金额
-                                const totalAmount = itemsWithCost.reduce((sum: number, item: any) => sum + (item.subtotal || 0), 0);
-                                
-                                // 🔥 步骤4: 创建采购订单
-                                const newPO = {
-                                  id: `po-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                                  poNumber, // CG-NA-260101-0001
-                                  sourceRef: contract.contractNumber, // 🔥 关联销售合同号（来源）
-                                  sourceSONumber: contract.contractNumber, // SC作为来源
-                                  requirementNo: relatedRequirement?.requirementNo, // 关联采购需求
-                                  rfqNumber: relatedRFQ?.rfqNumber, // 关联询价单
-                                  
-                                  // 🔥 供应商信息（从溯源结果自动填充）
-                                  supplierName,
-                                  supplierCode,
-                                  
-                                  // 🔥 区域信息
-                                  region: contract.region,
-                                  
-                                  // 🔥 产品清单（带成本价）
-                                  items: itemsWithCost,
-                                  
-                                  // 🔥 金额信息
-                                  totalAmount, // 根据溯源价格计算
-                                  currency: contract.currency || 'USD',
-                                  
-                                  // 🔥 条款信息
-                                  paymentTerms: purchaserFeedback?.paymentTerms || '30% 预付，70% 发货前付清',
-                                  deliveryTerms: purchaserFeedback?.deliveryTerms || contract.deliveryTime || 'EXW 工厂交货',
-                                  
-                                  // 🔥 日期信息
-                                  orderDate: new Date().toISOString(),
-                                  expectedDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(), // 45天后
-                                  
-                                  // 🔥 状态信息
-                                  status: 'pending' as const, // 待确认
-                                  paymentStatus: 'unpaid' as const,
-                                  
-                                  // 🔥 其他信息
-                                  remarks: `📋 来源: 销售合同 ${contract.contractNumber}\n👤 客户: ${contract.customerCompany}\n💰 定金已确认，可以开始采购流程\n${supplierCode !== 'TBD' ? `✅ 已自动匹配供应商: ${supplierName}` : '⚠️ 请采购员选择供应商'}`,
-                                  createdBy: currentUser?.email || 'system',
-                                  createdDate: new Date().toISOString()
-                                };
-                                
-                                console.log('✅ [下推采购] 采购订单创建完成:', newPO);
-                                console.log('  - 采购单号:', poNumber);
-                                console.log('  - 供应商名称:', supplierName);
-                                console.log('  - 供应商代码:', supplierCode);
-                                console.log('  - 产品数量:', itemsWithCost.length);
-                                console.log('  - 产品详情:', itemsWithCost);
-                                console.log('  - 总金额:', totalAmount, contract.currency || 'USD');
-                                
-                                // 🔥 保存采购订单
-                                addPurchaseOrder(newPO);
-                                persistPurchaseRequest(contract, newPO, poNumber);
-                                
-                                // 🔥 显示成功提示
-                                const successMessage = supplierCode !== 'TBD'
-                                  ? `📦 订单号：${poNumber}\n✅ 已自动匹配供应商：${supplierName}\n💰 采购金额：${contract.currency} ${totalAmount.toLocaleString()}\n🚀 已通知采购部门`
-                                  : `📦 订单号：${poNumber}\n⚠️ 请采购员手动选择供应商并填写价格\n🚀 已通知采购部门`;
-                                
-                                toast.success(`✅ 采购订单已生成！`, {
-                                  description: successMessage,
-                                  duration: 8000
-                                });
-                              }}
+                              onClick={() => requestProcurementFromContract(contract)}
                               className="gap-1 bg-[#F96302] hover:bg-[#e05502] text-white h-7 text-[11px]"
-                              title="定金已确认，点击下推采购订单给采购部门"
+                              title={hasLiveProcurementRequest ? '已存在采购请求，点击可重新激活' : '定金已确认，点击请求采购（由采购员分配供应商）'}
                             >
                               <ShoppingCart className="h-3 w-3" />
-                              下推采购
+                              请求采购
                             </Button>
                           )}
-                          
-                          {/* 🔥 开发测试：独立的下推采购按钮（任何状态都可用） */}
-                          <Button 
-                            size="sm"
-                            onClick={() => {
-                              if (Array.isArray(contract.purchaseOrderNumbers) && contract.purchaseOrderNumbers.length > 0) {
-                                toast.info('该合同已下推采购', {
-                                  description: `采购来源号：${contract.purchaseOrderNumbers.join(', ')}`,
-                                  duration: 3500
-                                });
-                                return;
-                              }
-                              console.log('🚀 [下推采购] 开始创建采购订单...');
-                              console.log('  - 销售合同号:', contract.contractNumber);
-                              console.log('  - 报价单号:', contract.quotationNumber);
-                              
-                              // 🔥 步骤1: 生成采购订单编号（CG-区域-YYMMDD-0001）
-                              const regionCode = contract.region || 'NA';
-                              const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '').slice(2); // YYMMDD
-                              
-                              // 🔥 获取今天已有的CG订单数量，生成序号
-                              const existingPOs = JSON.parse(localStorage.getItem('purchaseOrders') || '[]');
-                              const todayPrefix = `CG-${regionCode}-${dateStr}`;
-                              const todayPOs = existingPOs.filter((po: any) => po.poNumber?.startsWith(todayPrefix));
-                              const nextSeq = (todayPOs.length + 1).toString().padStart(4, '0');
-                              const poNumber = `${todayPrefix}-${nextSeq}`;
-                              
-                              console.log('  - 生成采购单号:', poNumber);
-                              console.log('  - 今天已有PO数量:', todayPOs.length);
-                              
-                              // 🔥 步骤2: 溯源 - 从报价单找到原始询价需求
-                              const quotationNumber = contract.quotationNumber;
-                              const salesContractNumber = contract.contractNumber;
-                              console.log('🔍 [溯源] 开始查找询价报价记录...');
-                              console.log('  - 报价单号:', quotationNumber);
-                              console.log('  - 销售合同号:', salesContractNumber);
-                              console.log('  - purchaseRequirements可用:', purchaseRequirements ? 'Yes' : 'No');
-                              console.log('  - purchaseRequirements数量:', purchaseRequirements?.length || 0);
-                              console.log('  - rfqs可用:', rfqs ? 'Yes' : 'No');
-                              
-                              // 🔥 调试：输出所有采购需求的关键字段
-                              if (purchaseRequirements && purchaseRequirements.length > 0) {
-                                console.log('  - 所有采购需求的关联信息:');
-                                purchaseRequirements.forEach((req: any, idx: number) => {
-                                  console.log(`    [${idx}] ${req.requirementNo}:`);
-                                  console.log(`      - quotationNumber: "${req.quotationNumber}"`);
-                                  console.log(`      - salesContractNumber: "${req.salesContractNumber}"`);
-                                  console.log(`      - sourceRef: "${req.sourceRef}"`);
-                                  console.log(`      - hasPurchaserFeedback: ${!!req.purchaserFeedback}`);
-                                  console.log(`      - 完整对象:`, req);
-                                });
-                              }
-                              
-                              // 从QT或SC反推到QR（采购需求）
-                              const relatedRequirement = purchaseRequirements?.find?.(req => 
-                                req.quotationNumber === quotationNumber || 
-                                req.salesContractNumber === salesContractNumber
-                              );
-                              
-                              console.log('  - 找到采购需求:', relatedRequirement?.requirementNo);
-                              console.log('  - 采购需求详情:', relatedRequirement);
-                              
-                              // 获取采购反馈
-                              const purchaserFeedback = relatedRequirement?.purchaserFeedback;
-                              console.log('  - 采购反馈:', purchaserFeedback);
-                              console.log('  - 采购反馈.products:', purchaserFeedback?.products);
-                              console.log('  - 采购反馈.products数量:', purchaserFeedback?.products?.length);
-                              
-                              if (!purchaserFeedback || !purchaserFeedback.products || purchaserFeedback.products.length === 0) {
-                                console.log('⚠️ [溯源失败] 未找到采购反馈，创建空采购订单');
-                                
-                                const newPO = {
-                                  id: `po_${Date.now()}`,
-                                  poNumber: poNumber,
-                                  salesContractNumber: contract.contractNumber,
-                                  quotationNumber: contract.quotationNumber,
-                                  supplierName: '待选择供应商',
-                                  supplierCode: 'TBD',
-                                  items: contract.products.map((p: any) => ({
-                                    productName: p.productName,
-                                    specification: p.specification || '',
-                                    quantity: p.quantity,
-                                    unit: p.unit || 'PCS',
-                                    unitPrice: 0,
-                                    totalPrice: 0,
-                                    currency: 'USD'
-                                  })),
-                                  totalAmount: 0,
-                                  currency: 'USD',
-                                  paymentTerms: '待确认',
-                                  deliveryTerms: '待确认',
-                                  orderDate: new Date().toISOString(),
-                                  expectedDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
-                                  status: 'pending' as const,
-                                  paymentStatus: 'unpaid' as const,
-                                  remarks: `待采购员补全供应商与价格\\n来源: ${contract.contractNumber}`,
-                                  createdBy: currentUser?.email || 'system',
-                                  createdDate: new Date().toISOString()
-                                };
-                                
-                                addPurchaseOrder(newPO);
-                                persistPurchaseRequest(contract, newPO, poNumber);
-                                return;
-                              }
-                              
-                              console.log('✅ [溯源成功] 找到采购反馈，自动填充供应商和成本信息');
-                              
-                              const supplierName = purchaserFeedback.linkedSupplier || '待选择供应商';
-                              const supplierCode = purchaserFeedback.linkedSupplier ? 
-                                purchaserFeedback.linkedSupplier.replace(/\s+/g, '_').toUpperCase() : 'TBD';
-                              
-                              const itemsWithCost = contract.products.map((contractProduct: any) => {
-                                const feedbackProduct = purchaserFeedback.products.find((fp: any) => 
-                                  fp.productName === contractProduct.productName ||
-                                  fp.productId === contractProduct.productId
-                                );
-                                
-                                console.log(`    - 产品 ${contractProduct.productName} 匹配成本:`, feedbackProduct?.costPrice || 0, '供应商报价:', feedbackProduct);
-                                
-                                return {
-                                  productId: contractProduct.productId || '',
-                                  productName: contractProduct.productName,
-                                  specification: contractProduct.specification || '',
-                                  quantity: contractProduct.quantity,
-                                  unit: contractProduct.unit || 'PCS',
-                                  unitPrice: feedbackProduct?.costPrice || 0,
-                                  totalPrice: (feedbackProduct?.costPrice || 0) * contractProduct.quantity,
-                                  currency: feedbackProduct?.currency || contract.currency || 'USD'
-                                };
-                              });
-                              
-                              const totalAmount = itemsWithCost.reduce((sum: number, item: any) => sum + item.totalPrice, 0);
-                              
-                              const newPO = {
-                                id: `po_${Date.now()}`,
-                                poNumber: poNumber,
-                                salesContractNumber: contract.contractNumber,
-                                quotationNumber: contract.quotationNumber,
-                                requirementNumber: relatedRequirement?.requirementNo || '',
-                                supplierName: supplierName,
-                                supplierCode: supplierCode,
-                                items: itemsWithCost,
-                                totalAmount: totalAmount,
-                                currency: contract.currency || 'USD',
-                                paymentTerms: purchaserFeedback?.paymentTerms || '30% 预付，70% 发货前付清',
-                                deliveryTerms: purchaserFeedback?.deliveryTerms || 'EXW 工厂交货',
-                                orderDate: new Date().toISOString(),
-                                expectedDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
-                                status: 'pending' as const,
-                                paymentStatus: 'unpaid' as const,
-                                remarks: `📋 来源: ${contract.contractNumber}\\n✅ 供应商: ${supplierName}`,
-                                createdBy: currentUser?.email || 'system',
-                                createdDate: new Date().toISOString()
-                              };
-                              
-                              console.log('✅ [下推采购] 采购订单创建完成:', newPO);
-                              
-                              addPurchaseOrder(newPO);
-                              persistPurchaseRequest(contract, newPO, poNumber);
-                              
-                              toast.success(`✅ 采购订单已生成！`, {
-                                description: `📦 订单号：${poNumber}\\n✅ 供应商：${supplierName}\\n💰 金额：${contract.currency || 'USD'} ${totalAmount.toLocaleString()}`,
-                                duration: 8000
-                              });
-                            }}
-                            className="gap-1 bg-blue-600 hover:bg-blue-700 text-white h-7 text-[11px]"
-                            title="🧪 测试：下推采购订单（任何状态都可用）"
-                          >
-                            <ShoppingCart className="h-3 w-3" />
-                            🧪 下推采购
-                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1311,7 +858,7 @@ ${order?.depositPaymentProof ? '✅ 定金凭证: ' + (order.depositPaymentProof
           </Table>
         </div>
       </div>
-      
+
       {/* 🔥 销售合同文档预览Dialog */}
       {showDocumentPreview && selectedContract && (
         <Dialog open={showDocumentPreview} onOpenChange={setShowDocumentPreview}>

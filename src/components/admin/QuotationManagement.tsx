@@ -769,17 +769,21 @@ export default function QuotationManagement({
 
   // 🔥 批量删除处理函数
   const handleBulkDelete = () => {
-    if (selectedIds.size === 0) {
+    const visibleSelectedIds = Array.from(selectedIds).filter((id) =>
+      filteredQuotations.some((quotation) => quotation.id === id),
+    );
+
+    if (visibleSelectedIds.length === 0) {
       toast.error('请先选择要删除的报价单');
       return;
     }
 
-    if (window.confirm(`确认要删除选中的 ${selectedIds.size} 条报价单吗？此操作无法撤销！`)) {
-      selectedIds.forEach(id => {
+    if (window.confirm(`确认要删除选中的 ${visibleSelectedIds.length} 条报价单吗？此操作无法撤销！`)) {
+      visibleSelectedIds.forEach(id => {
         deleteQuotation(id);
       });
       setSelectedIds(new Set());
-      toast.success(`✅ 已成功删除 ${selectedIds.size} 条报价单`);
+      toast.success(`✅ 已成功删除 ${visibleSelectedIds.length} 条报价单`);
     }
   };
 
@@ -807,6 +811,14 @@ export default function QuotationManagement({
   // 计算全选状态
   const isAllSelected = filteredQuotations.length > 0 && selectedIds.size === filteredQuotations.length;
   const isSomeSelected = selectedIds.size > 0 && selectedIds.size < filteredQuotations.length;
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredQuotations.map((quotation) => quotation.id));
+    const nextSelected = new Set(Array.from(selectedIds).filter((id) => visibleIds.has(id)));
+    if (nextSelected.size !== selectedIds.size) {
+      setSelectedIds(nextSelected);
+    }
+  }, [filteredQuotations, selectedIds]);
 
   return (
     <div className="space-y-4">

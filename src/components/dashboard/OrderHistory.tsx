@@ -22,6 +22,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Checkbox } from '../ui/checkbox';
 import { useOrders } from '../../contexts/OrderContext';
 import { useUser } from '../../contexts/UserContext';
+import { filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 
 interface OrderHistoryProps {
   orders: any[];
@@ -46,10 +48,14 @@ export function OrderHistory({ orders, onCreateOrder, onAddActiveOrder, onReorde
   const { user } = useUser();
 
   // 🔥 筛选当前用户的已完成订单
-  const historicalOrders = allOrders.filter(order => 
+  const historicalOrders = filterNotDeleted(
+    'order',
+    allOrders.filter(order => 
     user?.email && 
     order.customerEmail === user.email &&
     (order.status === 'delivered' || order.status === 'completed' || order.status === 'cancelled')
+    ),
+    (order) => [String(order?.id || ''), String(order?.orderNumber || ''), String(order?.quotationNumber || '')],
   );
 
   const getStatusBadge = (status: string) => {
@@ -200,9 +206,6 @@ export function OrderHistory({ orders, onCreateOrder, onAddActiveOrder, onReorde
       container: 'Pending'
     };
     
-    // Add new order to the beginning of the list
-    setHistoricalOrders([newOrder, ...historicalOrders]);
-    
     // Also add to Active Orders
     onAddActiveOrder(newOrder);
     
@@ -230,19 +233,7 @@ export function OrderHistory({ orders, onCreateOrder, onAddActiveOrder, onReorde
   const handleSubmitEditOrder = () => {
     if (!editingOrderId) return;
     
-    // Update the order in the list
-    setHistoricalOrders(orders =>
-      orders.map(order => {
-        if (order.id === editingOrderId) {
-          return {
-            ...order,
-            products: editableProducts.map(({ id, ...product }) => product),
-            totalAmount: calculateEditableTotal(),
-          };
-        }
-        return order;
-      })
-    );
+    // Completed orders are context-driven; avoid mutating non-existent local state.
     
     // Close dialog and reset states
     setIsEditDialogOpen(false);
@@ -255,87 +246,51 @@ export function OrderHistory({ orders, onCreateOrder, onAddActiveOrder, onReorde
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl text-gray-900">Order History</h1>
-        <p className="text-gray-600 mt-1">View and manage your completed orders</p>
-      </div>
-
-      {/* Search and Filter */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search by order ID or product name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant={dateRange === 'all' ? 'default' : 'outline'}
-                onClick={() => setDateRange('all')}
-                className={dateRange === 'all' ? 'bg-red-600 hover:bg-red-700' : ''}
-              >
-                All Time
-              </Button>
-              <Button
-                variant={dateRange === '3months' ? 'default' : 'outline'}
-                onClick={() => setDateRange('3months')}
-                className={dateRange === '3months' ? 'bg-red-600 hover:bg-red-700' : ''}
-              >
-                3 Months
-              </Button>
-              <Button
-                variant={dateRange === '6months' ? 'default' : 'outline'}
-                onClick={() => setDateRange('6months')}
-                className={dateRange === '6months' ? 'bg-red-600 hover:bg-red-700' : ''}
-              >
-                6 Months
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Summary Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <p className="text-sm text-gray-500 mb-1">Total Orders</p>
-              <p className="text-3xl text-gray-900">{filteredOrders.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <p className="text-sm text-gray-500 mb-1">Total Spent</p>
-              <p className="text-3xl text-gray-900">
-                ${filteredOrders.reduce((sum, order) => sum + order.totalAmount, 0).toLocaleString()}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <p className="text-sm text-gray-500 mb-1">Average Order Value</p>
-              <p className="text-3xl text-gray-900">
-                ${Math.round(filteredOrders.reduce((sum, order) => sum + order.totalAmount, 0) / filteredOrders.length).toLocaleString()}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Orders Table */}
       <Card>
         <CardContent className="p-0">
+          <div className="border-b border-gray-200 px-6 py-4 flex items-center gap-3">
+            <Package className="w-5 h-5 text-[#F96302]" />
+            <h3 className="text-gray-900 uppercase tracking-wide" style={{ fontSize: '14px', fontWeight: 600 }}>
+              Completed Order List
+            </h3>
+          </div>
+          <div className="p-5 border-b border-gray-200">
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search by order ID or product name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant={dateRange === 'all' ? 'default' : 'outline'}
+                  onClick={() => setDateRange('all')}
+                  className={dateRange === 'all' ? 'bg-red-600 hover:bg-red-700' : ''}
+                >
+                  All Time
+                </Button>
+                <Button
+                  variant={dateRange === '3months' ? 'default' : 'outline'}
+                  onClick={() => setDateRange('3months')}
+                  className={dateRange === '3months' ? 'bg-red-600 hover:bg-red-700' : ''}
+                >
+                  3 Months
+                </Button>
+                <Button
+                  variant={dateRange === '6months' ? 'default' : 'outline'}
+                  onClick={() => setDateRange('6months')}
+                  className={dateRange === '6months' ? 'bg-red-600 hover:bg-red-700' : ''}
+                >
+                  6 Months
+                </Button>
+              </div>
+            </div>
+          </div>
           {/* Action Bar */}
           {selectedOrderIds.length > 0 && (
             <div className="bg-blue-50 border-b border-blue-200 px-6 py-3 flex items-center justify-between">
@@ -382,6 +337,12 @@ export function OrderHistory({ orders, onCreateOrder, onAddActiveOrder, onReorde
                     ? `${firstProduct.name} +${order.products.length - 1} more`
                     : firstProduct.name;
                   const isSelected = selectedOrderIds.includes(order.id);
+                  const orderNo = String(order.orderNumber || order.id);
+                  const numberDisplay = resolveDisplayNumber({
+                    domain: 'order',
+                    internalNo: orderNo,
+                    companyId: (user as any)?.companyId ? String((user as any).companyId) : undefined,
+                  });
                   
                   return (
                     <TableRow key={order.id} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
@@ -401,9 +362,14 @@ export function OrderHistory({ orders, onCreateOrder, onAddActiveOrder, onReorde
                           }}
                           className="font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
                         >
-                          {order.id}
+                          {orderNo}
                           <ExternalLink className="h-3 w-3" />
                         </button>
+                        {numberDisplay.externalNo && (
+                          <div className="text-[11px] text-gray-500 mt-0.5">
+                            Customer ERP: {numberDisplay.externalNo}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs text-gray-700">{order.date}</TableCell>
                       <TableCell className="text-xs text-gray-700">{order.deliveryDate}</TableCell>

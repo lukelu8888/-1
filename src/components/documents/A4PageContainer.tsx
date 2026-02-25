@@ -11,10 +11,20 @@ import React, { ReactNode } from 'react';
 interface A4DocumentContainerProps {
   children: ReactNode;
   enablePagination?: boolean; // 是否启用分页显示
+  pageWidth?: string;
+  pageMinHeight?: string;
 }
 
 export const A4DocumentContainer = React.forwardRef<HTMLDivElement, A4DocumentContainerProps>(
-  ({ children, enablePagination = false }, ref) => {
+  (
+    {
+      children,
+      enablePagination = false,
+      pageWidth = '210mm',
+      pageMinHeight = '297mm'
+    },
+    ref
+  ) => {
     if (!enablePagination) {
       // 原有的单页模式（向后兼容）
       return (
@@ -32,7 +42,8 @@ export const A4DocumentContainer = React.forwardRef<HTMLDivElement, A4DocumentCo
             className="a4-page-content"
             style={{
               // A4纸张样式
-              width: '210mm',
+              width: pageWidth,
+              minHeight: pageMinHeight,
               background: 'white',
               margin: '0 auto',
               padding: '15mm',
@@ -64,8 +75,8 @@ export const A4DocumentContainer = React.forwardRef<HTMLDivElement, A4DocumentCo
         <div 
           className="a4-page"
           style={{
-            width: '210mm',
-            minHeight: '297mm',
+            width: pageWidth,
+            minHeight: pageMinHeight,
             background: 'white',
             margin: '0 auto 20px auto',
             padding: '15mm',

@@ -2,6 +2,10 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { getUserData, setUserData, getAllCustomersData, getCurrentUser } from '../utils/dataIsolation';
 import { toast } from 'react-toastify';
 import { apiFetchJson } from '../api/backend-auth';
+import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
+import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
+import { emitErpEvent } from '../lib/erp-core/event-bus';
+import { subscribeErpEvent } from '../lib/erp-core/event-bus';
 
 // 订单接口
 export interface Order {
@@ -121,6 +125,24 @@ interface OrderContextType {
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
+const getOrderMarkers = (order: Partial<Order>): string[] => {
+  return [order.id, order.orderNumber, order.quotationNumber].filter(Boolean).map((v) => String(v));
+};
+
+const emitOrderEvent = (key: string, order: Partial<Order> & { id: string }, metadata?: Record<string, unknown>) => {
+  const currentUser = getCurrentUser() as any;
+  emitErpEvent({
+    id: `evt-order-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    key: key as any,
+    domain: 'order',
+    recordId: String(order.id),
+    internalNo: String(order.orderNumber || order.id),
+    companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
+    source: currentUser?.type === 'admin' ? 'admin' : 'client',
+    occurredAt: new Date().toISOString(),
+    metadata,
+  });
+};
 
 // 初始订单数据（与AdminActiveOrders保持一致）
 const initialOrders: Order[] = []; // 🗑️ 清空所有旧订单数据
@@ -159,7 +181,11 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       if (currentUser.type === 'admin') {
         try {
           const res = await apiFetchJson<{ orders: Order[] }>('/api/orders');
-          const serverOrders = Array.isArray(res?.orders) ? res.orders : [];
+          const serverOrders = filterNotDeleted(
+            'order',
+            Array.isArray(res?.orders) ? res.orders : [],
+            (order) => getOrderMarkers(order),
+          );
           if (alive) setOrders(serverOrders);
         } catch (e) {
           const allOrders = getAllCustomersData<Order>('orders');
@@ -170,7 +196,9 @@ export function OrderProvider({ children }: { children: ReactNode }) {
             seen.add(key);
             return true;
           });
-          if (alive) setOrders(dedupedOrders);
+          if (alive) {
+            setOrders(filterNotDeleted('order', dedupedOrders, (order) => getOrderMarkers(order)));
+          }
         }
         return;
       }
@@ -178,7 +206,11 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       // 客户模式：优先从后端拉取，客户在任意设备都能看到业务员“发送客户”的订单
       try {
         const res = await apiFetchJson<{ orders: Order[] }>('/api/orders');
-        const serverOrders = Array.isArray(res?.orders) ? res.orders : [];
+        const serverOrders = filterNotDeleted(
+          'order',
+          Array.isArray(res?.orders) ? res.orders : [],
+          (order) => getOrderMarkers(order),
+        );
         if (alive) {
           setOrders(serverOrders);
           // 同步到本地，便于离线或后续更新
@@ -193,16 +225,29 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           seen.add(key);
           return true;
         });
-        if (alive) setOrders(dedupedOrders);
+        if (alive) {
+          setOrders(filterNotDeleted('order', dedupedOrders, (order) => getOrderMarkers(order)));
+        }
       }
     };
 
     loadOrders();
     const handleOrdersUpdated = () => { void loadOrders(); };
     window.addEventListener('ordersUpdated', handleOrdersUpdated);
+    const unsubscribeErpEvents = subscribeErpEvent((event) => {
+      if (event.domain !== 'order') return;
+      if (
+        event.key === ERP_EVENT_KEYS.ORDER_CREATED ||
+        event.key === ERP_EVENT_KEYS.ORDER_STATUS_CHANGED ||
+        event.key === ERP_EVENT_KEYS.ORDER_DELETED
+      ) {
+        void loadOrders();
+      }
+    });
     return () => {
       alive = false;
       window.removeEventListener('ordersUpdated', handleOrdersUpdated);
+      unsubscribeErpEvents();
     };
   }, []);
 
@@ -266,6 +311,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     }));
     
     console.log('🎉 [OrderContext.addOrder] 订单添加完成！');
+    emitOrderEvent(ERP_EVENT_KEYS.ORDER_CREATED, order, {
+      status: order.status,
+      quotationNumber: order.quotationNumber || null,
+    });
   };
 
   const updateOrder = (orderId: string, updates: Partial<Order>) => {
@@ -427,32 +476,65 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         orderId: orderId 
       } 
     }));
+    emitOrderEvent(ERP_EVENT_KEYS.ORDER_STATUS_CHANGED, {
+      id: orderId,
+      orderNumber: String(updates.orderNumber || orderId),
+    }, {
+      fields: Object.keys(updates || {}),
+      status: updates.status || null,
+    });
   };
 
   const deleteOrder = (orderId: string) => {
     // 🔒 删除订单：需要找到对应客户并删除其数据
     const currentUser = getCurrentUser();
+    const deletionMarkers = new Set<string>([String(orderId)]);
     
     if (currentUser?.type === 'admin') {
       // Admin删除：需要找到订单属于哪个客户
       const allOrders = getAllCustomersData<Order>('orders');
-      const orderToDelete = allOrders.find(o => o.id === orderId);
+      const orderToDelete = allOrders.find(o => o.id === orderId || o.orderNumber === orderId);
       
       if (orderToDelete) {
+        getOrderMarkers(orderToDelete).forEach((m) => deletionMarkers.add(m));
         const customerEmail = orderToDelete.customerEmail;
         if (customerEmail) {
           const customerOrders = getUserData<Order>('orders', customerEmail);
-          const filtered = customerOrders.filter(o => o.id !== orderId);
+          const filtered = customerOrders.filter(o => o.id !== orderId && o.orderNumber !== orderId);
           setUserData('orders', filtered, customerEmail);
           
           // 重新聚合所有数据
-          setOrders(getAllCustomersData<Order>('orders'));
+          const next = filterNotDeleted('order', getAllCustomersData<Order>('orders'), (order) =>
+            getOrderMarkers(order),
+          );
+          setOrders(next);
         }
       }
     } else {
       // 客户删除自己的订单
-      setOrders((prevOrders) => prevOrders.filter((order) => order.id !== orderId));
+      const customerEmail = currentUser?.email;
+      const filteredState = orders.filter((order) => order.id !== orderId && order.orderNumber !== orderId);
+      setOrders(filteredState);
+      if (customerEmail) {
+        const customerOrders = getUserData<Order>('orders', customerEmail);
+        const filtered = customerOrders.filter((order) => order.id !== orderId && order.orderNumber !== orderId);
+        const orderToDelete = customerOrders.find((order) => order.id === orderId || order.orderNumber === orderId);
+        if (orderToDelete) {
+          getOrderMarkers(orderToDelete).forEach((m) => deletionMarkers.add(m));
+        }
+        setUserData('orders', filtered, customerEmail);
+      }
     }
+
+    addTombstones('order', Array.from(deletionMarkers), {
+      reason: 'manual_delete',
+      deletedBy: currentUser?.email || 'unknown',
+    });
+    window.dispatchEvent(new CustomEvent('ordersUpdated', { detail: { action: 'delete', orderId } }));
+    emitOrderEvent(ERP_EVENT_KEYS.ORDER_DELETED, {
+      id: orderId,
+      orderNumber: String(orderId),
+    });
   };
 
   const clearAllOrders = () => {

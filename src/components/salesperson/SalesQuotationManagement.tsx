@@ -41,10 +41,18 @@ import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementConte
 import { apiFetchJson } from '../../api/backend-auth'; // 🔥 后端接口调用工具
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
+import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
+import { subscribeErpEvent } from '../../lib/erp-core/event-bus';
+import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import QuoteCreationIntelligent from '../admin/QuoteCreationIntelligent'; // 🔥 智能报价创建
 // ❌ 已禁用：文件不存在
 // import { CustomerInquiryView } from '../admin/CustomerInquiryView'; // 🔥 客户询价单查看
 import { QuotationView } from './QuotationView'; // 🔥 报价单查看（使用文档中心模版）
+
+const SALES_QUOTATION_DRAFT_OVERRIDES_KEY = 'sales_quotation_draft_overrides';
+const SALES_QUOTATION_DELETED_IDS_KEY = 'sales_quotation_deleted_ids'; // legacy key, keep for backward compatibility
+const SALES_QUOTATION_CACHE_PREFIX = 'sales_quotation_management_cache_v1';
+const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
 
 interface SalesQuotationManagementProps {
   highlightQtNumber?: string; // 🔥 高亮显示的报价单号
@@ -57,7 +65,143 @@ export function SalesQuotationManagement({
   onNavigateToOrders, 
   onNavigateToOrdersWithHighlight 
 }: SalesQuotationManagementProps = {}) {
-  const { quotations, deleteQuotation, updateQuotation } = useSalesQuotations();
+  const getSalesQuotationCacheKey = (email?: string) => `${SALES_QUOTATION_CACHE_PREFIX}:${email || 'anonymous'}`;
+
+  const readSalesQuotationCache = (email?: string): any[] => {
+    try {
+      const raw = localStorage.getItem(getSalesQuotationCacheKey(email));
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const writeSalesQuotationCache = (email: string | undefined, list: any[]) => {
+    localStorage.setItem(getSalesQuotationCacheKey(email), JSON.stringify(Array.isArray(list) ? list : []));
+  };
+
+  const readSalesQuotationLocalFallback = (): any[] => {
+    try {
+      const raw = localStorage.getItem('salesQuotations');
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const pushApprovalBridgeItem = (item: any) => {
+    try {
+      const raw = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      const queue = Array.isArray(list) ? list : [];
+      const dedupKey = `${item?.request?.type}:${item?.request?.relatedDocumentId}:${item?.currentApprover}`;
+      const next = queue.filter((x: any) => {
+        const k = `${x?.request?.type}:${x?.request?.relatedDocumentId}:${x?.currentApprover}`;
+        return k !== dedupKey;
+      });
+      next.unshift(item);
+      localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(next.slice(0, 200)));
+    } catch {}
+  };
+
+  const readDraftOverrides = (): Record<string, any> => {
+    try {
+      const raw = localStorage.getItem(SALES_QUOTATION_DRAFT_OVERRIDES_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const writeDraftOverride = (quotationId: string, override: any) => {
+    const all = readDraftOverrides();
+    all[quotationId] = override;
+    localStorage.setItem(SALES_QUOTATION_DRAFT_OVERRIDES_KEY, JSON.stringify(all));
+  };
+
+  const readDeletedIds = (): string[] => {
+    try {
+      const raw = localStorage.getItem(SALES_QUOTATION_DELETED_IDS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.map((id) => String(id)) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const appendDeletedIds = (ids: string[]) => {
+    const merged = new Set(readDeletedIds());
+    ids.forEach((id) => merged.add(String(id)));
+    localStorage.setItem(SALES_QUOTATION_DELETED_IDS_KEY, JSON.stringify(Array.from(merged)));
+    addTombstones(
+      'quotation',
+      ids.flatMap((id) => [String(id)]),
+      { reason: 'manual-delete-sales-quotation', deletedBy: currentUser?.email || 'unknown' },
+    );
+  };
+
+  const removeDraftOverrideByIds = (ids: string[]) => {
+    const all = readDraftOverrides();
+    ids.forEach((id) => {
+      delete all[String(id)];
+    });
+    localStorage.setItem(SALES_QUOTATION_DRAFT_OVERRIDES_KEY, JSON.stringify(all));
+  };
+
+  const mergeDraftOverrides = (quotations: any[]) => {
+    const all = readDraftOverrides();
+    const legacyDeletedSet = new Set(readDeletedIds());
+    return filterNotDeleted(
+      'quotation',
+      quotations.filter((qt) => !legacyDeletedSet.has(String(qt.id))),
+      (qt: any) => [String(qt?.id || ''), String(qt?.qtNumber || '')],
+    )
+      .map((qt) => {
+      const key = String(qt.id);
+      const override = all[key];
+      if (!override || typeof override !== 'object') return qt;
+      return {
+        ...qt,
+        ...override,
+        id: qt.id,
+        qtNumber: qt.qtNumber,
+      };
+    });
+  };
+
+  const mapQuoteDataToServerLike = (quoteData: any, currentQt: any) => ({
+    totalPrice: quoteData.totalAmount ?? currentQt?.totalPrice ?? 0,
+    totalAmount: quoteData.totalAmount ?? currentQt?.totalAmount ?? 0,
+    totalCost: quoteData.totalCost ?? currentQt?.totalCost ?? 0,
+    totalProfit: quoteData.totalProfit ?? currentQt?.totalProfit ?? 0,
+    profitRate: quoteData.profitMargin ?? quoteData.profitRate ?? currentQt?.profitRate ?? 0,
+    validUntil: quoteData.validUntil ?? currentQt?.validUntil ?? null,
+    notes: quoteData.approvalNotes ?? currentQt?.notes ?? '',
+    items: Array.isArray(quoteData.items)
+      ? quoteData.items.map((item: any) => ({
+          id: item.id,
+          productName: item.productName,
+          modelNo: item.modelNo,
+          specification: item.specification,
+          quantity: item.quantity,
+          unit: item.unit,
+          costPrice: item.costPrice ?? item.costUSD ?? 0,
+          salesPrice: item.salesPrice ?? item.quotePrice ?? 0,
+          profitMargin: item.profitMargin ?? 0,
+          profit: item.profit ?? item.profitUSD ?? 0,
+          totalCost: item.totalCost ?? ((item.costPrice ?? item.costUSD ?? 0) * (item.quantity ?? 0)),
+          totalPrice: item.totalPrice ?? item.totalAmount ?? ((item.salesPrice ?? item.quotePrice ?? 0) * (item.quantity ?? 0)),
+          currency: item.currency ?? 'USD',
+          remarks: item.remarks ?? '',
+        }))
+      : currentQt?.items ?? [],
+  });
+
+  const { quotations, updateQuotation } = useSalesQuotations();
   const { contracts: salesContracts, createContract, getContractByQuotationNumber } = useSalesContracts(); // 🔥 获取销售合同
   const { inquiries } = useInquiry();
   const { addQuotation: addCustomerQuotation } = useQuotations(); // 🔥 导入客户报价Context
@@ -66,7 +210,11 @@ export function SalesQuotationManagement({
   const currentUser = getCurrentUser();
 
   // 🔥 从后端加载报价单列表（只读服务器数据，不读本地）
-  const [serverQuotations, setServerQuotations] = useState<any[]>([]);
+  const [serverQuotations, setServerQuotations] = useState<any[]>(() => {
+    const cached = readSalesQuotationCache(currentUser?.email);
+    if (cached.length > 0) return cached;
+    return mergeDraftOverrides(readSalesQuotationLocalFallback());
+  });
   const [loadingFromApi, setLoadingFromApi] = useState(false);
 
   // 🔥 加载数据的函数
@@ -75,19 +223,22 @@ export function SalesQuotationManagement({
     apiFetchJson<{ quotations: any[] }>('/api/sales-quotations')
       .then((res) => {
         if (Array.isArray(res?.quotations)) {
+          const merged = mergeDraftOverrides(res.quotations);
           console.log('✅ [报价管理] 接口返回数据:', res.quotations.length, '条');
           console.log('  - 接口返回的报价单详情:');
-          res.quotations.forEach((qt: any, idx: number) => {
+          merged.forEach((qt: any, idx: number) => {
             console.log(`    ${idx + 1}. ${qt.qtNumber} - 业务员: ${qt.salesPerson} - 当前用户: ${currentUser?.email}`);
           });
-          setServerQuotations(res.quotations);
+          setServerQuotations(merged);
+          writeSalesQuotationCache(currentUser?.email, merged);
         } else {
           setServerQuotations([]);
+          writeSalesQuotationCache(currentUser?.email, []);
         }
       })
       .catch((err) => {
         console.error('❌ [SalesQuotationManagement] 加载 /api/sales-quotations 失败:', err);
-        setServerQuotations([]); // 🔥 失败时也设为空数组，不读本地数据
+        // 保留当前列表，避免切页时先空白后回填
       })
       .finally(() => {
         setLoadingFromApi(false);
@@ -99,6 +250,35 @@ export function SalesQuotationManagement({
     loadSalesQuotations();
   }, [loadSalesQuotations]);
 
+  // 🔥 ERP事件驱动刷新（减少跨流程切换后的显示延迟）
+  useEffect(() => {
+    let timer: number | null = null;
+    const triggerReload = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        loadSalesQuotations();
+      }, 120);
+    };
+
+    const unsubscribe = subscribeErpEvent((event) => {
+      if (
+        event.key === ERP_EVENT_KEYS.QUOTATION_CREATED ||
+        event.key === ERP_EVENT_KEYS.QUOTATION_SENT ||
+        event.key === ERP_EVENT_KEYS.QUOTATION_ACCEPTED ||
+        event.key === ERP_EVENT_KEYS.QUOTATION_DELETED ||
+        event.key === ERP_EVENT_KEYS.INQUIRY_SUBMITTED ||
+        event.key === ERP_EVENT_KEYS.ORDER_CREATED
+      ) {
+        triggerReload();
+      }
+    });
+
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [loadSalesQuotations]);
+
   // 🔥 当 highlightQtNumber 变化时（下推后切换过来），重新加载数据
   useEffect(() => {
     if (highlightQtNumber) {
@@ -106,6 +286,13 @@ export function SalesQuotationManagement({
       loadSalesQuotations();
     }
   }, [highlightQtNumber, loadSalesQuotations]);
+
+  // 如果接口尚未返回且本地缓存为空，则用 Context 兜底，避免页面先空白
+  useEffect(() => {
+    if (serverQuotations.length === 0 && Array.isArray(quotations) && quotations.length > 0) {
+      setServerQuotations(mergeDraftOverrides(quotations as any[]));
+    }
+  }, [quotations, serverQuotations.length]);
   
   // 🔥 高亮状态（3秒后自动消失）
   const [highlightedId, setHighlightedId] = React.useState<string | null>(null);
@@ -144,18 +331,46 @@ export function SalesQuotationManagement({
   };
   
   // 🔥 新增：批量删除
-  const handleBatchDelete = () => {
+  const handleBatchDelete = async () => {
     if (selectedIds.length === 0) {
       toast.error('请先选择要删除的报价单！');
       return;
     }
     
     if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个报价单吗？此操作不可恢复！`)) {
-      selectedIds.forEach(id => {
-        deleteQuotation(id);
-      });
+      const ids = selectedIds.map((id) => String(id));
+      let deletedByApiCount = 0;
+      let deleteMethodUnsupported = false;
+
+      for (const id of ids) {
+        try {
+          await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+          });
+          deletedByApiCount += 1;
+        } catch (e: any) {
+          const msg = String(e?.message || '');
+          if (msg.includes('DELETE method is not supported') || msg.includes('Supported methods: OPTIONS')) {
+            deleteMethodUnsupported = true;
+            break;
+          }
+        }
+      }
+
+      if (deleteMethodUnsupported || deletedByApiCount < ids.length) {
+        appendDeletedIds(ids);
+      }
+
+      removeDraftOverrideByIds(ids);
+      setServerQuotations((prev) => prev.filter((qt) => !ids.includes(String(qt.id))));
       setSelectedIds([]);
-      toast.success(`成功删除 ${selectedIds.length} 个报价单！`);
+
+      if (deletedByApiCount === ids.length) {
+        toast.success(`成功删除 ${ids.length} 个报价单！`);
+        loadSalesQuotations();
+      } else {
+        toast.success(`已删除 ${ids.length} 个报价单（兼容模式）`);
+      }
     }
   };
   
@@ -301,6 +516,56 @@ export function SalesQuotationManagement({
         }),
       });
 
+      const now = new Date();
+      const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const baseRequest = {
+        id: `bridge-${qt.id}-${now.getTime()}`,
+        type: 'quotation',
+        relatedDocumentId: qt.qtNumber || qt.id,
+        relatedDocumentType: '销售报价单',
+        relatedDocument: { ...qt, id: qt.id },
+        submittedBy: currentUser?.email || '',
+        submittedByName: currentUser?.name || currentUser?.email || '',
+        submittedByRole: currentUser?.userRole || currentUser?.role || 'Sales',
+        submittedAt: now.toISOString(),
+        region: qt.region || currentUser?.region || 'NA',
+        nextApprover: requiresDirectorReview ? directorEmail : null,
+        nextApproverRole: requiresDirectorReview ? '销售总监' : null,
+        requiresDirectorApproval: requiresDirectorReview,
+        status: 'pending',
+        urgency: amount >= 100000 ? 'high' : 'normal',
+        amount,
+        currency: qt.currency || 'USD',
+        customerName: qt.customerCompany || qt.customerName || 'Customer',
+        customerEmail: qt.customerEmail || '',
+        productSummary,
+        approvalHistory: [],
+        deadline: deadline.toISOString(),
+        expiresIn: 24,
+      };
+
+      // 注入到主管审批中心（切页可立即看到）
+      pushApprovalBridgeItem({
+        currentApprover: managerEmail,
+        request: {
+          ...baseRequest,
+          currentApprover: managerEmail,
+          currentApproverRole: '区域业务主管',
+        },
+      });
+
+      // 金额较大时也注入到总监审批中心（用于主管批准后的连续切换场景）
+      if (requiresDirectorReview) {
+        pushApprovalBridgeItem({
+          currentApprover: directorEmail,
+          request: {
+            ...baseRequest,
+            currentApprover: directorEmail,
+            currentApproverRole: '销售总监',
+          },
+        });
+      }
+
       // 提交后刷新列表（只读服务器数据）
       loadSalesQuotations();
     } catch (e: any) {
@@ -437,28 +702,6 @@ export function SalesQuotationManagement({
       console.error('❌ [handlePushToContract] 下推接口失败:', error);
       toast.error(`❌ 生成销售合同失败: ${error?.message || '未知错误'}`);
     }
-  };
-  
-  // 🔥 新增：重置下推状态（开发调试用）
-  const handleResetPushStatus = (qt: any) => {
-    console.log('═══════════════════════════════════════════════════════');
-    console.log('🔄 [handleResetPushStatus] 重置报价单下推状态');
-    console.log('  - QT单号:', qt.qtNumber);
-    
-    updateQuotation(qt.id, {
-      pushedToContract: false,
-      pushedContractNumber: undefined,
-      pushedContractAt: undefined,
-      pushedBy: undefined
-    });
-    
-    console.log('✅ [handleResetPushStatus] 下推状态已重置，按钮已激活');
-    console.log('═══════════════════════════════════════════════════════');
-    
-    toast.success('✅ 下推状态已重置！', {
-      description: `报价单 ${qt.qtNumber} 现在可以重新下推生成销售合同`,
-      duration: 3000
-    });
   };
   
   // 🔥 标准化区域代码
@@ -672,12 +915,6 @@ export function SalesQuotationManagement({
       <div className="bg-white border border-gray-200 rounded-lg">
         <div className="border-b border-gray-200">
           <div className="px-5 py-3 bg-gray-50">
-            {loadingFromApi && (
-              <div className="mb-2 text-xs text-blue-600 flex items-center gap-1">
-                <Clock className="w-3 h-3 animate-spin" />
-                正在从服务器加载报价数据...
-              </div>
-            )}
             <div className="flex gap-3 items-center">
               {/* 搜索框 */}
               <div className="relative flex-1">
@@ -952,27 +1189,15 @@ export function SalesQuotationManagement({
 
                         {/* 🔥 新增：已下推订单按钮 - 下推后显示（不可点击） */}
                         {qt.pushedToContract && qt.pushedContractNumber && (
-                          <>
-                            <Button 
-                              size="sm"
-                              disabled
-                              className="gap-1 bg-gray-400 cursor-not-allowed h-7 text-[11px]"
-                              title={`已下推至合同：${qt.pushedContractNumber}`}
-                            >
-                              <FileSignature className="h-3 w-3" />
-                              已下推订单
-                            </Button>
-                            
-                            {/* 🔥 开发调试：重置下推状态按钮 */}
-                            <Button 
-                              size="sm"
-                              onClick={() => handleResetPushStatus(qt)}
-                              className="gap-1 bg-yellow-500 hover:bg-yellow-600 h-7 text-[11px]"
-                              title="开发调试：重置下推状态，允许重新下推"
-                            >
-                              🔄 重置
-                            </Button>
-                          </>
+                          <Button 
+                            size="sm"
+                            disabled
+                            className="gap-1 bg-gray-400 cursor-not-allowed h-7 text-[11px]"
+                            title={`已下推至合同：${qt.pushedContractNumber}`}
+                          >
+                            <FileSignature className="h-3 w-3" />
+                            已下推订单
+                          </Button>
                         )}
                         
                         {/* 🔥 删除所有"生成合同"按钮 - 已放弃此功能 */}
@@ -1018,12 +1243,48 @@ export function SalesQuotationManagement({
             setShowPriceCalculation(false);
             setSelectedQuotation(null);
           }}
-          onSubmit={(quoteData) => {
-            // 更新报价单数据
-            updateQuotation(selectedQuotation.id, quoteData);
-            toast.success('报价单更新成功！');
-            setShowPriceCalculation(false);
-            setSelectedQuotation(null);
+          onSubmit={async (quoteData) => {
+            try {
+              await apiFetchJson<{ message: string; quotation: any }>(
+                `/api/sales-quotations/${encodeURIComponent(String(selectedQuotation.id))}`,
+                {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(quoteData),
+                }
+              );
+
+              toast.success('报价草稿已保存');
+              loadSalesQuotations();
+              setShowPriceCalculation(false);
+              setSelectedQuotation(null);
+            } catch (e: any) {
+              console.error('❌ 保存报价草稿失败:', e);
+              const errMsg = String(e?.message || '');
+              const patchNotSupported =
+                errMsg.includes('PATCH method is not supported') ||
+                errMsg.includes('Supported methods: OPTIONS');
+
+              if (patchNotSupported) {
+                const fallback = mapQuoteDataToServerLike(quoteData, selectedQuotation);
+                writeDraftOverride(String(selectedQuotation.id), fallback);
+
+                setServerQuotations(prev =>
+                  prev.map(qt =>
+                    String(qt.id) === String(selectedQuotation.id)
+                      ? { ...qt, ...fallback, id: qt.id, qtNumber: qt.qtNumber }
+                      : qt
+                  )
+                );
+
+                toast.success('报价草稿已保存（本地兼容模式）');
+                setShowPriceCalculation(false);
+                setSelectedQuotation(null);
+                return;
+              }
+
+              toast.error(`保存失败：${e?.message || '请稍后重试'}`);
+            }
           }}
         />
       )}

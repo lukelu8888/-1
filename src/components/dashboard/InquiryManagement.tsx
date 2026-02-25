@@ -21,6 +21,9 @@ import { CustomerInquiryView } from './CustomerInquiryView'; // 📋 使用文�
 import { UnifiedInquiryDialog } from './UnifiedInquiryDialog';
 import { ContainerLoadPlanner } from './ContainerLoadPlanner';
 import WorkflowStatusTracker from '../workflow/WorkflowStatusTracker';
+import { filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { canDeleteInquiry } from '../../lib/erp-core/delete-guard';
+import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 
 export function InquiryManagement() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -104,7 +107,12 @@ export function InquiryManagement() {
     }
   };
 
-  const filteredInquiries = inquiries.filter(inquiry => {
+  const visibleInquiries = filterNotDeleted('inquiry', inquiries, (inquiry) => [
+    String(inquiry?.id || ''),
+    String((inquiry as any)?.inquiryNumber || ''),
+  ]);
+
+  const filteredInquiries = visibleInquiries.filter(inquiry => {
     // Get first product name for search
     const firstProductName = inquiry.products && inquiry.products.length > 0 
       ? inquiry.products[0].productName 
@@ -195,9 +203,7 @@ export function InquiryManagement() {
   };
 
   const handleToggleSelectAll = () => {
-    // 🔥 允许选择所有状态的询价单（包括pending、draft、quoted等）
-    // 只排除已经转化为订单的approved状态
-    const selectableInquiries = filteredInquiries.filter(inq => inq.status !== 'approved');
+    const selectableInquiries = filteredInquiries.filter((inq) => canDeleteInquiry(inq));
     if (selectedInquiryIds.length === selectableInquiries.length && selectableInquiries.length > 0) {
       setSelectedInquiryIds([]);
     } else {
@@ -237,89 +243,6 @@ export function InquiryManagement() {
 
   return (
     <div className="space-y-6 pb-6" style={{ fontFamily: 'var(--hd-font)' }}>
-      {/* ========== Home Depot Style - Inquiry Statistics Cards ========== */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Inquiries */}
-        <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all group">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <div className="text-gray-600 uppercase tracking-wide mb-2 text-[10px]" style={{ fontWeight: 500, letterSpacing: '0.5px' }}>
-                Total Inquiries
-              </div>
-              <div className="text-gray-900 text-3xl" style={{ fontWeight: 700, lineHeight: 1 }}>
-                {inquiries.length}
-              </div>
-              <div className="text-gray-500 mt-1.5 text-[11px]" style={{ fontWeight: 400 }}>
-                All inquiry records
-              </div>
-            </div>
-            <div className="bg-[#0D3B66] w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0 group-hover:bg-[#0A2F52] transition-colors">
-              <FileText className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-          </div>
-        </div>
-
-        {/* Pending */}
-        <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all group">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <div className="text-gray-600 uppercase tracking-wide mb-2 text-[10px]" style={{ fontWeight: 500, letterSpacing: '0.5px' }}>
-                Pending
-              </div>
-              <div className="text-gray-900 text-3xl" style={{ fontWeight: 700, lineHeight: 1 }}>
-                {inquiries.filter(i => i.status === 'pending').length}
-              </div>
-              <div className="text-gray-500 mt-1.5 text-[11px]" style={{ fontWeight: 400 }}>
-                Awaiting supplier response
-              </div>
-            </div>
-            <div className="bg-[#F59E0B] w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0 group-hover:bg-[#D97706] transition-colors">
-              <Clock className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-          </div>
-        </div>
-
-        {/* Quoted */}
-        <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all group">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <div className="text-gray-600 uppercase tracking-wide mb-2 text-[10px]" style={{ fontWeight: 500, letterSpacing: '0.5px' }}>
-                Quoted
-              </div>
-              <div className="text-gray-900 text-3xl" style={{ fontWeight: 700, lineHeight: 1 }}>
-                {inquiries.filter(i => i.status === 'quoted').length}
-              </div>
-              <div className="text-gray-500 mt-1.5 text-[11px]" style={{ fontWeight: 400 }}>
-                Received quotations
-              </div>
-            </div>
-            <div className="bg-[#2E7D32] w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0 group-hover:bg-[#256428] transition-colors">
-              <CheckCircle2 className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-          </div>
-        </div>
-
-        {/* Approved */}
-        <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all group">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <div className="text-gray-600 uppercase tracking-wide mb-2 text-[10px]" style={{ fontWeight: 500, letterSpacing: '0.5px' }}>
-                Approved
-              </div>
-              <div className="text-gray-900 text-3xl" style={{ fontWeight: 700, lineHeight: 1 }}>
-                {inquiries.filter(i => i.status === 'approved').length}
-              </div>
-              <div className="text-gray-500 mt-1.5 text-[11px]" style={{ fontWeight: 400 }}>
-                Converted to orders
-              </div>
-            </div>
-            <div className="bg-[#6B46C1] w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0 group-hover:bg-[#5A3BA5] transition-colors">
-              <Package className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Inquiries Table */}
       <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm">
         <div className="border-b-2 border-gray-200">
@@ -346,6 +269,16 @@ export function InquiryManagement() {
               />
             </div>
             <div className="flex gap-2">
+              {selectedInquiryIds.length > 0 && (
+                <Button
+                  variant="destructive"
+                  className="gap-2"
+                  onClick={handleBatchDelete}
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Batch Delete ({selectedInquiryIds.length})
+                </Button>
+              )}
               <Button
                 variant={filterStatus === 'all' ? 'default' : 'outline'}
                 onClick={() => setFilterStatus('all')}
@@ -379,45 +312,17 @@ export function InquiryManagement() {
         </div>
         <div className="p-5">
           <div className="overflow-x-auto">
-            {/* 🔥 批量操作工具栏 */}
-            {selectedInquiryIds.length > 0 && (
-              <div className="mb-4 px-5 py-3 bg-blue-50 border border-blue-200 rounded-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <CheckSquare className="w-4 h-4 text-blue-600" />
-                    <span className="text-sm text-blue-900" style={{ fontWeight: 500 }}>
-                      Selected <span className="font-bold">{selectedInquiryIds.length}</span> inquiries
-                    </span>
-                    <button
-                      onClick={() => setSelectedInquiryIds([])}
-                      className="text-xs text-blue-600 hover:text-blue-800 underline"
-                    >
-                      Clear Selection
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="h-8 gap-2"
-                      onClick={handleBatchDelete}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Batch Delete ({selectedInquiryIds.length})
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <Table>
               <TableHeader>
                 <TableRow className="bg-gray-50">
                   <TableHead className="w-12">
                     <Checkbox
-                      checked={filteredInquiries.filter(inq => inq.status !== 'approved').length > 0 && selectedInquiryIds.length === filteredInquiries.filter(inq => inq.status !== 'approved').length}
+                      checked={
+                        filteredInquiries.filter((inq) => canDeleteInquiry(inq)).length > 0 &&
+                        selectedInquiryIds.length === filteredInquiries.filter((inq) => canDeleteInquiry(inq)).length
+                      }
                       onCheckedChange={handleToggleSelectAll}
-                      disabled={filteredInquiries.filter(inq => inq.status !== 'approved').length === 0}
+                      disabled={filteredInquiries.filter((inq) => canDeleteInquiry(inq)).length === 0}
                     />
                   </TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Inquiry #</TableHead>
@@ -438,19 +343,31 @@ export function InquiryManagement() {
                     ? `${firstProduct?.productName} +${inquiry.products.length - 1} more`
                     : firstProduct?.productName || 'N/A';
                   
+                  const inquiryNo = String((inquiry as any)?.inquiryNumber || inquiry.id);
+                  const numberDisplay = resolveDisplayNumber({
+                    domain: 'inquiry',
+                    internalNo: inquiryNo,
+                    companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
+                  });
+                  
                   return (
                     <TableRow key={`${inquiry.id}-${index}`} className="hover:bg-gray-50">
                       <TableCell>
                         <Checkbox
                           checked={selectedInquiryIds.includes(inquiry.id)}
                           onCheckedChange={() => handleToggleSelectInquiry(inquiry.id)}
-                          disabled={inquiry.status === 'approved'}
+                          disabled={!canDeleteInquiry(inquiry)}
                         />
                       </TableCell>
                       <TableCell className="text-xs">
                         <span className="font-bold text-gray-900">
-                          {inquiry.id}
+                          {inquiryNo}
                         </span>
+                        {numberDisplay.externalNo && (
+                          <div className="text-[11px] text-gray-500 mt-0.5">
+                            Customer ERP: {numberDisplay.externalNo}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs text-gray-700">{inquiry.date}</TableCell>
                       <TableCell className="text-xs font-medium text-gray-900 max-w-xs truncate">
@@ -470,18 +387,22 @@ export function InquiryManagement() {
                       </TableCell>
                       <TableCell className="text-xs">
                         <div className="flex items-center justify-end gap-2">
-                          {/* 🚀 Submit Button - Only show for draft inquiries */}
-                          {!inquiry.isSubmitted && (
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                              onClick={() => setSubmitInquiryId(inquiry.id)}
-                              title="Submit Inquiry to Admin"
-                            >
-                              <Send className="h-4 w-4" />
-                            </Button>
-                          )}
+                          {/* 🚀 Submit Button - Always show as first action */}
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            onClick={() => {
+                              if (!inquiry.isSubmitted) {
+                                setSubmitInquiryId(inquiry.id);
+                              } else {
+                                toast.info('Inquiry already submitted');
+                              }
+                            }}
+                            title={inquiry.isSubmitted ? "Already Submitted" : "Submit Inquiry to Admin"}
+                          >
+                            <Send className="h-4 w-4" />
+                          </Button>
                           <Button 
                             variant="ghost" 
                             size="sm"
@@ -533,7 +454,7 @@ export function InquiryManagement() {
                             <Phone className="h-4 w-4" />
                           </Button>
                           {/* 🗑️ Delete Button - Only show for draft inquiries */}
-                          {!inquiry.isSubmitted && (
+                          {canDeleteInquiry(inquiry) && (
                             <Button 
                               variant="ghost" 
                               size="sm"
@@ -1006,10 +927,14 @@ export function InquiryManagement() {
             </Button>
             <Button 
               className="bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={() => {
+              onClick={async () => {
                 if (submitInquiryId) {
-                  submitInquiry(submitInquiryId);
-                  toast.success(`Inquiry submitted successfully!`);
+                  const ok = await submitInquiry(submitInquiryId);
+                  if (ok) {
+                    toast.success(`Inquiry submitted successfully!`);
+                  } else {
+                    toast.error('Inquiry submit failed. Please try again.');
+                  }
                   setSubmitInquiryId(null);
                 }
               }}

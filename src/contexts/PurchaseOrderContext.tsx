@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { apiFetchJson } from '../api/backend-auth';
+import { addTombstones, filterNotDeleted, removeTombstones } from '../lib/erp-core/deletion-tombstone';
 
 // 🔥 采购订单状态
 export type POStatus = 'pending' | 'confirmed' | 'producing' | 'shipped' | 'completed' | 'cancelled';
@@ -110,7 +111,231 @@ interface PurchaseOrderContextType {
 
 const PurchaseOrderContext = createContext<PurchaseOrderContextType | undefined>(undefined);
 
+const getPurchaseOrderMarkers = (order: Partial<PurchaseOrder>): string[] =>
+  [order.id, order.poNumber].filter(Boolean).map((v) => String(v));
+
+const filterVisiblePurchaseOrders = (list: PurchaseOrder[]): PurchaseOrder[] =>
+  filterNotDeleted('order', list, (order) => getPurchaseOrderMarkers(order));
+
+const normalizeCurrencyCode = (value: unknown): string => {
+  const raw = String(value || '').trim().toUpperCase();
+  if (!raw) return '';
+  if (raw === 'RMB' || raw === 'CN¥' || raw === 'YUAN') return 'CNY';
+  return raw;
+};
+
+const mergePurchaseOrders = (localOrders: PurchaseOrder[], serverOrders: PurchaseOrder[]): PurchaseOrder[] => {
+  const byKey = new Map<string, PurchaseOrder>();
+  // 先放本地（兜底）
+  localOrders.forEach((order) => {
+    const key = String(order.poNumber || order.id || '').trim();
+    if (key) byKey.set(key, order);
+  });
+  // 再放服务端（同key覆盖本地，确保服务端为准）
+  serverOrders.forEach((order) => {
+    const key = String(order.poNumber || order.id || '').trim();
+    if (key) byKey.set(key, order);
+  });
+  return Array.from(byKey.values());
+};
+
 export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // 修复历史误删：过去把 SC/RFQ 等来源号错误写入 order tombstone，导致订单列表被误隐藏
+  useEffect(() => {
+    const removedLegacy = removeTombstones((t) => {
+      if (t.domain !== 'order') return false;
+      const marker = String(t.marker || '').trim().toUpperCase();
+      const reason = String(t.reason || '').trim();
+      if (reason !== 'manual-delete-purchase-order') return false;
+      // 仅清理“非采购单本体”的错误 marker，保留真正 PO/CQ 删除标记
+      return /^(SC-|QT-|RFQ-|INQ-|XJ-|SO-|QR-)/.test(marker);
+    });
+
+    // 修复历史误操作：系统曾错误调用删除采购请求，写入了 CQ 的 tombstone，导致采购请求池被永久隐藏
+    // 仅当本地仍存在同号 CQ 单据时，移除该 tombstone，避免影响用户手动删除的真实意图
+    let removedCQ = 0;
+    try {
+      const raw = localStorage.getItem('purchaseOrders');
+      const parsed = raw ? JSON.parse(raw) : [];
+      const existingCQ = new Set(
+        (Array.isArray(parsed) ? parsed : [])
+          .map((o: any) => String(o?.poNumber || '').trim().toUpperCase())
+          .filter((no: string) => /^CQ-\d{6}-\d{4}$/.test(no))
+      );
+      if (existingCQ.size > 0) {
+        removedCQ = removeTombstones((t) => {
+          if (t.domain !== 'order') return false;
+          const reason = String(t.reason || '').trim();
+          if (reason !== 'manual-delete-purchase-order') return false;
+          const marker = String(t.marker || '').trim().toUpperCase();
+          return /^CQ-\d{6}-\d{4}$/.test(marker) && existingCQ.has(marker);
+        });
+      }
+    } catch {
+      removedCQ = 0;
+    }
+
+    const totalRemoved = removedLegacy + removedCQ;
+    if (totalRemoved > 0) {
+      console.warn(`⚠️ [PurchaseOrderContext] removed ${totalRemoved} invalid order tombstones (legacy=${removedLegacy}, cq=${removedCQ})`);
+      window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
+    }
+  }, []);
+
+  // 修复历史数据：若存在由 CQ 请求拆出的 CG 子单，但 CQ 主请求被误删，则自动补回 CQ 记录
+  useEffect(() => {
+    setPurchaseOrders((prev) => {
+      if (!prev.length) return prev;
+      const byPo = new Map<string, PurchaseOrder>();
+      prev.forEach((o) => byPo.set(String(o.poNumber || '').trim().toUpperCase(), o));
+
+      let changed = false;
+      const next = [...prev];
+      const parentMap = new Map<string, PurchaseOrder[]>();
+      prev.forEach((o) => {
+        const parent = String((o as any).parentRequestPoNumber || '').trim().toUpperCase();
+        if (!/^CQ-\d{6}-\d{4}$/.test(parent)) return;
+        const list = parentMap.get(parent) || [];
+        list.push(o);
+        parentMap.set(parent, list);
+      });
+
+      parentMap.forEach((children, parentNo) => {
+        if (byPo.has(parentNo)) return;
+        const seed = children[0];
+        if (!seed) return;
+        const mergedItems = children.flatMap((c) => c.items || []);
+        const totalAmount = children.reduce((sum, c) => sum + Number(c.totalAmount || 0), 0);
+        const recovered: PurchaseOrder = {
+          id: `recovered-${parentNo.toLowerCase()}-${Date.now()}`,
+          poNumber: parentNo,
+          requirementNo: seed.requirementNo,
+          sourceRef: seed.sourceRef,
+          sourceSONumber: seed.sourceSONumber,
+          rfqId: seed.rfqId,
+          rfqNumber: seed.rfqNumber,
+          supplierName: '待分配供应商',
+          supplierCode: 'TBD',
+          region: seed.region || 'NA',
+          items: mergedItems,
+          totalAmount,
+          currency: seed.currency || 'USD',
+          paymentTerms: seed.paymentTerms || '',
+          deliveryTerms: seed.deliveryTerms || '',
+          orderDate: seed.orderDate || new Date().toISOString(),
+          expectedDate: seed.expectedDate || new Date().toISOString(),
+          status: 'pending',
+          paymentStatus: 'unpaid',
+          remarks: '系统自动补回（历史误删修复）',
+          createdBy: seed.createdBy || 'system',
+          createdDate: new Date().toISOString(),
+          updatedDate: new Date().toISOString(),
+          ...( {
+            procurementRequestStatus: 'partial_allocated',
+            supplierAllocationReady: true,
+            allocatedSupplierCount: children.length,
+            pendingSupplierPONumbers: children.map((c) => c.poNumber),
+          } as any ),
+        };
+        next.push(recovered);
+        byPo.set(parentNo, recovered);
+        changed = true;
+      });
+
+      return changed ? filterVisiblePurchaseOrders(next) : prev;
+    });
+  }, []);
+
+  // 兜底恢复：若采购需求中已记录“采购单号: CQ-xxxx”，但 CQ 请求单在采购订单池缺失，则自动补回
+  useEffect(() => {
+    setPurchaseOrders((prev) => {
+      let requirements: any[] = [];
+      try {
+        const rawReq = localStorage.getItem('purchaseRequirements');
+        const parsedReq = rawReq ? JSON.parse(rawReq) : [];
+        requirements = Array.isArray(parsedReq) ? parsedReq : [];
+      } catch {
+        requirements = [];
+      }
+      if (!requirements.length) return prev;
+
+      const byPo = new Map<string, PurchaseOrder>();
+      prev.forEach((o) => byPo.set(String(o.poNumber || '').trim().toUpperCase(), o));
+      let changed = false;
+      const next = [...prev];
+      const cqMarkersToKeep = new Set<string>();
+
+      requirements.forEach((req: any) => {
+        const special = String(req?.specialRequirements || '');
+        const match = special.match(/采购单号[:：]\s*(CQ-\d{6}-\d{4})/i);
+        if (!match) return;
+        const cqNo = String(match[1] || '').trim().toUpperCase();
+        if (!cqNo) return;
+        cqMarkersToKeep.add(cqNo);
+        if (byPo.has(cqNo)) return;
+
+        const items = Array.isArray(req?.items)
+          ? req.items.map((item: any, idx: number) => ({
+              id: String(item?.id || `item-${idx + 1}`),
+              productName: String(item?.productName || 'Unknown Product'),
+              modelNo: String(item?.modelNo || item?.productName || '-'),
+              specification: String(item?.specification || ''),
+              quantity: Number(item?.quantity || 0),
+              unit: String(item?.unit || 'PCS'),
+              unitPrice: Number(item?.targetPrice || 0),
+              currency: normalizeCurrencyCode(item?.targetCurrency || req?.currency || '') || 'USD',
+              subtotal: Number(item?.quantity || 0) * Number(item?.targetPrice || 0),
+              hsCode: String(item?.hsCode || ''),
+              packingRequirement: String(item?.packingRequirement || ''),
+              remarks: String(item?.remarks || ''),
+            }))
+          : [];
+
+        const recovered: PurchaseOrder = {
+          id: `recovered-${cqNo.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          poNumber: cqNo,
+          requirementNo: String(req?.requirementNo || '').trim(),
+          sourceRef: String(req?.sourceInquiryNumber || req?.sourceRef || '').trim(),
+          sourceSONumber: String(req?.salesOrderNo || req?.sourceRef || '').trim(),
+          salesContractNumber: String(req?.sourceRef || '').trim(),
+          rfqNumber: String(req?.sourceInquiryNumber || '').trim(),
+          supplierName: '待采购分配',
+          supplierCode: 'TBD',
+          region: String(req?.region || 'NA'),
+          items,
+          totalAmount: 0,
+          currency: normalizeCurrencyCode(req?.currency || items?.[0]?.currency || 'USD') || 'USD',
+          paymentTerms: '待采购确认',
+          deliveryTerms: '待采购确认',
+          orderDate: String(req?.createdDate || new Date().toISOString()),
+          expectedDate: String(req?.requiredDate || new Date().toISOString()),
+          status: 'pending',
+          paymentStatus: 'unpaid',
+          remarks: special || '系统自动补回采购请求',
+          createdBy: String(req?.createdBy || 'system'),
+          createdDate: String(req?.createdDate || new Date().toISOString()),
+          updatedDate: new Date().toISOString(),
+          ...( { procurementRequestStatus: 'pending_procurement_assignment' } as any ),
+        };
+        next.push(recovered);
+        byPo.set(cqNo, recovered);
+        changed = true;
+      });
+
+      if (cqMarkersToKeep.size > 0) {
+        const removed = removeTombstones((t) => {
+          if (t.domain !== 'order') return false;
+          if (String(t.reason || '') !== 'manual-delete-purchase-order') return false;
+          const marker = String(t.marker || '').trim().toUpperCase();
+          return /^CQ-\d{6}-\d{4}$/.test(marker) && cqMarkersToKeep.has(marker);
+        });
+        if (removed > 0) changed = true;
+      }
+
+      return changed ? filterVisiblePurchaseOrders(next) : prev;
+    });
+  }, []);
+
   // 🔥 先从 localStorage 启动，随后由接口数据覆盖（接口优先，本地兜底）
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => {
     if (typeof window !== 'undefined') {
@@ -119,7 +344,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
         try {
           const parsed = JSON.parse(saved);
           console.log('📦 从localStorage加载采购订单数据，总数:', parsed.length);
-          return parsed;
+          return filterVisiblePurchaseOrders(parsed);
         } catch (e) {
           console.error('❌ 加载采购订单数据失败:', e);
         }
@@ -144,8 +369,8 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
         const res = await apiFetchJson<{ purchaseOrders: PurchaseOrder[] }>('/api/purchase-orders');
         const serverOrders = Array.isArray(res?.purchaseOrders) ? res.purchaseOrders : [];
         if (!alive) return;
-        // 接口优先：请求成功即覆盖本地（可为空数组）
-        setPurchaseOrders(serverOrders);
+        // 合并策略：防止“前端刚新增但后端尚未落库”导致列表瞬间消失
+        setPurchaseOrders((prev) => filterVisiblePurchaseOrders(mergePurchaseOrders(prev, serverOrders)));
       } catch (e) {
         // 接口失败时保留本地
         console.warn('⚠️ [PurchaseOrderContext] load purchase-orders failed, fallback to localStorage:', e);
@@ -170,7 +395,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
       const exists = prev.some(o => o.id === order.id || o.poNumber === order.poNumber);
       const newOrders = exists ? prev.map(o => (o.id === order.id || o.poNumber === order.poNumber ? order : o)) : [...prev, order];
       console.log('  ✅ 当前采购订单总数:', newOrders.length);
-      return newOrders;
+      return filterVisiblePurchaseOrders(newOrders);
     });
     window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
     void (async () => {
@@ -190,11 +415,11 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
   const updatePurchaseOrder = (id: string, updates: Partial<PurchaseOrder>) => {
     const target = purchaseOrders.find(o => o.id === id || o.poNumber === id);
     const poRef = target?.poNumber || target?.id || id;
-    setPurchaseOrders(prev => prev.map(order => (
+    setPurchaseOrders(prev => filterVisiblePurchaseOrders(prev.map(order => (
       (order.id === id || order.poNumber === id)
         ? { ...order, ...updates, updatedDate: new Date().toISOString() }
         : order
-    )));
+    ))));
     window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
     void (async () => {
       try {
@@ -213,7 +438,12 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
   const deletePurchaseOrder = (id: string) => {
     const target = purchaseOrders.find(o => o.id === id || o.poNumber === id);
     const poRef = target?.poNumber || target?.id || id;
-    setPurchaseOrders(prev => prev.filter(order => order.id !== id && order.poNumber !== id));
+    const markers = getPurchaseOrderMarkers(target || { id });
+    addTombstones('order', markers, {
+      reason: 'manual-delete-purchase-order',
+      deletedBy: 'admin',
+    });
+    setPurchaseOrders(prev => filterVisiblePurchaseOrders(prev.filter(order => order.id !== id && order.poNumber !== id)));
     window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
     void (async () => {
       try {
@@ -247,7 +477,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
       orders.forEach((o) => byPo.set(o.poNumber || o.id, o));
       const newOrders = Array.from(byPo.values());
       console.log('  ✅ 当前采购订单总数:', newOrders.length);
-      return newOrders;
+      return filterVisiblePurchaseOrders(newOrders);
     });
     window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
     void (async () => {

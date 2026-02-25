@@ -70,6 +70,14 @@ export const getUrgencyConfig = (urgency: 'high' | 'medium' | 'low') => {
  * 🔥 将采购订单数据转换为文档模板数据
  */
 export const convertToPOData = (po: PurchaseOrderType): PurchaseOrderData => {
+  const poAny = po as any;
+  const pick = (...values: unknown[]) => {
+    for (const v of values) {
+      const s = String(v ?? '').trim();
+      if (s) return s;
+    }
+    return '';
+  };
   // 🔥 转换产品列表格式
   const products = po.items.map((item, index) => ({
     no: index + 1,
@@ -125,16 +133,26 @@ export const convertToPOData = (po: PurchaseOrderType): PurchaseOrderData => {
     terms: {
       totalAmount: po.totalAmount,
       currency: po.currency,
-      paymentTerms: po.paymentTerms,
-      deliveryTerms: po.deliveryTerms,
-      deliveryAddress: '福建省福州市仓山区金山街道浦上大道216号',
-      qualityStandard: '符合国家标准及合同约定',
-      inspectionMethod: '到货验收',
-      packaging: '标准出口包装',
-      warrantyPeriod: '12个月',
-      warrantyTerms: '质量问题免费更换',
-      applicableLaw: '中华人民共和国合同法',
-      contractValidity: '订单确认后生效'
+      paymentTerms: pick(poAny.paymentTerms, '待采购确认'),
+      deliveryTerms: pick(poAny.deliveryTerms, '待采购确认'),
+      deliveryAddress: pick(poAny.deliveryAddress, '福建省福州市仓山区金山街道浦上大道216号'),
+      qualityStandard: pick(poAny.qualityStandard, poAny.qualityTerms, '符合国家标准及合同约定'),
+      inspectionMethod: pick(poAny.inspectionMethod, poAny.inspectionTerms, '到货验收'),
+      packaging: pick(poAny.packaging, poAny.packagingTerms, '标准出口包装'),
+      shippingMarks: pick(poAny.shippingMarks),
+      deliveryPenalty: pick(poAny.deliveryPenalty),
+      qualityPenalty: pick(poAny.qualityPenalty, poAny.penaltyTerms),
+      warrantyPeriod: pick(poAny.warrantyPeriod, '12个月'),
+      warrantyTerms: pick(poAny.warrantyTerms, '质量问题免费更换'),
+      returnPolicy: pick(poAny.returnPolicy),
+      confidentiality: pick(poAny.confidentiality),
+      ipRights: pick(poAny.ipRights),
+      forceMajeure: pick(poAny.forceMajeure),
+      disputeResolution: pick(poAny.disputeResolution, poAny.disputeResolutionTerms),
+      applicableLaw: pick(poAny.applicableLaw, '中华人民共和国合同法'),
+      contractValidity: pick(poAny.contractValidity, '订单确认后生效'),
+      modification: pick(poAny.modification),
+      termination: pick(poAny.termination)
     }
   };
 };

@@ -23,7 +23,6 @@ import {
   CheckCircle2,
   TrendingUp,
   Save,
-  RotateCcw,
   Calculator,
   Boxes,
   ChevronDown,
@@ -111,7 +110,6 @@ export function ContainerLoadPlanner({
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const [selectedContainer, setSelectedContainer] = useState<keyof typeof CONTAINER_TYPES>('40HQ');
   const [products, setProducts] = useState<Product[]>([]);
-  const [originalProducts, setOriginalProducts] = useState<Product[]>([]);
   const [hoveredProductId, setHoveredProductId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [isDraggingDialog, setIsDraggingDialog] = useState(false);
@@ -173,7 +171,6 @@ export function ContainerLoadPlanner({
         pcsPerCarton: p.pcsPerCarton || 12, // default 12 pcs per carton
       }));
       setProducts(productsWithDefaults);
-      setOriginalProducts(JSON.parse(JSON.stringify(productsWithDefaults)));
     }
   }, [inquiry]);
 
@@ -246,8 +243,11 @@ export function ContainerLoadPlanner({
     };
   }, [dragStartMouse.x, dragStartMouse.y, dragStartOffset.x, dragStartOffset.y, isDraggingDialog]);
 
-  const dialogTransform = useMemo(
-    () => `translate(calc(-50% + ${dragOffset.x}px), calc(-50% + ${dragOffset.y}px))`,
+  const dialogPosition = useMemo(
+    () => ({
+      left: `calc(50% + ${dragOffset.x}px)`,
+      top: `calc(50% + ${dragOffset.y}px)`,
+    }),
     [dragOffset.x, dragOffset.y],
   );
 
@@ -309,19 +309,10 @@ export function ContainerLoadPlanner({
     });
   };
 
-  const handleReset = () => {
-    setProducts(JSON.parse(JSON.stringify(originalProducts)));
-    toast.success('Reset to original quantities');
-  };
-
   const handleSave = () => {
     onSaveQuantities(products);
     toast.success('Container plan saved successfully');
     onClose();
-  };
-
-  const handleResetPosition = () => {
-    setDragOffset({ x: 0, y: 0 });
   };
 
   const handleDialogHeaderMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -711,9 +702,9 @@ export function ContainerLoadPlanner({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent
         ref={dialogContentRef}
-        style={{ transform: dialogTransform }}
+        style={dialogPosition}
         onWheelCapture={(event) => event.stopPropagation()}
-        className="!top-1/2 !left-1/2 w-[min(1520px,calc(100vw-120px))] max-w-none !h-[calc(100dvh-120px)] !max-h-[calc(100dvh-120px)] min-h-[560px] p-0 flex flex-col overflow-hidden overscroll-contain rounded-xl"
+        className="max-w-7xl h-[90vh] max-h-[95vh] min-h-[560px] p-0 flex flex-col overflow-hidden overscroll-contain rounded-xl"
       >
         <div className="flex flex-col h-full min-h-0">
           {/* Header */}
@@ -721,7 +712,7 @@ export function ContainerLoadPlanner({
             onMouseDown={handleDialogHeaderMouseDown}
             className={`px-8 py-5 border-b border-gray-200 bg-white flex-shrink-0 select-none ${isDraggingDialog ? 'cursor-grabbing' : 'cursor-grab'}`}
           >
-            <div className="flex items-center justify-between">
+            <div>
               <div>
                 <h2 className="text-2xl font-semibold leading-tight text-[#F96302] flex items-center gap-2">
                   <Container className="w-6 h-6" />
@@ -731,17 +722,6 @@ export function ContainerLoadPlanner({
                   Inquiry: {inquiry?.id} - Optimize your container loading
                 </p>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleResetPosition}
-                className="h-9 border-gray-300 bg-white/90"
-                title="Reset dialog position"
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Reset Position
-              </Button>
             </div>
           </div>
 
@@ -1314,13 +1294,8 @@ export function ContainerLoadPlanner({
 
           {/* Sticky Footer Actions */}
           <div className="px-8 py-4 border-t border-gray-200 bg-white flex items-center justify-end gap-3">
-            <Button variant="outline" onClick={handleResetPosition} className="border-2">
-              <RotateCcw className="w-4 h-4 mr-2" />
-              Reset Position
-            </Button>
-            <Button variant="outline" onClick={handleReset} className="border-2">
-              <RotateCcw className="w-4 h-4 mr-2" />
-              Reset
+            <Button variant="outline" onClick={onClose} className="border-2">
+              Cancel
             </Button>
             <Button onClick={handleSave} className="bg-[#F96302] hover:bg-[#E05502]">
               <Save className="w-4 h-4 mr-2" />

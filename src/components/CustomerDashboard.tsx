@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { Menu, X, LogOut, ChevronLeft, ChevronRight, User, LayoutDashboard, Package, DollarSign, Bell, BarChart3, Mail, FileText, GripVertical, Home, Calculator, Target } from 'lucide-react';
 import { Button } from './ui/button';
 import { Resizable } from 're-resizable';
@@ -22,18 +22,43 @@ interface CustomerDashboardProps {
   userEmail: string;
 }
 
+const DEFAULT_DASHBOARD_VIEW = 'overview';
+const VALID_DASHBOARD_VIEWS = new Set([
+  'overview',
+  'profile',
+  'my-orders',
+  'rate-request',
+  'create-order',
+  'analytics',
+  'messages',
+  'inquiries',
+  'documents',
+  'profit-analyzer',
+  'supplier-evaluation',
+]);
+
 export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProps) {
   // Restore active view from localStorage on mount
   const [activeView, setActiveView] = useState<string>(() => {
     const savedView = localStorage.getItem('dashboardActiveView');
-    return savedView || 'overview';
+    if (savedView && VALID_DASHBOARD_VIEWS.has(savedView)) {
+      return savedView;
+    }
+    return DEFAULT_DASHBOARD_VIEW;
   });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [profileEditToken, setProfileEditToken] = useState(0);
+  const [customerLogo, setCustomerLogo] = useState<string | null>(() => localStorage.getItem('cosun_customer_logo'));
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const { navigateTo } = useRouter();
   const { clearUser } = useUser();
 
   // Save active view to localStorage whenever it changes
   useEffect(() => {
+    if (!VALID_DASHBOARD_VIEWS.has(activeView)) {
+      setActiveView(DEFAULT_DASHBOARD_VIEW);
+      return;
+    }
     localStorage.setItem('dashboardActiveView', activeView);
     console.log('💾 Saved dashboard view:', activeView);
   }, [activeView]);
@@ -81,12 +106,10 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
   // Menu items state with drag and drop support
   const defaultMenuItems = [
     { id: 'overview', label: 'Dashboard Overview', icon: LayoutDashboard },
-    { id: 'profile', label: 'My Profile', icon: User },
     { id: 'my-orders', label: 'My Orders', icon: Package },
     { id: 'rate-request', label: 'Rate Request', icon: DollarSign },
     { id: 'analytics', label: 'Data Analytics', icon: BarChart3 },
     { id: 'messages', label: 'Messages', icon: Mail },
-    { id: 'inquiries', label: 'Inquiries', icon: FileText },
     { id: 'documents', label: 'My Documents', icon: FileText }, // 📄 客户文档中心
     { id: 'profit-analyzer', label: 'Profit Analyzer', icon: Calculator }, // 🔥 利润分析器
     { id: 'supplier-evaluation', label: 'Supplier Evaluation', icon: Target }, // 🎯 供应商评估系统 v2.0
@@ -98,6 +121,9 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
     if (savedOrder) {
       try {
         const savedIds = JSON.parse(savedOrder);
+        if (!Array.isArray(savedIds)) {
+          return defaultMenuItems;
+        }
         
         // Get saved items that still exist in defaultMenuItems
         const existingItems = savedIds
@@ -141,7 +167,11 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
   // Sidebar width state
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const savedWidth = localStorage.getItem('dashboardSidebarWidth');
-    return savedWidth ? parseInt(savedWidth) : 256; // Default 256px (w-64)
+    const parsedWidth = savedWidth ? parseInt(savedWidth, 10) : 256;
+    if (!Number.isFinite(parsedWidth)) {
+      return 256;
+    }
+    return Math.min(400, Math.max(200, parsedWidth)); // Default 256px (w-64)
   });
 
   // Save sidebar width to localStorage
@@ -187,7 +217,7 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
       case 'overview':
         return <DashboardOverview userEmail={userEmail} onNavigate={setActiveView} />;
       case 'profile':
-        return <CustomerProfile />;
+        return <CustomerProfile forceEditToken={profileEditToken} />;
       case 'my-orders':
         return <MyOrders 
           activeOrders={activeOrders} 
@@ -293,15 +323,52 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
           <div className="flex flex-col h-full">
             {/* User Info */}
             <div className="p-4 border-b border-gray-200 bg-gray-50">
-              <div className="flex items-center gap-3 overflow-hidden">
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
-                  <User className="h-6 w-6 text-white" />
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveView('profile');
+                  setProfileEditToken(Date.now());
+                }}
+                className="w-full flex items-center gap-3 overflow-hidden text-left group"
+              >
+                <div
+                  className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden ring-2 ring-transparent group-hover:ring-blue-300 transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    logoInputRef.current?.click();
+                  }}
+                  title="Click to upload logo"
+                >
+                  {customerLogo ? (
+                    <img src={customerLogo} alt="Customer logo" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="h-6 w-6 text-white" />
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 truncate whitespace-nowrap">{userEmail}</p>
-                  <p className="text-xs text-gray-500 whitespace-nowrap">Premium Member</p>
+                  <p className="text-xs text-gray-500 whitespace-nowrap">Premium Member · Click to edit profile</p>
                 </div>
-              </div>
+              </button>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+                    if (!dataUrl) return;
+                    setCustomerLogo(dataUrl);
+                    localStorage.setItem('cosun_customer_logo', dataUrl);
+                  };
+                  reader.readAsDataURL(file);
+                  e.currentTarget.value = '';
+                }}
+              />
             </div>
 
             {/* Navigation Menu */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -52,7 +52,8 @@ import {
   Info,
   ChevronDown,
   ChevronUp,
-  Bell
+  Bell,
+  Star
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
 import {
@@ -65,6 +66,12 @@ import {
 } from '../ui/table';
 import { toast } from 'sonner@2.0.3';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
+import { useInquiry } from '../../contexts/InquiryContext';
+import { useOrders } from '../../contexts/OrderContext';
+import { useUser } from '../../contexts/UserContext';
+import { useSalesQuotations } from '../../contexts/SalesQuotationContext';
+import { filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 
 // Mock data with complete order lifecycle
 const mockOrders = [
@@ -1161,7 +1168,16 @@ const mockOrders = [
   }
 ];
 
-export function OrderTracking() {
+interface OrderTrackingProps {
+  onTabChange?: (tab: string) => void;
+}
+
+export function OrderTracking({ onTabChange }: OrderTrackingProps) {
+  const { user } = useUser();
+  const { getUserInquiries } = useInquiry();
+  const { orders: allOrders } = useOrders();
+  const { quotations: allQuotations } = useSalesQuotations();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -1180,6 +1196,97 @@ export function OrderTracking() {
   const [showFreightInquiryForm, setShowFreightInquiryForm] = useState(false);
   const [showFreightConfirmationForm, setShowFreightConfirmationForm] = useState(false);
   const [showBookingConfirmationForm, setShowBookingConfirmationForm] = useState(false);
+
+  const normalizeStatus = (status?: string) => String(status || '').trim().toLowerCase();
+
+  const inquiries = user?.email ? getUserInquiries(user.email) : [];
+  const customerQuotations = useMemo(() => {
+    if (!user?.email) return allQuotations;
+    return allQuotations.filter((quotation: any) => {
+      const email = String(quotation?.customerEmail || '').toLowerCase();
+      return !email || email === String(user.email).toLowerCase();
+    });
+  }, [allQuotations, user?.email]);
+
+  const customerOrders = useMemo(() => {
+    if (!user?.email) return allOrders;
+    return allOrders.filter((order: any) => {
+      const email = String(order?.customerEmail || '').toLowerCase();
+      return !email || email === String(user.email).toLowerCase();
+    });
+  }, [allOrders, user?.email]);
+
+  const visibleInquiries = useMemo(() => {
+    return filterNotDeleted('inquiry', inquiries, (inquiry: any) => {
+      return [inquiry?.id, inquiry?.inquiryNumber];
+    });
+  }, [inquiries]);
+
+  const visibleCustomerQuotations = useMemo(() => {
+    return filterNotDeleted('quotation', customerQuotations, (quotation: any) => {
+      return [quotation?.id, quotation?.qtNumber, quotation?.quotationNumber];
+    });
+  }, [customerQuotations]);
+
+  const visibleCustomerOrders = useMemo(() => {
+    return filterNotDeleted('order', customerOrders, (order: any) => {
+      return [order?.id, order?.orderNumber, order?.quotationNumber];
+    });
+  }, [customerOrders]);
+
+  const stageStats = useMemo(() => {
+    const inquiryCount = visibleInquiries.length;
+    const quotationCount = visibleCustomerQuotations.length;
+    const contractCount = visibleCustomerOrders.filter((order: any) => {
+      const status = normalizeStatus(order?.status);
+      return [
+        'pending',
+        'awaiting deposit',
+        'payment proof uploaded',
+        'deposit received',
+        'confirmed',
+        'negotiating',
+      ].includes(status);
+    }).length;
+    const productionCount = visibleCustomerOrders.filter((order: any) => {
+      const status = normalizeStatus(order?.status);
+      return ['preparing production', 'in production'].includes(status);
+    }).length;
+    const qcCount = visibleCustomerOrders.filter((order: any) => normalizeStatus(order?.status) === 'quality inspection').length;
+    const shippingCount = visibleCustomerOrders.filter((order: any) => {
+      const status = normalizeStatus(order?.status);
+      return ['ready to ship', 'shipped'].includes(status);
+    }).length;
+    const deliveredCount = visibleCustomerOrders.filter((order: any) => normalizeStatus(order?.status) === 'delivered').length;
+    const feedbackCount = visibleCustomerOrders.filter((order: any) => {
+      return Boolean(order?.customerFeedback || order?.orderFeedback);
+    }).length;
+    const productReviewCount = visibleCustomerOrders.filter((order: any) => {
+      return Boolean(
+        order?.productReview ||
+        order?.productReviews ||
+        order?.reviewOnProduct ||
+        order?.customerRating ||
+        order?.rating,
+      );
+    }).length;
+
+    return {
+      inquiryCount,
+      quotationCount,
+      contractCount,
+      productionCount,
+      qcCount,
+      shippingCount,
+      deliveredCount,
+      feedbackCount,
+      productReviewCount,
+    };
+  }, [visibleCustomerOrders, visibleCustomerQuotations.length, visibleInquiries.length]);
+
+  const goToTab = (tab: string) => {
+    onTabChange?.(tab);
+  };
 
   const toggleStageExpansion = (stageId: string) => {
     const newExpanded = new Set(expandedStages);
@@ -1204,8 +1311,42 @@ export function OrderTracking() {
     return colors[color]?.[variant] || colors.blue[variant];
   };
 
-  // 🔥 清空mock数据 - 使用空数组
-  const filteredOrders: any[] = [];
+  const trackedOrders = useMemo(() => {
+    return visibleCustomerOrders.map((order: any) => {
+      const displayNo = order.orderNumber || order.id || 'N/A';
+      const externalNo = resolveDisplayNumber({
+        domain: 'order',
+        internalNo: displayNo,
+        companyId: (user as any)?.companyId ? String((user as any).companyId) : undefined,
+      }).externalNo;
+      return {
+        ...order,
+        id: displayNo,
+        externalNo,
+        inquiryDate: String(order.createdAt || order.date || '').slice(0, 10) || '-',
+        orderDate: String(order.date || order.createdAt || '').slice(0, 10) || '-',
+        productName: order.products?.[0]?.name || '-',
+        totalItems: Number(order.products?.reduce((sum: number, p: any) => sum + Number(p.quantity || 0), 0) || 0),
+        totalValue: Number(order.totalAmount || 0),
+        overallProgress: Number(order.progress || 0),
+        estimatedArrival: String(order.expectedDelivery || '-'),
+        phases: Array.isArray(order.phases) ? order.phases : [],
+        currentPhaseIndex: Number(order.currentPhaseIndex || 0),
+      };
+    });
+  }, [visibleCustomerOrders]);
+
+  const filteredOrders = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return trackedOrders;
+    return trackedOrders.filter((order: any) => {
+      return (
+        String(order.id || '').toLowerCase().includes(term) ||
+        String(order.externalNo || '').toLowerCase().includes(term) ||
+        String(order.productName || '').toLowerCase().includes(term)
+      );
+    });
+  }, [searchTerm, trackedOrders]);
 
   const openImageViewer = (images: string[], startIndex: number = 0) => {
     setSelectedImages(images);
@@ -1215,88 +1356,131 @@ export function OrderTracking() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Stage Statistics (Tracking keeps this section) */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Order Tracking</h1>
-        <p className="text-gray-600 mt-1">Complete lifecycle tracking from inquiry to customer</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, minmax(0, 1fr))', gap: '8px' }}>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <MessageSquare className="h-4 w-4 text-purple-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('inquiries')} className="text-xl font-bold text-purple-600 hover:underline">
+                {stageStats.inquiryCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">Inquiry</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <DollarSign className="h-4 w-4 text-indigo-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('quotations')} className="text-xl font-bold text-indigo-600 hover:underline">
+                {stageStats.quotationCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">Quotation</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <FileCheck className="h-4 w-4 text-blue-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('active')} className="text-xl font-bold text-blue-600 hover:underline">
+                {stageStats.contractCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">Contract</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <Factory className="h-4 w-4 text-orange-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('active')} className="text-xl font-bold text-orange-600 hover:underline">
+                {stageStats.productionCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">Production</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <ClipboardCheck className="h-4 w-4 text-yellow-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('active')} className="text-xl font-bold text-yellow-600 hover:underline">
+                {stageStats.qcCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">QC</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <Ship className="h-4 w-4 text-cyan-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('active')} className="text-xl font-bold text-cyan-600 hover:underline">
+                {stageStats.shippingCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">Shipping</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('completed')} className="text-xl font-bold text-green-600 hover:underline">
+                {stageStats.deliveredCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">Delivered</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <MessageSquare className="h-4 w-4 text-pink-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('completed')} className="text-xl font-bold text-pink-600 hover:underline">
+                {stageStats.feedbackCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">Order feedback</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-md transition-shadow min-w-0">
+          <CardContent className="pt-3 pb-3">
+            <div className="text-center">
+              <Star className="h-4 w-4 text-amber-600 mx-auto mb-1" />
+              <button type="button" onClick={() => goToTab('completed')} className="text-xl font-bold text-amber-600 hover:underline">
+                {stageStats.productReviewCount}
+              </button>
+              <p className="text-[13px] text-gray-600 leading-tight">Review on Product</p>
+            </div>
+          </CardContent>
+        </Card>
+        </div>
       </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Card className="hover:shadow-md transition-shadow">
-          <CardContent className="pt-4 pb-4">
-            <div className="text-center">
-              <MessageSquare className="h-5 w-5 text-purple-600 mx-auto mb-1" />
-              <p className="text-xl font-bold text-purple-600">8</p>
-              <p className="text-xs text-gray-600">Inquiry</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="hover:shadow-md transition-shadow">
-          <CardContent className="pt-4 pb-4">
-            <div className="text-center">
-              <FileCheck className="h-5 w-5 text-blue-600 mx-auto mb-1" />
-              <p className="text-xl font-bold text-blue-600">12</p>
-              <p className="text-xs text-gray-600">Contract</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="hover:shadow-md transition-shadow">
-          <CardContent className="pt-4 pb-4">
-            <div className="text-center">
-              <Factory className="h-5 w-5 text-orange-600 mx-auto mb-1" />
-              <p className="text-xl font-bold text-orange-600">5</p>
-              <p className="text-xs text-gray-600">Production</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="hover:shadow-md transition-shadow">
-          <CardContent className="pt-4 pb-4">
-            <div className="text-center">
-              <ClipboardCheck className="h-5 w-5 text-yellow-600 mx-auto mb-1" />
-              <p className="text-xl font-bold text-yellow-600">3</p>
-              <p className="text-xs text-gray-600">QC</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="hover:shadow-md transition-shadow">
-          <CardContent className="pt-4 pb-4">
-            <div className="text-center">
-              <Ship className="h-5 w-5 text-cyan-600 mx-auto mb-1" />
-              <p className="text-xl font-bold text-cyan-600">12</p>
-              <p className="text-xs text-gray-600">Shipping</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="hover:shadow-md transition-shadow">
-          <CardContent className="pt-4 pb-4">
-            <div className="text-center">
-              <CheckCircle2 className="h-5 w-5 text-green-600 mx-auto mb-1" />
-              <p className="text-xl font-bold text-green-600">28</p>
-              <p className="text-xs text-gray-600">Delivered</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Search */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search by PO number or product name..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Orders Table */}
       <Card>
         <CardContent className="p-0">
+          <div className="border-b border-gray-200 px-6 py-4 flex items-center gap-3">
+            <TruckIcon className="w-5 h-5 text-[#F96302]" />
+            <h3 className="text-gray-900 uppercase tracking-wide" style={{ fontSize: '14px', fontWeight: 600 }}>
+              Tracking List
+            </h3>
+          </div>
+          <div className="p-5 border-b border-gray-200">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Search by PO number or product name..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -1325,7 +1509,10 @@ export function OrderTracking() {
                         }}
                         className="font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
                       >
-                        {order.id}
+                        <span>{order.id}</span>
+                        {order.externalNo && order.externalNo !== order.id && (
+                          <span className="text-[10px] text-gray-500 ml-1">({order.externalNo})</span>
+                        )}
                         <ExternalLink className="h-3 w-3" />
                       </button>
                     </TableCell>

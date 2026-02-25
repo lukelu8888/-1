@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiFetchJson } from '../api/backend-auth';
+import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
 
 // 🔥 采购需求产品项接口
 export interface PurchaseRequirementItem {
@@ -111,6 +112,32 @@ interface PurchaseRequirementContextType {
 }
 
 const PurchaseRequirementContext = createContext<PurchaseRequirementContextType | undefined>(undefined);
+const DELETED_PURCHASE_REQUIREMENTS_KEY = 'deleted_purchase_requirements';
+
+const getDeletedRequirementMarkers = (): Set<string> => {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(DELETED_PURCHASE_REQUIREMENTS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter(Boolean).map((v) => String(v)));
+  } catch {
+    return new Set();
+  }
+};
+
+const saveDeletedRequirementMarkers = (markers: Set<string>) => {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(DELETED_PURCHASE_REQUIREMENTS_KEY, JSON.stringify(Array.from(markers)));
+};
+
+const getRequirementMarkers = (req: Partial<PurchaseRequirement>): string[] => {
+  return [req.id, req.requirementNo].filter(Boolean).map((v) => String(v));
+};
+
+const filterVisibleRequirements = (list: PurchaseRequirement[]): PurchaseRequirement[] =>
+  filterNotDeleted('document', list, (req) => getRequirementMarkers(req));
 
 export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // 🔥 从localStorage加载初始数据，保留用户创建的所有采购需求
@@ -144,8 +171,14 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
             return req;
           });
           
-          console.log('✅ 从localStorage加载采购需求数据，总数:', validRequirements.length);
-          return validRequirements;
+          const deletedMarkers = getDeletedRequirementMarkers();
+          const filteredRequirements = validRequirements.filter((req: PurchaseRequirement) => {
+            const markers = getRequirementMarkers(req);
+            return !markers.some((m) => deletedMarkers.has(m));
+          });
+          const visible = filterVisibleRequirements(filteredRequirements);
+          console.log('✅ 从localStorage加载采购需求数据，总数:', visible.length);
+          return visible;
         } catch (e) {
           console.error('❌ 加载采购需求数据失败:', e);
           // 不要返回空数组，保持localStorage中的原始数据
@@ -169,7 +202,11 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
     apiFetchJson<{ requirements: PurchaseRequirement[] }>('/api/purchase-requirements')
       .then((data) => {
         if (cancelled || !data?.requirements?.length) return;
-        const apiList = data.requirements as PurchaseRequirement[];
+        const deletedMarkers = getDeletedRequirementMarkers();
+        const apiList = filterVisibleRequirements((data.requirements as PurchaseRequirement[]).filter((req) => {
+          const markers = getRequirementMarkers(req);
+          return !markers.some((m) => deletedMarkers.has(m));
+        }));
         setRequirements((prev) => {
           const byNo = new Map<string, PurchaseRequirement>();
           prev.forEach((r) => {
@@ -180,7 +217,7 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
             const key = apiR.requirementNo || apiR.id;
             if (key) byNo.set(key, apiR);
           });
-          return Array.from(byNo.values());
+          return filterVisibleRequirements(Array.from(byNo.values()));
         });
       })
       .catch(() => { /* 未登录或网络错误时保留本地数据 */ });
@@ -204,7 +241,7 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
   const addRequirement = (requirement: PurchaseRequirement) => {
     console.log('➕ 添加新采购需求:', requirement);
     setRequirements(prev => {
-      const newRequirements = [...prev, requirement];
+      const newRequirements = filterVisibleRequirements([...prev, requirement]);
       console.log('  ✅ 当前采购需求总数:', newRequirements.length);
       return newRequirements;
     });
@@ -231,7 +268,7 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
         createdBy: targetReq.createdBy
       });
       
-      const newReqs = prev.map(req => req.id === id ? { ...req, ...updates } : req);
+      const newReqs = filterVisibleRequirements(prev.map(req => req.id === id ? { ...req, ...updates } : req));
       console.log('  💾 更新后的需求列表数量:', newReqs.length);
       return newReqs;
     });
@@ -250,8 +287,19 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
           itemCount: targetReq.items?.length
         });
       }
+
+      const markers = new Set(getDeletedRequirementMarkers());
+      markers.add(String(id));
+      if (targetReq?.requirementNo) {
+        markers.add(String(targetReq.requirementNo));
+      }
+      saveDeletedRequirementMarkers(markers);
+      addTombstones('document', Array.from(markers), {
+        reason: 'manual-delete-purchase-requirement',
+        deletedBy: 'admin',
+      });
       
-      const newReqs = prev.filter(req => req.id !== id);
+      const newReqs = filterVisibleRequirements(prev.filter(req => req.id !== id));
       console.warn('  📊 删除后剩余需求数量:', newReqs.length);
       return newReqs;
     });
@@ -264,7 +312,11 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
   const refreshPurchaseRequirementsFromApi = React.useCallback(async () => {
     try {
       const data = await apiFetchJson<{ requirements: PurchaseRequirement[] }>('/api/purchase-requirements');
-      const apiList = (data?.requirements ?? []) as PurchaseRequirement[];
+      const deletedMarkers = getDeletedRequirementMarkers();
+      const apiList = filterVisibleRequirements(((data?.requirements ?? []) as PurchaseRequirement[]).filter((req) => {
+        const markers = getRequirementMarkers(req);
+        return !markers.some((m) => deletedMarkers.has(m));
+      }));
       setRequirements((prev) => {
         const byNo = new Map<string, PurchaseRequirement>();
         prev.forEach((r) => {
@@ -275,7 +327,7 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
           const key = apiR.requirementNo || apiR.id;
           if (key) byNo.set(key, apiR);
         });
-        return Array.from(byNo.values());
+        return filterVisibleRequirements(Array.from(byNo.values()));
       });
     } catch {
       // 未登录或网络错误时静默失败，由调用方 toast

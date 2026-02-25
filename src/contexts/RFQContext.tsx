@@ -1,5 +1,24 @@
 import React, { createContext, useCallback, useContext, useRef, useState, ReactNode } from 'react';
 import { apiFetchJson, getApiToken, getBackendUser } from '../api/backend-auth';
+import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
+
+const SUPPLIER_RFQ_CLEAR_LOCK_KEY = 'supplier_rfq_clear_lock_until';
+
+function isSupplierRfqSyncLocked(): boolean {
+  if (typeof window === 'undefined') return false;
+  const raw = localStorage.getItem(SUPPLIER_RFQ_CLEAR_LOCK_KEY);
+  if (!raw) return false;
+  const lockUntil = Number(raw);
+  if (!Number.isFinite(lockUntil)) {
+    localStorage.removeItem(SUPPLIER_RFQ_CLEAR_LOCK_KEY);
+    return false;
+  }
+  if (Date.now() > lockUntil) {
+    localStorage.removeItem(SUPPLIER_RFQ_CLEAR_LOCK_KEY);
+    return false;
+  }
+  return true;
+}
 
 // 🔥 询价请求（RFQ - Request for Quotation）状态
 export type RFQStatus = 'pending' | 'quoted' | 'accepted' | 'rejected' | 'expired';
@@ -104,10 +123,21 @@ interface RFQContextType {
 
 const RFQContext = createContext<RFQContextType | undefined>(undefined);
 
+const getRfqMarkers = (rfq: Partial<RFQ>): string[] =>
+  [rfq.id, rfq.rfqNumber, rfq.requirementNo, rfq.sourceInquiryNumber].filter(Boolean).map((v) => String(v));
+
+const filterVisibleRfqs = (list: RFQ[]): RFQ[] =>
+  filterNotDeleted('inquiry', list, (rfq) => getRfqMarkers(rfq));
+
 export const RFQProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // 🔥 从localStorage加载初始数据
   const [rfqs, setRFQs] = useState<RFQ[]>(() => {
     if (typeof window !== 'undefined') {
+      if (isSupplierRfqSyncLocked()) {
+        console.log('🧹 [RFQContext] 供应商RFQ同步已锁定，初始化为空列表');
+        return [];
+      }
+
       // 🔥 合并两个数据源：rfqs（Admin端创建的草稿）+ supplierRFQs（Admin提交给供应商的）
       const adminRFQs = localStorage.getItem('rfqs');
       const supplierRFQs = localStorage.getItem('supplierRFQs');
@@ -142,8 +172,9 @@ export const RFQProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }
       
-      console.log('✅ 合并后的总RFQ数量:', allRFQs.length);
-      return allRFQs;
+      const visible = filterVisibleRfqs(allRFQs);
+      console.log('✅ 合并后的总RFQ数量:', visible.length);
+      return visible;
     }
     return [];
   });
@@ -159,6 +190,11 @@ export const RFQProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // 🔥 监听supplierRFQs的变化（Admin端提交新询价单）
   React.useEffect(() => {
     const handleStorageChange = () => {
+      if (isSupplierRfqSyncLocked()) {
+        setRFQs([]);
+        return;
+      }
+
       console.log('🔔 检测到supplierRFQs变化，重新加载...');
       
       const supplierRFQs = localStorage.getItem('supplierRFQs');
@@ -171,7 +207,7 @@ export const RFQProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           // 对比当前rfqs中的id，只添加不存在的新RFQ
           setRFQs(prev => {
             const existingIds = new Set(prev.map(rfq => rfq.id));
-            const newRFQs = parsed.filter((supplierRFQ: any) => !existingIds.has(supplierRFQ.id));
+            const newRFQs = filterVisibleRfqs(parsed).filter((supplierRFQ: any) => !existingIds.has(supplierRFQ.id));
             
             if (newRFQs.length > 0) {
               console.log(`✅ 添加${newRFQs.length}个新RFQ:`, newRFQs.map((r: any) => r.supplierRfqNo));
@@ -218,6 +254,11 @@ export const RFQProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const run = (async () => {
       try {
+        if (isSupplierRfqSyncLocked()) {
+          setRFQs([]);
+          return;
+        }
+
         const token = getApiToken();
         const backendUser = getBackendUser();
         if (!token) return;
@@ -242,14 +283,14 @@ export const RFQProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         mineLastFetchedAtRef.current = Date.now();
 
         const data = await apiFetchJson<{ rfqs: RFQ[] }>('/api/supplier-rfqs/mine');
-        const serverRfqs = (data?.rfqs || []).filter(Boolean);
+        const serverRfqs = filterVisibleRfqs((data?.rfqs || []).filter(Boolean));
 
         setRFQs(prev => {
           const byId = new Map(prev.map(r => [r.id, r]));
           for (const r of serverRfqs) {
             byId.set(r.id, { ...(byId.get(r.id) || {}), ...r });
           }
-          return Array.from(byId.values());
+          return filterVisibleRfqs(Array.from(byId.values()));
         });
       } catch (e) {
         console.error('❌ [RFQContext] Failed to load supplier RFQs from backend:', e);
@@ -273,7 +314,7 @@ export const RFQProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const addRFQ = (rfq: RFQ) => {
     console.log('📥 添加RFQ:', rfq.rfqNumber);
-    setRFQs(prev => [rfq, ...prev]);
+    setRFQs(prev => filterVisibleRfqs([rfq, ...prev]));
     
     // 🔥 触发事件通知所有监听器
     window.dispatchEvent(new CustomEvent('rfqsUpdated', { 
@@ -297,7 +338,13 @@ export const RFQProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const deleteRFQ = (id: string) => {
     console.log('🗑️ 删除RFQ:', id);
-    setRFQs(prev => prev.filter(rfq => rfq.id !== id));
+    const target = rfqs.find((r) => r.id === id);
+    const markers = getRfqMarkers(target || { id });
+    addTombstones('inquiry', markers, {
+      reason: 'manual-delete-rfq',
+      deletedBy: getBackendUser()?.email || 'unknown',
+    });
+    setRFQs(prev => filterVisibleRfqs(prev.filter(rfq => rfq.id !== id)));
     
     // 🔥 同时从supplierRFQs中删除（如果存在）
     if (typeof window !== 'undefined') {

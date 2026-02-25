@@ -1,6 +1,34 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { Quotation } from '../components/admin/QuotationManagement';
 import { getUserData, setUserData, getAllCustomersData, getCurrentUser } from '../utils/dataIsolation';
+import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
+import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
+import { emitErpEvent } from '../lib/erp-core/event-bus';
+
+const getQuotationMarkers = (quotation: Partial<Quotation>): string[] => {
+  return [quotation.id, (quotation as any).qtNumber, quotation.quotationNumber]
+    .filter(Boolean)
+    .map((v) => String(v));
+};
+
+const emitQuotationEvent = (
+  key: string,
+  quotation: Partial<Quotation> & { id: string },
+  metadata?: Record<string, unknown>,
+) => {
+  const currentUser = getCurrentUser() as any;
+  emitErpEvent({
+    id: `evt-quotation-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    key: key as any,
+    domain: 'quotation',
+    recordId: String(quotation.id),
+    internalNo: String((quotation as any).qtNumber || quotation.quotationNumber || quotation.id),
+    companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
+    source: currentUser?.type === 'admin' ? 'admin' : 'client',
+    occurredAt: new Date().toISOString(),
+    metadata,
+  });
+};
 
 interface QuotationContextType {
   quotations: Quotation[];
@@ -29,17 +57,19 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
       // Admin可以看到所有客户的报价
       if (currentUser.type === 'admin') {
         const allQuotations = getAllCustomersData<Quotation>('quotations');
+        const visible = filterNotDeleted('quotation', allQuotations, (q) => getQuotationMarkers(q));
         console.log('  - 🔑 Admin视图，加载所有客户报价:', allQuotations.length, '条');
         console.log('  - 报价列表:', allQuotations);
-        return allQuotations;
+        return visible;
       }
       
       // 客户只能看到自己的报价
       const customerQuotations = getUserData<Quotation>('quotations', currentUser.email);
+      const visible = filterNotDeleted('quotation', customerQuotations, (q) => getQuotationMarkers(q));
       console.log('  - 👤 客户视图，加载自己的报价:', customerQuotations.length, '条');
       console.log('  - 客户邮箱:', currentUser.email);
       console.log('  - 报价列表:', customerQuotations);
-      return customerQuotations;
+      return visible;
     }
     return [];
   });
@@ -60,12 +90,12 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
       if (currentUser.type === 'admin') {
         const allQuotations = getAllCustomersData<Quotation>('quotations');
         console.log('  - 🔑 Admin视图，重新加载所有客户报价:', allQuotations.length, '条');
-        setQuotations(allQuotations);
+        setQuotations(filterNotDeleted('quotation', allQuotations, (q) => getQuotationMarkers(q)));
       } else {
         // 客户只能看到自己的报价
         const customerQuotations = getUserData<Quotation>('quotations', currentUser.email);
         console.log('  - 👤 客户视图，重新加载自己的报价:', customerQuotations.length, '条');
-        setQuotations(customerQuotations);
+        setQuotations(filterNotDeleted('quotation', customerQuotations, (q) => getQuotationMarkers(q)));
       }
     };
 
@@ -79,11 +109,11 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
       if (currentUser.type === 'admin') {
         const allQuotations = getAllCustomersData<Quotation>('quotations');
         console.log('  - 🔑 Admin视图，重新聚合所有报价:', allQuotations.length, '条');
-        setQuotations(allQuotations);
+        setQuotations(filterNotDeleted('quotation', allQuotations, (q) => getQuotationMarkers(q)));
       } else {
         const customerQuotations = getUserData<Quotation>('quotations', currentUser.email);
         console.log('  - 👤 客户视图，重新加载自己的报价:', customerQuotations.length, '条');
-        setQuotations(customerQuotations);
+        setQuotations(filterNotDeleted('quotation', customerQuotations, (q) => getQuotationMarkers(q)));
       }
     };
 
@@ -129,10 +159,12 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
     if (currentUser?.type === 'admin') {
       const allQuotations = getAllCustomersData<Quotation>('quotations');
       console.log('  - Admin视图，重新聚合所有报价:', allQuotations.length, '条');
-      setQuotations(allQuotations);
+      setQuotations(filterNotDeleted('quotation', allQuotations, (q) => getQuotationMarkers(q)));
     } else {
       console.log('  - 客户视图，更新本地报价列表');
-      setQuotations(updatedQuotations);
+      setQuotations(
+        filterNotDeleted('quotation', updatedQuotations, (q) => getQuotationMarkers(q)),
+      );
     }
     
     // 🔥 标记对应的询价为已使用（一对一关系）
@@ -155,6 +187,10 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
       window.dispatchEvent(new Event('inquiriesUpdated'));
       console.log('✅ 已标记询价为已使用:', quotation.inquiryNumber);
     }
+
+    emitQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, quotation, {
+      status: quotation.status,
+    });
   };
 
   const updateQuotation = (id: string, updates: Partial<Quotation>) => {
@@ -182,7 +218,11 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
         console.log('  - ✅ 已保存到客户存储:', `quotations_${customerEmail}`);
         
         // 重新聚合所有数据
-        setQuotations(getAllCustomersData<Quotation>('quotations'));
+        setQuotations(
+          filterNotDeleted('quotation', getAllCustomersData<Quotation>('quotations'), (q) =>
+            getQuotationMarkers(q),
+          ),
+        );
         
         // 🔥 触发同步事件
         window.dispatchEvent(new Event('quotationsUpdated'));
@@ -212,7 +252,7 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
       console.log('  - 🔍 验证localStorage保存结果:', saved ? `${JSON.parse(saved).length}条` : '未找到');
       
       // 🔥 再更新本地状态
-      setQuotations(updated);
+      setQuotations(filterNotDeleted('quotation', updated, (q) => getQuotationMarkers(q)));
       console.log('  - ✅ 已更新本地React state');
       
       // 🔥 延迟触发同步事件，确保localStorage已完全写入
@@ -239,12 +279,35 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
         setUserData('quotations', filtered, customerEmail);
         
         // 重新聚合所有数据
-        setQuotations(getAllCustomersData<Quotation>('quotations'));
+        setQuotations(
+          filterNotDeleted('quotation', getAllCustomersData<Quotation>('quotations'), (q) =>
+            getQuotationMarkers(q),
+          ),
+        );
       }
     } else {
       // 客户删除自己的报价
-      setQuotations(prev => prev.filter(q => q.id !== id));
+      const customerEmail = currentUser?.email;
+      if (!customerEmail) return;
+
+      const customerQuotations = getUserData<Quotation>('quotations', customerEmail);
+      const filtered = customerQuotations.filter(q => q.id !== id);
+      setUserData('quotations', filtered, customerEmail);
+      setQuotations(filterNotDeleted('quotation', filtered, (q) => getQuotationMarkers(q)));
+      window.dispatchEvent(new Event('quotationsUpdated'));
     }
+
+    const target = quotations.find((q) => q.id === id);
+    const markers = target ? getQuotationMarkers(target) : [String(id)];
+    addTombstones('quotation', markers, {
+      reason: 'manual_delete',
+      deletedBy: currentUser?.email || 'unknown',
+    });
+    emitQuotationEvent(ERP_EVENT_KEYS.QUOTATION_DELETED, {
+      id,
+      quotationNumber: String(target?.quotationNumber || id),
+      ...(target as any)?.qtNumber ? { qtNumber: (target as any).qtNumber } : {},
+    } as any);
   };
 
   const getQuotationById = (id: string) => {

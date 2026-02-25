@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Input } from './input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
 import { Label } from './label';
+import { X } from 'lucide-react@0.487.0';
 
 interface EditableSelectProps {
   label: string;
@@ -35,21 +36,38 @@ export const EditableSelect: React.FC<EditableSelectProps> = ({
     }
   };
 
+  const handleClearValue = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onChange('');
+  };
+
   return (
     <div className={className}>
-      <Label className="text-[10px] text-gray-600 mb-1 block">{label}</Label>
+      <Label className="text-sm text-gray-700 mb-1 block">{label}</Label>
       {!isCustom ? (
         <Select value={value || '__placeholder__'} onValueChange={handleSelectChange}>
-          <SelectTrigger className="text-xs h-7">
+          <SelectTrigger className="text-sm h-9">
             <SelectValue placeholder={placeholder} />
+            {value && (
+              <button
+                type="button"
+                onPointerDown={handleClearValue}
+                className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                aria-label="清除当前选择"
+                title="清除当前选择"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
           </SelectTrigger>
           <SelectContent>
             {options.map((option, index) => (
-              <SelectItem key={index} value={option} className="text-xs">
+              <SelectItem key={index} value={option} className="text-sm">
                 {option}
               </SelectItem>
             ))}
-            <SelectItem value="__custom__" className="text-xs text-blue-600 font-semibold">
+            <SelectItem value="__custom__" className="text-sm text-blue-600 font-semibold">
               ✏️ 自定义输入...
             </SelectItem>
           </SelectContent>
@@ -60,12 +78,12 @@ export const EditableSelect: React.FC<EditableSelectProps> = ({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
-            className="text-xs h-7 flex-1"
+            className="text-sm h-9 flex-1"
           />
           <button
             type="button"
             onClick={() => setIsCustom(false)}
-            className="text-[10px] px-2 text-blue-600 hover:text-blue-800 border border-blue-300 rounded hover:bg-blue-50"
+            className="text-xs px-2 text-blue-600 hover:text-blue-800 border border-blue-300 rounded hover:bg-blue-50"
             title="返回选择列表"
           >
             ↩

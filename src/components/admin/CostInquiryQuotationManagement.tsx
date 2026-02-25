@@ -758,17 +758,21 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   
   // 🔥 批量删除处理函数
   const handleBulkDelete = () => {
-    if (selectedIds.size === 0) {
+    const visibleSelectedIds = Array.from(selectedIds).filter((id) =>
+      filteredQRs.some((qr) => qr.id === id),
+    );
+
+    if (visibleSelectedIds.length === 0) {
       toast.error('请先选择要删除的采购需求单');
       return;
     }
 
-    if (window.confirm(`确认要删除选中的 ${selectedIds.size} 条采购需求单吗？此操作无法撤销！`)) {
-      selectedIds.forEach(id => {
+    if (window.confirm(`确认要删除选中的 ${visibleSelectedIds.length} 条采购需求单吗？此操作无法撤销！`)) {
+      visibleSelectedIds.forEach(id => {
         deleteRequirement(id);
       });
       setSelectedIds(new Set());
-      toast.success(`✅ 已成功删除 ${selectedIds.size} 条采购需求单`);
+      toast.success(`✅ 已成功删除 ${visibleSelectedIds.length} 条采购需求单`);
     }
   };
 
@@ -796,6 +800,14 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   // 计算全选状态
   const isAllSelected = filteredQRs.length > 0 && selectedIds.size === filteredQRs.length;
   const isSomeSelected = selectedIds.size > 0 && selectedIds.size < filteredQRs.length;
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredQRs.map((qr) => qr.id));
+    const nextSelected = new Set(Array.from(selectedIds).filter((id) => visibleIds.has(id)));
+    if (nextSelected.size !== selectedIds.size) {
+      setSelectedIds(nextSelected);
+    }
+  }, [filteredQRs, selectedIds]);
 
   return (
     <div>
@@ -891,7 +903,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                       onCheckedChange={handleSelectAll}
                       aria-label="全选"
                     />
-                    <span>#</span>
+                    <span>序号</span>
                   </div>
                 </TableHead>
                 <TableHead className="h-9" style={{ fontSize: '12px' }}>

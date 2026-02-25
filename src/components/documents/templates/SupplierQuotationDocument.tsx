@@ -117,8 +117,8 @@ export const SupplierQuotationDocument = forwardRef<HTMLDivElement, SupplierQuot
             }
             
             .print-document {
-              width: 210mm;
-              min-height: 297mm;
+              width: 794px;
+              min-height: 1123px;
               padding: 15mm 15mm;
               margin: 0 auto;
               background: white;
@@ -147,8 +147,8 @@ export const SupplierQuotationDocument = forwardRef<HTMLDivElement, SupplierQuot
           /* ✅ 屏幕预览样式 */
           @media screen {
             .print-document {
-              width: 210mm;
-              min-height: 297mm;
+              width: 794px;
+              min-height: 1123px;
               padding: 15mm 15mm;
               margin: 0 auto;
               background: white;

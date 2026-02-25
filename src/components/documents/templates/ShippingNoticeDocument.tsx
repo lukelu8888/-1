@@ -18,7 +18,7 @@ interface ShippingNoticeDocumentProps {
 export const ShippingNoticeDocument = forwardRef<HTMLDivElement, ShippingNoticeDocumentProps>(
   ({ data }, ref) => {
     return (
-      <div ref={ref} className="bg-white w-[210mm] min-h-[297mm] mx-auto shadow-lg p-[20mm]">
+      <div ref={ref} className="bg-white w-[794px] min-h-[1123px] mx-auto shadow-lg p-[20mm]">
         <h1>Shipping Notice</h1>
         <p>模板开发中...</p>
       </div>

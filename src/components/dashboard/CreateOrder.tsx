@@ -12,6 +12,8 @@ import { ResizableProformaTable } from './ResizableProformaTable';
 import { productDetailsData } from '../../data/productDetailsData';
 import { copyToClipboard } from '../../utils/clipboard';
 import { useUser } from '../../contexts/UserContext';
+import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 
 interface DraftOrder {
   id: string;
@@ -85,6 +87,10 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
       if (savedDrafts) {
         try {
           drafts = JSON.parse(savedDrafts);
+          drafts = filterNotDeleted('order', drafts, (draft) => [
+            String(draft?.id || ''),
+            String(draft?.sourceOrderId || ''),
+          ]);
           
           // Auto-fix missing images and itemNumbers from productDetailsData
           let hasChanges = false;
@@ -450,9 +456,17 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
   }, [orderItems, currentDraftId]);
 
   const deleteDraftOrder = (draftId: string) => {
+    const draft = draftOrders.find((d) => d.id === draftId);
+    const markers = [String(draftId), String(draft?.sourceOrderId || '')].filter(Boolean);
     const updatedDrafts = draftOrders.filter(d => d.id !== draftId);
     setDraftOrders(updatedDrafts);
     saveDraftsToLocalStorage(updatedDrafts);
+    if (markers.length > 0) {
+      addTombstones('order', markers, {
+        reason: 'manual_delete',
+        deletedBy: user?.email || 'unknown',
+      });
+    }
     
     if (currentDraftId === draftId) {
       setCurrentDraftId(null);
@@ -582,24 +596,6 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
 
   return (
     <div className="space-y-6">
-      {/* Header with Draft Selector */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl text-gray-900">Create New Order</h1>
-          <p className="text-gray-600 mt-1">Manage draft orders and create new orders</p>
-        </div>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={() => setIsLoadHistoryOpen(true)}>
-            <History className="h-4 w-4 mr-2" />
-            Load from History
-          </Button>
-          <Button onClick={createNewDraft} className="bg-red-600 hover:bg-red-700 text-white">
-            <Plus className="h-4 w-4 mr-2" />
-            New Draft Order
-          </Button>
-        </div>
-      </div>
-
       {/* Main Content */}
       {draftOrders.length === 0 ? (
         <Card className="border-gray-200">
@@ -626,6 +622,24 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
       ) : (
         <Card>
           <CardContent className="p-0">
+            <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <ShoppingBag className="w-5 h-5 text-[#F96302]" />
+                <h3 className="text-gray-900 uppercase tracking-wide" style={{ fontSize: '14px', fontWeight: 600 }}>
+                  Draft Order List
+                </h3>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setIsLoadHistoryOpen(true)}>
+                  <History className="h-4 w-4 mr-2" />
+                  Load from History
+                </Button>
+                <Button onClick={createNewDraft} className="bg-red-600 hover:bg-red-700 text-white">
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Draft Order
+                </Button>
+              </div>
+            </div>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -647,6 +661,12 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
                       totalAmount: acc.totalAmount + (item.qty * item.price)
                     }), { totalQty: 0, totalAmount: 0 });
 
+                    const numberDisplay = resolveDisplayNumber({
+                      domain: 'order',
+                      internalNo: String(draft.id),
+                      companyId: (user as any)?.companyId ? String((user as any).companyId) : undefined,
+                    });
+
                     return (
                       <TableRow key={draft.id} className="border-b hover:bg-gray-50">
                         {/* Order # */}
@@ -666,6 +686,11 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
                             <span>{draft.id}</span>
                             <ExternalLink className="h-3.5 w-3.5" />
                           </button>
+                          {numberDisplay.externalNo && (
+                            <div className="text-[11px] text-gray-500 mt-0.5">
+                              Customer ERP: {numberDisplay.externalNo}
+                            </div>
+                          )}
                         </TableCell>
                         
                         {/* Date */}

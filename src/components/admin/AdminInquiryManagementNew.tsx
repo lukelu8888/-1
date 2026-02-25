@@ -4,7 +4,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogClose } from '../ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '../ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox';
 import { Search, Filter, Eye, Reply, CheckCircle, XCircle, Clock, FileText, AlertCircle, TestTube, ChevronDown, ChevronUp, Send, Trash2 } from 'lucide-react';
@@ -32,6 +32,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedInquiry, setSelectedInquiry] = useState<any>(null);
+  const [isInquiryDetailOpen, setIsInquiryDetailOpen] = useState(false);
   const [replyMessage, setReplyMessage] = useState('');
   
   // 🔥 批量选择和删除状态
@@ -83,17 +84,21 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   
   // 🔥 批量删除处理函数
   const handleBulkDelete = () => {
-    if (selectedIds.size === 0) {
+    const visibleSelectedIds = Array.from(selectedIds).filter((id) =>
+      filteredInquiries.some((inquiry) => inquiry.id === id),
+    );
+
+    if (visibleSelectedIds.length === 0) {
       toast.error('请先选择要删除的询价单');
       return;
     }
 
-    if (window.confirm(`确认要删除选中的 ${selectedIds.size} 条询价单吗？此操作无法撤销！`)) {
-      selectedIds.forEach(id => {
+    if (window.confirm(`确认要删除选中的 ${visibleSelectedIds.length} 条询价单吗？此操作无法撤销！`)) {
+      visibleSelectedIds.forEach(id => {
         deleteInquiry(id);
       });
       setSelectedIds(new Set());
-      toast.success(`✅ 已成功删除 ${selectedIds.size} 条询价单`);
+      toast.success(`✅ 已成功删除 ${visibleSelectedIds.length} 条询价单`);
     }
   };
 
@@ -230,6 +235,12 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       'SA': 'South America',
       'EA': 'Europe & Africa',
       'EMEA': 'Europe & Africa',
+      'north_america': 'North America',
+      'south_america': 'South America',
+      'europe_africa': 'Europe & Africa',
+      '北美': 'North America',
+      '南美': 'South America',
+      '欧非': 'Europe & Africa',
       'all': 'all'
     };
     return mapping[code] || code;
@@ -273,16 +284,22 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     
     const variants = [s];
     const map: Record<string, string[]> = {
-      'NA': ['North America', 'north-america'],
-      'North America': ['NA', 'north-america'],
-      'north-america': ['NA', 'North America'],
-      'SA': ['South America', 'south-america'],
-      'South America': ['SA', 'south-america'],
-      'south-america': ['SA', 'South America'],
-      'EA': ['Europe & Africa', 'EMEA', 'europe-africa'],
-      'EMEA': ['Europe & Africa', 'EA', 'europe-africa'],
-      'Europe & Africa': ['EA', 'EMEA', 'europe-africa'],
-      'europe-africa': ['EA', 'EMEA', 'Europe & Africa'],
+      'NA': ['North America', 'north-america', 'north_america', '北美'],
+      'North America': ['NA', 'north-america', 'north_america', '北美'],
+      'north-america': ['NA', 'North America', 'north_america', '北美'],
+      'north_america': ['NA', 'North America', 'north-america', '北美'],
+      '北美': ['NA', 'North America', 'north-america', 'north_america'],
+      'SA': ['South America', 'south-america', 'south_america', '南美'],
+      'South America': ['SA', 'south-america', 'south_america', '南美'],
+      'south-america': ['SA', 'South America', 'south_america', '南美'],
+      'south_america': ['SA', 'South America', 'south-america', '南美'],
+      '南美': ['SA', 'South America', 'south-america', 'south_america'],
+      'EA': ['Europe & Africa', 'EMEA', 'europe-africa', 'europe_africa', '欧非'],
+      'EMEA': ['Europe & Africa', 'EA', 'europe-africa', 'europe_africa', '欧非'],
+      'Europe & Africa': ['EA', 'EMEA', 'europe-africa', 'europe_africa', '欧非'],
+      'europe-africa': ['EA', 'EMEA', 'Europe & Africa', 'europe_africa', '欧非'],
+      'europe_africa': ['EA', 'EMEA', 'Europe & Africa', 'europe-africa', '欧非'],
+      '欧非': ['EA', 'EMEA', 'Europe & Africa', 'europe-africa', 'europe_africa'],
     };
     
     const mapped = map[s] || [];
@@ -435,6 +452,11 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     setReplyMessage('');
   };
 
+  const openInquiryDetail = (inquiry: any) => {
+    setSelectedInquiry(inquiry);
+    setIsInquiryDetailOpen(true);
+  };
+
   const handleCreateQuotation = () => {
     if (onCreateQuotation && selectedInquiry) {
       onCreateQuotation(selectedInquiry);
@@ -467,6 +489,14 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   // 计算全选状态
   const isAllSelected = filteredInquiries.length > 0 && selectedIds.size === filteredInquiries.length;
   const isSomeSelected = selectedIds.size > 0 && selectedIds.size < filteredInquiries.length;
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredInquiries.map((inquiry) => inquiry.id));
+    const nextSelected = new Set(Array.from(selectedIds).filter((id) => visibleIds.has(id)));
+    if (nextSelected.size !== selectedIds.size) {
+      setSelectedIds(nextSelected);
+    }
+  }, [filteredInquiries, selectedIds]);
 
   return (
     <div className="space-y-4">
@@ -692,68 +722,12 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                       </div>
                     </TableCell>
                     <TableCell className="py-3" style={{ fontSize: '13px' }}>
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <button
-                            className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
-                            onClick={() => setSelectedInquiry(inquiry)}
-                          >
-                            {inquiry.id}
-                          </button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
-                          <DialogTitle className="sr-only">询价单详情</DialogTitle>
-                          <DialogDescription className="sr-only">
-                            查看完整的询价单信息和产品详情
-                          </DialogDescription>
-                          
-                          <div className="absolute top-4 right-16 z-50 flex gap-2 print:hidden">
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
-                              onClick={() => {
-                                document.body.classList.add('printing-rfq');
-                                window.print();
-                                setTimeout(() => {
-                                  document.body.classList.remove('printing-rfq');
-                                }, 1000);
-                              }}
-                            >
-                              <FileText className="w-4 h-4 mr-2" />
-                              打印
-                            </Button>
-                          </div>
-
-                          <DialogClose asChild>
-                            <button
-                              className="absolute right-4 top-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition-colors print:hidden"
-                              aria-label="Close"
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                <line x1="6" y1="6" x2="18" y2="18"></line>
-                              </svg>
-                            </button>
-                          </DialogClose>
-
-                          <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
-                            {selectedInquiry && (
-                              <CustomerInquiryView inquiry={selectedInquiry} />
-                            )}
-                          </div>
-                        </DialogContent>
-                      </Dialog>
+                      <button
+                        className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
+                        onClick={() => openInquiryDetail(inquiry)}
+                      >
+                        {inquiry.id}
+                      </button>
                     </TableCell>
                     <TableCell className="py-3" style={{ fontSize: '12px' }}>
                       <div>
@@ -779,71 +753,15 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                     </TableCell>
                     <TableCell className="py-3 text-center">
                       <div className="flex items-center justify-center gap-2">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => setSelectedInquiry(inquiry)}
-                            >
-                              <Eye className="w-3 h-3 mr-1" />
-                              查看
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
-                            <DialogTitle className="sr-only">询价单详情</DialogTitle>
-                            <DialogDescription className="sr-only">
-                              查看完整的询价单信息和产品详情
-                            </DialogDescription>
-                            
-                            <div className="absolute top-4 right-16 z-50 flex gap-2 print:hidden">
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
-                                onClick={() => {
-                                  document.body.classList.add('printing-rfq');
-                                  window.print();
-                                  setTimeout(() => {
-                                    document.body.classList.remove('printing-rfq');
-                                  }, 1000);
-                                }}
-                              >
-                                <FileText className="w-4 h-4 mr-2" />
-                                打印
-                              </Button>
-                            </div>
-
-                            <DialogClose asChild>
-                              <button
-                                className="absolute right-4 top-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition-colors print:hidden"
-                                aria-label="Close"
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                              </button>
-                            </DialogClose>
-
-                            <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
-                              {selectedInquiry && (
-                                <CustomerInquiryView inquiry={selectedInquiry} />
-                              )}
-                            </div>
-                          </DialogContent>
-                        </Dialog>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => openInquiryDetail(inquiry)}
+                        >
+                          <Eye className="w-3 h-3 mr-1" />
+                          查看
+                        </Button>
                         
                         {/* 下推成本询报按钮 */}
                         {hasQR ? (
@@ -874,6 +792,61 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
           </Table>
         </div>
       </div>
+
+      <Dialog open={isInquiryDetailOpen} onOpenChange={setIsInquiryDetailOpen}>
+        <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
+          <DialogTitle className="sr-only">询价单详情</DialogTitle>
+          <DialogDescription className="sr-only">
+            查看完整的询价单信息和产品详情
+          </DialogDescription>
+          
+          <div className="absolute top-4 right-16 z-50 flex gap-2 print:hidden">
+            <Button 
+              variant="outline" 
+              size="sm"
+              className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
+              onClick={() => {
+                document.body.classList.add('printing-rfq');
+                window.print();
+                setTimeout(() => {
+                  document.body.classList.remove('printing-rfq');
+                }, 1000);
+              }}
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              打印
+            </Button>
+          </div>
+
+          <DialogClose asChild>
+            <button
+              className="absolute right-4 top-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition-colors print:hidden"
+              aria-label="Close"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </DialogClose>
+
+          <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
+            {selectedInquiry && (
+              <CustomerInquiryView inquiry={selectedInquiry} />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
       
       {/* 🔥 报价请求对话框 */}
       <CreateQuotationRequestDialog

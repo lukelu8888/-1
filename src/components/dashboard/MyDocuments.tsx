@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { FileText, Eye, Download, Printer, Search, Filter, Calendar, ChevronDown } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -18,6 +18,13 @@ import type { CommercialInvoiceData } from '../documents/templates/CommercialInv
 import type { PackingListData } from '../documents/templates/PackingListDocument';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { useInquiry } from '../../contexts/InquiryContext';
+import { useSalesQuotations } from '../../contexts/SalesQuotationContext';
+import { useSalesContracts } from '../../contexts/SalesContractContext';
+import { useOrders } from '../../contexts/OrderContext';
+import { useUser } from '../../contexts/UserContext';
+import type { BusinessDomain } from '../../lib/erp-core/types';
+import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 
 /**
  * 📄 客户文档中心
@@ -33,6 +40,7 @@ interface DocumentItem {
   id: string;
   type: 'inquiry' | 'quotation' | 'sc' | 'pi' | 'ci' | 'pl';
   number: string;
+  externalNumber?: string;
   date: string;
   title: string;
   status: 'draft' | 'sent' | 'confirmed' | 'completed';
@@ -40,67 +48,153 @@ interface DocumentItem {
 }
 
 export function MyDocuments() {
+  const { user } = useUser();
+  const { getUserInquiries } = useInquiry();
+  const { quotations: allQuotations } = useSalesQuotations();
+  const { contracts } = useSalesContracts();
+  const { orders } = useOrders();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const documentRef = useRef<HTMLDivElement>(null);
 
-  // 示例文档列表（实际应该从后端获取）
-  const documents: DocumentItem[] = [
-    {
-      id: '1',
-      type: 'inquiry',
-      number: 'INQ-NA-20251210-001',
-      date: '2025-12-10',
-      title: 'Electrical Components Inquiry',
-      status: 'confirmed',
-    },
-    {
-      id: '2',
-      type: 'quotation',
-      number: 'QT-NA-20251211-001',
-      date: '2025-12-11',
-      title: 'Quotation for Electrical Components',
-      status: 'sent',
-      amount: '$15,890.00',
-    },
-    {
-      id: '3',
-      type: 'sc',
-      number: 'SC-NA-20251212-001',
-      date: '2025-12-12',
-      title: 'Sales Contract - Electrical Components',
-      status: 'confirmed',
-      amount: '$15,890.00',
-    },
-    {
-      id: '4',
-      type: 'pi',
-      number: 'PI-NA-20251213-001',
-      date: '2025-12-13',
-      title: 'Proforma Invoice',
-      status: 'sent',
-      amount: '$15,890.00',
-    },
-    {
-      id: '5',
-      type: 'ci',
-      number: 'CI-NA-20251214-001',
-      date: '2025-12-14',
-      title: 'Commercial Invoice',
-      status: 'completed',
-      amount: '$15,890.00',
-    },
-    {
-      id: '6',
-      type: 'pl',
-      number: 'PL-NA-20251214-001',
-      date: '2025-12-14',
-      title: 'Packing List',
-      status: 'completed',
-    },
-  ];
+  const currentEmail = String(user?.email || '').toLowerCase();
+  const companyId = (user as any)?.companyId ? String((user as any).companyId) : undefined;
+
+  const formatAmount = (amount?: number, currency?: string) => {
+    if (typeof amount !== 'number' || Number.isNaN(amount)) return undefined;
+    const code = (currency || 'USD').toUpperCase();
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  };
+
+  const mapInquiryStatus = (status?: string): DocumentItem['status'] => {
+    const s = String(status || '').toLowerCase();
+    if (s === 'draft') return 'draft';
+    if (s === 'pending' || s === 'quoted') return 'sent';
+    return 'confirmed';
+  };
+
+  const mapQuotationStatus = (customerStatus?: string): DocumentItem['status'] => {
+    const s = String(customerStatus || '').toLowerCase();
+    if (s === 'not_sent') return 'draft';
+    if (s === 'sent' || s === 'viewed' || s === 'negotiating') return 'sent';
+    if (s === 'accepted') return 'confirmed';
+    return 'completed';
+  };
+
+  const mapContractStatus = (status?: string): DocumentItem['status'] => {
+    const s = String(status || '').toLowerCase();
+    if (s === 'draft' || s === 'pending_supervisor' || s === 'pending_director') return 'draft';
+    if (s === 'approved' || s === 'sent') return 'sent';
+    if (s === 'completed' || s === 'cancelled' || s === 'rejected') return 'completed';
+    return 'confirmed';
+  };
+
+  const getMappedExternalNo = (domain: BusinessDomain, internalNo: string) => {
+    if (!internalNo) return undefined;
+    return resolveDisplayNumber({ domain, internalNo, companyId }).externalNo;
+  };
+
+  const documents: DocumentItem[] = useMemo(() => {
+    const result: DocumentItem[] = [];
+    if (!currentEmail) return result;
+
+    const inquiries = getUserInquiries(currentEmail);
+    inquiries.forEach((inq: any) => {
+      const number = inq.inquiryNumber || inq.id || 'N/A';
+      const firstProduct = inq.products?.[0]?.productName || inq.products?.[0]?.name || 'Inquiry';
+      result.push({
+        id: `inq-${inq.id}`,
+        type: 'inquiry',
+        number,
+        externalNumber: getMappedExternalNo('inquiry', number),
+        date: String(inq.date || '').slice(0, 10) || new Date(inq.createdAt || Date.now()).toISOString().slice(0, 10),
+        title: String(firstProduct),
+        status: mapInquiryStatus(inq.status),
+      });
+    });
+
+    const quotations = (allQuotations || []).filter((q: any) => String(q.customerEmail || '').toLowerCase() === currentEmail);
+    quotations.forEach((qt: any) => {
+      const firstProduct = qt.items?.[0]?.productName || 'Quotation';
+      result.push({
+        id: `qt-${qt.id}`,
+        type: 'quotation',
+        number: qt.qtNumber || qt.id,
+        externalNumber: getMappedExternalNo('quotation', qt.qtNumber || qt.id),
+        date: String(qt.createdAt || '').slice(0, 10),
+        title: `Quotation - ${firstProduct}`,
+        status: mapQuotationStatus(qt.customerStatus),
+        amount: formatAmount(Number(qt.totalPrice || 0), qt.currency),
+      });
+    });
+
+    const customerContracts = (contracts || []).filter((c: any) => String(c.customerEmail || '').toLowerCase() === currentEmail);
+    customerContracts.forEach((sc: any) => {
+      const baseDate = String(sc.updatedAt || sc.createdAt || '').slice(0, 10);
+      const amount = formatAmount(Number(sc.totalAmount || 0), sc.currency);
+      const scStatus = mapContractStatus(sc.status);
+      const scNo = sc.contractNumber || sc.id;
+      const order = (orders || []).find((o: any) => (o.orderNumber || o.id) === scNo);
+      const orderStatus = String(order?.status || '').toLowerCase();
+
+      result.push({
+        id: `sc-${sc.id}`,
+        type: 'sc',
+        number: scNo,
+        externalNumber: getMappedExternalNo('contract', scNo),
+        date: baseDate,
+        title: `Sales Contract - ${sc.customerCompany || sc.customerName || 'Customer'}`,
+        status: scStatus,
+        amount,
+      });
+
+      if (['sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'po_generated', 'production', 'shipped', 'completed'].includes(String(sc.status || '').toLowerCase())) {
+        result.push({
+          id: `pi-${sc.id}`,
+          type: 'pi',
+          number: `PI-${scNo}`,
+          externalNumber: getMappedExternalNo('document', `PI-${scNo}`),
+          date: baseDate,
+          title: 'Proforma Invoice',
+          status: scStatus === 'completed' ? 'completed' : 'sent',
+          amount,
+        });
+      }
+
+      if (orderStatus === 'shipped' || orderStatus === 'delivered' || String(sc.status || '').toLowerCase() === 'completed') {
+        result.push({
+          id: `ci-${sc.id}`,
+          type: 'ci',
+          number: `CI-${scNo}`,
+          externalNumber: getMappedExternalNo('document', `CI-${scNo}`),
+          date: baseDate,
+          title: 'Commercial Invoice',
+          status: orderStatus === 'delivered' ? 'completed' : 'confirmed',
+          amount,
+        });
+        result.push({
+          id: `pl-${sc.id}`,
+          type: 'pl',
+          number: `PL-${scNo}`,
+          externalNumber: getMappedExternalNo('document', `PL-${scNo}`),
+          date: baseDate,
+          title: 'Packing List',
+          status: orderStatus === 'delivered' ? 'completed' : 'confirmed',
+          amount,
+        });
+      }
+    });
+
+    return result.sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [allQuotations, contracts, currentEmail, getUserInquiries, orders]);
 
   // 文档类型标签
   const docTypeLabels: Record<string, { label: string; color: string }> = {
@@ -493,7 +587,12 @@ export function MyDocuments() {
                         </Badge>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-gray-900">{doc.number}</span>
+                        <div className="space-y-0.5">
+                          <span className="text-gray-900 block">{doc.number}</span>
+                          {doc.externalNumber && doc.externalNumber !== doc.number && (
+                            <span className="text-xs text-gray-500 block">Customer ERP: {doc.externalNumber}</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-gray-900">{doc.title}</span>

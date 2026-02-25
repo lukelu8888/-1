@@ -7,7 +7,6 @@ import {
   Clock,
   Package,
   DollarSign,
-  Building2,
   AlertCircle,
   CheckCircle2,
   RefreshCw,
@@ -43,30 +42,38 @@ import {
   DialogTitle,
   DialogFooter
 } from '../ui/dialog';
-import { Label } from '../ui/label';
-import { Textarea } from '../ui/textarea';
-import { EditableSelect } from '../ui/editable-select'; // 🔥 可编辑下拉选择
 import { toast } from 'sonner@2.0.3';
 import { PurchaseOrderDocument, PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument'; // 🔥 文档中心采购订单模板
-import { SupplierRFQDocument, SupplierRFQData } from '../documents/templates/SupplierRFQDocument'; // 🔥 供应商询价单模板
+import { SupplierRFQData } from '../documents/templates/SupplierRFQDocument'; // 🔥 供应商询价单模板
 import QuoteCreationIntelligent from './QuoteCreationIntelligent'; // 🔥 智能报价创建页面
 import { PurchaseRequirementDocument, PurchaseRequirementDocumentData } from '../documents/templates/PurchaseRequirementDocument'; // 🔥 采购需求单模板
-import SupplierQuotationDocumentViewer from '../supplier/SupplierQuotationDocumentViewer'; // 🔥 供应商报价单查看器
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport'; // 🔥 PDF导出工具
 import { usePurchaseRequirements, PurchaseRequirement, PurchaserFeedback } from '../../contexts/PurchaseRequirementContext'; // 🔥 采购需求Context
 import { usePurchaseOrders, PurchaseOrder as PurchaseOrderType, PurchaseOrderItem } from '../../contexts/PurchaseOrderContext'; // 🔥 采购订单Context
 import { useRFQs, RFQ, RFQProduct } from '../../contexts/RFQContext'; // 🔥 RFQ Context
 import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 报价Context（用于保存业务员报价）
-import { DatePicker } from '../ui/date-picker'; // 🔥 日期选择器
 import { PurchaserFeedbackForm } from './PurchaserFeedbackForm'; // 🔥 智能采购反馈表单
 import { useUser } from '../../contexts/UserContext'; // 🔥 用户Context
-import { migrateRFQQuotesToBJQuotations, checkMigrationStatus } from '../../utils/migrateQuotations'; // 🔥 报价数据迁移工具
+import { useApproval } from '../../contexts/ApprovalContext';
 import { generateXJNumber } from '../../utils/rfqNumberGenerator'; // 🔥 XJ编号生成器
+import { generateCGNumber, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
 import { apiFetchJson } from '../../api/backend-auth';
 import { TERMS_OPTIONS } from './purchase-order/purchaseOrderConstants'; // 🔥 从常量文件导入
-import { 
-  getPOStatusConfig, 
-  getPaymentStatusConfig, 
+import { PurchaseOrderEditDialog } from './purchase-order/PurchaseOrderEditDialog';
+import { PurchaseOrderCreateDialogs } from './purchase-order/PurchaseOrderCreateDialogs';
+import { EditRFQDialog } from './purchase-order/EditRFQDialog';
+import { RFQPreviewDialog } from './purchase-order/RFQPreviewDialog';
+import { SupplierQuotationDialog } from './purchase-order/SupplierQuotationDialog';
+import { CreateRFQAndHistoryDialogs } from './purchase-order/CreateRFQAndHistoryDialogs';
+import { PurchaseOrdersTab } from './purchase-order/PurchaseOrdersTab';
+import {
+  createInitialCreateOrderForm,
+  createInitialEditPOForm,
+  EditPOFormState,
+  normalizeCurrencyCode,
+  normalizeRegionalDocNo,
+} from './purchase-order/purchaseOrderEditConfig';
+import {
   getBusinessTypeLabel, 
   getUrgencyConfig,
   convertToPOData,
@@ -74,6 +81,7 @@ import {
   desensitizeFeedback,
   generateRFQDocumentData
 } from './purchase-order/purchaseOrderUtils'; // 🔥 从工具函数文件导入
+import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 
 /**
  * 🔥 采购订单管理 - 台湾大厂风格
@@ -82,20 +90,26 @@ import {
 
 // 🔥 采购订单类型已从PurchaseOrderContext导入，不再在此定义
 // 🔥 TERMS_OPTIONS已从purchase-order/purchaseOrderConstants.ts导入，不再在此定义
+const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
 
 const PurchaseOrderManagementEnhanced: React.FC = () => {
-  console.log('🔥🔥🔥 PurchaseOrderManagementEnhanced组件已加载 - 版本2024-12-21 带编辑按钮');
   
   // 🔥 使用采购需求Context - 添加deleteRequirement
   const { requirements, updateRequirement, deleteRequirement } = usePurchaseRequirements();
   // 🔥 使用采购订单Context
-  const { purchaseOrders, addPurchaseOrder, deletePurchaseOrder } = usePurchaseOrders();
+  const { purchaseOrders, addPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder } = usePurchaseOrders();
   // 🔥 使用RFQ Context - 获取rfqs列表用于计算状态
   const { rfqs, addRFQ, updateRFQ, deleteRFQ } = useRFQs();
   // 🔥 使用报价Context - 用于保存业务员创建的报价单
   const { addQuotation } = useQuotations();
   // 🔥 用户Context - 获取当前用户信息
   const { user } = useUser();
+  const { requests: approvalRequests, addApprovalRequest, updateApprovalRequest } = useApproval();
+  const isProcurementRequestRecord = React.useCallback((po: PurchaseOrderType) => {
+    const reqStatus = String((po as any).procurementRequestStatus || '').trim();
+    const poNo = String(po.poNumber || '').trim().toUpperCase();
+    return reqStatus === 'pending_procurement_assignment' || poNo.startsWith('CQ-');
+  }, []);
   const requestPurchaseOrders = React.useCallback(() => {
     // 直接请求一次，确保点击“采购订单”Tab时 Network 一定能看到 /api/purchase-orders
     void apiFetchJson<{ purchaseOrders: any[] }>('/api/purchase-orders')
@@ -110,7 +124,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     // 进入采购订单页时主动请求一次
     requestPurchaseOrders();
   }, [requestPurchaseOrders]);
-  const [activeTab, setActiveTab] = useState<'requirements' | 'rfq-management' | 'supplier-quotations' | 'orders'>('orders');
+  const [activeTab, setActiveTab] = useState<'requirements' | 'rfq-management' | 'supplier-quotations' | 'procurement-requests' | 'orders'>('orders');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [selectedSource, setSelectedSource] = useState('all');
@@ -129,15 +143,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 创建采购订单对话框状态
   const [showCreateOrderDialog, setShowCreateOrderDialog] = useState(false);
   const [selectedRequirement, setSelectedRequirement] = useState<PurchaseRequirement | null>(null);
-  const [createOrderForm, setCreateOrderForm] = useState({
-    supplierName: '',
-    supplierCode: '',
-    currency: 'USD',
-    paymentTerms: '30% 预付，70% 发货前付清',
-    deliveryTerms: 'EXW 工厂交货',
-    expectedDate: '',
-    remarks: ''
-  });
+  const [createOrderForm, setCreateOrderForm] = useState(createInitialCreateOrderForm);
+  const [showEditPODialog, setShowEditPODialog] = useState(false);
+  const [editingPO, setEditingPO] = useState<PurchaseOrderType | null>(null);
+  const [editPOForm, setEditPOForm] = useState<EditPOFormState>(createInitialEditPOForm);
+  const [editPOItems, setEditPOItems] = useState<PurchaseOrderItem[]>([]);
+  const [editPOOrderDate, setEditPOOrderDate] = useState<Date | undefined>(undefined);
+  const [editPOExpectedDate, setEditPOExpectedDate] = useState<Date | undefined>(undefined);
+  const [editPOActualDate, setEditPOActualDate] = useState<Date | undefined>(undefined);
   
   // 🔥 供应商选择对话框状态
   const [showSupplierDialog, setShowSupplierDialog] = useState(false);
@@ -191,6 +204,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 采购订单 - 搜索和批量删除状态
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [procurementRequestSearchTerm, setProcurementRequestSearchTerm] = useState('');
+  const [selectedProcurementRequestIds, setSelectedProcurementRequestIds] = useState<string[]>([]);
+  const [showAllocationDialog, setShowAllocationDialog] = useState(false);
+  const [allocationPO, setAllocationPO] = useState<PurchaseOrderType | null>(null);
+  const [submittingAllocation, setSubmittingAllocation] = useState(false);
+  const [allocationSupplierSearchTerm, setAllocationSupplierSearchTerm] = useState('');
+  const [allocationSelectedSupplierCodes, setAllocationSelectedSupplierCodes] = useState<string[]>([]);
+  const [allocationSelectedProductKeys, setAllocationSelectedProductKeys] = useState<string[]>([]);
 
   // 🔥 智能采购反馈 - 状态管理
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
@@ -279,22 +300,139 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [supplierQuotations, setSupplierQuotations] = useState<any[]>([]);
   const [selectedSupplierQuotation, setSelectedSupplierQuotation] = useState<any>(null);
   const [showSupplierQuotationDialog, setShowSupplierQuotationDialog] = useState(false);
+  const DELETED_SUPPLIER_QUOTATIONS_KEY = 'deleted_supplier_quotations';
+  const [salesContractsLite, setSalesContractsLite] = useState<any[]>([]);
+  const supplierQuotationSnapshot = useMemo(() => {
+    if (supplierQuotations.length > 0) return supplierQuotations;
+    try {
+      const stored = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  }, [supplierQuotations]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSalesContractsLite = async () => {
+      try {
+        const res = await apiFetchJson<{ contracts: any[] }>('/api/sales-contracts');
+        if (!cancelled && Array.isArray(res?.contracts)) {
+          setSalesContractsLite(res.contracts);
+        }
+      } catch {
+        if (cancelled) return;
+        try {
+          const local = JSON.parse(localStorage.getItem('salesContracts') || '[]');
+          if (Array.isArray(local)) setSalesContractsLite(local);
+        } catch {
+          setSalesContractsLite([]);
+        }
+      }
+    };
+    void loadSalesContractsLite();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const getDeletedSupplierQuotationIds = React.useCallback((): Set<string> => {
+    try {
+      const raw = localStorage.getItem(DELETED_SUPPLIER_QUOTATIONS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return new Set<string>();
+      return new Set(parsed.map((id) => String(id)));
+    } catch {
+      return new Set<string>();
+    }
+  }, []);
+
+  const addDeletedSupplierQuotationIds = React.useCallback((ids: string[]) => {
+    const merged = getDeletedSupplierQuotationIds();
+    ids.forEach((id) => merged.add(String(id)));
+    localStorage.setItem(DELETED_SUPPLIER_QUOTATIONS_KEY, JSON.stringify(Array.from(merged)));
+    addTombstones('quotation', ids.map((id) => String(id)), {
+      reason: 'manual-delete-admin-supplier-quotation',
+      deletedBy: user?.email || 'admin',
+    });
+  }, [getDeletedSupplierQuotationIds]);
   
   // 🔥 加载供应商报价数据：优先从后端接口拉取（采购员可见供应商提交的 BJ）
   const loadSupplierQuotationsFromApi = React.useCallback(async () => {
     try {
       const res = await apiFetchJson<{ quotations: any[] }>('/api/supplier-quotations');
-      const list = res?.quotations ?? [];
+      const deletedIds = getDeletedSupplierQuotationIds();
+      const list = filterNotDeleted(
+        'quotation',
+        (res?.quotations ?? []).filter((q: any) => !deletedIds.has(String(q.id))),
+        (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.rfqNumber || '')],
+      );
       setSupplierQuotations(list);
+      try {
+        localStorage.setItem('supplierQuotations', JSON.stringify(list));
+      } catch {}
     } catch (e) {
       const stored = localStorage.getItem('supplierQuotations');
       if (stored) {
         const allQuotations = JSON.parse(stored);
-        const visibleQuotations = allQuotations.filter((q: any) => q.status !== 'draft');
+        const deletedIds = getDeletedSupplierQuotationIds();
+        const visibleQuotations = filterNotDeleted(
+          'quotation',
+          allQuotations.filter((q: any) => q.status !== 'draft' && !deletedIds.has(String(q.id))),
+          (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.rfqNumber || '')],
+        );
         setSupplierQuotations(visibleQuotations);
       }
     }
-  }, []);
+  }, [getDeletedSupplierQuotationIds]);
+
+  const handleAcceptSupplierQuotation = React.useCallback(async () => {
+    if (!selectedSupplierQuotation) return;
+    try {
+      await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(selectedSupplierQuotation.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'accepted' }),
+      });
+      setSupplierQuotations((prev) =>
+        prev.map((q: any) => (q.id === selectedSupplierQuotation.id ? { ...q, status: 'accepted' as const } : q)),
+      );
+      setShowSupplierQuotationDialog(false);
+      toast.success(
+        <div className="space-y-1">
+          <p className="font-semibold">✅ 已接受报价</p>
+          <p className="text-sm">报价单号: {selectedSupplierQuotation.quotationNo}</p>
+          <p className="text-xs text-gray-500">刷新后状态会保持，可在采购订单中创建订单</p>
+        </div>,
+      );
+    } catch (e: any) {
+      toast.error(e?.message || '操作失败，请重试');
+    }
+  }, [selectedSupplierQuotation]);
+
+  const handleRejectSupplierQuotation = React.useCallback(async () => {
+    if (!selectedSupplierQuotation) return;
+    try {
+      await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(selectedSupplierQuotation.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'rejected' }),
+      });
+      setSupplierQuotations((prev) =>
+        prev.map((q: any) => (q.id === selectedSupplierQuotation.id ? { ...q, status: 'rejected' as const } : q)),
+      );
+      setShowSupplierQuotationDialog(false);
+      toast.info(
+        <div className="space-y-1">
+          <p className="font-semibold">❌ 已拒绝报价</p>
+          <p className="text-sm">报价单号: {selectedSupplierQuotation.quotationNo}</p>
+          <p className="text-xs text-gray-500">刷新后状态会保持</p>
+        </div>,
+      );
+    } catch (e: any) {
+      toast.error(e?.message || '操作失败，请重试');
+    }
+  }, [selectedSupplierQuotation]);
 
   React.useEffect(() => {
     if (activeTab === 'supplier-quotations') {
@@ -306,14 +444,15 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 统计数据
   const stats = useMemo(() => {
-    const total = purchaseOrders.length;
-    const pending = purchaseOrders.filter(po => po.status === 'pending').length;
-    const producing = purchaseOrders.filter(po => po.status === 'producing').length;
-    const completed = purchaseOrders.filter(po => po.status === 'completed').length;
-    const totalValue = purchaseOrders.reduce((sum, po) => sum + po.totalAmount, 0);
+    const orderPool = purchaseOrders.filter((po) => !isProcurementRequestRecord(po));
+    const total = orderPool.length;
+    const pending = orderPool.filter(po => po.status === 'pending').length;
+    const producing = orderPool.filter(po => po.status === 'producing').length;
+    const completed = orderPool.filter(po => po.status === 'completed').length;
+    const totalValue = orderPool.reduce((sum, po) => sum + po.totalAmount, 0);
 
     return { total, pending, producing, completed, totalValue };
-  }, [purchaseOrders]);
+  }, [purchaseOrders, isProcurementRequestRecord]);
 
   // 需求统计 - 🔥 使用动态计算的状态
   const requirementStats = useMemo(() => {
@@ -328,29 +467,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 旧的筛选订单逻辑已删除，使用下面新的 filteredOrders
 
-  // 🔥 筛选供应商 - 根据供应商名称、产品名称、产品类别
-  const filteredSuppliers = useMemo(() => {
-    if (!supplierSearchTerm) return allSuppliers;
-
-    const kw = supplierSearchTerm.trim().toLowerCase();
-    return allSuppliers.filter(supplier => {
-      const hay = [
-        supplier.name,
-        supplier.nameEn,
-        supplier.category,
-        supplier.code,
-        supplier.region,
-        supplier.contact,
-        supplier.email,
-        supplier.phone,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(kw);
-    });
-  }, [supplierSearchTerm, allSuppliers]);
-  
   // 🔥 筛选询价单 - 根据询价单号、供应商、关联需求
   const filteredRFQs = useMemo(() => {
     if (!rfqSearchTerm) return rfqs;
@@ -390,24 +506,476 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     );
   }, [supplierQuotations, quotationSearchTerm]);
 
-  // 🔥 筛选采购订单 - 根据订单号、供应商、需求编号
+  // 🔥 筛选采购请求池（业务员提请采购，待采购员分配供应商）
+  const filteredProcurementRequests = useMemo(() => {
+    const requests = purchaseOrders.filter((po) => isProcurementRequestRecord(po));
+    const keyword = procurementRequestSearchTerm.trim().toLowerCase();
+    if (!keyword) return requests;
+
+    return requests.filter((order) =>
+      order.poNumber?.toLowerCase().includes(keyword) ||
+      String((order as any).rfqNumber || '').toLowerCase().includes(keyword) ||
+      String(order.sourceRef || '').toLowerCase().includes(keyword) ||
+      String(order.requirementNo || (order as any).requirementNumber || '').toLowerCase().includes(keyword) ||
+      order.supplierName?.toLowerCase().includes(keyword) ||
+      order.supplierCode?.toLowerCase().includes(keyword)
+    );
+  }, [purchaseOrders, procurementRequestSearchTerm, isProcurementRequestRecord]);
+
+  const getProcurementChildOrders = React.useCallback((po: PurchaseOrderType) => {
+    const parentNo = String(po.poNumber || '').trim().toUpperCase();
+    if (!parentNo.startsWith('CQ-')) return [] as PurchaseOrderType[];
+    return purchaseOrders.filter((child) => {
+      const childNo = String(child.poNumber || '').trim().toUpperCase();
+      const parent = String((child as any).parentRequestPoNumber || '').trim().toUpperCase();
+      return !!parent && parent === parentNo && !childNo.startsWith('CQ-');
+    });
+  }, [purchaseOrders]);
+
+  const getProcurementRequestRuntimeStatus = React.useCallback((po: PurchaseOrderType) => {
+    const requestItems = po.items || [];
+    const children = getProcurementChildOrders(po);
+    if (children.length === 0) return 'pending_procurement_assignment';
+    if (requestItems.length === 0) return 'partial_allocated';
+
+    const isMatched = (reqItem: any) => {
+      const reqId = String(reqItem?.id || '').trim();
+      const reqModel = String(reqItem?.modelNo || '').trim().toLowerCase();
+      const reqName = String(reqItem?.productName || '').trim().toLowerCase();
+      return children.some((child) =>
+        (child.items || []).some((childItem: any) => {
+          const sameId = reqId && String(childItem?.id || '').trim() === reqId;
+          const sameModel = reqModel && String(childItem?.modelNo || '').trim().toLowerCase() === reqModel;
+          const sameName = reqName && String(childItem?.productName || '').trim().toLowerCase() === reqName;
+          return sameId || sameModel || sameName;
+        })
+      );
+    };
+
+    const matchedCount = requestItems.filter((item) => isMatched(item)).length;
+    if (matchedCount >= requestItems.length) return 'allocated_completed';
+    if (matchedCount > 0) return 'partial_allocated';
+    return 'pending_procurement_assignment';
+  }, [getProcurementChildOrders]);
+
+  const getProcurementRequestStatusText = (status: string) => {
+    if (status === 'allocated_completed') return '已分配完成';
+    if (status === 'partial_allocated') return '部分分配';
+    return '待分配供应商';
+  };
+
+  const pendingProcurementRequestCount = useMemo(() => {
+    const requests = purchaseOrders.filter((po) => isProcurementRequestRecord(po));
+    return requests.filter((po) => getProcurementRequestRuntimeStatus(po) !== 'allocated_completed').length;
+  }, [purchaseOrders, isProcurementRequestRecord, getProcurementRequestRuntimeStatus]);
+
+  // 采购请求状态自动随分配结果变化（包括下游CG被删除后自动恢复可分配）
+  useEffect(() => {
+    const requests = purchaseOrders.filter((po) => isProcurementRequestRecord(po));
+    requests.forEach((po) => {
+      const runtimeStatus = getProcurementRequestRuntimeStatus(po);
+      const persisted = String((po as any).procurementRequestStatus || '').trim();
+      if (persisted !== runtimeStatus) {
+        updatePurchaseOrder(po.id, { procurementRequestStatus: runtimeStatus } as any);
+      }
+    });
+  }, [purchaseOrders, isProcurementRequestRecord, getProcurementRequestRuntimeStatus, updatePurchaseOrder]);
+
+  // 🔥 筛选采购订单 - 根据订单号、供应商、需求编号（不含“待分配”的采购请求）
   const filteredOrders = useMemo(() => {
-    if (!orderSearchTerm) return purchaseOrders;
-    
+    const orderPool = purchaseOrders.filter((po) => !isProcurementRequestRecord(po));
+    if (!orderSearchTerm) return orderPool;
+
     const lowerSearchTerm = orderSearchTerm.toLowerCase();
-    return purchaseOrders.filter(order => 
-      order.orderNumber?.toLowerCase().includes(lowerSearchTerm) ||
+    return orderPool.filter(order => 
+      order.poNumber?.toLowerCase().includes(lowerSearchTerm) ||
       order.supplierName?.toLowerCase().includes(lowerSearchTerm) ||
       order.requirementNo?.toLowerCase().includes(lowerSearchTerm) ||
+      String((order as any).requirementNumber || '').toLowerCase().includes(lowerSearchTerm) ||
       order.supplierCode?.toLowerCase().includes(lowerSearchTerm)
     );
-  }, [purchaseOrders, orderSearchTerm]);
+  }, [purchaseOrders, orderSearchTerm, isProcurementRequestRecord]);
+
+  // 采购请求兜底修复：
+  // 若业务员已发起“请求采购”并在采购需求中留下 CQ 标记，但采购请求记录异常缺失，则自动补回 CQ 请求记录
+  useEffect(() => {
+    if (!purchaseRequirements.length) return;
+
+    const existingByPo = new Set(
+      (purchaseOrders || []).map((po) => String(po.poNumber || '').trim().toUpperCase()).filter(Boolean)
+    );
+
+    purchaseRequirements.forEach((req) => {
+      const note = String((req as any).specialRequirements || '');
+      const match = note.match(/采购单号[:：]\s*(CQ-\d{6}-\d{4})/i);
+      if (!match) return;
+
+      const cqNo = String(match[1] || '').trim().toUpperCase();
+      if (!cqNo || existingByPo.has(cqNo)) return;
+
+      const requirementNo = String(req.requirementNo || '').trim();
+        const inferredRfq = String((req as any).sourceInquiryNumber || '').trim();
+        const recoveredItems = Array.isArray((req as any).items)
+          ? (req as any).items.map((item: any, idx: number) => ({
+              id: String(item?.id || `item-${idx + 1}`),
+              productName: String(item?.productName || 'Unknown Product'),
+              modelNo: String(item?.modelNo || item?.productName || '-'),
+              specification: String(item?.specification || ''),
+              quantity: Number(item?.quantity || 0),
+              unit: String(item?.unit || 'PCS'),
+              unitPrice: Number(item?.targetPrice || 0),
+              currency: normalizeCurrencyCode(item?.targetCurrency || req?.currency || ''),
+              subtotal: Number(item?.quantity || 0) * Number(item?.targetPrice || 0),
+              hsCode: String(item?.hsCode || ''),
+              packingRequirement: String(item?.packingRequirement || ''),
+              remarks: String(item?.remarks || ''),
+            }))
+          : [];
+        const recoveredCurrency =
+          normalizeCurrencyCode((req as any)?.currency || recoveredItems[0]?.currency || 'USD') || 'USD';
+
+        addPurchaseOrder({
+          id: `recovered-${cqNo.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          poNumber: cqNo,
+          requirementNo,
+        sourceRef: inferredRfq || String(req.sourceRef || '').trim(),
+        sourceSONumber: String((req as any).salesOrderNo || req.sourceRef || '').trim(),
+        salesContractNumber: String((req as any).sourceRef || '').trim(),
+          rfqNumber: inferredRfq,
+          supplierName: '待采购分配',
+          supplierCode: 'TBD',
+          region: String((req as any).region || 'NA'),
+          items: recoveredItems,
+          totalAmount: 0,
+          currency: recoveredCurrency,
+        paymentTerms: '待采购确认',
+        deliveryTerms: '待采购确认',
+        orderDate: String((req as any).createdDate || new Date().toISOString()),
+        expectedDate: String((req as any).requiredDate || new Date().toISOString()),
+        status: 'pending',
+        paymentStatus: 'unpaid',
+        remarks: note || '系统自动回填采购请求',
+        createdBy: String((req as any).createdBy || 'system'),
+        createdDate: String((req as any).createdDate || new Date().toISOString()),
+        updatedDate: new Date().toISOString(),
+        procurementRequestStatus: 'pending_procurement_assignment',
+      } as any);
+    });
+  }, [purchaseRequirements, purchaseOrders, addPurchaseOrder]);
+
+  const requirementByNo = useMemo(() => {
+    const byNo = new Map<string, PurchaseRequirement>();
+    purchaseRequirements.forEach((req) => {
+      if (req.requirementNo) byNo.set(req.requirementNo, req);
+    });
+    return byNo;
+  }, [purchaseRequirements]);
+
+  const getRequirementNoFromPO = (po: PurchaseOrderType): string => {
+    return String(po.requirementNo || (po as any).requirementNumber || '').trim();
+  };
+
+  const parseDateLike = (value: unknown): Date | undefined => {
+    const raw = String(value || '').trim();
+    if (!raw) return undefined;
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? undefined : d;
+  };
+
+  const formatDateForStorage = (date?: Date): string => {
+    if (!date) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const toNumericAmount = (value: unknown): number => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const getQuotationItems = (quotation: any): any[] => {
+    if (Array.isArray(quotation?.items)) return quotation.items;
+    if (Array.isArray(quotation?.quoteData?.items)) return quotation.quoteData.items;
+    if (Array.isArray(quotation?.documentData?.products)) {
+      return quotation.documentData.products.map((p: any) => ({
+        id: p?.id || p?.productId || '',
+        productName: p?.description || p?.productName || '',
+        modelNo: p?.modelNo || '',
+        unitPrice: p?.unitPrice || 0,
+        currency: p?.currency || quotation?.currency || '',
+      }));
+    }
+    return [];
+  };
+
+  const findRequirementForPO = (po: PurchaseOrderType): PurchaseRequirement | undefined => {
+    const requirementNo = getRequirementNoFromPO(po);
+    if (requirementNo && requirementByNo.has(requirementNo)) {
+      return requirementByNo.get(requirementNo);
+    }
+    const refs = [
+      String((po as any).salesContractNumber || '').trim(),
+      String((po as any).sourceSONumber || '').trim(),
+      String(po.sourceRef || '').trim(),
+      String((po as any).quotationNumber || '').trim(),
+    ].filter(Boolean);
+    if (refs.length === 0) return undefined;
+    return purchaseRequirements.find((req: any) => {
+      const reqRefs = [
+        String(req.salesContractNumber || '').trim(),
+        String(req.salesOrderNo || '').trim(),
+        String(req.sourceRef || '').trim(),
+        String(req.quotationNumber || '').trim(),
+      ];
+      return refs.some((ref) => reqRefs.includes(ref));
+    });
+  };
+
+  const getRFQNumberByRequirementNo = (requirementNo: string): string => {
+    if (!requirementNo) return '';
+    const matchedRFQ = rfqs.find((rfq) => String(rfq.requirementNo || '').trim() === requirementNo);
+    const candidate = String(
+      (matchedRFQ as any)?.sourceInquiryNumber ||
+      matchedRFQ?.sourceInquiryNumber ||
+      matchedRFQ?.rfqNumber ||
+      '',
+    ).trim();
+    return candidate.startsWith('RFQ-') || candidate.startsWith('INQ-') ? candidate : '';
+  };
+
+  const getInquiryByContractRef = (po: PurchaseOrderType): string => {
+    const refs = [
+      String((po as any).sourceSONumber || '').trim(),
+      String((po as any).salesContractNumber || '').trim(),
+      String(po.sourceRef || '').trim(),
+      String(po.poNumber || '').trim(),
+    ].filter(Boolean);
+    if (refs.length === 0) return '';
+
+    const matchedContract = salesContractsLite.find((c: any) => {
+      const contractNo = String(c?.contractNumber || '').trim();
+      const poNumbers = Array.isArray(c?.purchaseOrderNumbers) ? c.purchaseOrderNumbers.map((x: any) => String(x || '').trim()) : [];
+      return refs.some((ref) => ref === contractNo || poNumbers.includes(ref));
+    });
+    if (!matchedContract) return '';
+    const inquiryNo = String(matchedContract?.inquiryNumber || '').trim();
+    return inquiryNo.startsWith('RFQ-') || inquiryNo.startsWith('INQ-') ? inquiryNo : '';
+  };
+
+  const resolveInquirySourceRef = (po: PurchaseOrderType): string => {
+    const requirementNo = getRequirementNoFromPO(po);
+    const matchedRequirement = findRequirementForPO(po);
+    const rfqFromRequirement = requirementNo ? getRFQNumberByRequirementNo(requirementNo) : '';
+    const poRfqRef = String((po as any).rfqNumber || '').trim();
+    const poSourceRef = String(po.sourceRef || '').trim();
+    const rfqFromPO = poRfqRef.startsWith('RFQ-') || poRfqRef.startsWith('INQ-')
+      ? poRfqRef
+      : (poSourceRef.startsWith('RFQ-') || poSourceRef.startsWith('INQ-') ? poSourceRef : '');
+    const legacyFromRequirement = String(matchedRequirement?.sourceRef || '').trim();
+    const sourceInquiryNumber = String(matchedRequirement?.sourceInquiryNumber || '').trim();
+    const inquiryFromContract = getInquiryByContractRef(po);
+    // 规则：来源统一显示 RFQ/INQ 客户询价编号；不显示 CG/SC/XJ
+    if (sourceInquiryNumber.startsWith('RFQ-') || sourceInquiryNumber.startsWith('INQ-')) return sourceInquiryNumber;
+    if (rfqFromRequirement) return rfqFromRequirement;
+    if (inquiryFromContract) return inquiryFromContract;
+    if (rfqFromPO) return rfqFromPO;
+    if (legacyFromRequirement.startsWith('RFQ-') || legacyFromRequirement.startsWith('INQ-')) return legacyFromRequirement;
+    return '';
+  };
+
+  const getPOTraceRefs = React.useCallback((po: PurchaseOrderType): Set<string> => {
+    const refs = new Set<string>();
+    const addRef = (v: unknown) => {
+      const s = String(v || '').trim().toUpperCase();
+      if (s) refs.add(s);
+    };
+    addRef(resolveInquirySourceRef(po));
+    addRef((po as any).rfqNumber);
+    addRef(po.sourceRef);
+    addRef(getRequirementNoFromPO(po));
+    addRef((po as any).requirementNumber);
+    addRef((po as any).sourceInquiryNumber);
+    return refs;
+  }, [resolveInquirySourceRef]);
+
+  const getPOQuoteCandidates = React.useCallback(
+    (po: PurchaseOrderType, supplierCode?: string) => {
+      const refs = getPOTraceRefs(po);
+      const preferredSupplier = String(supplierCode || po.supplierCode || '').trim().toUpperCase();
+      const statusWeight = (status: string) => {
+        const s = String(status || '').trim().toLowerCase();
+        if (s === 'accepted' || s === 'approved') return 0;
+        if (s === 'submitted' || s === 'quoted') return 1;
+        return 2;
+      };
+      const candidates = supplierQuotationSnapshot.filter((q: any) => {
+        const qSupplier = String(q?.supplierCode || '').trim().toUpperCase();
+        if (preferredSupplier && preferredSupplier !== 'TBD' && qSupplier && qSupplier !== preferredSupplier) {
+          return false;
+        }
+        const qRefs = [
+          q?.sourceQR,
+          q?.rfqNumber,
+          q?.rfqNo,
+          q?.sourceXJ,
+          q?.requirementNo,
+          q?.sourceRFQId,
+          q?.quoteData?.sourceQR,
+          q?.quoteData?.rfqNo,
+          q?.quoteData?.rfqNumber,
+        ]
+          .map((v) => String(v || '').trim().toUpperCase())
+          .filter(Boolean);
+        return qRefs.some((r) => refs.has(r));
+      });
+      return candidates.sort((a: any, b: any) => {
+        const w = statusWeight(a?.status) - statusWeight(b?.status);
+        if (w !== 0) return w;
+        const da = Date.parse(String(a?.submittedDate || a?.quotationDate || a?.quotedDate || 0));
+        const db = Date.parse(String(b?.submittedDate || b?.quotationDate || b?.quotedDate || 0));
+        return db - da;
+      });
+    },
+    [getPOTraceRefs, supplierQuotationSnapshot]
+  );
+
+  const resolveQuotedItemPricing = React.useCallback(
+    (po: PurchaseOrderType, item: PurchaseOrderItem, supplierCode?: string) => {
+      const itemId = String(item?.id || '').trim();
+      const itemModel = String(item?.modelNo || '').trim().toLowerCase();
+      const itemName = String(item?.productName || '').trim().toLowerCase();
+      const quotes = getPOQuoteCandidates(po, supplierCode);
+      for (const quotation of quotes) {
+        const qItems = getQuotationItems(quotation);
+        const matched = qItems.find((qi: any) => {
+          const qiId = String(qi?.id || qi?.productId || '').trim();
+          const qiModel = String(qi?.modelNo || '').trim().toLowerCase();
+          const qiName = String(qi?.productName || qi?.description || '').trim().toLowerCase();
+          const sameId = itemId !== '' && qiId !== '' && qiId === itemId;
+          const sameModel = itemModel !== '' && qiModel !== '' && qiModel === itemModel;
+          const sameName = itemName !== '' && qiName !== '' && qiName === itemName;
+          return sameId || sameModel || sameName;
+        });
+        if (!matched) continue;
+        const unitPrice = toNumericAmount(
+          matched?.unitPrice ?? matched?.quotePrice ?? matched?.quotedPrice ?? matched?.costPrice ?? 0
+        );
+        const currency = normalizeCurrencyCode(
+          matched?.currency ?? matched?.targetCurrency ?? matched?.quoteCurrency ?? quotation?.currency
+        );
+        if (unitPrice > 0 || currency) {
+          return { unitPrice, currency };
+        }
+      }
+      return null;
+    },
+    [getPOQuoteCandidates]
+  );
+
+  const buildPOWithTracedQuoteCurrency = React.useCallback(
+    (po: PurchaseOrderType) => {
+      const tracedItems = (po.items || []).map((item) => {
+        const traced = resolveQuotedItemPricing(po, item);
+        const unitPrice = traced && traced.unitPrice > 0 ? traced.unitPrice : toNumericAmount(item.unitPrice);
+        const currency = normalizeCurrencyCode(traced?.currency || item.currency || po.currency || '');
+        return {
+          ...item,
+          unitPrice,
+          currency: currency || 'USD',
+          subtotal: toNumericAmount(item.quantity) * unitPrice,
+        };
+      });
+      const currencies = Array.from(
+        new Set(tracedItems.map((it) => normalizeCurrencyCode(it.currency)).filter(Boolean))
+      );
+      const poCurrency =
+        currencies.length > 0
+          ? currencies[0]
+          : normalizeCurrencyCode(po.currency || tracedItems[0]?.currency || 'USD');
+      const totalAmount = tracedItems.reduce(
+        (sum, item) => sum + toNumericAmount(item.subtotal || toNumericAmount(item.quantity) * toNumericAmount(item.unitPrice)),
+        0
+      );
+      return {
+        items: tracedItems,
+        currency: poCurrency || 'USD',
+        totalAmount,
+      };
+    },
+    [resolveQuotedItemPricing]
+  );
+
+  // 自动反查回填：为缺失来源的采购单回填 RFQ/INQ（持久化到 purchase order）
+  useEffect(() => {
+    if (!purchaseOrders.length) return;
+    purchaseOrders.forEach((po) => {
+      const existing = String((po as any).rfqNumber || '').trim();
+      if (existing.startsWith('RFQ-') || existing.startsWith('INQ-')) return;
+      const inferred = resolveInquirySourceRef(po);
+      if (!inferred) return;
+      if (inferred === existing) return;
+      updatePurchaseOrder(po.id, { rfqNumber: inferred });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseOrders, salesContractsLite, rfqs, purchaseRequirements]);
+
+  // 审批联动：老板审批采购请求后，自动更新采购单可下推状态
+  useEffect(() => {
+    if (!purchaseOrders.length || !approvalRequests.length) return;
+    purchaseOrders.forEach((po) => {
+      const reqStatus = String((po as any).procurementRequestStatus || '');
+      if (reqStatus !== 'pending_boss_approval') return;
+      const poNo = String(po.poNumber || '').trim();
+      const parentNo = String((po as any).parentRequestPoNumber || '').trim();
+      const requestIds = [
+        poNo ? `PRQ-${poNo}` : '',
+        !poNo && parentNo ? `PRQ-${parentNo}` : ''
+      ].filter(Boolean);
+      const matched = approvalRequests.find((r) => requestIds.includes(String(r.relatedDocumentId || '')));
+      if (!matched) return;
+      if (matched.status === 'approved') {
+        updatePurchaseOrder(po.id, {
+          status: 'confirmed',
+          ...( { procurementRequestStatus: 'approved_boss' } as any ),
+        } as any);
+      } else if (matched.status === 'rejected') {
+        updatePurchaseOrder(po.id, {
+          ...( { procurementRequestStatus: 'rejected_boss' } as any ),
+        } as any);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseOrders, approvalRequests]);
 
   // 🔥 工具函数已移至 purchase-order/purchaseOrderUtils.ts
 
   // 🔥 处理采购单号点击 - 打开文档预览
   const handleViewPODocument = (po: PurchaseOrderType) => {
-    const poData = convertToPOData(po);
+    const tracedPatch = buildPOWithTracedQuoteCurrency(po);
+    const poForDoc = {
+      ...po,
+      ...tracedPatch,
+    };
+    const hasCurrencyDelta =
+      String(po.currency || '').toUpperCase() !== String(tracedPatch.currency || '').toUpperCase();
+    const hasAmountDelta = Math.abs(Number(po.totalAmount || 0) - Number(tracedPatch.totalAmount || 0)) > 0.0001;
+    const hasItemDelta = (po.items || []).some((item, idx) => {
+      const next = tracedPatch.items[idx];
+      return !next ||
+        Number(item.unitPrice || 0) !== Number(next.unitPrice || 0) ||
+        String(item.currency || '').toUpperCase() !== String(next.currency || '').toUpperCase();
+    });
+    if (hasCurrencyDelta || hasAmountDelta || hasItemDelta) {
+      updatePurchaseOrder(po.id, {
+        items: tracedPatch.items as any,
+        currency: tracedPatch.currency,
+        totalAmount: tracedPatch.totalAmount,
+        updatedDate: new Date().toISOString(),
+      } as any);
+    }
+    const poData = convertToPOData(poForDoc);
     setCurrentPOData(poData);
     setShowPOPreview(true);
   };
@@ -418,6 +986,393 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     // 使用文档预览
     setViewRequirement(req);
     setShowRequirementDialog(true);
+  };
+
+  const handleApplyBossApproval = (po: PurchaseOrderType) => {
+    const navigateToBossApproval = () => {
+      window.dispatchEvent(new CustomEvent('navigate', {
+        detail: {
+          page: 'order-management-center',
+          subTab: 'approvals',
+        },
+      }));
+    };
+
+    const reqStatus = String((po as any).procurementRequestStatus || '');
+    if (reqStatus === 'pending_boss_approval') {
+      toast.info('该采购单已提交审核');
+      navigateToBossApproval();
+      return;
+    }
+    if (reqStatus === 'approved_boss') {
+      toast.info('该采购单已审核通过');
+      navigateToBossApproval();
+      return;
+    }
+    const isRejectedAndResubmit = reqStatus === 'rejected_boss';
+    if (reqStatus === 'pushed_supplier') {
+      toast.info('该采购单已发送供应商');
+      return;
+    }
+
+    const currentPoNo = String(po.poNumber || '').trim();
+    const parentPoNo = String((po as any).parentRequestPoNumber || '').trim();
+    const mainPoNo = parentPoNo.startsWith('CG-') ? parentPoNo : currentPoNo;
+    const groupPOs = purchaseOrders.filter((p) => {
+      const pNo = String(p.poNumber || '').trim();
+      const parentNo = String((p as any).parentRequestPoNumber || '').trim();
+      return pNo === mainPoNo || parentNo === mainPoNo;
+    });
+    const managerByRegion: Record<string, string> = {
+      NA: 'ceo@cosun.com',
+      SA: 'ceo@cosun.com',
+      EMEA: 'ceo@cosun.com',
+    };
+    const currentApproverEmail = managerByRegion[po.region || 'NA'] || 'ceo@cosun.com';
+    const requestId = `PRQ-${mainPoNo || currentPoNo}`;
+    const existingRequest = approvalRequests.find((r) => String(r.relatedDocumentId || '') === requestId);
+    let bridgeRequest: any = null;
+    if (existingRequest && (existingRequest.status === 'pending' || existingRequest.status === 'forwarded')) {
+      toast.info('该采购单已提交审核');
+      navigateToBossApproval();
+      return;
+    }
+
+    if (existingRequest && isRejectedAndResubmit) {
+      updateApprovalRequest(existingRequest.id, {
+        status: 'pending',
+        submittedAt: new Date().toISOString(),
+        submittedBy: user?.email || existingRequest.submittedBy,
+        submittedByName: user?.name || user?.email || existingRequest.submittedByName,
+        submittedByRole: user?.role || existingRequest.submittedByRole,
+        currentApprover: currentApproverEmail,
+        currentApproverRole: 'CEO',
+        nextApprover: null,
+        nextApproverRole: null,
+        expiresIn: 24,
+        deadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      } as any);
+    } else if (!existingRequest) {
+      const linkedRequirement = findRequirementForPO(po);
+      bridgeRequest = addApprovalRequest({
+        type: 'contract',
+        relatedDocumentId: requestId,
+        relatedDocumentType: '采购请求审批',
+        relatedDocument: {
+          poNumber: mainPoNo || currentPoNo,
+          sourceInquiryNumber: resolveInquirySourceRef(po),
+          requirementNo: getRequirementNoFromPO(po),
+          purchaseOrders: groupPOs.map((p) => p.poNumber),
+        },
+        submittedBy: user?.email || '',
+        submittedByName: user?.name || user?.email || '',
+        submittedByRole: user?.role || 'Purchaser',
+        submittedAt: new Date().toISOString(),
+        region: po.region || 'NA',
+        currentApprover: currentApproverEmail,
+        currentApproverRole: 'CEO',
+        status: 'pending',
+        urgency: Number(po.totalAmount || 0) >= 50000 ? 'high' : 'normal',
+        amount: Number(po.totalAmount || 0),
+        currency: po.currency || 'USD',
+        customerName: linkedRequirement?.customer?.companyName || '',
+        customerEmail: linkedRequirement?.customer?.email || '',
+        productSummary: `${groupPOs.length}张采购单草稿，待老板审核`,
+        deadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        expiresIn: 24
+      } as any);
+
+      try {
+        const rawBridge = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
+        const bridgeItems = rawBridge ? JSON.parse(rawBridge) : [];
+        const next = Array.isArray(bridgeItems) ? bridgeItems : [];
+        next.unshift({
+          currentApprover: currentApproverEmail,
+          request: bridgeRequest,
+        });
+        localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(next.slice(0, 200)));
+      } catch {}
+    }
+    groupPOs.forEach((p) => {
+      updatePurchaseOrder(p.id, { procurementRequestStatus: 'pending_boss_approval' } as any);
+    });
+    toast.success(`已提交审核（${groupPOs.length}张采购单）`);
+    navigateToBossApproval();
+  };
+
+  const handlePushPurchaseToSupplier = (po: PurchaseOrderType) => {
+    const reqStatus = String((po as any).procurementRequestStatus || '');
+    const isUnassigned = !po.supplierCode || po.supplierCode === 'TBD' || String(po.supplierName || '').includes('待');
+    if (reqStatus === 'pending_procurement_assignment' || isUnassigned) {
+      openSupplierAllocationDialog(po);
+      return;
+    }
+    if (!reqStatus || reqStatus === 'draft_allocated') {
+      toast.error('请先点击“申请审核”，审核通过后才能下推采购');
+      return;
+    }
+    if (reqStatus === 'pending_boss_approval') {
+      toast.error('该采购请求待老板审核，通过后才能下推采购');
+      return;
+    }
+    if (reqStatus === 'rejected_boss') {
+      toast.error('该采购请求已被老板驳回，请业务员重新发起请求采购');
+      return;
+    }
+    if (reqStatus === 'approved_boss') {
+      const currentPoNo = String(po.poNumber || '').trim();
+      const parentPoNo = String((po as any).parentRequestPoNumber || '').trim();
+      const mainPoNo = parentPoNo.startsWith('CG-') ? parentPoNo : currentPoNo;
+      const targetPOs = purchaseOrders.filter((p) => {
+        const pNo = String(p.poNumber || '').trim();
+        const parentNo = String((p as any).parentRequestPoNumber || '').trim();
+        return pNo === mainPoNo || parentNo === mainPoNo;
+      });
+      targetPOs.forEach((p) => {
+        updatePurchaseOrder(p.id, {
+          procurementRequestStatus: 'pushed_supplier',
+          status: 'confirmed',
+          updatedDate: new Date().toISOString(),
+        } as any);
+      });
+      toast.success(`已向供应商发送 ${targetPOs.length || 1} 张采购单`);
+      return;
+    }
+    if (reqStatus === 'pushed_supplier') {
+      toast.info('该采购单已完成下推采购');
+      return;
+    }
+    toast.error('当前状态不可下推，请先完成分配和审批');
+  };
+
+  const handleOpenEditPO = (po: PurchaseOrderType) => {
+    const normalizedSourceRef = normalizeRegionalDocNo(
+      String(
+        po.sourceRef ||
+        (po as any).salesContractNumber ||
+        (po as any).sourceSONumber ||
+        ''
+      )
+    );
+    const normalizedPOCurrency = normalizeCurrencyCode((po as any).currency);
+    const legacyAutoUsd =
+      normalizedPOCurrency === 'USD' &&
+      (po.items || []).every((item) => {
+        const c = normalizeCurrencyCode(item?.currency || '');
+        const unitPrice = Number(item?.unitPrice || 0);
+        return (!c || c === 'USD') && unitPrice <= 0;
+      });
+    const effectivePOCurrency = legacyAutoUsd ? 'CNY' : (normalizedPOCurrency || 'CNY');
+    setEditingPO(po);
+    setEditPOForm({
+      poNumber: String(po.poNumber || ''),
+      requirementNo: String(po.requirementNo || ''),
+      rfqNumber: String((po as any).rfqNumber || ''),
+      sourceRef: normalizedSourceRef,
+      supplierName: String(po.supplierName || ''),
+      supplierCode: String(po.supplierCode || ''),
+      supplierContact: String((po as any).supplierContact || ''),
+      supplierPhone: String((po as any).supplierPhone || ''),
+      supplierAddress: String((po as any).supplierAddress || ''),
+      currency: effectivePOCurrency,
+      paymentTerms: String((po as any).paymentTerms || ''),
+      deliveryTerms: String((po as any).deliveryTerms || ''),
+      deliveryAddress: String((po as any).deliveryAddress || ''),
+      qualityStandard: String((po as any).qualityStandard || (po as any).qualityTerms || ''),
+      inspectionMethod: String((po as any).inspectionMethod || (po as any).inspectionTerms || ''),
+      packaging: String((po as any).packaging || (po as any).packagingTerms || ''),
+      shippingMarks: String((po as any).shippingMarks || ''),
+      deliveryPenalty: String((po as any).deliveryPenalty || ''),
+      qualityPenalty: String((po as any).qualityPenalty || (po as any).penaltyTerms || ''),
+      warrantyPeriod: String((po as any).warrantyPeriod || ''),
+      returnPolicy: String((po as any).returnPolicy || ''),
+      confidentiality: String((po as any).confidentiality || ''),
+      ipRights: String((po as any).ipRights || ''),
+      forceMajeure: String((po as any).forceMajeure || ''),
+      disputeResolution: String((po as any).disputeResolution || (po as any).disputeResolutionTerms || ''),
+      applicableLaw: String((po as any).applicableLaw || ''),
+      contractValidity: String((po as any).contractValidity || ''),
+      modification: String((po as any).modification || ''),
+      termination: String((po as any).termination || ''),
+      incoterm: String((po as any).incoterm || ''),
+      portOfLoading: String((po as any).portOfLoading || ''),
+      portOfDestination: String((po as any).portOfDestination || ''),
+      qualityTerms: String((po as any).qualityTerms || ''),
+      inspectionTerms: String((po as any).inspectionTerms || ''),
+      packagingTerms: String((po as any).packagingTerms || ''),
+      warrantyTerms: String((po as any).warrantyTerms || ''),
+      penaltyTerms: String((po as any).penaltyTerms || ''),
+      disputeResolutionTerms: String((po as any).disputeResolutionTerms || ''),
+      taxTerms: String((po as any).taxTerms || ''),
+      bankTerms: String((po as any).bankTerms || ''),
+      orderDate: String((po as any).orderDate || ''),
+      expectedDate: String((po as any).expectedDate || ''),
+      actualDate: String((po as any).actualDate || ''),
+      status: String((po as any).status || 'pending'),
+      paymentStatus: String((po as any).paymentStatus || 'unpaid'),
+      remarks: String((po as any).remarks || ''),
+    });
+    setEditPOOrderDate(parseDateLike((po as any).orderDate));
+    setEditPOExpectedDate(parseDateLike((po as any).expectedDate));
+    setEditPOActualDate(parseDateLike((po as any).actualDate));
+    setEditPOItems(
+      (po.items || []).map((item) => ({
+        ...item,
+        currency: (() => {
+          const itemCurrency = normalizeCurrencyCode(item?.currency || '');
+          if (legacyAutoUsd && (!itemCurrency || itemCurrency === 'USD')) return 'CNY';
+          return itemCurrency || effectivePOCurrency || 'CNY';
+        })(),
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.unitPrice || 0),
+        subtotal: Number(item.subtotal || Number(item.quantity || 0) * Number(item.unitPrice || 0)),
+      }))
+    );
+    setShowEditPODialog(true);
+  };
+
+  const handleEditPOItemChange = (idx: number, field: keyof PurchaseOrderItem, value: string) => {
+    setEditPOItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== idx) return it;
+        const next: PurchaseOrderItem = { ...it };
+        if (field === 'quantity' || field === 'unitPrice') {
+          (next as any)[field] = Number(value || 0);
+          next.subtotal = Number(next.quantity || 0) * Number(next.unitPrice || 0);
+        } else if (field === 'subtotal') {
+          next.subtotal = Number(value || 0);
+        } else {
+          (next as any)[field] = value;
+        }
+        return next;
+      })
+    );
+  };
+
+  const resolveSupplierByKeyword = (keywordRaw: string) => {
+    const keyword = String(keywordRaw || '').trim().toLowerCase();
+    if (!keyword) return null;
+
+    const exact = allSuppliers.find((s) => {
+      const name = String(s.name || '').trim().toLowerCase();
+      const code = String(s.code || s.id || '').trim().toLowerCase();
+      return name === keyword || code === keyword;
+    });
+    if (exact) return exact;
+
+    return allSuppliers.find((s) => {
+      const name = String(s.name || '').trim().toLowerCase();
+      const code = String(s.code || s.id || '').trim().toLowerCase();
+      return name.includes(keyword) || code.includes(keyword);
+    }) || null;
+  };
+
+  const handleEditSupplierNameChange = (value: string) => {
+    const nextName = String(value || '');
+    const matched = resolveSupplierByKeyword(nextName);
+    if (matched) {
+      setEditPOForm((prev) => ({
+        ...prev,
+        supplierName: matched.name || nextName,
+        supplierCode: String(matched.code || matched.id || prev.supplierCode || ''),
+        supplierContact: String(matched.contact || ''),
+        supplierPhone: String(matched.phone || ''),
+        supplierAddress: String(matched.address || ''),
+      }));
+      return;
+    }
+    setEditPOForm((prev) => ({
+      ...prev,
+      supplierName: nextName,
+      supplierContact: '',
+      supplierPhone: '',
+      supplierAddress: '',
+    }));
+  };
+
+  const handleEditSupplierCodeChange = (value: string) => {
+    const nextCode = String(value || '');
+    const matched = resolveSupplierByKeyword(nextCode);
+    if (matched) {
+      setEditPOForm((prev) => ({
+        ...prev,
+        supplierCode: String(matched.code || matched.id || nextCode || ''),
+        supplierName: matched.name || prev.supplierName,
+        supplierContact: String(matched.contact || ''),
+        supplierPhone: String(matched.phone || ''),
+        supplierAddress: String(matched.address || ''),
+      }));
+      return;
+    }
+    setEditPOForm((prev) => ({
+      ...prev,
+      supplierCode: nextCode,
+      supplierContact: '',
+      supplierPhone: '',
+      supplierAddress: '',
+    }));
+  };
+
+  const handleSaveEditPO = () => {
+    if (!editingPO) return;
+    const totalAmount = editPOItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+    const normalizedSourceRef = normalizeRegionalDocNo(editPOForm.sourceRef);
+    updatePurchaseOrder(editingPO.id, {
+      poNumber: String(editPOForm.poNumber || '').trim(),
+      requirementNo: String(editPOForm.requirementNo || '').trim(),
+      rfqNumber: String(editPOForm.rfqNumber || '').trim(),
+      sourceRef: normalizedSourceRef,
+      sourceSONumber: normalizedSourceRef,
+      salesContractNumber: normalizedSourceRef,
+      supplierName: String(editPOForm.supplierName || '').trim(),
+      supplierCode: String(editPOForm.supplierCode || '').trim(),
+      supplierContact: String(editPOForm.supplierContact || '').trim(),
+      supplierPhone: String(editPOForm.supplierPhone || '').trim(),
+      supplierAddress: String(editPOForm.supplierAddress || '').trim(),
+      currency: normalizeCurrencyCode(editPOForm.currency) || 'CNY',
+      paymentTerms: String(editPOForm.paymentTerms || '').trim(),
+      deliveryTerms: String(editPOForm.deliveryTerms || '').trim(),
+      deliveryAddress: String(editPOForm.deliveryAddress || '').trim(),
+      qualityStandard: String(editPOForm.qualityStandard || '').trim(),
+      inspectionMethod: String(editPOForm.inspectionMethod || '').trim(),
+      packaging: String(editPOForm.packaging || '').trim(),
+      shippingMarks: String(editPOForm.shippingMarks || '').trim(),
+      deliveryPenalty: String(editPOForm.deliveryPenalty || '').trim(),
+      qualityPenalty: String(editPOForm.qualityPenalty || '').trim(),
+      warrantyPeriod: String(editPOForm.warrantyPeriod || '').trim(),
+      returnPolicy: String(editPOForm.returnPolicy || '').trim(),
+      confidentiality: String(editPOForm.confidentiality || '').trim(),
+      ipRights: String(editPOForm.ipRights || '').trim(),
+      forceMajeure: String(editPOForm.forceMajeure || '').trim(),
+      disputeResolution: String(editPOForm.disputeResolution || '').trim(),
+      applicableLaw: String(editPOForm.applicableLaw || '').trim(),
+      contractValidity: String(editPOForm.contractValidity || '').trim(),
+      modification: String(editPOForm.modification || '').trim(),
+      termination: String(editPOForm.termination || '').trim(),
+      incoterm: String(editPOForm.incoterm || '').trim(),
+      portOfLoading: String(editPOForm.portOfLoading || '').trim(),
+      portOfDestination: String(editPOForm.portOfDestination || '').trim(),
+      qualityTerms: String(editPOForm.qualityStandard || editPOForm.qualityTerms || '').trim(),
+      inspectionTerms: String(editPOForm.inspectionMethod || editPOForm.inspectionTerms || '').trim(),
+      packagingTerms: String(editPOForm.packaging || editPOForm.packagingTerms || '').trim(),
+      warrantyTerms: String(editPOForm.warrantyTerms || '').trim(),
+      penaltyTerms: String(editPOForm.qualityPenalty || editPOForm.penaltyTerms || '').trim(),
+      disputeResolutionTerms: String(editPOForm.disputeResolution || editPOForm.disputeResolutionTerms || '').trim(),
+      taxTerms: String(editPOForm.taxTerms || '').trim(),
+      bankTerms: String(editPOForm.bankTerms || '').trim(),
+      orderDate: formatDateForStorage(editPOOrderDate) || String(editPOForm.orderDate || '').trim(),
+      expectedDate: formatDateForStorage(editPOExpectedDate) || String(editPOForm.expectedDate || '').trim(),
+      actualDate: formatDateForStorage(editPOActualDate) || String(editPOForm.actualDate || '').trim() || undefined,
+      status: String(editPOForm.status || 'pending') as any,
+      paymentStatus: String(editPOForm.paymentStatus || 'unpaid') as any,
+      remarks: String(editPOForm.remarks || '').trim(),      
+      items: editPOItems,
+      totalAmount,
+      updatedDate: new Date().toISOString(),
+    } as any);
+    toast.success(`采购订单 ${editingPO.poNumber} 已更新`);
+    setShowEditPODialog(false);
+    setEditingPO(null);
   };
 
   // 🔥 处理创建RFQ - 从采购需求创建，向多个供应商询价
@@ -708,16 +1663,43 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 批量删除供应商报价
-  const handleBatchDeleteQuotations = () => {
+  const handleBatchDeleteQuotations = async () => {
     if (selectedQuotationIds.length === 0) {
       toast.error('请先选择要删除的供应商报价');
       return;
     }
-    const confirmMessage = `确定要从当前列表移除选中的 ${selectedQuotationIds.length} 个供应商报价吗？\n\n（列表来自后端，刷新后会重新拉取）`;
+    const confirmMessage = `确定要永久删除选中的 ${selectedQuotationIds.length} 个供应商报价吗？\n\n⚠️ 删除后不可恢复`;
     if (!window.confirm(confirmMessage)) return;
-    setSupplierQuotations(prev => prev.filter((q: any) => !selectedQuotationIds.includes(q.id)));
+
+    const ids = [...selectedQuotationIds];
+    const results = await Promise.allSettled(
+      ids.map((id) =>
+        apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(String(id))}`, {
+          method: 'DELETE',
+        })
+      )
+    );
+
+    const successCount = results.filter((r) => r.status === 'fulfilled').length;
+    const failedCount = ids.length - successCount;
+    const failedIds = ids.filter((_, idx) => results[idx].status === 'rejected');
+
+    if (successCount > 0) {
+      toast.success(`已永久删除 ${successCount} 条供应商报价`, { duration: 3000 });
+      addTombstones('quotation', ids, {
+        reason: 'manual-delete-admin-supplier-quotation',
+        deletedBy: user?.email || 'admin',
+      });
+    }
+
+    if (failedCount > 0 && failedIds.length > 0) {
+      // 兼容：当后端未提供 DELETE 时，至少保证前端“永久隐藏”
+      addDeletedSupplierQuotationIds(failedIds);
+      toast.success(`已永久移除 ${failedIds.length} 条（本地隐藏）`, { duration: 3000 });
+    }
+
+    await loadSupplierQuotationsFromApi();
     setSelectedQuotationIds([]);
-    toast.success(`已从当前列表移除 ${selectedQuotationIds.length} 条`, { duration: 3000 });
   };
 
   // 🔥 批量删除采购订单
@@ -740,6 +1722,25 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       
       setSelectedOrderIds([]);
     }
+  };
+
+  // 🔥 批量删除采购请求
+  const handleBatchDeleteProcurementRequests = () => {
+    if (selectedProcurementRequestIds.length === 0) {
+      toast.error('请先选择要删除的采购请求');
+      return;
+    }
+
+    const confirmMessage = `确定要删除选中的 ${selectedProcurementRequestIds.length} 个采购请求吗？\n\n⚠️ 此操作不可恢复！`;
+    if (!window.confirm(confirmMessage)) return;
+
+    selectedProcurementRequestIds.forEach((id) => {
+      deletePurchaseOrder(id);
+    });
+    toast.success(`已删除 ${selectedProcurementRequestIds.length} 个采购请求`, {
+      duration: 3000,
+    });
+    setSelectedProcurementRequestIds([]);
   };
 
   // 🔥 编辑询价单
@@ -918,6 +1919,239 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     );
   };
 
+  const getPOProductAllocationKey = (item: PurchaseOrderItem, index: number) => {
+    return String(item?.id || item?.modelNo || `${index}`);
+  };
+
+  const getProductMatchToken = (item: PurchaseOrderItem, index: number) => {
+    const key = getPOProductAllocationKey(item, index);
+    const name = String(item?.productName || '').trim().toLowerCase();
+    const model = String(item?.modelNo || '').trim().toLowerCase();
+    return `${key}|${name}|${model}`;
+  };
+
+  const allocatedProductTokensInDialog = useMemo(() => {
+    if (!allocationPO) return new Set<string>();
+    const parentNo = String(allocationPO.poNumber || '').trim();
+    if (!parentNo) return new Set<string>();
+
+    const children = purchaseOrders.filter((po) => {
+      const parent = String((po as any).parentRequestPoNumber || '').trim();
+      const poNo = String(po.poNumber || '').trim().toUpperCase();
+      return parent === parentNo && !poNo.startsWith('CQ-');
+    });
+
+    const tokenSet = new Set<string>();
+    (allocationPO.items || []).forEach((item, idx) => {
+      const token = getProductMatchToken(item, idx);
+      const matched = children.some((child) =>
+        (child.items || []).some((ci) => {
+          const sameId = String(ci?.id || '').trim() !== '' && String(ci?.id || '').trim() === String(item?.id || '').trim();
+          const sameModel =
+            String(ci?.modelNo || '').trim().toLowerCase() !== '' &&
+            String(ci?.modelNo || '').trim().toLowerCase() === String(item?.modelNo || '').trim().toLowerCase();
+          const sameName =
+            String(ci?.productName || '').trim().toLowerCase() !== '' &&
+            String(ci?.productName || '').trim().toLowerCase() === String(item?.productName || '').trim().toLowerCase();
+          return sameId || sameModel || sameName;
+        })
+      );
+      if (matched) tokenSet.add(token);
+    });
+
+    return tokenSet;
+  }, [allocationPO, purchaseOrders]);
+
+  const openSupplierAllocationDialog = (po: PurchaseOrderType) => {
+    setAllocationSelectedSupplierCodes([]);
+    setAllocationSelectedProductKeys([]);
+    setAllocationSupplierSearchTerm('');
+    setAllocationPO(po);
+    setShowAllocationDialog(true);
+  };
+
+  const filteredAllocationSuppliers = useMemo(() => {
+    const keyword = allocationSupplierSearchTerm.trim().toLowerCase();
+    return allSuppliers.filter((s) => {
+      if (!(s.status === 'active' && s.code && s.name)) return false;
+      if (!keyword) return true;
+      const haystack = [s.name, s.code, s.email, s.category].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }, [allSuppliers, allocationSupplierSearchTerm]);
+
+  const toggleAllocationSupplier = (supplierCode: string, checked: boolean) => {
+    setAllocationSelectedSupplierCodes((prev) => {
+      if (checked) {
+        if (prev.includes(supplierCode)) return prev;
+        return [...prev, supplierCode];
+      }
+      return prev.filter((code) => code !== supplierCode);
+    });
+  };
+
+  const toggleAllocationProduct = (productKey: string, checked: boolean) => {
+    setAllocationSelectedProductKeys((prev) => {
+      if (checked) {
+        if (prev.includes(productKey)) return prev;
+        return [...prev, productKey];
+      }
+      return prev.filter((key) => key !== productKey);
+    });
+  };
+
+  const toggleAllAllocationProducts = (checked: boolean) => {
+    if (!allocationPO) return;
+    if (checked) {
+      const keys: string[] = [];
+      (allocationPO.items || []).forEach((item, idx) => {
+        if (!allocatedProductTokensInDialog.has(getProductMatchToken(item, idx))) {
+          keys.push(getPOProductAllocationKey(item, idx));
+        }
+      });
+      setAllocationSelectedProductKeys(keys);
+      return;
+    }
+    setAllocationSelectedProductKeys([]);
+  };
+
+  const submitSupplierAllocation = async () => {
+    const po = allocationPO;
+    if (!po) return;
+    if (allocationSelectedSupplierCodes.length === 0) {
+      toast.error('请先选择供应商');
+      return;
+    }
+
+    const selectedItems = (po.items || []).filter((item, idx) =>
+      allocationSelectedProductKeys.includes(getPOProductAllocationKey(item, idx))
+    );
+    const remainingItems = (po.items || []).filter((item, idx) =>
+      !allocationSelectedProductKeys.includes(getPOProductAllocationKey(item, idx))
+    );
+
+    if (selectedItems.length === 0) {
+      toast.error('请先选择至少一个产品');
+      return;
+    }
+
+    setSubmittingAllocation(true);
+    try {
+      const createdPONumbers: string[] = [];
+      const distribution = allocationSelectedSupplierCodes.map((supplierCode) => {
+        const supplierItems = selectedItems.map((item) => ({
+          ...item,
+          id: `${item.id}-${supplierCode}-${Math.random().toString(36).slice(2, 6)}`,
+          quantity: Number(item.quantity || 0),
+          subtotal: Number(item.quantity || 0) * Number(item.unitPrice || 0),
+        }));
+        return [supplierCode, supplierItems] as const;
+      });
+
+      distribution.forEach(([supplierCode, supplierItems]) => {
+        const supplier = allSuppliers.find((s) => s.code === supplierCode);
+        if (!supplier) {
+          throw new Error(`供应商不存在: ${supplierCode}`);
+        }
+        const tracedItems = supplierItems.map((item) => {
+          const traced = resolveQuotedItemPricing(po, item, supplierCode);
+          const unitPrice = traced && traced.unitPrice > 0 ? traced.unitPrice : Number(item.unitPrice || 0);
+          const currency = normalizeCurrencyCode(traced?.currency || item.currency || po.currency || 'USD');
+          return {
+            ...item,
+            unitPrice,
+            currency: currency || 'USD',
+            subtotal: Number(item.quantity || 0) * unitPrice,
+          };
+        });
+        const totalAmount = tracedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+        const currencyCandidates = Array.from(
+          new Set(tracedItems.map((it) => normalizeCurrencyCode(it.currency)).filter(Boolean))
+        );
+        const draftCurrency = currencyCandidates[0] || normalizeCurrencyCode(po.currency || 'USD') || 'USD';
+        const newPoNumber = generateCGNumber(po.region || 'NA');
+        addPurchaseOrder({
+          ...po,
+          id: `po-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          poNumber: newPoNumber,
+          supplierName: supplier.name || '待选择供应商',
+          supplierCode: supplier.code || 'TBD',
+          supplierContact: supplier.contact || '',
+          supplierPhone: supplier.phone || '',
+          supplierAddress: supplier.address || '',
+          items: tracedItems,
+          totalAmount,
+          currency: draftCurrency,
+          createdDate: new Date().toISOString(),
+          updatedDate: new Date().toISOString(),
+          procurementRequestStatus: 'draft_allocated',
+          parentRequestPoNumber: po.poNumber as any,
+        } as any);
+        createdPONumbers.push(newPoNumber);
+      });
+
+      // 参照“创建询价单”逻辑：
+      // 仅下推选中产品，未选中产品继续保留在采购请求池（待后续分配）
+      if (remainingItems.length > 0) {
+        const tracedRemainingItems = remainingItems.map((item) => {
+          const traced = resolveQuotedItemPricing(po, item);
+          const unitPrice = traced && traced.unitPrice > 0 ? traced.unitPrice : Number(item.unitPrice || 0);
+          const currency = normalizeCurrencyCode(traced?.currency || item.currency || po.currency || 'USD');
+          return {
+            ...item,
+            unitPrice,
+            currency: currency || 'USD',
+            subtotal: Number(item.quantity || 0) * unitPrice,
+          };
+        });
+        const remainingCurrencies = Array.from(
+          new Set(tracedRemainingItems.map((it) => normalizeCurrencyCode(it.currency)).filter(Boolean))
+        );
+        const remainingAmount = tracedRemainingItems.reduce(
+          (sum, item) => sum + Number(item.subtotal || Number(item.quantity || 0) * Number(item.unitPrice || 0)),
+          0
+        );
+        updatePurchaseOrder(po.id, {
+          items: tracedRemainingItems,
+          totalAmount: remainingAmount,
+          currency: remainingCurrencies[0] || normalizeCurrencyCode(po.currency || 'USD') || 'USD',
+          procurementRequestStatus: 'partial_allocated',
+          status: 'pending',
+          supplierAllocationReady: true as any,
+          allocatedSupplierCount: distribution.length as any,
+          pendingSupplierPONumbers: createdPONumbers as any,
+          updatedDate: new Date().toISOString(),
+        } as any);
+      } else {
+        // 全部分配完成：保留采购请求记录，仅更新状态（不消失）
+        updatePurchaseOrder(po.id, {
+          procurementRequestStatus: 'allocated_completed',
+          supplierAllocationReady: true as any,
+          allocatedSupplierCount: distribution.length as any,
+          pendingSupplierPONumbers: createdPONumbers as any,
+          status: 'confirmed',
+          updatedDate: new Date().toISOString(),
+        } as any);
+      }
+
+      setShowAllocationDialog(false);
+      setAllocationPO(null);
+      setActiveTab('orders');
+      toast.success('已生成采购单草稿', {
+        description:
+          remainingItems.length > 0
+            ? `已生成 ${createdPONumbers.length} 张CG采购单草稿；未分配产品已保留在“采购请求”模块`
+            : `已生成 ${createdPONumbers.length} 张CG采购单草稿；采购请求已更新为“已分配完成”`,
+      });
+    } catch (error: any) {
+      toast.error('提交分配失败', {
+        description: error?.message || '请重试',
+      });
+    } finally {
+      setSubmittingAllocation(false);
+    }
+  };
+
   // 🔥 处理创建订单 - 从采购需求创建
   const handleCreateOrderFromRequirement = (req: PurchaseRequirement) => {
     setSelectedRequirement(req);
@@ -964,10 +2198,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       return;
     }
 
-    // 生成新的采购订单编号
+    // 生成新的采购订单编号：CG-<REGION>-YYMMDD-XXXX（序号全局递增，不按天重置）
     const today = new Date();
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-    const newPONumber = `PO-${dateStr}-${String(Math.floor(Math.random() * 100)).padStart(2, '0')}`;
+    const newPONumber = generateCGNumber(selectedRequirement.region);
 
     // 🔥 生成产品清单并计算总金额
     const products = items.map((item, index) => {
@@ -1051,7 +2284,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       id: `PO-${Date.now()}`,
       poNumber: newPONumber,
       requirementNo: selectedRequirement.requirementNo, // 🔥 关联采购需求编号
-      sourceRef: selectedRequirement.sourceRef, // 来源单号（销售订单号等）
+      sourceRef: getRFQNumberByRequirementNo(selectedRequirement.requirementNo) || selectedRequirement.sourceInquiryNumber || selectedRequirement.sourceRef,
       
       // 供应商信息
       supplierName: createOrderForm.supplierName,
@@ -1152,7 +2385,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 处理创建订单（旧版，保留向后兼容）
   const handleCreateOrder = () => {
-    toast.success('请从采购需求池中选择需求创建订单');
+    toast.success('请从报价请求池中选择需求创建订单');
   };
 
   // 🔥 处理智能采购反馈 - 一键流转
@@ -1283,6 +2516,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           if (v === 'orders') {
             requestPurchaseOrders();
           }
+          if (v === 'procurement-requests') {
+            setProcurementRequestSearchTerm('');
+          }
         }} className="w-full">
           <div className="border-b border-gray-200 px-3">
             <TabsList className="bg-transparent h-auto p-0 gap-4">
@@ -1291,7 +2527,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                 className="bg-transparent border-b-2 border-transparent data-[state=active]:border-rose-600 data-[state=active]:bg-transparent data-[state=active]:text-rose-700 rounded-none px-0 pb-2 pt-2 text-[14px] font-medium relative"
               >
                 <AlertCircle className="w-3 h-3 mr-1" />
-                采购需求池
+                报价请求池
                 {(requirementStats.pending + requirementStats.partial) > 0 && (
                   <span className="absolute -top-1 -right-3 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">
                     {requirementStats.pending + requirementStats.partial}
@@ -1316,6 +2552,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                 {supplierQuotations.filter(q => q.status === 'submitted').length > 0 && (
                   <span className="absolute -top-1 -right-3 bg-green-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">
                     {supplierQuotations.filter(q => q.status === 'submitted').length}
+                  </span>
+                )}
+              </TabsTrigger>
+
+              <TabsTrigger
+                value="procurement-requests"
+                className="bg-transparent border border-transparent data-[state=active]:border-[#F96302] data-[state=active]:bg-[#FFF7ED] data-[state=active]:text-[#F96302] rounded px-2 py-1 text-[14px] font-medium relative"
+              >
+                <Send className="w-3 h-3 mr-1" />
+                采购请求
+                {pendingProcurementRequestCount > 0 && (
+                  <span className="absolute -top-1 -right-3 bg-sky-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">
+                    {pendingProcurementRequestCount}
                   </span>
                 )}
               </TabsTrigger>
@@ -1386,37 +2635,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                       批量删除 ({selectedRequirementIds.length})
                     </Button>
                   )}
-                  {/* 🔥 迁移报价数据按钮 */}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const status = checkMigrationStatus();
-                      if (status.needsMigration) {
-                        if (window.confirm(`检测到 ${status.unmatchedRFQs} 个报价需要迁移。\n\n是否立即迁移？`)) {
-                          const result = migrateRFQQuotesToBJQuotations();
-                          if (result.success) {
-                            toast.success(result.message, {
-                              description: `已创建 ${result.migratedCount} 个BJ报价单，总计 ${result.totalBJs} 个`
-                            });
-                            // 刷新页面以重新加载数据
-                            setTimeout(() => window.location.reload(), 1500);
-                          } else {
-                            toast.error(result.message);
-                          }
-                        }
-                      } else {
-                        toast.info('数据已是最新', {
-                          description: `所有 ${status.rfqsWithQuotes} 个报价都已迁移`
-                        });
-                      }
-                    }}
-                    className="h-8 text-xs px-3 border-blue-300 text-blue-600 hover:bg-blue-50 hover:border-blue-400"
-                    title="将已有的RFQ报价转换成BJ报价单对象"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 mr-1" />
-                    迁移报价数据
-                  </Button>
                 </div>
                 <p className="text-[14px] text-gray-600">共 {filteredRequirements.length} 条采购需求</p>
               </div>
@@ -1457,18 +2675,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                       
                       // 🔥 动态计算状态
                       const dynamicStatus = calculateRequirementStatus(req);
-                      
-                      // 🔍 调试：查看数据
-                      if (idx === 0) {
-                        console.log('🔍 采购需求数据示例:', {
-                          requirementNo: req.requirementNo,
-                          sourceRef: req.sourceRef,
-                          region: req.region,
-                          status: req.status,
-                          dynamicStatus: dynamicStatus,
-                          rawData: req
-                        });
-                      }
                       
                       // 🔥 区域标签配置
                       const regionConfig = req.region === 'North America' || req.region === 'NA' ? { label: 'NA', color: 'bg-blue-100 text-blue-700' }
@@ -1720,7 +2926,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                 <div className="text-center py-12 border border-gray-200 rounded">
                   <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                   <p className="text-gray-500">暂无询价单</p>
-                  <p className="text-sm text-gray-400 mt-1">从采购需求池创建询价单后将显示在这里</p>
+                  <p className="text-sm text-gray-400 mt-1">从报价请求池创建询价单后将显示在这里</p>
                 </div>
               ) : (
                 <div className="border border-gray-200 rounded overflow-hidden">
@@ -1837,30 +3043,26 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   <Eye className="w-3 h-3 mr-1" />
                                   查看
                                 </Button>
-                                {isDraft && (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => handleEditRFQ(rfq)}
-                                      className="h-6 text-[12px] px-2 border-gray-300 text-gray-600 hover:bg-gray-50"
-                                    >
-                                      <Edit className="w-3 h-3 mr-1" />
-                                      编辑
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      onClick={() => {
-                                        // 🔥 提交询价单给供应商
-                                        handleSubmitRFQToSupplier(rfq);
-                                      }}
-                                      className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
-                                    >
-                                      <Send className="w-3 h-3 mr-1" />
-                                      提交
-                                    </Button>
-                                  </>
-                                )}
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleEditRFQ(rfq)}
+                                  className="h-6 text-[12px] px-2 border-gray-300 text-gray-600 hover:bg-gray-50"
+                                >
+                                  <Edit className="w-3 h-3 mr-1" />
+                                  编辑
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    // 🔥 提交询价单给供应商
+                                    handleSubmitRFQToSupplier(rfq);
+                                  }}
+                                  className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
+                                >
+                                  <Send className="w-3 h-3 mr-1" />
+                                  提交
+                                </Button>
                               </div>
                             </td>
                           </tr>
@@ -2138,235 +3340,343 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             </div>
           </TabsContent>
 
-          {/* ==================== Tab 4: 采购订单 ==================== */}
-          <TabsContent value="orders" className="m-0">
-            {/* 搜索和筛选 */}
+          {/* ==================== Tab 4: 采购请求 ==================== */}
+          <TabsContent value="procurement-requests" className="m-0">
             <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
               <div className="flex gap-2 items-center">
                 <div className="relative flex-1">
                   <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
                   <Input
-                    placeholder="搜索采购单号、供应商、需求编号..."
-                    value={orderSearchTerm}
-                    onChange={(e) => setOrderSearchTerm(e.target.value)}
+                    placeholder="搜索采购请求号、来源询价、需求编号..."
+                    value={procurementRequestSearchTerm}
+                    onChange={(e) => setProcurementRequestSearchTerm(e.target.value)}
                     className="pl-7 h-8 text-xs border-gray-300"
                   />
                 </div>
-                {selectedOrderIds.length > 0 && (
+                {selectedProcurementRequestIds.length > 0 && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={handleBatchDeleteOrders}
+                    onClick={handleBatchDeleteProcurementRequests}
                     className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
                   >
                     <Trash2 className="w-3.5 h-3.5 mr-1" />
-                    批量删除 ({selectedOrderIds.length})
+                    批量删除 ({selectedProcurementRequestIds.length})
                   </Button>
                 )}
-                <Button 
-                  variant="default" 
-                  size="sm" 
-                  className="h-8 text-xs px-3 bg-purple-600 hover:bg-purple-700"
-                  onClick={handleCreateOrder}
-                >
-                  <Plus className="w-3 h-3 mr-1" />
-                  新建采购单
-                </Button>
               </div>
             </div>
 
-            {/* 订单列表 - 新样式 */}
             <div className="px-3 py-3">
-              <p className="text-[14px] text-gray-600 mb-2">共 {filteredOrders.length} 条采购订单</p>
+              <p className="text-[14px] text-gray-600 mb-2">共 {filteredProcurementRequests.length} 条采购请求</p>
+              {filteredProcurementRequests.length === 0 && purchaseOrders.filter((po) => isProcurementRequestRecord(po)).length > 0 && (
+                <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  当前筛选条件下无数据，已保留采购请求。请清空搜索后查看全部。
+                </div>
+              )}
               <div className="border border-gray-200 rounded overflow-hidden bg-white">
                 <table className="w-full text-[14px]">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                        <input 
-                          type="checkbox" 
+                        <input
+                          type="checkbox"
                           className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                          checked={selectedOrderIds.length === filteredOrders.length && filteredOrders.length > 0}
+                          checked={selectedProcurementRequestIds.length === filteredProcurementRequests.length && filteredProcurementRequests.length > 0}
                           onChange={(e) => {
                             if (e.target.checked) {
-                              setSelectedOrderIds(filteredOrders.map(o => o.id));
+                              setSelectedProcurementRequestIds(filteredProcurementRequests.map((o) => o.id));
                             } else {
-                              setSelectedOrderIds([]);
+                              setSelectedProcurementRequestIds([]);
                             }
                           }}
                         />
                       </th>
                       <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                      <th className="text-left py-2 px-3 font-medium text-gray-600">采购单号</th>
-                      <th className="text-left py-2 px-3 font-medium text-gray-600">供应商</th>
-                      <th className="text-left py-2 px-3 font-medium text-gray-600">区域</th>
+                      <th className="text-left py-2 px-3 font-medium text-gray-600">采购请求号</th>
+                      <th className="text-left py-2 px-3 font-medium text-gray-600">来源</th>
                       <th className="text-left py-2 px-3 font-medium text-gray-600">产品数量</th>
-                      <th className="text-left py-2 px-3 font-medium text-gray-600">报价期限</th>
                       <th className="text-left py-2 px-3 font-medium text-gray-600">状态</th>
                       <th className="text-center py-2 px-3 font-medium text-gray-600">操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredOrders.map((po, idx) => {
-                      const statusConfig = getPOStatusConfig(po.status);
-                      const paymentConfig = getPaymentStatusConfig(po.paymentStatus);
-                      
-                      // 🔥 区域标签配置
-                      const regionConfig = po.region === 'North America' || po.region === 'NA' ? { label: 'NA', color: 'bg-blue-100 text-blue-700' }
-                        : po.region === 'South America' || po.region === 'SA' ? { label: 'SA', color: 'bg-green-100 text-green-700' }
-                        : po.region === 'Europe & Africa' || po.region === 'EA' ? { label: 'EA', color: 'bg-purple-100 text-purple-700' }
-                        : null;
-                      
+                    {filteredProcurementRequests.map((po, idx) => {
+                      const runtimeStatus = getProcurementRequestRuntimeStatus(po);
                       return (
-                        <tr key={po.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                          <td className="py-2 px-2 text-center">
-                            <input 
-                              type="checkbox" 
-                              className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                              checked={selectedOrderIds.includes(po.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedOrderIds([...selectedOrderIds, po.id]);
-                                } else {
-                                  setSelectedOrderIds(selectedOrderIds.filter(id => id !== po.id));
-                                }
-                              }}
-                            />
-                          </td>
-                          <td className="py-2 px-2 text-center text-gray-500">
-                            {idx + 1}
-                          </td>
-                          {/* 采购单号 */}
-                          <td className="py-3 px-3">
-                            <button 
-                              onClick={() => handleViewPODocument(po)}
-                              className="text-purple-600 hover:text-purple-700 font-medium hover:underline text-xs"
-                            >
-                              {po.poNumber}
-                            </button>
-                            {/* 🔥 显示来源销售合同编号 */}
-                            {po.sourceRef && (
-                              <div className="text-[11px] text-gray-500 mt-0.5">
-                                来源: {po.sourceRef}
-                              </div>
-                            )}
-                          </td>
-                          
-                          {/* 供应商 */}
-                          <td className="py-3 px-3">
-                            <div className="text-gray-900">{po.supplierName}</div>
-                            {/* 🔥 显示供应商代码 */}
-                            {po.supplierCode && (
-                              <div className="text-[11px] text-gray-500 mt-0.5">
-                                {po.supplierCode}
-                              </div>
-                            )}
-                          </td>
-                          
-                          {/* 区域 */}
-                          <td className="py-3 px-3">
-                            {regionConfig ? (
-                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-medium ${regionConfig.color}`}>
-                                {regionConfig.label}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400 text-[12px]">-</span>
-                            )}
-                          </td>
-                          
-                          {/* 产品数量 */}
-                          <td className="py-3 px-3">
-                            {po.items && po.items.length > 0 ? (
-                              <>
-                                <div className="text-gray-900">{po.items.length}个产品</div>
-                                <div className="text-[12px] text-gray-500">
-                                  共 {po.items.reduce((sum, item) => sum + item.quantity, 0).toLocaleString()} 件
-                                </div>
-                              </>
-                            ) : (
-                              <div className="text-gray-400">-</div>
-                            )}
-                          </td>
-                          
-                          {/* 报价期限 */}
-                          <td className="py-3 px-3">
-                            <div className="text-gray-900">{po.expectedDate}</div>
-                            {po.actualDate && (
-                              <div className="text-[12px] text-green-600">实: {po.actualDate}</div>
-                            )}
-                          </td>
-                          
-                          {/* 状态 */}
-                          <td className="py-3 px-3">
-                            <span className={`inline-flex items-center px-2 py-1 rounded text-[12px] font-medium border ${statusConfig.color}`}>
-                              {statusConfig.label}
+                      <tr key={po.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                        <td className="py-2 px-2 text-center">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
+                            checked={selectedProcurementRequestIds.includes(po.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedProcurementRequestIds([...selectedProcurementRequestIds, po.id]);
+                              } else {
+                                setSelectedProcurementRequestIds(selectedProcurementRequestIds.filter((id) => id !== po.id));
+                              }
+                            }}
+                          />
+                        </td>
+                        <td className="py-2 px-2 text-center text-gray-500">{idx + 1}</td>
+                        <td className="py-2 px-2">
+                          <div className="font-semibold text-purple-600">{normalizeCGNumberForDisplay(po.poNumber || '')}</div>
+                          <div className="text-xs text-gray-500">申请时间: {new Date(po.orderDate || po.createdDate || Date.now()).toLocaleString()}</div>
+                        </td>
+                        <td className="py-2 px-2">
+                          <div className="text-sm text-gray-700">询价: {resolveInquirySourceRef(po) || ''}</div>
+                          <div className="text-xs text-gray-500">需求: {getRequirementNoFromPO(po) || ''}</div>
+                        </td>
+                        <td className="py-2 px-2">
+                          <span className="font-semibold">{po.items?.length || 0} 个产品</span>
+                          <div className="text-xs text-gray-500">
+                            共 {(po.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0).toLocaleString()} 件
+                          </div>
+                        </td>
+                        <td className="py-2 px-2">
+                          {runtimeStatus === 'allocated_completed' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-green-50 text-green-700 border-green-200">
+                              {getProcurementRequestStatusText(runtimeStatus)}
                             </span>
-                          </td>
-                          
-                          {/* 操作按钮 */}
-                          <td className="py-3 px-3">
-                            <div className="flex gap-1 justify-center">
-                              <button
-                                onClick={() => handleViewPODocument(po)}
-                                className="p-1 hover:bg-gray-100 rounded transition-colors"
-                                title="查看采购订单文档"
-                              >
-                                <Eye className="w-4 h-4 text-gray-600" />
-                              </button>
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    setExportingPDF(true);
-                                    const poData = convertToPOData(po);
-                                    setCurrentPOData(poData);
-                                    
-                                    // 等待React状态更新和DOM渲染
-                                    await new Promise(resolve => setTimeout(resolve, 200));
-                                    
-                                    // 使用隐藏的ref进行PDF导出
-                                    if (hiddenPDFRef.current) {
-                                      const filename = generatePDFFilename('Purchase_Order', po.poNumber);
-                                      await exportToPDF(hiddenPDFRef.current, filename);
-                                      toast.success(`✅ 采购订单 ${po.poNumber} PDF下载成功！`);
-                                    } else {
-                                      throw new Error('PDF渲染区域未就绪');
-                                    }
-                                  } catch (error) {
-                                    toast.error('❌ PDF导出失败，请重试');
-                                    console.error('PDF export error:', error);
-                                  } finally {
-                                    setExportingPDF(false);
-                                  }
-                                }}
-                                className="p-1 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="下载PDF"
-                                disabled={exportingPDF}
-                              >
-                                {exportingPDF ? (
-                                  <RefreshCw className="w-4 h-4 text-gray-400 animate-spin" />
-                                ) : (
-                                  <Download className="w-4 h-4 text-gray-600" />
-                                )}
-                              </button>
-                              <button
-                                onClick={() => handleDeletePurchaseOrder(po)}
-                                className="p-1 hover:bg-red-50 rounded transition-colors border border-red-300 text-red-600"
-                                title="删除采购订单"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                          ) : runtimeStatus === 'partial_allocated' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-blue-50 text-blue-700 border-blue-200">
+                              {getProcurementRequestStatusText(runtimeStatus)}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-amber-50 text-amber-700 border-amber-200">
+                              {getProcurementRequestStatusText(runtimeStatus)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleViewPODocument(po)}
+                              className="h-7 px-2 text-xs"
+                              title="查看采购请求详情"
+                            >
+                              <Eye className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => openSupplierAllocationDialog(po)}
+                              disabled={runtimeStatus === 'allocated_completed'}
+                              className="h-7 px-2 text-xs bg-[#F96302] hover:bg-[#E05502] disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="按产品行分配供应商并生成采购订单草稿"
+                            >
+                              {runtimeStatus === 'allocated_completed' ? '已分配完成' : runtimeStatus === 'partial_allocated' ? '继续分配' : '分配供应商'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                if (!window.confirm(`确定要删除采购请求 "${po.poNumber}" 吗？\n\n⚠️ 此操作不可恢复！`)) return;
+                                deletePurchaseOrder(po.id);
+                                toast.success('采购请求已删除');
+                              }}
+                              className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50"
+                              title="删除采购请求"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    )})}
                   </tbody>
                 </table>
               </div>
             </div>
           </TabsContent>
+
+          <PurchaseOrdersTab
+            orderSearchTerm={orderSearchTerm}
+            setOrderSearchTerm={setOrderSearchTerm}
+            selectedOrderIds={selectedOrderIds}
+            setSelectedOrderIds={setSelectedOrderIds}
+            handleBatchDeleteOrders={handleBatchDeleteOrders}
+            handleCreateOrder={handleCreateOrder}
+            filteredOrders={filteredOrders}
+            handleViewPODocument={handleViewPODocument}
+            handleOpenEditPO={handleOpenEditPO}
+            handlePushPurchaseToSupplier={handlePushPurchaseToSupplier}
+            handleApplyBossApproval={handleApplyBossApproval}
+            handleDeletePurchaseOrder={handleDeletePurchaseOrder}
+            normalizeCGNumberForDisplay={normalizeCGNumberForDisplay}
+            resolveInquirySourceRef={resolveInquirySourceRef}
+            getRequirementNoFromPO={getRequirementNoFromPO}
+          />
         </Tabs>
       </div>
+
+      <Dialog open={showAllocationDialog} onOpenChange={setShowAllocationDialog}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>创建采购单草稿 - 分配供应商</DialogTitle>
+            <DialogDescription>
+              选择供应商并分配产品数量，系统将生成CG采购单草稿并提交老板审核。
+            </DialogDescription>
+          </DialogHeader>
+
+          {allocationPO && (
+            <div className="space-y-4">
+              <div className="rounded border border-gray-200 bg-gray-50 p-4">
+                <h4 className="mb-3 text-[16px] font-semibold text-gray-900">📋 采购需求信息</h4>
+                <div className="mb-3 grid grid-cols-2 gap-3 text-[15px]">
+                  <div>
+                    <span className="text-gray-600">采购单号:</span>
+                    <span className="ml-2 font-semibold">{allocationPO.poNumber}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">来源询价:</span>
+                    <span className="ml-2 font-semibold">{resolveInquirySourceRef(allocationPO) || '-'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">来源需求:</span>
+                    <span className="ml-2 font-semibold">{getRequirementNoFromPO(allocationPO) || '-'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">产品数量:</span>
+                    <span className="ml-2 font-semibold">{allocationPO.items?.length || 0} 项</span>
+                  </div>
+                </div>
+                <div className="overflow-x-auto rounded border border-gray-200 bg-white">
+                  <table className="w-full text-[16px]">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="w-12 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5"
+                            checked={
+                              (allocationPO.items || []).filter((item, idx) =>
+                                !allocatedProductTokensInDialog.has(getProductMatchToken(item, idx))
+                              ).length > 0 &&
+                              allocationSelectedProductKeys.length ===
+                                (allocationPO.items || []).filter((item, idx) =>
+                                  !allocatedProductTokensInDialog.has(getProductMatchToken(item, idx))
+                                ).length
+                            }
+                            onChange={(e) => toggleAllAllocationProducts(e.target.checked)}
+                          />
+                        </th>
+                        <th className="w-10 py-2 text-center">#</th>
+                        <th className="py-2 text-left">产品名称</th>
+                        <th className="py-2 text-left">型号</th>
+                        <th className="py-2 text-right">数量</th>
+                        <th className="py-2 text-left">单位</th>
+                        <th className="py-2 text-center">分配状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(allocationPO.items || []).map((item, idx) => {
+                        const key = getPOProductAllocationKey(item, idx);
+                        const token = getProductMatchToken(item, idx);
+                        const isAllocated = allocatedProductTokensInDialog.has(token);
+                        const checked = allocationSelectedProductKeys.includes(key);
+                        return (
+                          <tr key={key} className="border-t border-gray-100">
+                            <td className="py-2 text-center">
+                              <input
+                                type="checkbox"
+                                className="h-5 w-5"
+                                checked={checked}
+                                disabled={isAllocated}
+                                onChange={(e) => toggleAllocationProduct(key, e.target.checked)}
+                              />
+                            </td>
+                            <td className="py-2 text-center">{idx + 1}</td>
+                            <td className="py-2">{item.productName}</td>
+                            <td className="py-2 text-gray-600">{item.modelNo}</td>
+                            <td className="py-2 text-right font-semibold">{item.quantity}</td>
+                            <td className="py-2">{item.unit}</td>
+                            <td className="py-2 text-center">
+                              {isAllocated ? (
+                                <span className="inline-flex items-center rounded border border-green-200 bg-green-50 px-2 py-0.5 text-xs text-green-700">
+                                  已分配
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+                                  待分配
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="rounded border border-gray-200 p-3">
+                <h5 className="mb-2 text-sm font-semibold text-gray-900">
+                  选择供应商 * ({allocationSelectedSupplierCodes.length} 个已选)
+                </h5>
+                <div className="relative mb-3">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    value={allocationSupplierSearchTerm}
+                    onChange={(e) => setAllocationSupplierSearchTerm(e.target.value)}
+                    className="h-10 pl-9 text-sm"
+                    placeholder="搜索供应商名称、产品名称、产品类别..."
+                  />
+                </div>
+                <div className="space-y-2 rounded border border-gray-200 bg-white p-2">
+                  {filteredAllocationSuppliers.map((supplier) => {
+                    const code = String(supplier.code || '');
+                    const checked = allocationSelectedSupplierCodes.includes(code);
+                    return (
+                      <div key={code} className="flex items-center justify-between rounded border border-gray-100 px-3 py-2">
+                        <label className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5"
+                            checked={checked}
+                            onChange={(e) => toggleAllocationSupplier(code, e.target.checked)}
+                          />
+                          <div>
+                            <p className="text-base font-semibold text-gray-900">{supplier.name}</p>
+                            <p className="text-sm text-gray-600">{supplier.code} | {supplier.email}</p>
+                          </div>
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-green-100 text-green-700 hover:bg-green-100">{supplier.level || 'A'}级</Badge>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-sm text-gray-500">可以选择多个供应商进行分配</p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowAllocationDialog(false);
+                    setAllocationPO(null);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button
+                  type="button"
+                  disabled={submittingAllocation}
+                  className="bg-blue-600 text-white hover:bg-blue-700"
+                  onClick={submitSupplierAllocation}
+                >
+                  {submittingAllocation ? '创建中...' : '创建采购单草稿'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* 订单详情对话框 */}
       <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
@@ -2384,12 +3694,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <span className="text-gray-600">采购单号：</span>
-                    <span className="font-semibold ml-2 text-purple-600">{viewOrder.poNumber}</span>
+                    <span className="font-semibold ml-2 text-purple-600">{normalizeCGNumberForDisplay(viewOrder.poNumber)}</span>
                   </div>
-                  {viewOrder.sourceRef && (
+                  {resolveInquirySourceRef(viewOrder) && (
                     <div>
                       <span className="text-gray-600">来源单号：</span>
-                      <span className="ml-2 text-blue-600">{viewOrder.sourceRef}</span>
+                      <span className="ml-2 text-blue-600">{resolveInquirySourceRef(viewOrder)}</span>
                     </div>
                   )}
                   {viewOrder.requirementNo && (
@@ -2722,1346 +4032,94 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* 🔥 创建采购订单对话框 - 从需求创建 */}
-      <Dialog open={showCreateOrderDialog} onOpenChange={setShowCreateOrderDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle style={{ fontSize: '15px' }}>
-              🛒 创建采购订单 - {selectedRequirement?.requirementNo}
-            </DialogTitle>
-            <DialogDescription style={{ fontSize: '12px' }}>
-              Create Purchase Order from Requirement
-            </DialogDescription>
-          </DialogHeader>
+      {/* 🔥 编辑采购订单对话框 */}
+      <PurchaseOrderEditDialog
+        open={showEditPODialog}
+        onOpenChange={setShowEditPODialog}
+        editingPONumber={editingPO?.poNumber}
+        editPOForm={editPOForm}
+        setEditPOForm={setEditPOForm}
+        editPOItems={editPOItems}
+        onEditPOItemChange={handleEditPOItemChange}
+        editPOOrderDate={editPOOrderDate}
+        setEditPOOrderDate={setEditPOOrderDate}
+        editPOExpectedDate={editPOExpectedDate}
+        setEditPOExpectedDate={setEditPOExpectedDate}
+        editPOActualDate={editPOActualDate}
+        setEditPOActualDate={setEditPOActualDate}
+        allSuppliers={allSuppliers}
+        onSupplierNameChange={handleEditSupplierNameChange}
+        onSupplierCodeChange={handleEditSupplierCodeChange}
+        onCancel={() => {
+          setShowEditPODialog(false);
+          setEditingPO(null);
+        }}
+        onSave={handleSaveEditPO}
+      />
 
-          {selectedRequirement && (
-            <div className="space-y-4">
-              {/* 🔥 需求基本信息 */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <div className="grid grid-cols-4 gap-3 text-xs">
-                  <div>
-                    <span className="text-gray-600">需求编号：</span>
-                    <span className="font-semibold text-gray-900 ml-1">{selectedRequirement.requirementNo}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">产品数：</span>
-                    <span className="font-semibold text-gray-900 ml-1">{selectedRequirement.items?.length || 0} 个</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">型号：</span>
-                    <span className="ml-1 text-gray-900">{selectedRequirement.requiredDate}</span>
-                  </div>
-                  {selectedRequirement.sourceRef && (
-                    <div>
-                      <span className="text-gray-600">来源：</span>
-                      <span className="ml-1 text-blue-600 text-[10px]">{selectedRequirement.sourceRef}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
+      <PurchaseOrderCreateDialogs
+        showCreateOrderDialog={showCreateOrderDialog}
+        setShowCreateOrderDialog={setShowCreateOrderDialog}
+        selectedRequirement={selectedRequirement}
+        createOrderForm={createOrderForm}
+        setCreateOrderForm={setCreateOrderForm}
+        productPrices={productPrices}
+        setProductPrices={setProductPrices}
+        handleSubmitCreateOrder={handleSubmitCreateOrder}
+        showSupplierDialog={showSupplierDialog}
+        setShowSupplierDialog={setShowSupplierDialog}
+        supplierSearchTerm={supplierSearchTerm}
+        setSupplierSearchTerm={setSupplierSearchTerm}
+        allSuppliers={allSuppliers}
+      />
 
-              {/* 🔥 产品清单 - 每个产品独立的单价输入 */}
-              <div>
-                <h4 className="text-xs font-semibold text-gray-900 mb-2">📦 产品清单 & 采购单价</h4>
-                <div className="border border-gray-200 rounded overflow-hidden">
-                  <table className="w-full text-[10px]">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">序号</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">产品名称</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">型号</th>
-                        <th className="text-right py-1.5 px-2 font-medium text-gray-700">需求数量</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">单位</th>
-                        <th className="text-right py-1.5 px-2 font-medium text-gray-700 w-24">采购单价 *</th>
-                        <th className="text-right py-1.5 px-2 font-medium text-gray-700">小计</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedRequirement.items?.map((item, idx) => {
-                        const unitPrice = parseFloat(productPrices[item.id] || '0');
-                        const subtotal = item.quantity * unitPrice;
-                        
-                        return (
-                          <tr key={item.id} className="border-b border-gray-100">
-                            <td className="py-2 px-2 text-gray-600">{idx + 1}</td>
-                            <td className="py-2 px-2 font-medium text-gray-900">{item.productName}</td>
-                            <td className="py-2 px-2 text-gray-700 text-[9px]">{item.modelNo}</td>
-                            <td className="py-2 px-2 text-right font-semibold text-gray-900">{item.quantity.toLocaleString()}</td>
-                            <td className="py-2 px-2 text-gray-700">{item.unit}</td>
-                            <td className="py-2 px-2">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={productPrices[item.id] || ''}
-                                onChange={(e) => setProductPrices({ ...productPrices, [item.id]: e.target.value })}
-                                placeholder="0.00"
-                                className="h-6 text-[10px] text-right"
-                              />
-                            </td>
-                            <td className="py-2 px-2 text-right font-semibold text-gray-900">
-                              {isNaN(subtotal) || subtotal === 0 ? '--' : subtotal.toFixed(2)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      <tr className="bg-gray-50 font-semibold">
-                        <td colSpan={6} className="py-2 px-2 text-right text-gray-700">
-                          预计总金额：
-                        </td>
-                        <td className="py-2 px-2 text-right text-gray-900">
-                          {createOrderForm.currency} {
-                            (() => {
-                              const total = selectedRequirement.items?.reduce((sum, item) => {
-                                const price = parseFloat(productPrices[item.id] || '0');
-                                return sum + (item.quantity * price);
-                              }, 0) || 0;
-                              return isNaN(total) ? '--' : total.toFixed(2);
-                            })()
-                          }
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-[10px] text-gray-500 mt-1">💡 请为每个产品填写采购单价</p>
-              </div>
-
-              {/* 供应商信息 */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-semibold text-gray-900">🏭 供应商信息</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2">
-                    <Label htmlFor="supplierName" className="text-xs">
-                      供应商名称 <span className="text-red-500">*</span>
-                    </Label>
-                    <div className="flex gap-2 mt-1">
-                      <Input
-                        id="supplierName"
-                        value={createOrderForm.supplierName}
-                        onChange={(e) => setCreateOrderForm({ ...createOrderForm, supplierName: e.target.value })}
-                        placeholder="请输入或从供应商库选择"
-                        className="text-xs h-8 flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowSupplierDialog(true)}
-                        className="h-8 text-xs px-3"
-                      >
-                        <Search className="w-3 h-3 mr-1" />
-                        选择
-                      </Button>
-                    </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="supplierCode" className="text-xs">供应商编码</Label>
-                    <Input
-                      id="supplierCode"
-                      value={createOrderForm.supplierCode}
-                      onChange={(e) => setCreateOrderForm({ ...createOrderForm, supplierCode: e.target.value })}
-                      placeholder="可选"
-                      className="mt-1 text-xs h-8"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="currency" className="text-xs">结算货币</Label>
-                    <Select 
-                      value={createOrderForm.currency} 
-                      onValueChange={(value) => setCreateOrderForm({ ...createOrderForm, currency: value })}
-                    >
-                      <SelectTrigger className="mt-1 h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="USD" style={{ fontSize: '11px' }}>USD 美元</SelectItem>
-                        <SelectItem value="EUR" style={{ fontSize: '11px' }}>EUR 欧元</SelectItem>
-                        <SelectItem value="GBP" style={{ fontSize: '11px' }}>GBP 英镑</SelectItem>
-                        <SelectItem value="CNY" style={{ fontSize: '11px' }}>CNY 人民币</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
-              {/* 采购条款 */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-semibold text-gray-900">📄 采购条款</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2">
-                    <Label htmlFor="paymentTerms" className="text-xs">付款条款</Label>
-                    <Input
-                      id="paymentTerms"
-                      value={createOrderForm.paymentTerms}
-                      onChange={(e) => setCreateOrderForm({ ...createOrderForm, paymentTerms: e.target.value })}
-                      className="mt-1 text-xs h-8"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Label htmlFor="deliveryTerms" className="text-xs">交货条款</Label>
-                    <Input
-                      id="deliveryTerms"
-                      value={createOrderForm.deliveryTerms}
-                      onChange={(e) => setCreateOrderForm({ ...createOrderForm, deliveryTerms: e.target.value })}
-                      className="mt-1 text-xs h-8"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="expectedDate" className="text-xs">期望交付日期</Label>
-                    <Input
-                      id="expectedDate"
-                      type="date"
-                      value={createOrderForm.expectedDate}
-                      onChange={(e) => setCreateOrderForm({ ...createOrderForm, expectedDate: e.target.value })}
-                      className="mt-1 text-xs h-8"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* 备注 */}
-              <div>
-                <Label htmlFor="remarks" className="text-xs">备注说明</Label>
-                <Textarea
-                  id="remarks"
-                  value={createOrderForm.remarks}
-                  onChange={(e) => setCreateOrderForm({ ...createOrderForm, remarks: e.target.value })}
-                  placeholder="订单备注..."
-                  className="mt-1 text-xs min-h-[60px]"
-                  rows={3}
-                />
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="mt-4">
-            <Button
-              variant="outline"
-              onClick={() => setShowCreateOrderDialog(false)}
-              className="text-xs"
-            >
-              取消
-            </Button>
-            <Button
-              onClick={handleSubmitCreateOrder}
-              className="bg-[#F96302] hover:bg-[#E05502] text-xs"
-            >
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              创建采购订单
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 🔥 供应商选择对话框 */}
-      <Dialog open={showSupplierDialog} onOpenChange={setShowSupplierDialog}>
-        <DialogContent className="max-w-3xl max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle style={{ fontSize: '15px' }}>
-              🏭 选择供应商
-            </DialogTitle>
-            <DialogDescription style={{ fontSize: '12px' }}>
-              从供应商库中搜索并选择供应商
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            {/* 搜索框 */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="搜索供应商名称、编码、联系人、类别、区域..."
-                value={supplierSearchTerm}
-                onChange={(e) => setSupplierSearchTerm(e.target.value)}
-                className="pl-9 text-xs h-9"
-              />
-            </div>
-
-            {/* 🔥 供应商列表 - 使用真实数据 */}
-            <div className="border border-gray-200 rounded overflow-hidden max-h-[400px] overflow-y-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
-                  <tr>
-                    <th className="text-left py-2 px-3 font-medium text-gray-700">等级</th>
-                    <th className="text-left py-2 px-3 font-medium text-gray-700">供应商编码</th>
-                    <th className="text-left py-2 px-3 font-medium text-gray-700">供应商名称</th>
-                    <th className="text-left py-2 px-3 font-medium text-gray-700">类别</th>
-                    <th className="text-left py-2 px-3 font-medium text-gray-700">区域</th>
-                    <th className="text-left py-2 px-3 font-medium text-gray-700">联系人</th>
-                    <th className="text-left py-2 px-3 font-medium text-gray-700">电话</th>
-                    <th className="text-center py-2 px-3 font-medium text-gray-700">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    // 🔥 使用供应商数据（优先后端DB）并支持搜索
-                    const filteredSuppliers = (supplierSearchTerm
-                      ? allSuppliers.filter(s => {
-                          const kw = supplierSearchTerm.trim().toLowerCase();
-                          const hay = [
-                            s.name,
-                            s.nameEn,
-                            s.category,
-                            s.code,
-                            s.region,
-                            s.contact,
-                            s.email,
-                            s.phone,
-                          ].filter(Boolean).join(' ').toLowerCase();
-                          return hay.includes(kw);
-                        })
-                      : allSuppliers
-                    ).filter(s => s.status === 'active');
-                    
-                    if (filteredSuppliers.length === 0) {
-                      return (
-                        <tr>
-                          <td colSpan={8} className="py-8 px-3 text-center text-gray-500">
-                            <div className="flex flex-col items-center gap-2">
-                              <AlertCircle className="w-8 h-8 text-gray-400" />
-                              <p>未找到匹配的供应商</p>
-                              <p className="text-[10px]">请尝试其他搜索关键词</p>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    }
-                    
-                    return filteredSuppliers.map((supplier, idx) => (
-                      <tr key={supplier.id} className={`border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-                        <td className="py-2 px-3">
-                          <Badge 
-                            className={`text-[9px] px-1.5 py-0.5 ${
-                              supplier.level === 'A' ? 'bg-green-100 text-green-700' :
-                              supplier.level === 'B' ? 'bg-blue-100 text-blue-700' :
-                              'bg-gray-100 text-gray-700'
-                            }`}
-                          >
-                            {supplier.level}级
-                          </Badge>
-                        </td>
-                        <td className="py-2 px-3 font-mono text-[10px] text-gray-600">{supplier.code}</td>
-                        <td className="py-2 px-3 font-medium text-gray-900">
-                          <div>{supplier.name}</div>
-                          <div className="text-[9px] text-gray-500 mt-0.5">{supplier.nameEn}</div>
-                        </td>
-                        <td className="py-2 px-3 text-gray-700">
-                          <Badge variant="outline" className="text-[9px]">{supplier.category}</Badge>
-                        </td>
-                        <td className="py-2 px-3 text-gray-600">{supplier.region}</td>
-                        <td className="py-2 px-3 text-gray-700">{supplier.contact}</td>
-                        <td className="py-2 px-3 text-gray-600 text-[10px]">{supplier.phone}</td>
-                        <td className="py-2 px-3 text-center">
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setCreateOrderForm({
-                                ...createOrderForm,
-                                supplierName: supplier.name,
-                                supplierCode: supplier.code
-                              });
-                              setShowSupplierDialog(false);
-                              setSupplierSearchTerm('');
-                              toast.success(
-                                <div>
-                                  <p className="font-semibold">✅ 已选择供应商</p>
-                                  <p className="text-[10px] mt-1">{supplier.name}</p>
-                                  <p className="text-[10px]">等级: {supplier.level}级 | {supplier.category}</p>
-                                </div>
-                              );
-                            }}
-                            className="h-6 text-[10px] bg-[#F96302] hover:bg-[#E05502] px-2"
-                          >
-                            选择
-                          </Button>
-                        </td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex items-center justify-between text-[10px] text-gray-500">
-              <p>💡 提示：点击"选择"按钮将自动填充供应商信息</p>
-              <p>
-                共 {(supplierSearchTerm
-                  ? allSuppliers.filter(s => {
-                      const kw = supplierSearchTerm.trim().toLowerCase();
-                      const hay = [
-                        s.name,
-                        s.nameEn,
-                        s.category,
-                        s.code,
-                        s.region,
-                        s.contact,
-                        s.email,
-                        s.phone,
-                      ]
-                        .filter(Boolean)
-                        .join(' ')
-                        .toLowerCase();
-                      return hay.includes(kw);
-                    })
-                  : allSuppliers
-                ).filter(s => s.status === 'active').length}{' '}
-                个活跃供应商
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowSupplierDialog(false);
-                setSupplierSearchTerm(''); // 关闭时清空搜索
-              }}
-              className="text-xs"
-            >
-              取消
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ==================== 创建询价单对话框 ==================== */}
-      <Dialog open={showCreateRFQDialog} onOpenChange={setShowCreateRFQDialog}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader className="border-b border-gray-200 pb-4">
-            <DialogTitle className="text-base">创建询价单 - 向供应商询价</DialogTitle>
-            <DialogDescription className="text-xs">
-              选择供应商并设置询价参数，系统将向每个供应商发送包含所有产品的询价单
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto py-4 space-y-4">
-            {/* 需求信息 */}
-            {selectedRequirementForRFQ && (
-              <div className="bg-gray-50 border border-gray-200 rounded p-4">
-                <h4 className="text-xs font-semibold text-gray-900 mb-3">📋 采购需求信息</h4>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <span className="text-gray-600">需求编号:</span>
-                    <span className="ml-2 font-semibold text-gray-900">{selectedRequirementForRFQ.requirementNo}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">客户:</span>
-                    <span className="ml-2 font-semibold text-gray-900">{selectedRequirementForRFQ.customerName}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">要求日期:</span>
-                    <span className="ml-2 font-semibold text-gray-900">{selectedRequirementForRFQ.requiredDate}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">产品数量:</span>
-                    <span className="ml-2 font-semibold text-gray-900">{selectedRequirementForRFQ.items?.length || 0} 项</span>
-                  </div>
-                </div>
-                
-                {/* 产品列表 */}
-                <div className="mt-3">
-                  <div className="text-xs font-semibold text-gray-700 mb-2">产品明细:</div>
-                  <div className="bg-white border border-gray-200 rounded">
-                    <table className="w-full text-xs">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                            <input 
-                              type="checkbox" 
-                              className="w-4 h-4 cursor-pointer"
-                              checked={selectedProductIds.length === selectedRequirementForRFQ.items?.length && selectedProductIds.length > 0}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedProductIds(selectedRequirementForRFQ.items?.map(item => String(item.id)) || []);
-                                } else {
-                                  setSelectedProductIds([]);
-                                }
-                              }}
-                            />
-                          </th>
-                          <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">#</th>
-                          <th className="text-left py-1.5 px-2 font-medium text-gray-700">产品名称</th>
-                          <th className="text-left py-1.5 px-2 font-medium text-gray-700">型号</th>
-                          <th className="text-right py-1.5 px-2 font-medium text-gray-700">数量</th>
-                          <th className="text-left py-1.5 px-2 font-medium text-gray-700">单位</th>
-                          <th className="text-center py-1.5 px-2 font-medium text-gray-700">询价状态</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedRequirementForRFQ.items?.map((item, idx) => (
-                          <tr key={item.id} className="border-t border-gray-100 hover:bg-gray-50">
-                            <td className="py-1.5 px-2 text-center">
-                              <input 
-                                type="checkbox" 
-                                className="w-4 h-4 cursor-pointer"
-                                checked={selectedProductIds.includes(String(item.id))}
-                                onChange={(e) => {
-                                  const itemId = String(item.id);
-                                  if (e.target.checked) {
-                                    setSelectedProductIds([...selectedProductIds, itemId]);
-                                  } else {
-                                    setSelectedProductIds(selectedProductIds.filter(id => id !== itemId));
-                                  }
-                                }}
-                              />
-                            </td>
-                            <td className="py-1.5 px-2 text-center text-gray-600">{idx + 1}</td>
-                            <td className="py-1.5 px-2">{item.productName}</td>
-                            <td className="py-1.5 px-2 text-gray-600">{item.modelNo}</td>
-                            <td className="py-1.5 px-2 text-right font-semibold">{item.quantity}</td>
-                            <td className="py-1.5 px-2 text-gray-600">{item.unit}</td>
-                            <td className="py-1.5 px-2 text-center">
-                              {(item as any).rfqHistory && (item as any).rfqHistory.length > 0 ? (
-                                <button
-                                  onClick={() => {
-                                    setSelectedProductForHistory(item);
-                                    setShowRFQHistoryDialog(true);
-                                  }}
-                                  className="text-xs px-2 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded hover:bg-green-100 transition-colors cursor-pointer"
-                                >
-                                  已发送
-                                </button>
-                              ) : (
-                                <span className="text-xs text-gray-400">-</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 选择供应商 */}
-            <div>
-              <Label className="text-xs font-semibold text-gray-900 mb-2 block">
-                选择供应商 * ({selectedSuppliers.length} 个已选)
-              </Label>
-              
-              {/* 🔥 搜索框 */}
-              <div className="mb-3 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  placeholder="搜索供应商名称、产品名称、产品类别..."
-                  value={supplierSearchTerm}
-                  onChange={(e) => setSupplierSearchTerm(e.target.value)}
-                  className="pl-9 text-xs h-9"
-                />
-              </div>
-
-              <div className="border border-gray-300 rounded p-3 bg-white max-h-60 overflow-y-auto">
-                {filteredSuppliers.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 text-xs">
-                    未找到匹配的供应商
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {filteredSuppliers.map((supplier) => (
-                    <div
-                      key={supplier.code}
-                      className={`flex items-center justify-between p-2 border rounded transition-colors ${
-                        selectedSuppliers.some(s => s.code === supplier.code)
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div 
-                        className="flex items-center gap-2 flex-1 cursor-pointer"
-                        onClick={() => {
-                          if (selectedSuppliers.some(s => s.code === supplier.code)) {
-                            setSelectedSuppliers(selectedSuppliers.filter(s => s.code !== supplier.code));
-                          } else {
-                            setSelectedSuppliers([...selectedSuppliers, supplier]);
-                          }
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedSuppliers.some(s => s.code === supplier.code)}
-                          onChange={() => {}}
-                          className="w-4 h-4"
-                        />
-                        <div>
-                          <div className="text-xs font-semibold text-gray-900">{supplier.name}</div>
-                          <div className="text-xs text-gray-600">{supplier.code} | {supplier.email}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded text-xs ${
-                          supplier.level === 'A' ? 'bg-green-100 text-green-700' :
-                          supplier.level === 'B' ? 'bg-blue-100 text-blue-700' :
-                          'bg-gray-100 text-gray-700'
-                        }`}>
-                          {supplier.level}级
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handlePreviewRFQ(supplier);
-                          }}
-                          className="h-7 text-xs px-2 flex items-center gap-1"
-                        >
-                          <Eye className="w-3 h-3" />
-                          预览
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                  </div>
-                )}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                💡 可以选择多个供应商进行询价对比
-              </p>
-            </div>
-
-            {/* 报价截止日期 */}
-            <div>
-              <Label className="text-xs font-semibold text-gray-900 mb-2 block">
-                报价截止日期 *
-              </Label>
-              <DatePicker
-                date={rfqDeadline}
-                onSelect={setRFQDeadline}
-                placeholder="选择截止日期"
-                minDate={new Date()}
-                className="text-xs h-9"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                供应商需要在此日期前提交报价
-              </p>
-            </div>
-
-            {/* 备注 */}
-            <div>
-              <Label className="text-xs font-semibold text-gray-900 mb-2 block">
-                备注说明
-              </Label>
-              <Textarea
-                value={rfqRemarks}
-                onChange={(e) => setRFQRemarks(e.target.value)}
-                placeholder="向供应商说明特殊要求、注意事项等..."
-                rows={3}
-                className="text-xs resize-none"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="border-t border-gray-200 pt-4">
-            <Button
-              variant="outline"
-              onClick={() => setShowCreateRFQDialog(false)}
-              className="text-xs"
-            >
-              取消
-            </Button>
-            <Button
-              onClick={handleSubmitRFQ}
-              disabled={submittingRFQ || selectedSuppliers.length === 0 || !rfqDeadline}
-              className="bg-blue-600 hover:bg-blue-700 text-xs"
-            >
-              {submittingRFQ ? '创建中...' : `创建询价单 (${selectedSuppliers.length} 个供应商)`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ==================== 询价历史弹窗 ==================== */}
-      <Dialog open={showRFQHistoryDialog} onOpenChange={setShowRFQHistoryDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader className="border-b border-gray-200 pb-4">
-            <DialogTitle className="text-base">询价历史记录</DialogTitle>
-            <DialogDescription className="text-xs">
-              {selectedProductForHistory?.productName} - {selectedProductForHistory?.modelNo}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="py-4">
-            {selectedProductForHistory?.rfqHistory && selectedProductForHistory.rfqHistory.length > 0 ? (
-              <div className="space-y-3">
-                {selectedProductForHistory.rfqHistory.map((history: any, idx: number) => (
-                  <div key={idx} className="bg-gray-50 border border-gray-200 rounded p-3">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-gray-900">
-                          询价批次 #{history.batchNo || idx + 1}
-                        </span>
-                        <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
-                          {history.supplierCount} 家供应商
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-600">
-                        {history.sentDate}
-                      </span>
-                    </div>
-                    
-                    <div className="text-xs text-gray-700 mb-2">
-                      <span className="font-medium">发送至：</span>
-                    </div>
-                    
-                    <div className="space-y-1.5">
-                      {history.suppliers.map((supplier: any, sIdx: number) => (
-                        <div key={sIdx} className="flex items-center justify-between bg-white border border-gray-200 rounded px-2 py-1.5">
-                          <div className="flex items-center gap-2">
-                            <Building2 className="w-3.5 h-3.5 text-gray-400" />
-                            <span className="text-xs font-medium text-gray-900">{supplier.name}</span>
-                            <span className="text-xs text-gray-500">{supplier.code}</span>
-                          </div>
-                          <span className={`text-xs px-1.5 py-0.5 rounded ${
-                            supplier.level === 'A' ? 'bg-green-100 text-green-700' :
-                            supplier.level === 'B' ? 'bg-blue-100 text-blue-700' :
-                            'bg-gray-100 text-gray-700'
-                          }`}>
-                            {supplier.level}级
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {history.remarks && (
-                      <div className="mt-2 pt-2 border-t border-gray-200">
-                        <span className="text-xs text-gray-600">备注：{history.remarks}</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-gray-500 text-xs">
-                暂无询价历史记录
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="border-t border-gray-200 pt-4">
-            <Button
-              variant="outline"
-              onClick={() => setShowRFQHistoryDialog(false)}
-              className="text-xs"
-            >
-              关闭
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CreateRFQAndHistoryDialogs
+        showCreateRFQDialog={showCreateRFQDialog}
+        setShowCreateRFQDialog={setShowCreateRFQDialog}
+        selectedRequirementForRFQ={selectedRequirementForRFQ}
+        selectedProductIds={selectedProductIds}
+        setSelectedProductIds={setSelectedProductIds}
+        selectedSuppliers={selectedSuppliers}
+        setSelectedSuppliers={setSelectedSuppliers}
+        supplierSearchTerm={supplierSearchTerm}
+        setSupplierSearchTerm={setSupplierSearchTerm}
+        allSuppliers={allSuppliers}
+        handlePreviewRFQ={handlePreviewRFQ}
+        rfqDeadline={rfqDeadline}
+        setRFQDeadline={setRFQDeadline}
+        rfqRemarks={rfqRemarks}
+        setRFQRemarks={setRFQRemarks}
+        handleSubmitRFQ={handleSubmitRFQ}
+        submittingRFQ={submittingRFQ}
+        showRFQHistoryDialog={showRFQHistoryDialog}
+        setShowRFQHistoryDialog={setShowRFQHistoryDialog}
+        selectedProductForHistory={selectedProductForHistory}
+        setSelectedProductForHistory={setSelectedProductForHistory}
+      />
       
-      {/* 🔥 询价单预览对话框 */}
-      <Dialog open={showRFQPreview} onOpenChange={setShowRFQPreview}>
-        <DialogContent className="max-w-[95vw] h-[95vh] p-0">
-          <DialogHeader className="px-6 py-4 border-b">
-            <DialogTitle className="text-base flex items-center gap-2">
-              <FileText className="w-4 h-4" />
-              📋 供应商询价单预览 - {currentRFQData?.rfqNo}
-            </DialogTitle>
-            <DialogDescription style={{ fontSize: '12px' }}>
-              Supplier RFQ Preview - 可直接发送给供应商的询价单文档
-            </DialogDescription>
-          </DialogHeader>
+      <RFQPreviewDialog
+        showRFQPreview={showRFQPreview}
+        setShowRFQPreview={setShowRFQPreview}
+        currentRFQData={currentRFQData}
+        rfqDocRef={rfqDocRef}
+        handleExportRFQPDF={handleExportRFQPDF}
+      />
 
-          {/* 文档预览区域 */}
-          <div className="flex-1 overflow-auto bg-gray-100 p-6">
-            {currentRFQData && (
-              <SupplierRFQDocument
-                ref={rfqDocRef}
-                data={currentRFQData}
-              />
-            )}
-          </div>
+      <SupplierQuotationDialog
+        showSupplierQuotationDialog={showSupplierQuotationDialog}
+        setShowSupplierQuotationDialog={setShowSupplierQuotationDialog}
+        selectedSupplierQuotation={selectedSupplierQuotation}
+        onAccept={handleAcceptSupplierQuotation}
+        onReject={handleRejectSupplierQuotation}
+      />
 
-          {/* 操作按钮 */}
-          <div className="border-t bg-white px-6 py-4 flex items-center justify-between">
-            <div className="text-xs text-gray-500">
-              💡 此询价单可发送给供应商进行报价
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowRFQPreview(false)}
-                className="text-xs"
-              >
-                关闭
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleExportRFQPDF(false)}
-                className="text-xs flex items-center gap-1"
-              >
-                <Printer className="w-3 h-3" />
-                打印
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => handleExportRFQPDF(true)}
-                className="bg-[#F96302] hover:bg-[#E05502] text-xs flex items-center gap-1"
-              >
-                <Download className="w-3 h-3" />
-                下载PDF
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* 🔥 供应商报价详情对话框 */}
-      <Dialog open={showSupplierQuotationDialog} onOpenChange={setShowSupplierQuotationDialog}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>供应商报价单</DialogTitle>
-            <DialogDescription>
-              查看供应商提交的完整报价单文档 | 报价单号: {selectedSupplierQuotation?.quotationNo}
-            </DialogDescription>
-          </DialogHeader>
-          
-          {selectedSupplierQuotation && (
-            <div className="space-y-4">
-              {/* 🔥 使用供应商报价单文档查看器 */}
-              <SupplierQuotationDocumentViewer 
-                quotation={selectedSupplierQuotation}
-                onEdit={undefined} // Admin端不允许编辑供应商报价
-                onSubmit={undefined} // Admin端不允许提交
-              />
-              
-              {/* 🔥 Admin操作按钮 */}
-              {selectedSupplierQuotation.status === 'submitted' && (
-                <div className="flex gap-2 pt-4 border-t">
-                  <Button
-                    className="flex-1 bg-green-600 hover:bg-green-700"
-                    onClick={async () => {
-                      try {
-                        await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(selectedSupplierQuotation.id)}`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ status: 'accepted' }),
-                        });
-                        setSupplierQuotations(prev =>
-                          prev.map((q: any) =>
-                            q.id === selectedSupplierQuotation.id ? { ...q, status: 'accepted' as const } : q
-                          )
-                        );
-                        setShowSupplierQuotationDialog(false);
-                        toast.success(
-                          <div className="space-y-1">
-                            <p className="font-semibold">✅ 已接受报价</p>
-                            <p className="text-sm">报价单号: {selectedSupplierQuotation.quotationNo}</p>
-                            <p className="text-xs text-gray-500">刷新后状态会保持，可在采购订单中创建订单</p>
-                          </div>
-                        );
-                      } catch (e: any) {
-                        toast.error(e?.message || '操作失败，请重试');
-                      }
-                    }}
-                  >
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                    接受报价
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50"
-                    onClick={async () => {
-                      try {
-                        await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(selectedSupplierQuotation.id)}`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ status: 'rejected' }),
-                        });
-                        setSupplierQuotations(prev =>
-                          prev.map((q: any) =>
-                            q.id === selectedSupplierQuotation.id ? { ...q, status: 'rejected' as const } : q
-                          )
-                        );
-                        setShowSupplierQuotationDialog(false);
-                        toast.info(
-                          <div className="space-y-1">
-                            <p className="font-semibold">❌ 已拒绝报价</p>
-                            <p className="text-sm">报价单号: {selectedSupplierQuotation.quotationNo}</p>
-                            <p className="text-xs text-gray-500">刷新后状态会保持</p>
-                          </div>
-                        );
-                      } catch (e: any) {
-                        toast.error(e?.message || '操作失败，请重试');
-                      }
-                    }}
-                  >
-                    <AlertCircle className="w-4 h-4 mr-2" />
-                    拒绝报价
-                  </Button>
-                </div>
-              )}
-              
-              {/* 🔥 显示报价状态提示 */}
-              {selectedSupplierQuotation.status === 'accepted' && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <p className="text-sm text-green-800">
-                    ✅ 此报价已被接受 | {selectedSupplierQuotation.submittedDate || ''}
-                  </p>
-                </div>
-              )}
-              
-              {selectedSupplierQuotation.status === 'rejected' && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-800">
-                    ❌ 此报价已被拒绝 | {selectedSupplierQuotation.submittedDate || ''}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* 🔥 编辑询价单对话框 - 完整编辑功能 */}
-      <Dialog open={showEditRFQDialog} onOpenChange={setShowEditRFQDialog}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle style={{ fontSize: '16px' }}>
-              ✏️ 编辑询价单 - {editRFQData?.rfqNo}
-            </DialogTitle>
-            <DialogDescription style={{ fontSize: '12px' }}>
-              Edit RFQ - All fields are editable
-            </DialogDescription>
-          </DialogHeader>
-
-          {editRFQData && (
-            <div className="space-y-4">
-              {/* 基本信息 */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-blue-900 mb-2">��� 基本信息</h4>
-                <div className="grid grid-cols-4 gap-2">
-                  <div>
-                    <Label className="text-[10px] text-gray-600">询价单号</Label>
-                    <Input
-                      value={editRFQData.rfqNo || ''}
-                      onChange={(e) => setEditRFQData({...editRFQData, rfqNo: e.target.value})}
-                      className="text-xs h-7"
-                      readOnly
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-[10px] text-gray-600">询价日期</Label>
-                    <Input
-                      type="date"
-                      value={editRFQData.rfqDate || ''}
-                      onChange={(e) => setEditRFQData({...editRFQData, rfqDate: e.target.value})}
-                      className="text-xs h-7"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-[10px] text-gray-600">要求回复日期</Label>
-                    <Input
-                      type="date"
-                      value={editRFQData.requiredResponseDate || ''}
-                      onChange={(e) => setEditRFQData({...editRFQData, requiredResponseDate: e.target.value})}
-                      className="text-xs h-7"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-[10px] text-gray-600">要求交货日期</Label>
-                    <Input
-                      type="date"
-                      value={editRFQData.requiredDeliveryDate || ''}
-                      onChange={(e) => setEditRFQData({...editRFQData, requiredDeliveryDate: e.target.value})}
-                      className="text-xs h-7"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* 供应商信息 */}
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-green-900 mb-2">🏭 供应商信息</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label className="text-[10px] text-gray-600">公司名称</Label>
-                    <Input
-                      value={editRFQData.supplier?.companyName || ''}
-                      onChange={(e) => setEditRFQData({...editRFQData, supplier: {...editRFQData.supplier, companyName: e.target.value}})}
-                      className="text-xs h-7"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-[10px] text-gray-600">联系人</Label>
-                    <Input
-                      value={editRFQData.supplier?.contactPerson || ''}
-                      onChange={(e) => setEditRFQData({...editRFQData, supplier: {...editRFQData.supplier, contactPerson: e.target.value}})}
-                      className="text-xs h-7"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-[10px] text-gray-600">地址</Label>
-                    <Input
-                      value={editRFQData.supplier?.address || ''}
-                      onChange={(e) => setEditRFQData({...editRFQData, supplier: {...editRFQData.supplier, address: e.target.value}})}
-                      className="text-xs h-7"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[10px] text-gray-600">电话</Label>
-                      <Input
-                        value={editRFQData.supplier?.tel || ''}
-                        onChange={(e) => setEditRFQData({...editRFQData, supplier: {...editRFQData.supplier, tel: e.target.value}})}
-                        className="text-xs h-7"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-gray-600">邮箱</Label>
-                      <Input
-                        value={editRFQData.supplier?.email || ''}
-                        onChange={(e) => setEditRFQData({...editRFQData, supplier: {...editRFQData.supplier, email: e.target.value}})}
-                        className="text-xs h-7"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 询价说明 */}
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-orange-900 mb-2">📋 询价说明</h4>
-                <div>
-                  <Textarea
-                    value={editRFQData.inquiryDescription || ''}
-                    onChange={(e) => setEditRFQData({...editRFQData, inquiryDescription: e.target.value})}
-                    className="text-xs min-h-[60px]"
-                    placeholder="例如：请贵司根据以下产品清单和要求提供详细报价，包括单价、总价、交货期等信息。请在 2025-12-21 前将报价单回复至采购联系人邮箱。"
-                  />
-                  <p className="text-[10px] text-gray-500 mt-1">💡 提示：如不填写将使用默认说明（包含回复截止日期）</p>
-                </div>
-              </div>
-
-              {/* 产品清单 - 可编辑 */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-semibold text-gray-900">📦 产品清单</h4>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const newProduct = {
-                        no: (editRFQData.products?.length || 0) + 1,
-                        modelNo: '',
-                        description: '',
-                        specification: '',
-                        quantity: 1,
-                        unit: 'pcs',
-                        targetPrice: '',
-                        remarks: ''
-                      };
-                      setEditRFQData({
-                        ...editRFQData,
-                        products: [...(editRFQData.products || []), newProduct]
-                      });
-                    }}
-                    className="h-6 text-[10px] px-2 border-green-300 text-green-600 hover:bg-green-50"
-                  >
-                    <Plus className="w-3 h-3 mr-1" />
-                    添加产品
-                  </Button>
-                </div>
-                <div className="border border-gray-200 rounded overflow-hidden max-h-[300px] overflow-y-auto">
-                  <table className="w-full text-[10px]">
-                    <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
-                      <tr>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-10">#</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">型号</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">产品名称</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">规格</th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700">数量</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">单位</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">目标价</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">备注</th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-16">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {editRFQData.products?.map((product: any, idx: number) => (
-                        <tr key={idx} className="border-b border-gray-100">
-                          <td className="py-1 px-2 text-gray-500">{product.no}</td>
-                          <td className="py-1 px-1">
-                            <Input
-                              value={product.modelNo || ''}
-                              onChange={(e) => {
-                                const newProducts = [...editRFQData.products];
-                                newProducts[idx].modelNo = e.target.value;
-                                setEditRFQData({...editRFQData, products: newProducts});
-                              }}
-                              className="text-[10px] h-6 px-1"
-                            />
-                          </td>
-                          <td className="py-1 px-1">
-                            <Input
-                              value={product.description || ''}
-                              onChange={(e) => {
-                                const newProducts = [...editRFQData.products];
-                                newProducts[idx].description = e.target.value;
-                                setEditRFQData({...editRFQData, products: newProducts});
-                              }}
-                              className="text-[10px] h-6 px-1"
-                            />
-                          </td>
-                          <td className="py-1 px-1">
-                            <Input
-                              value={product.specification || ''}
-                              onChange={(e) => {
-                                const newProducts = [...editRFQData.products];
-                                newProducts[idx].specification = e.target.value;
-                                setEditRFQData({...editRFQData, products: newProducts});
-                              }}
-                              className="text-[10px] h-6 px-1"
-                            />
-                          </td>
-                          <td className="py-1 px-1">
-                            <Input
-                              type="number"
-                              value={product.quantity || ''}
-                              onChange={(e) => {
-                                const newProducts = [...editRFQData.products];
-                                newProducts[idx].quantity = parseInt(e.target.value) || 0;
-                                setEditRFQData({...editRFQData, products: newProducts});
-                              }}
-                              className="text-[10px] h-6 px-1 text-center"
-                            />
-                          </td>
-                          <td className="py-1 px-1">
-                            <Input
-                              value={product.unit || ''}
-                              onChange={(e) => {
-                                const newProducts = [...editRFQData.products];
-                                newProducts[idx].unit = e.target.value;
-                                setEditRFQData({...editRFQData, products: newProducts});
-                              }}
-                              className="text-[10px] h-6 px-1"
-                            />
-                          </td>
-                          <td className="py-1 px-1">
-                            <Input
-                              value={product.targetPrice || ''}
-                              onChange={(e) => {
-                                const newProducts = [...editRFQData.products];
-                                newProducts[idx].targetPrice = e.target.value;
-                                setEditRFQData({...editRFQData, products: newProducts});
-                              }}
-                              className="text-[10px] h-6 px-1"
-                              placeholder="选填"
-                            />
-                          </td>
-                          <td className="py-1 px-1">
-                            <Input
-                              value={product.remarks || ''}
-                              onChange={(e) => {
-                                const newProducts = [...editRFQData.products];
-                                newProducts[idx].remarks = e.target.value;
-                                setEditRFQData({...editRFQData, products: newProducts});
-                              }}
-                              className="text-[10px] h-6 px-1"
-                              placeholder="选填"
-                            />
-                          </td>
-                          <td className="py-1 px-1 text-center">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                const newProducts = editRFQData.products.filter((_: any, i: number) => i !== idx);
-                                // 重新编号
-                                newProducts.forEach((p: any, i: number) => p.no = i + 1);
-                                setEditRFQData({...editRFQData, products: newProducts});
-                              }}
-                              className="h-5 w-5 p-0 text-red-600 hover:bg-red-50"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* 报价条款 - 16条完整条款，可下拉选择 + 自定义 */}
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-yellow-900 mb-3">📜 报价条款（16条）</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  {/* 1. 报价币种 */}
-                  <EditableSelect
-                    label="1. 报价币种"
-                    value={editRFQData.terms?.currency || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, currency: val}})}
-                    options={TERMS_OPTIONS.currency}
-                    placeholder="选择或输入币种..."
-                  />
-
-                  {/* 2. 付款方式 */}
-                  <EditableSelect
-                    label="2. 付款方式"
-                    value={editRFQData.terms?.paymentTerms || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, paymentTerms: val}})}
-                    options={TERMS_OPTIONS.paymentTerms}
-                    placeholder="选择或输入付款方式..."
-                  />
-
-                  {/* 3. 交货条款 */}
-                  <EditableSelect
-                    label="3. 交货条款"
-                    value={editRFQData.terms?.deliveryTerms || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, deliveryTerms: val}})}
-                    options={TERMS_OPTIONS.deliveryTerms}
-                    placeholder="选择或输入交货条款..."
-                  />
-
-                  {/* 4. 交货地址 */}
-                  <EditableSelect
-                    label="4. 交货地址"
-                    value={editRFQData.terms?.deliveryAddress || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, deliveryAddress: val}})}
-                    options={TERMS_OPTIONS.deliveryAddress}
-                    placeholder="选择或输入交货地址..."
-                  />
-
-                  {/* 5. 交货时间 */}
-                  <EditableSelect
-                    label="5. 交货时间"
-                    value={editRFQData.terms?.deliveryRequirement || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, deliveryRequirement: val}})}
-                    options={TERMS_OPTIONS.deliveryRequirement}
-                    placeholder="选择或输入交货时间..."
-                  />
-
-                  {/* 6. 产品质量标准 */}
-                  <EditableSelect
-                    label="6. 产品质量标准"
-                    value={editRFQData.terms?.qualityStandard || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, qualityStandard: val}})}
-                    options={TERMS_OPTIONS.qualityStandard}
-                    placeholder="选择或输入质量标准..."
-                  />
-
-                  {/* 7. 验收标准 */}
-                  <EditableSelect
-                    label="7. 验收标准"
-                    value={editRFQData.terms?.inspectionMethod || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, inspectionMethod: val}})}
-                    options={TERMS_OPTIONS.inspectionMethod}
-                    placeholder="选择或输入验收标准..."
-                  />
-
-                  {/* 8. 包装要求 */}
-                  <EditableSelect
-                    label="8. 包装要求"
-                    value={editRFQData.terms?.packaging || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, packaging: val}})}
-                    options={TERMS_OPTIONS.packaging}
-                    placeholder="选择或输入包装要求..."
-                  />
-
-                  {/* 9. 唛头要求 */}
-                  <EditableSelect
-                    label="9. 唛头要求"
-                    value={editRFQData.terms?.shippingMarks || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, shippingMarks: val}})}
-                    options={TERMS_OPTIONS.shippingMarks}
-                    placeholder="选择或输入唛头要求..."
-                  />
-
-                  {/* 10. 验货要求 */}
-                  <EditableSelect
-                    label="10. 验货要求"
-                    value={editRFQData.terms?.inspectionRequirement || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, inspectionRequirement: val}})}
-                    options={TERMS_OPTIONS.inspectionRequirement}
-                    placeholder="选择或输入验货要求..."
-                  />
-
-                  {/* 11. 技术文件 */}
-                  <EditableSelect
-                    label="11. 技术文件"
-                    value={editRFQData.terms?.technicalDocuments || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, technicalDocuments: val}})}
-                    options={TERMS_OPTIONS.technicalDocuments}
-                    placeholder="选择或输入技术文件要求..."
-                  />
-
-                  {/* 12. 知识产权 */}
-                  <EditableSelect
-                    label="12. 知识产权"
-                    value={editRFQData.terms?.ipRights || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, ipRights: val}})}
-                    options={TERMS_OPTIONS.ipRights}
-                    placeholder="选择或输入知识产权要求..."
-                  />
-
-                  {/* 13. 保密条款 */}
-                  <EditableSelect
-                    label="13. 保密条款"
-                    value={editRFQData.terms?.confidentiality || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, confidentiality: val}})}
-                    options={TERMS_OPTIONS.confidentiality}
-                    placeholder="选择或输入保密条款..."
-                  />
-
-                  {/* 14. 样品要求 */}
-                  <EditableSelect
-                    label="14. 样品要求"
-                    value={editRFQData.terms?.sampleRequirement || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, sampleRequirement: val}})}
-                    options={TERMS_OPTIONS.sampleRequirement}
-                    placeholder="选择或输入样品要求..."
-                  />
-
-                  {/* 15. 最小起订量（MOQ） */}
-                  <EditableSelect
-                    label="15. 最小起订量（MOQ）"
-                    value={editRFQData.terms?.moq || ''}
-                    onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, moq: val}})}
-                    options={TERMS_OPTIONS.moq}
-                    placeholder="选择或输入MOQ..."
-                  />
-
-                  {/* 16. 其他说明 */}
-                  <div className="col-span-2">
-                    <EditableSelect
-                      label="16. 其他说明"
-                      value={editRFQData.terms?.remarks || ''}
-                      onChange={(val) => setEditRFQData({...editRFQData, terms: {...editRFQData.terms, remarks: val}})}
-                      options={TERMS_OPTIONS.remarks}
-                      placeholder="选择或输入其他说明..."
-                    />
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowEditRFQDialog(false);
-                setEditRFQData(null);
-              }}
-              className="text-xs"
-            >
-              取消
-            </Button>
-            <Button
-              onClick={handleSaveEditRFQ}
-              className="text-xs bg-[#F96302] hover:bg-[#E05502]"
-            >
-              💾 保存修改
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <EditRFQDialog
+        showEditRFQDialog={showEditRFQDialog}
+        setShowEditRFQDialog={setShowEditRFQDialog}
+        editRFQData={editRFQData}
+        setEditRFQData={setEditRFQData}
+        handleSaveEditRFQ={handleSaveEditRFQ}
+      />
 
       {/* 🔥 智能采购反馈表单 */}
       {feedbackRequirement && (

@@ -93,7 +93,7 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
     return (
       <div 
         ref={ref}
-        className="bg-white w-[210mm] min-h-[297mm] mx-auto shadow-lg"
+        className="bg-white w-[794px] min-h-[1123px] mx-auto shadow-lg"
         style={{ 
           fontFamily: 'Arial, "Helvetica Neue", sans-serif',
           fontSize: '10pt',
