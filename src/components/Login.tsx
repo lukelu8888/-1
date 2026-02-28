@@ -16,7 +16,7 @@ const REMEMBER_CUSTOMER_KEY = 'cosun_remember_customer';
 const REMEMBER_SUPPLIER_KEY = 'cosun_remember_supplier';
 
 // 一次性迁移：清除所有旧版 remember 数据（版本号控制，只执行一次）
-const MIGRATE_VERSION = 'v2';
+const MIGRATE_VERSION = 'v3';
 function migrateRememberKeys() {
   if (localStorage.getItem('cosun_remember_migrated') === MIGRATE_VERSION) return;
   // 清除旧版共享 key 和可能被旧代码写入测试账号的新 key
@@ -73,9 +73,13 @@ export function Login() {
 
       const profile = await fetchProfile(session.user.id);
 
-      if (profile && profile.portal_role === 'admin') {
+      if (profile && profile.portal_role !== 'customer') {
         await import('../hooks/useSupabaseAuth').then(m => m.signOut());
-        throw new Error('This is an admin account. Please use the Admin Portal.');
+        throw new Error(
+          profile.portal_role === 'admin'
+            ? 'This is an admin account. Please use the Admin Portal.'
+            : 'This is a supplier account. Please use the Manufacturer tab.'
+        );
       }
 
       setUser({
@@ -115,9 +119,13 @@ export function Login() {
 
       const profile = await fetchProfile(session.user.id);
 
-      if (profile && profile.portal_role === 'admin') {
+      if (profile && profile.portal_role !== 'supplier') {
         await import('../hooks/useSupabaseAuth').then(m => m.signOut());
-        throw new Error('This is an admin account. Please use the Admin Portal.');
+        throw new Error(
+          profile.portal_role === 'admin'
+            ? 'This is an admin account. Please use the Admin Portal.'
+            : 'This is a customer account. Please use the Customer tab.'
+        );
       }
 
       setUser({

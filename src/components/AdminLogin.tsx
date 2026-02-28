@@ -10,7 +10,7 @@ export default function AdminLogin() {
   const { setUser } = useUser();
   const { navigateTo } = useRouter();
   const REMEMBER_KEY = 'cosun_remember_admin';
-  const MIGRATE_VERSION = 'v2';
+  const MIGRATE_VERSION = 'v3';
   const [username, setUsername] = useState(() => {
     // 同步迁移：如果 Login.tsx 的迁移未执行（直接访问 admin-login），这里也清一次
     if (localStorage.getItem('cosun_remember_migrated') !== MIGRATE_VERSION) {
