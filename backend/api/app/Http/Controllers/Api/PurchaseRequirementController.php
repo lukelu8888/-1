@@ -57,9 +57,10 @@ class PurchaseRequirementController extends Controller
         }
 
         // Generate requirement number (QR-{REGION}-{DATE}-{SEQ})
+        // Use Asia/Shanghai timezone so the date matches the user's local date (CST = UTC+8)
         $region = $validated['region'] ?? 'NA';
         $regionCode = $this->normalizeRegionCode($region);
-        $dateStr = date('ymd');
+        $dateStr = now()->setTimezone('Asia/Shanghai')->format('ymd');
         $seq = $this->getNextSequenceNumber($regionCode, $dateStr);
         $requirementNo = "QR-{$regionCode}-{$dateStr}-{$seq}";
 

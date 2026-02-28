@@ -45,6 +45,23 @@ import { toast } from 'sonner@2.0.3';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog'; // 🔥 新增：Dialog组件
 import { SalesContractDocument, SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 新增：销售合同文档模板
 
+const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
+
+const pushContractApprovalBridgeItem = (item: any) => {
+  try {
+    const raw = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    const queue = Array.isArray(list) ? list : [];
+    const dedupKey = `${item?.request?.type}:${item?.request?.relatedDocumentId}:${item?.currentApprover}`;
+    const next = queue.filter((x: any) => {
+      const k = `${x?.request?.type}:${x?.request?.relatedDocumentId}:${x?.currentApprover}`;
+      return k !== dedupKey;
+    });
+    next.unshift(item);
+    localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(next.slice(0, 200)));
+  } catch {}
+};
+
 interface SalesContractManagementProps {
   highlightScNumber?: string; // 🔥 高亮显示的销售合同号
 }
@@ -116,10 +133,21 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
 
   // 🔥 接口化：进入“订单管理”Tab时立刻请求后端（Network 面板能直接看到 /api/sales-contracts）
   React.useEffect(() => {
+    // context 为空但 localStorage 有合同时，强制重新加载（防墓碑误过滤）
+    try {
+      const saved = localStorage.getItem('salesContracts');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0 && contracts.length === 0) {
+          window.dispatchEvent(new CustomEvent('salesContractCreatedLocally'));
+        }
+      }
+    } catch { /* ignore */ }
     void refreshFromBackend().catch((e: any) => {
       console.warn('⚠️ [SalesContractManagement] refreshFromBackend failed:', e?.message || e);
     });
-  }, [refreshFromBackend]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // 🔥 调试：监听contracts变化
   React.useEffect(() => {
@@ -129,6 +157,47 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     console.log('  - 当前用户:', currentUser);
   }, [contracts]);
   
+  // 一次性修正：用报价单的 salesPrice 纠正合同 products 里错误的 unitPrice
+  // 直接修正 localStorage，不调用 refreshFromBackend（避免触发墓碑过滤清空新合同）
+  React.useEffect(() => {
+    try {
+      const stored: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
+      if (!stored.length) return;
+
+      // 收集所有本地报价单（各缓存 key）
+      const allQuotations: any[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i) || '';
+        if (key.startsWith('sales_quotations_')) {
+          try { allQuotations.push(...JSON.parse(localStorage.getItem(key) || '[]')); } catch { /* ignore */ }
+        }
+      }
+
+      let changed = false;
+      const corrected = stored.map((contract: any) => {
+        const qt = allQuotations.find((q: any) => q.qtNumber === contract.quotationNumber);
+        if (!qt?.items?.length) return contract;
+        const newProducts = (contract.products || []).map((p: any, idx: number) => {
+          const item = qt.items[idx];
+          if (!item) return p;
+          const correctPrice = Number(item.salesPrice ?? item.unitPrice ?? item.quotePrice ?? 0);
+          if (correctPrice > 0 && Math.abs(correctPrice - Number(p.unitPrice)) > 0.001) {
+            changed = true;
+            return { ...p, unitPrice: correctPrice, amount: correctPrice * Number(p.quantity || 0) };
+          }
+          return p;
+        });
+        return { ...contract, products: newProducts };
+      });
+
+      if (changed) {
+        // 只更新 localStorage，不触发 refreshFromBackend，避免后端空响应干扰
+        localStorage.setItem('salesContracts', JSON.stringify(corrected));
+      }
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 🔥 高亮状态（3秒后自动消失）
   const [highlightedId, setHighlightedId] = React.useState<string | null>(null);
   
@@ -230,20 +299,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   };
 
   const isContractDeletable = (contract: any): boolean => {
-    const status = String(contract?.status || '').toLowerCase();
-    return ![
-      'sent',
-      'sent_to_customer',
-      'customer_confirmed',
-      'customer_rejected',
-      'customer_requested_changes',
-      'deposit_uploaded',
-      'deposit_confirmed',
-      'po_generated',
-      'production',
-      'shipped',
-      'completed',
-    ].includes(status);
+    return true;
   };
   
   // 🔥 全选/取消全选
@@ -334,6 +390,12 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       expiresIn: 48
     });
     
+    // 写入 bridge，让主管的审批中心立刻看到
+    pushContractApprovalBridgeItem({
+      currentApprover: managerEmail,
+      request: approvalRequest,
+    });
+
     // 🔥 更新销售合同状态
     submitForApproval(contract.id, `销售合同 ${contract.contractNumber} 已准备好，请审批。`);
     
@@ -623,6 +685,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                 <TableHead className="w-24">区域</TableHead>
                 <TableHead>客户信息</TableHead>
                 <TableHead>产品信息</TableHead>
+                <TableHead className="w-28 text-right">商品单价</TableHead>
                 <TableHead className="w-32 text-right">合同金额</TableHead>
                 <TableHead className="w-24 text-center">状态</TableHead>
                 <TableHead className="w-32 text-right">操作</TableHead>
@@ -631,7 +694,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
             <TableBody className="text-[12px]">
               {myContracts.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-12 text-gray-500">
+                  <TableCell colSpan={10} className="text-center py-12 text-gray-500">
                     <AlertCircle className="h-12 w-12 mx-auto mb-3 text-gray-400" />
                     <p>暂无销售合同</p>
                     <p className="text-sm mt-1">在报价管理模块中，客户接受报价后可生成销售合同</p>
@@ -707,6 +770,27 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             </div>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {(() => {
+                          const first = contract.products?.[0];
+                          const up = Number(
+                            (first as any)?.unitPrice ??
+                            (first as any)?.salesPrice ??
+                            (first as any)?.quotePrice ??
+                            0
+                          );
+                          if (!up) return <span className="text-gray-400">—</span>;
+                          const currency = contract.currency || 'USD';
+                          const symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : currency;
+                          const formatted = up.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          const hasMultiple = contract.products.length > 1;
+                          return (
+                            <span className="font-medium text-gray-800">
+                              {symbol}{formatted}{hasMultiple ? ' ~' : ''}
+                            </span>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="space-y-0.5">

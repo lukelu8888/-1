@@ -10,14 +10,15 @@ import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogPortal, DialogOverlay } from '../ui/dialog';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { 
   LayoutGrid, FileText, Calculator, Package, Clock, CheckCircle2, 
   XCircle, AlertCircle, Search, Filter, Eye, Download, Printer,
   ArrowRight, TrendingUp, DollarSign, Calendar, Truck, Factory,
   Trash2, CheckSquare, FileCheck, Send, Archive, BarChart3, RefreshCw,
   Settings, TrendingDown, Receipt, Users, Activity, Percent, AlertTriangle,
-  ChevronRight, Circle
+  ChevronRight, Circle, X as XIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '../../contexts/UserContext';
@@ -27,7 +28,6 @@ import SupplierQuotationDocumentViewer from './SupplierQuotationDocumentViewer';
 import SupplierQuotationEditor from './SupplierQuotationEditor';
 import { createSupplierQuotationFromRFQ, saveSupplierQuotation } from '../../utils/createSupplierQuotationFromRFQ';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
-import { SupplierRFQDebugger } from './SupplierRFQDebugger'; // 🔥 调试工具
 
 // 🔥 供应商报价单接口（从localStorage读取）
 interface SupplierQuotationItem {
@@ -168,8 +168,20 @@ export default function SupplierOrderManagementCenter() {
   const [quotationEditorOpen, setQuotationEditorOpen] = useState(false);
   const [selectedQuotation, setSelectedQuotation] = useState<any>(null);
   
-  // 🔥 内联编辑状态 - 用于表格行内编辑
+  // 核算报价弹窗状态（editingQuotationId 驱动，quotationEditorOpen 已在上方声明）
   const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
+
+  const openQuotationEditor = (id: string) => {
+    // Set the quotation to edit, then reuse the existing quotationEditorOpen dialog
+    const q = supplierQuotations.find(sq => sq.id === id) ?? null;
+    setSelectedQuotation(q);
+    setEditingQuotationId(id);
+    setQuotationEditorOpen(true);
+  };
+  const closeQuotationEditor = () => {
+    setQuotationEditorOpen(false);
+    setEditingQuotationId(null);
+  };
   
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -692,17 +704,48 @@ export default function SupplierOrderManagementCenter() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{rfq.productName || 'N/A'}</p>
-                        <p className="text-xs text-slate-500">{rfq.modelNo || ''}</p>
-                        {rfq.specification && (
-                          <p className="text-xs text-slate-400">{rfq.specification}</p>
-                        )}
-                      </div>
+                      {rfq.products && rfq.products.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {rfq.products.slice(0, 2).map((p: any, i: number) => (
+                            <div key={i}>
+                              <p className="text-sm font-medium text-slate-900 leading-tight">{p.productName || p.description || 'N/A'}</p>
+                              {p.modelNo && p.modelNo !== '-' && (
+                                <p className="text-xs text-slate-500">{p.modelNo}</p>
+                              )}
+                              {p.specification && (
+                                <p className="text-xs text-slate-400 truncate max-w-[200px]">{p.specification}</p>
+                              )}
+                            </div>
+                          ))}
+                          {rfq.products.length > 2 && (
+                            <p className="text-xs text-blue-500">+{rfq.products.length - 2} 件产品</p>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">{rfq.productName || 'N/A'}</p>
+                          {rfq.modelNo && <p className="text-xs text-slate-500">{rfq.modelNo}</p>}
+                          {rfq.specification && <p className="text-xs text-slate-400">{rfq.specification}</p>}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <span className="text-sm font-medium">{rfq.quantity?.toLocaleString() || 0}</span>
-                      <span className="text-xs text-slate-500 ml-1">{rfq.unit || ''}</span>
+                      {rfq.products && rfq.products.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {rfq.products.slice(0, 2).map((p: any, i: number) => (
+                            <div key={i} className="text-right">
+                              <span className="text-sm font-medium">{(p.quantity ?? 0).toLocaleString()}</span>
+                              <span className="text-xs text-slate-500 ml-1">{p.unit || 'PCS'}</span>
+                            </div>
+                          ))}
+                          {rfq.products.length > 2 && <div className="h-4" />}
+                        </div>
+                      ) : (
+                        <>
+                          <span className="text-sm font-medium">{rfq.quantity?.toLocaleString() || 0}</span>
+                          <span className="text-xs text-slate-500 ml-1">{rfq.unit || ''}</span>
+                        </>
+                      )}
                     </TableCell>
                     <TableCell>
                       <span className="text-sm text-slate-600">{rfq.quotationDeadline}</span>
@@ -885,52 +928,6 @@ export default function SupplierOrderManagementCenter() {
                             );
                           }
                         })()}
-                        <Button
-                          size="sm"
-                          className="h-7 px-2 text-xs bg-orange-600 hover:bg-orange-700"
-                          onClick={() => {
-                            try {
-                              const sourceXJ = rfq.supplierRfqNo || rfq.rfqNumber;
-                              // Prefer existing draft quotation for this RFQ
-                              const existingQuotation = supplierQuotations.find(q =>
-                                q.sourceXJ === sourceXJ && q.supplierEmail === user?.email
-                              );
-
-                              if (existingQuotation) {
-                                setSelectedQuotation(existingQuotation);
-                                setQuotationEditorOpen(true);
-                                return;
-                              }
-
-                              // Create a new draft quotation and open editor
-                              const quotation = createSupplierQuotationFromRFQ(
-                                rfq,
-                                supplierInfo,
-                                {
-                                  unitPrice: 0,
-                                  leadTime: 30,
-                                  moq: 1000,
-                                  paymentTerms: 'T/T 30天',
-                                  deliveryTerms: 'FOB 厦门',
-                                  status: 'draft',
-                                }
-                              );
-
-                              saveSupplierQuotation(quotation);
-                              const updatedQuotations = [...supplierQuotations, quotation];
-                              setSupplierQuotations(updatedQuotations);
-
-                              setSelectedQuotation(quotation);
-                              setQuotationEditorOpen(true);
-                            } catch (e) {
-                              console.error('❌ 打开报价失败:', e);
-                              toast.error('打开报价失败，请重试');
-                            }
-                          }}
-                        >
-                          <Calculator className="w-3 h-3 mr-1" />
-                          报价
-                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -1011,12 +1008,15 @@ export default function SupplierOrderManagementCenter() {
         </div>
 
         {/* 表格 */}
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50">
-                <TableHead className="w-12">
-                  <Checkbox 
+        <Card className="rounded-none border-x-0 border-t-0 shadow-none">
+          {/* ── Flat density table: one attribute = one column, single-line rows ── */}
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b-2 border-slate-200 bg-slate-50">
+                {/* Checkbox */}
+                <th className="w-10 px-3 py-2.5 text-left">
+                  <Checkbox
                     checked={selectedIds.length === myQuotations.length && myQuotations.length > 0}
                     onCheckedChange={() => {
                       if (selectedIds.length === myQuotations.length) {
@@ -1026,138 +1026,255 @@ export default function SupplierOrderManagementCenter() {
                       }
                     }}
                   />
-                </TableHead>
-                <TableHead className="w-16">序号</TableHead>
-                <TableHead className="w-40">报价单号</TableHead>
-                <TableHead className="w-36">客户</TableHead>
-                <TableHead>关联询价</TableHead>
-                <TableHead className="w-32 text-right">报价金额</TableHead>
-                <TableHead className="w-32">报价日期</TableHead>
-                <TableHead className="w-24">状态</TableHead>
-                <TableHead className="w-40 text-center">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+                </th>
+                <th className="w-36 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">报价单号</th>
+                <th className="w-8  px-2 py-2.5 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider">版本</th>
+                <th className="w-28 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">客户名称</th>
+                <th className="w-44 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap hidden xl:table-cell">客户公司</th>
+                <th className="w-36 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap hidden lg:table-cell">关联询价单</th>
+                <th className="w-24 px-3 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">数量</th>
+                <th className="w-28 px-3 py-2.5 text-right text-[11px] font-semibold text-slate-600 uppercase tracking-wider">单价</th>
+                <th className="w-10 px-1 py-2.5 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider hidden lg:table-cell">币种</th>
+                {/* 报价金额 – focal column */}
+                <th className="w-32 px-3 py-2.5 text-right text-[11px] font-semibold text-slate-900 uppercase tracking-wider whitespace-nowrap">报价金额 ↕</th>
+                <th className="w-24 px-3 py-2.5 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider hidden md:table-cell">报价日期 ↕</th>
+                <th className="w-20 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">状态</th>
+                <th className="w-56 px-3 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">操作</th>
+              </tr>
+            </thead>
+
+            <tbody className="divide-y divide-slate-100">
               {myQuotations.length > 0 ? (
-                myQuotations.map((quotation, index) => (
+                myQuotations.map((quotation) => {
+                  // ── pre-compute helpers ──────────────────────────────────
+                  const items: any[] = quotation.items ?? [];
+                  const currency = quotation.currency || items[0]?.currency || 'CNY';
+                  const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '¥';
+
+                  const totalQty = items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0);
+                  const unit = items.length === 1 ? (items[0].unit || '') : '';
+
+                  const prices = items
+                    .map((it: any) => it.unitPrice)
+                    .filter((p: any) => p != null && Number.isFinite(Number(p)))
+                    .map(Number);
+                  const minP = prices.length ? Math.min(...prices) : null;
+                  const maxP = prices.length ? Math.max(...prices) : null;
+                  const unitPriceDisplay =
+                    prices.length === 0 ? '—'
+                    : minP === maxP
+                      ? minP!.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      : `${minP!.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}~${maxP!.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+                  const total = quotation.totalAmount;
+                  const totalDisplay =
+                    total != null && Number.isFinite(total)
+                      ? total.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      : null;
+
+                  const STATUS: Record<string, { label: string; dot: string; text: string }> = {
+                    draft:     { label: '草稿',   dot: 'bg-slate-400',   text: 'text-slate-500' },
+                    submitted: { label: '已提交', dot: 'bg-blue-500',    text: 'text-blue-600'  },
+                    accepted:  { label: '已接受', dot: 'bg-emerald-500', text: 'text-emerald-600' },
+                    rejected:  { label: '已拒绝', dot: 'bg-red-500',     text: 'text-red-500'   },
+                    completed: { label: '已完成', dot: 'bg-purple-500',  text: 'text-purple-600' },
+                  };
+                  const st = STATUS[quotation.status] ?? STATUS.draft;
+
+                  const isSelected = selectedIds.includes(quotation.id);
+
+                  return (
                   <React.Fragment key={quotation.id}>
-                    <TableRow className="hover:bg-slate-50">
-                      <TableCell>
-                        <Checkbox 
-                          checked={selectedIds.includes(quotation.id)}
-                        onCheckedChange={() => {
-                          setSelectedIds(prev => 
-                            prev.includes(quotation.id) 
-                              ? prev.filter(id => id !== quotation.id)
-                              : [...prev, quotation.id]
-                          );
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm text-slate-600">{index + 1}</span>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-blue-600">{quotation.quotationNo}</p>
-                        <p className="text-xs text-slate-500">v{quotation.version}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{quotation.customerName}</p>
-                        <p className="text-xs text-slate-500">{quotation.customerCompany}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm text-slate-600">{quotation.sourceXJ || 'N/A'}</p>
-                        <p className="text-xs text-slate-500">{quotation.sourceQR || ''}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className="text-sm font-semibold text-green-600">
-                        ¥{quotation.totalAmount?.toLocaleString() || 0}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm text-slate-600">{quotation.quotationDate}</span>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={
-                        quotation.status === 'draft' 
-                          ? 'bg-slate-100 text-slate-800 border-slate-300'
-                          : quotation.status === 'submitted'
-                          ? 'bg-blue-100 text-blue-800 border-blue-300'
-                          : quotation.status === 'accepted'
-                          ? 'bg-green-100 text-green-800 border-green-300'
-                          : 'bg-slate-100 text-slate-800 border-slate-300'
-                      }>
-                        {quotation.status === 'draft' ? '草稿' 
-                          : quotation.status === 'submitted' ? '已提交' 
-                          : quotation.status === 'accepted' ? '已接受'
-                          : quotation.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-center gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-xs"
+                    <tr
+                      className={`group transition-colors ${
+                        isSelected
+                          ? 'bg-blue-50/60'
+                          : 'hover:bg-slate-50/80'
+                      }`}
+                      style={{ height: 52 }}
+                    >
+                      {/* Checkbox */}
+                      <td className="px-3">
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => {
+                            setSelectedIds(prev =>
+                              prev.includes(quotation.id)
+                                ? prev.filter(id => id !== quotation.id)
+                                : [...prev, quotation.id]
+                            );
+                          }}
+                        />
+                      </td>
+
+                      {/* 报价单号 – clickable, primary identifier */}
+                      <td className="px-3 whitespace-nowrap">
+                        <button
+                          className="font-mono text-[13px] font-semibold text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 transition-colors"
                           onClick={() => {
                             setSelectedQuotation(quotation);
                             setQuotationDocumentViewerOpen(true);
                           }}
                         >
-                          <Eye className="w-3 h-3 mr-1" />
+                          {quotation.quotationNo}
+                        </button>
+                      </td>
+
+                      {/* 版本 */}
+                      <td className="px-2 text-center">
+                        <span className="text-[11px] font-medium text-slate-400 tabular-nums">v{quotation.version}</span>
+                      </td>
+
+                      {/* 客户名称 */}
+                      <td className="px-3 max-w-[112px]">
+                        <span className="text-[13px] font-medium text-slate-800 truncate block" title={quotation.customerName}>
+                          {quotation.customerName || '—'}
+                        </span>
+                      </td>
+
+                      {/* 客户公司（响应式隐藏 < xl） */}
+                      <td className="px-3 max-w-[176px] hidden xl:table-cell">
+                        <span className="text-[12px] text-slate-500 truncate block" title={quotation.customerCompany}>
+                          {quotation.customerCompany || '—'}
+                        </span>
+                      </td>
+
+                      {/* 关联询价单（响应式隐藏 < lg） */}
+                      <td className="px-3 hidden lg:table-cell">
+                        <span className="font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                          {quotation.sourceXJ || '—'}
+                        </span>
+                      </td>
+
+                      {/* 数量 – L3 */}
+                      <td className="px-3 text-right whitespace-nowrap tabular-nums">
+                        {items.length === 0 ? (
+                          <span className="text-[13px] text-slate-300">—</span>
+                        ) : (
+                          <>
+                            <span className="text-[13px] font-medium text-slate-700">
+                              {totalQty.toLocaleString('zh-CN')}
+                            </span>
+                            {unit && (
+                              <span className="text-[11px] text-slate-400 ml-0.5 uppercase">{unit}</span>
+                            )}
+                          </>
+                        )}
+                      </td>
+
+                      {/* 单价 – L2: same size as qty, stronger color */}
+                      <td className="px-3 text-right whitespace-nowrap tabular-nums">
+                        <span className="text-[13px] font-semibold text-slate-700">
+                          {unitPriceDisplay === '—' ? (
+                            <span className="font-normal text-slate-300">—</span>
+                          ) : (
+                            unitPriceDisplay
+                          )}
+                        </span>
+                      </td>
+
+                      {/* 币种（响应式隐藏 < lg） */}
+                      <td className="px-1 text-center hidden lg:table-cell">
+                        <span className="text-[10px] font-medium text-slate-400 tracking-wide">{currency}</span>
+                      </td>
+
+                      {/* 报价金额 – L1 FOCAL COLUMN */}
+                      <td className="px-3 text-right whitespace-nowrap tabular-nums">
+                        {totalDisplay ? (
+                          <span className="text-[15px] font-bold text-slate-900">
+                            {symbol}{totalDisplay}
+                          </span>
+                        ) : (
+                          <span className="text-[13px] text-slate-300">—</span>
+                        )}
+                      </td>
+
+                      {/* 报价日期（响应式隐藏 < md） */}
+                      <td className="px-3 text-center whitespace-nowrap hidden md:table-cell">
+                        <span className="text-[12px] text-slate-500 tabular-nums font-mono">
+                          {quotation.quotationDate || '—'}
+                        </span>
+                      </td>
+
+                      {/* 状态 badge – dot + label */}
+                      <td className="px-3">
+                        <span className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${st.text} whitespace-nowrap`}>
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${st.dot} flex-shrink-0`} />
+                          {st.label}
+                        </span>
+                      </td>
+
+                      {/* 操作 */}
+                      <td className="px-3">
+                        <div className="flex items-center justify-end gap-1.5">
+                        {/* 查看文档 */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-3 text-xs font-medium border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 gap-1.5"
+                          onClick={() => {
+                            setSelectedQuotation(quotation);
+                            setQuotationDocumentViewerOpen(true);
+                          }}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
                           查看
                         </Button>
-                        {quotation.status === 'draft' && (
+
+                        {/* 核算 / 重新核算 — 弹窗模式 */}
+                        {quotation.status === 'draft' ? (
                           <Button
                             size="sm"
-                            className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-700"
+                            className="h-8 px-3 text-xs font-medium bg-orange-500 hover:bg-orange-600 text-white gap-1.5 shadow-sm"
+                            onClick={() => openQuotationEditor(quotation.id)}
+                          >
+                            <Calculator className="w-3.5 h-3.5" />
+                            核算报价
+                          </Button>
+                        ) : quotation.status === 'submitted' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-3 text-xs font-medium border-orange-200 text-orange-600 hover:bg-orange-50 gap-1.5"
                             onClick={() => {
-                              setEditingQuotationId(quotation.id);
+                              const reverted = { ...quotation, status: 'draft' as const };
+                              saveSupplierQuotation(reverted);
+                              const updated = supplierQuotations.map(q =>
+                                q.id === quotation.id ? reverted : q
+                              );
+                              setSupplierQuotations(updated);
+                              openQuotationEditor(quotation.id);
+                              toast.info('已撤回为草稿，可重新核算报价');
                             }}
                           >
-                            <FileCheck className="w-3 h-3 mr-1" />
-                            编辑
+                            <Calculator className="w-3.5 h-3.5" />
+                            重新核算
                           </Button>
-                        )}
+                        ) : null}
+
+                        {/* 提交报价 */}
                         {quotation.status === 'draft' && (() => {
-                          // 🔥 验证报价单是否填写完必填项
                           const isQuotationValid = () => {
-                            // 检查所有产品是否都有有效的单价
-                            const allPricesValid = quotation.items?.every((item: any) => {
-                              return item.unitPrice && item.unitPrice > 0;
-                            });
-                            
-                            // 检查交货期、MOQ（从第一个产品获取）
+                            const allPricesValid = quotation.items?.every((item: any) => item.unitPrice && item.unitPrice > 0);
                             const firstItem = quotation.items?.[0];
                             const leadTimeValid = firstItem?.leadTime && firstItem.leadTime > 0;
                             const moqValid = firstItem?.moq && firstItem.moq > 0;
-                            
-                            // 检查付款条款和交货条款
                             const paymentTermsValid = quotation.paymentTerms && quotation.paymentTerms.trim().length > 0;
                             const deliveryTermsValid = quotation.deliveryTerms && quotation.deliveryTerms.trim().length > 0;
-                            
                             return allPricesValid && leadTimeValid && moqValid && paymentTermsValid && deliveryTermsValid;
                           };
-
                           const isValid = isQuotationValid();
-                          
                           return (
                             <Button
                               size="sm"
-                              className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="h-8 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                               disabled={!isValid}
                               onClick={() => {
                                 if (!isValid) {
                                   toast.error(
                                     <div className="space-y-1">
                                       <p className="font-semibold">⚠️ 无法提交报价</p>
-                                      <p className="text-sm">请先点击"编辑"按钮填写以下必填项：</p>
+                                      <p className="text-sm">请先点击"核算报价"填写以下必填项：</p>
                                       <ul className="text-xs list-disc list-inside space-y-0.5">
                                         <li>所有产品的单价</li>
                                         <li>交货周期</li>
@@ -1170,25 +1287,17 @@ export default function SupplierOrderManagementCenter() {
                                   );
                                   return;
                                 }
-
-                                // 🔥 提交报价单给COSUN
                                 const updatedQuotation = {
                                   ...quotation,
                                   status: 'submitted' as const,
-                                  submittedDate: new Date().toISOString().split('T')[0]
+                                  submittedDate: new Date().toISOString().split('T')[0],
                                 };
-                                
-                                // 更新localStorage
                                 const storedQuotations = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
-                                const updatedQuotations = storedQuotations.map((q: SupplierQuotation) => 
+                                const updatedQuotations = storedQuotations.map((q: SupplierQuotation) =>
                                   q.id === quotation.id ? updatedQuotation : q
                                 );
                                 localStorage.setItem('supplierQuotations', JSON.stringify(updatedQuotations));
-                                
-                                // 更新本地状态
                                 setSupplierQuotations(updatedQuotations);
-                                
-                                // 显示成功提示
                                 toast.success(
                                   <div className="space-y-1">
                                     <p className="font-semibold">✅ 报价单已提交给COSUN采购</p>
@@ -1199,15 +1308,18 @@ export default function SupplierOrderManagementCenter() {
                                 );
                               }}
                             >
-                              <Send className="w-3 h-3 mr-1" />
+                              <Send className="w-3.5 h-3.5" />
                               提交报价
                             </Button>
                           );
                         })()}
+
+                        {/* 下载 – icon only */}
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-2 text-xs hover:bg-orange-50 hover:text-orange-700"
+                          className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                          title="下载报价单"
                           onClick={() => {
                             toast.info(
                               <div className="space-y-1">
@@ -1216,8 +1328,6 @@ export default function SupplierOrderManagementCenter() {
                               </div>,
                               { duration: 2000 }
                             );
-                            
-                            // 🔥 下载报价单PDF
                             setTimeout(() => {
                               const printContent = document.createElement('div');
                               printContent.innerHTML = `
@@ -1242,7 +1352,6 @@ export default function SupplierOrderManagementCenter() {
                                   <h3 style="text-align: right;">总金额: ¥${quotation.totalAmount?.toLocaleString()}</h3>
                                 </div>
                               `;
-                              
                               const printWindow = window.open('', '', 'width=800,height=600');
                               if (printWindow) {
                                 printWindow.document.write(printContent.innerHTML);
@@ -1252,50 +1361,29 @@ export default function SupplierOrderManagementCenter() {
                             }, 300);
                           }}
                         >
-                          <Download className="w-3 h-3" />
+                          <Download className="w-3.5 h-3.5" />
                         </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  
-                  {/* 🔥 内联编辑器展开行 */}
-                  {editingQuotationId === quotation.id && (
-                    <TableRow>
-                      <TableCell colSpan={9} className="bg-slate-50 p-6">
-                        <SupplierQuotationEditor
-                          quotation={quotation}
-                          onSave={(updatedQuotation) => {
-                            // 更新localStorage
-                            saveSupplierQuotation(updatedQuotation);
-                            
-                            // 更新本地状态
-                            const updatedQuotations = supplierQuotations.map(q =>
-                              q.quotationNo === updatedQuotation.quotationNo ? updatedQuotation : q
-                            );
-                            setSupplierQuotations(updatedQuotations);
-                            
-                            // 关闭编辑模式
-                            setEditingQuotationId(null);
-                          }}
-                          onCancel={() => setEditingQuotationId(null)}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </React.Fragment>
-                ))
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* 核算报价已改为弹窗模式，见下方 Dialog */}
+                  </React.Fragment>
+                  );
+                })
               ) : (
-                <TableRow>
-                  <TableCell colSpan={9} className="h-32 text-center">
+                <tr>
+                  <td colSpan={13} className="h-32 text-center">
                     <div className="flex flex-col items-center justify-center text-slate-400">
                       <Calculator className="w-12 h-12 mb-2" />
                       <p className="text-sm">暂无报价单</p>
                     </div>
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               )}
-            </TableBody>
-          </Table>
+            </tbody>
+          </table>
+          </div>
         </Card>
       </div>
     );
@@ -1358,10 +1446,24 @@ export default function SupplierOrderManagementCenter() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{order.productName || 'N/A'}</p>
-                        <p className="text-xs text-slate-500">{order.quantity} {order.unit}</p>
-                      </div>
+                      {order.products && order.products.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {order.products.slice(0, 2).map((p: any, i: number) => (
+                            <div key={i}>
+                              <p className="text-sm font-medium text-slate-900 leading-tight">{p.productName || p.description || 'N/A'}</p>
+                              <p className="text-xs text-slate-500">{(p.quantity ?? 0).toLocaleString()} {p.unit || 'PCS'}</p>
+                            </div>
+                          ))}
+                          {order.products.length > 2 && (
+                            <p className="text-xs text-blue-500">+{order.products.length - 2} 件产品</p>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">{order.productName || 'N/A'}</p>
+                          <p className="text-xs text-slate-500">{order.quantity} {order.unit}</p>
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
@@ -1674,91 +1776,139 @@ export default function SupplierOrderManagementCenter() {
         </DialogContent>
       </Dialog>
 
-      {/* 🔥 报价单文档查看器对话框 */}
-      <Dialog open={quotationDocumentViewerOpen} onOpenChange={setQuotationDocumentViewerOpen}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>报价单文档</DialogTitle>
-            <DialogDescription>完整的供应商报价单文档，包含产品报价、交货条款和付款方式</DialogDescription>
-          </DialogHeader>
-          {selectedQuotation && (
-            <SupplierQuotationDocumentViewer 
-              quotation={selectedQuotation}
-              onEdit={() => {
-                // 🔥 关闭查看对话框，打开编辑对话框
-                setQuotationDocumentViewerOpen(false);
-                setQuotationEditorOpen(true);
-              }}
-              onSubmit={() => {
-                // 🔥 提交报价单给COSUN
-                const updatedQuotation = {
-                  ...selectedQuotation,
-                  status: 'submitted' as const,
-                  submittedDate: new Date().toISOString().split('T')[0]
-                };
-                
-                // 更新localStorage
-                const storedQuotations = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
-                const updatedQuotations = storedQuotations.map((q: SupplierQuotation) => 
-                  q.id === selectedQuotation.id ? updatedQuotation : q
-                );
-                localStorage.setItem('supplierQuotations', JSON.stringify(updatedQuotations));
-                
-                // 更新本地状态
-                setSupplierQuotations(updatedQuotations);
-                
-                // 关闭对话框
-                setQuotationDocumentViewerOpen(false);
-                
-                // 显示成功提示
-                toast.success(
-                  <div className="space-y-1">
-                    <p className="font-semibold">✅ 报价单已提交给COSUN采购</p>
-                    <p className="text-sm">报价单号: {selectedQuotation.quotationNo}</p>
-                    <p className="text-xs text-slate-500 mt-1">采购方将收到报价通知</p>
-                  </div>,
-                  { duration: 3000 }
-                );
-              }}
-            />
-          )}
-        </DialogContent>
+      {/* 报价单文档查看器 – 独立 DocumentModal（可拖动、A4分页） */}
+      {selectedQuotation && (
+        <SupplierQuotationDocumentViewer
+          open={quotationDocumentViewerOpen}
+          onClose={() => setQuotationDocumentViewerOpen(false)}
+          quotation={selectedQuotation}
+          onEdit={() => {
+            setQuotationDocumentViewerOpen(false);
+            setQuotationEditorOpen(true);
+          }}
+          onSubmit={() => {
+            const updatedQuotation = {
+              ...selectedQuotation,
+              status: 'submitted' as const,
+              submittedDate: new Date().toISOString().split('T')[0],
+            };
+            const storedQuotations = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
+            const updatedQuotations = storedQuotations.map((q: SupplierQuotation) =>
+              q.id === selectedQuotation.id ? updatedQuotation : q,
+            );
+            localStorage.setItem('supplierQuotations', JSON.stringify(updatedQuotations));
+            setSupplierQuotations(updatedQuotations);
+            setQuotationDocumentViewerOpen(false);
+            toast.success(
+              <div className="space-y-1">
+                <p className="font-semibold">✅ 报价单已提交给COSUN采购</p>
+                <p className="text-sm">报价单号: {selectedQuotation.quotationNo}</p>
+                <p className="text-xs text-slate-500 mt-1">采购方将收到报价通知</p>
+              </div>,
+              { duration: 3000 },
+            );
+          }}
+        />
+      )}
+
+      {/* 核算报价 / 编辑报价单 弹窗
+          架构：Portal > Overlay(居中容器) > Content(尺寸+flex) > Header(固定) + Body(滚动)
+          - Overlay: fixed inset-0 flex items-center justify-center p-6  → 负责居中
+          - Content: w-full max-w-5xl max-h-full flex flex-col overflow-hidden → 负责尺寸
+          - Body:    flex-1 min-h-0 overflow-y-auto                         → 负责滚动
+      */}
+      <Dialog open={quotationEditorOpen} onOpenChange={open => { if (!open) closeQuotationEditor(); }}>
+        <DialogPortal>
+          {/* 背景遮罩 */}
+          <DialogOverlay />
+
+          {/* Overlay 兼居中容器：fixed inset-0 + flex 居中，p-6 作为安全边距 */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
+            {/* Modal 容器：负责尺寸与三段式 flex 布局，pointer-events-auto 恢复交互 */}
+            <DialogPrimitive.Content
+              className="pointer-events-auto w-full max-w-5xl max-h-full flex flex-col overflow-hidden rounded-lg border bg-white shadow-lg"
+              onInteractOutside={e => e.preventDefault()}
+              onOpenAutoFocus={e => e.preventDefault()}
+            >
+              {/* ModalHeader — shrink-0，不参与滚动 */}
+              <div className="shrink-0 flex items-center gap-3 px-6 py-4 pr-14 bg-white border-b border-slate-200">
+                <Calculator className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <DialogPrimitive.Title className="text-[15px] font-semibold text-slate-800 leading-tight">
+                    核算报价
+                  </DialogPrimitive.Title>
+                  {selectedQuotation && (
+                    <DialogPrimitive.Description className="text-[12px] text-slate-400 mt-0.5">
+                      {selectedQuotation.quotationNo} · {selectedQuotation.customerName || 'COSUN采购'}
+                    </DialogPrimitive.Description>
+                  )}
+                </div>
+              </div>
+
+              {/* ModalBody — flex-1 min-h-0 overflow-y-auto，内容在此滚动 */}
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {selectedQuotation && (
+                  <SupplierQuotationEditor
+                    quotation={selectedQuotation}
+                    onSave={(updatedQuotation) => {
+                      // 1. Persist to localStorage
+                      saveSupplierQuotation(updatedQuotation);
+
+                      // 2. Sync unitPrice + totalAmount back into the table row
+                      const updatedQuotations = supplierQuotations.map(q =>
+                        q.quotationNo === updatedQuotation.quotationNo ? updatedQuotation : q
+                      );
+                      setSupplierQuotations(updatedQuotations);
+
+                      // 3. Keep selectedQuotation fresh (for document viewer)
+                      setSelectedQuotation(updatedQuotation);
+
+                      // 4. Sync back to the parent RFQ
+                      const relatedRFQ = myRFQs.find(r =>
+                        (r.supplierRfqNo || r.rfqNumber) === updatedQuotation.sourceXJ
+                      );
+                      if (relatedRFQ) {
+                        const firstItem = updatedQuotation.items?.[0];
+                        addQuoteToRFQ(relatedRFQ.id, {
+                          supplierCode: updatedQuotation.supplierEmail || user?.email || '',
+                          supplierName: updatedQuotation.supplierName || user?.username || '供应商',
+                          unitPrice: firstItem?.unitPrice ?? 0,
+                          totalAmount: updatedQuotation.totalAmount ?? 0,
+                          currency: updatedQuotation.currency || 'CNY',
+                          leadTime: firstItem?.leadTime ?? 0,
+                          moq: firstItem?.moq ?? 0,
+                          validityDays: 30,
+                          paymentTerms: updatedQuotation.paymentTerms || '',
+                          deliveryTerms: updatedQuotation.deliveryTerms || '',
+                          remarks: [
+                            updatedQuotation.generalRemarks,
+                            updatedQuotation.supplierRemarks,
+                          ].filter(Boolean).join(' | ') || `报价单号: ${updatedQuotation.quotationNo}`,
+                          quoteMode: updatedQuotation.quoteMode,
+                          overallMargin: updatedQuotation.overallMargin,
+                          status: updatedQuotation.status,
+                        });
+                      }
+
+                      // 5. Close dialog
+                      closeQuotationEditor();
+                    }}
+                    onCancel={closeQuotationEditor}
+                  />
+                )}
+              </div>
+
+              {/* 关闭按钮 */}
+              <DialogPrimitive.Close className="absolute top-4 right-4 z-50 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:outline-none disabled:pointer-events-none">
+                <XIcon className="w-5 h-5" />
+                <span className="sr-only">Close</span>
+              </DialogPrimitive.Close>
+            </DialogPrimitive.Content>
+          </div>
+        </DialogPortal>
       </Dialog>
 
-      {/* 🔥 报价单编辑对话框 */}
-      <Dialog open={quotationEditorOpen} onOpenChange={setQuotationEditorOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>编辑报价单</DialogTitle>
-            <DialogDescription>修改报价单详情并提交</DialogDescription>
-          </DialogHeader>
-          {selectedQuotation && (
-            <SupplierQuotationEditor
-              quotation={selectedQuotation}
-              onSave={(updatedQuotation) => {
-                // 更新localStorage
-                saveSupplierQuotation(updatedQuotation);
-                
-                // 更新本地状态
-                const updatedQuotations = supplierQuotations.map(q =>
-                  q.quotationNo === updatedQuotation.quotationNo ? updatedQuotation : q
-                );
-                setSupplierQuotations(updatedQuotations);
-                
-                // 🔥 更新选中的报价单（确保文档视图能读取到最新数据）
-                setSelectedQuotation(updatedQuotation);
-                
-                // 关闭对话框
-                setQuotationEditorOpen(false);
-              }}
-              onCancel={() => setQuotationEditorOpen(false)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
 
-      {/* 🔥 RFQ数据流转调试工具 */}
-      <SupplierRFQDebugger />
     </div>
   );
 }

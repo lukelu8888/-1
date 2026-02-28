@@ -2,32 +2,55 @@ import React, { useState } from 'react';
 import { Building2, Eye, EyeOff, Globe, Shield } from 'lucide-react';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
-import { authorizedUsers } from '../data/authorizedUsers';
-import { useUser } from '../contexts/UserContext'; // 🔥 使用UserContext
-import { useRouter } from '../contexts/RouterContext'; // 🔥 使用RouterContext
-import { DEMO_USERS } from '../lib/rbac-config'; // 🔥 导入DEMO_USERS
-import { apiLogin, setApiToken, setBackendUser } from '../api/backend-auth';
+import { useUser } from '../contexts/UserContext';
+import { useRouter } from '../contexts/RouterContext';
+import { signInWithEmail, fetchProfile } from '../hooks/useSupabaseAuth';
 
 export default function AdminLogin() {
-  const { setUser } = useUser(); // 🔥 获取setUser函数
-  const { navigateTo } = useRouter(); // 🔥 获取navigateTo函数
-  // 临时：写死测试账号，方便联调（测完再删）
-  const [username, setUsername] = useState('admin@cosun.com');
-  const [password, setPassword] = useState('admin123');
-  const [rememberMe, setRememberMe] = useState(true);
+  const { setUser } = useUser();
+  const { navigateTo } = useRouter();
+  const REMEMBER_KEY = 'cosun_remember_admin';
+  const MIGRATE_VERSION = 'v2';
+  const [username, setUsername] = useState(() => {
+    // 同步迁移：如果 Login.tsx 的迁移未执行（直接访问 admin-login），这里也清一次
+    if (localStorage.getItem('cosun_remember_migrated') !== MIGRATE_VERSION) {
+      localStorage.removeItem('cosun_remember_user');
+      localStorage.removeItem('cosun_remember_customer');
+      localStorage.removeItem('cosun_remember_supplier');
+      localStorage.removeItem('cosun_remember_admin');
+      localStorage.setItem('cosun_remember_migrated', MIGRATE_VERSION);
+    }
+    return localStorage.getItem(REMEMBER_KEY) ?? '';
+  });
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => !!localStorage.getItem(REMEMBER_KEY));
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [language, setLanguage] = useState<'zh' | 'en'>('zh');
 
-  const resolveAdminEmail = (input: string): string | null => {
-    const trimmed = input.trim();
-    if (!trimmed) return null;
+  // 将用户名/短名映射为邮箱（开发快捷登录用）
+  const USERNAME_MAP: Record<string, string> = {
+    admin: 'admin@cosun.com',
+    ceo: 'ceo@cosun.com',
+    cfo: 'cfo@cosun.com',
+    'sales.director': 'sales.director@cosun.com',
+    'john.smith': 'john.smith@cosun.com',
+    'carlos.silva': 'carlos.silva@cosun.com',
+    'hans.mueller': 'hans.mueller@cosun.com',
+    zhangwei: 'zhangwei@cosun.com',
+    lifang: 'lifang@cosun.com',
+    wangfang: 'wangfang@cosun.com',
+    finance: 'finance@cosun.com',
+    procurement: 'procurement@cosun.com',
+    marketing: 'marketing@cosun.com',
+    supplier: 'gd.supplier@test.com',
+  };
+
+  const resolveEmail = (input: string): string => {
+    const trimmed = input.trim().toLowerCase();
     if (trimmed.includes('@')) return trimmed;
-    const match = authorizedUsers.find(
-      (u) => u.role === 'admin' && u.username.toLowerCase() === trimmed.toLowerCase()
-    );
-    return match?.email ?? null;
+    return USERNAME_MAP[trimmed] ?? trimmed;
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -35,7 +58,7 @@ export default function AdminLogin() {
     setError('');
     setIsLoading(true);
 
-    const email = resolveAdminEmail(username);
+    const email = resolveEmail(username);
     if (!email) {
       setError(language === 'zh' ? '请输入有效的用户名或邮箱' : 'Please enter a valid username or email');
       setIsLoading(false);
@@ -43,56 +66,94 @@ export default function AdminLogin() {
     }
 
     try {
-      const { token, user } = await apiLogin({
-        email,
-        password,
-        deviceName: 'admin-web',
-      });
-      setApiToken(token);
-      setBackendUser(user);
+      // Supabase Auth 登录
+      const { session } = await signInWithEmail(email, password);
+      if (!session?.user) throw new Error('登录失败，请重试');
 
-      if (rememberMe) {
-        localStorage.setItem('cosun_remember_user', username);
+      // 获取用户 profile（portal_role / rbac_role / region）
+      const profile = await fetchProfile(session.user.id);
+
+      // 仅允许 admin portal_role 登录此页面
+      if (profile && profile.portal_role !== 'admin') {
+        await import('../hooks/useSupabaseAuth').then(m => m.signOut());
+        throw new Error(language === 'zh'
+          ? '此账号无管理员权限，请使用客户/供应商入口登录'
+          : 'This account has no admin access. Please use the customer/supplier portal.');
       }
 
-      // 🔥 兼容 RBAC：优先用 DEMO_USERS（email 对齐），否则用后端数据拼一个
-      const rbacUser =
-        DEMO_USERS.find((u: any) => u.email === user.email) ||
-        ({
-          id: String(user.id ?? user.email),
-          name: user.username ?? user.email.split('@')[0],
-          email: user.email,
-          role: (user.rbac_role ?? 'Admin') as any,
-          region: (user.region ?? 'all') as any,
-        } as any);
+      if (rememberMe) {
+        localStorage.setItem(REMEMBER_KEY, email);
+      } else {
+        localStorage.removeItem(REMEMBER_KEY);
+      }
 
+      // 更新 UserContext（onAuthStateChange 也会触发，这里做即时同步）
+      setUser({
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        type: 'admin',
+        role: profile?.rbac_role ?? 'Admin',
+        userRole: profile?.rbac_role ?? 'Admin',
+        region: profile?.region ?? 'all',
+      });
+
+      // 触发 userChanged 让 RBAC 系统同步
+      const rbacUser = {
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        role: profile?.rbac_role ?? 'Admin',
+        region: profile?.region ?? 'all',
+      };
       localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser));
       window.dispatchEvent(new CustomEvent('userChanged', { detail: rbacUser }));
 
-      setUser({
-        id: String(rbacUser.id),
-        email: rbacUser.email,
-        name: rbacUser.name,
-        type: 'admin' as const,
-        role: rbacUser.role,
-        userRole: rbacUser.role,
-        region: rbacUser.region,
-      });
     } catch (err: any) {
-      setError(err?.message || (language === 'zh' ? '登录失败' : 'Login failed'));
+      const msg = err?.message || '';
+      if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) {
+        setError(language === 'zh' ? '邮箱或密码错误' : 'Invalid email or password');
+      } else {
+        setError(msg || (language === 'zh' ? '登录失败，请重试' : 'Login failed, please try again'));
+      }
     }
 
     setIsLoading(false);
   };
 
-  // 快速登录（开发模式）
-  const quickLogin = (user: string, pass: string) => {
-    setUsername(user);
+  // 快速登录（开发模式）：直接用传入的账密，绕过 state 异步问题
+  const quickLogin = async (email: string, pass: string) => {
+    setUsername(email);
     setPassword(pass);
-    setError(''); // 清除错误
-    
-    // ✅ 直接触发表单登录（走真实后端）
-    handleLogin({ preventDefault() {} } as any);
+    setError('');
+    setIsLoading(true);
+    try {
+      const { signInWithEmail: signIn, fetchProfile: getProfile } = await import('../hooks/useSupabaseAuth');
+      const { session } = await signIn(email, pass);
+      if (!session?.user) throw new Error('登录失败，请重试');
+      const profile = await getProfile(session.user.id);
+      if (profile && profile.portal_role !== 'admin') {
+        const { signOut } = await import('../hooks/useSupabaseAuth');
+        await signOut();
+        throw new Error('此账号无管理员权限');
+      }
+      const { setUser } = await import('../contexts/UserContext').then(m => ({ setUser: null }));
+      // UserContext via onAuthStateChange will handle state update
+      // Force navigate to admin dashboard
+      const rbacUser = {
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        role: profile?.rbac_role ?? 'Admin',
+        region: profile?.region ?? 'all',
+      };
+      localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser));
+      window.dispatchEvent(new CustomEvent('userChanged', { detail: rbacUser }));
+    } catch (err: any) {
+      setError(err?.message || '快速登录失败');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const text = {

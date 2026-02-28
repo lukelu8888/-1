@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\SupplierRfq;
 use App\Models\SupplierRfqProduct;
+use App\Models\SupplierRfqQuote;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -231,5 +232,70 @@ class SupplierRfqController extends Controller
 
         return response()->json(['rfq' => $this->toRfqDto($rfq->fresh(['products']))]);
     }
-}
 
+    /**
+     * Supplier: clear all own RFQ business test data from backend.
+     * DELETE /api/supplier-rfqs/mine
+     */
+    public function clearMine(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $email = (string) ($user->email ?? '');
+        if ($email === '') {
+            return response()->json(['message' => 'User email required'], 400);
+        }
+
+        $rfqIds = SupplierRfq::query()
+            ->where('supplier_email', $email)
+            ->pluck('id')
+            ->values();
+
+        if ($rfqIds->isEmpty()) {
+            return response()->json([
+                'message' => 'No supplier RFQ data to clear',
+                'cleared' => [
+                    'rfqs' => 0,
+                    'products' => 0,
+                    'quotes' => 0,
+                ],
+            ]);
+        }
+
+        $result = DB::transaction(function () use ($rfqIds) {
+            $quotesCount = SupplierRfqQuote::query()
+                ->whereIn('supplier_rfq_id', $rfqIds->all())
+                ->count();
+            $productsCount = SupplierRfqProduct::query()
+                ->whereIn('supplier_rfq_id', $rfqIds->all())
+                ->count();
+            $rfqCount = SupplierRfq::query()
+                ->whereIn('id', $rfqIds->all())
+                ->count();
+
+            SupplierRfqQuote::query()
+                ->whereIn('supplier_rfq_id', $rfqIds->all())
+                ->delete();
+            SupplierRfqProduct::query()
+                ->whereIn('supplier_rfq_id', $rfqIds->all())
+                ->delete();
+            SupplierRfq::query()
+                ->whereIn('id', $rfqIds->all())
+                ->delete();
+
+            return [
+                'rfqs' => $rfqCount,
+                'products' => $productsCount,
+                'quotes' => $quotesCount,
+            ];
+        });
+
+        return response()->json([
+            'message' => 'Supplier RFQ test data cleared',
+            'cleared' => $result,
+        ]);
+    }
+}

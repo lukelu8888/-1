@@ -288,6 +288,21 @@ export default function QuoteCreationIntelligent({
         setQuoteNo(requirement.qtNumber || '');
         setQuoteDate(requirement.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0]);
         setValidityDays(30); // 可以从 validUntil 计算
+
+        // 🔥 回填全局默认参数（优先使用已保存的 globalDefaults，其次回退到首个产品参数）
+        const firstItem = requirement.items?.[0] || {};
+        const savedGlobal = requirement.globalDefaults || {};
+        setGlobalDefaults((prev) => ({
+          ...prev,
+          priceType: (savedGlobal.priceType || firstItem.priceType || prev.priceType) as PriceType,
+          exchangeRate: Number(savedGlobal.exchangeRate ?? firstItem.exchangeRate ?? prev.exchangeRate),
+          taxRate: Number(savedGlobal.taxRate ?? firstItem.taxRate ?? prev.taxRate),
+          exportRebateRate: Number(savedGlobal.exportRebateRate ?? firstItem.exportRebateRate ?? prev.exportRebateRate),
+          profitMargin: Number(savedGlobal.profitMargin ?? firstItem.profitMargin ?? prev.profitMargin),
+          domesticFeesCNY: Number(savedGlobal.domesticFeesCNY ?? firstItem.domesticFeesCNY ?? prev.domesticFeesCNY),
+          tradeTerms: (savedGlobal.tradeTerms || firstItem.tradeTerms || prev.tradeTerms) as TradeTerms,
+          insuranceRate: Number(savedGlobal.insuranceRate ?? firstItem.insuranceRate ?? prev.insuranceRate),
+        }));
         
         // 🔥 修复：编辑QT时，也应该从QR采购需求单中读取原始供货价，而不是从QT计算结果读取
         const existingItems: QuoteItem[] = requirement.items.map((item: any, index: number) => {
@@ -306,27 +321,20 @@ export default function QuoteCreationIntelligent({
             || item.price
             || 0;
             
-          const currency = feedbackProduct?.currency 
-            || feedbackProduct?.priceType 
-            || item.currency 
-            || item.priceType
-            || 'CNY';
-          
+          // 🔥 直接读取供应商报价携带的 priceType，不再靠 currency 猜测
+          const feedbackPriceType = feedbackProduct?.priceType || item.priceType;
+          const feedbackTaxSettings = feedbackProduct?.taxSettings || item.taxSettings;
+          const currency = feedbackProduct?.currency || item.currency || 'CNY';
+
+          // 推断 priceType（优先使用明确传递的值）
+          const resolvedPriceType: PriceType = feedbackPriceType
+            ? feedbackPriceType as PriceType
+            : currency.toUpperCase() === 'USD' ? 'usd' : 'cny_with_tax';
+
           console.log(`🔍 [编辑QT-加载产品${index + 1}] ${item.productName}:`, {
-            '已有QT的item': item,
-            '采购反馈完整数据': requirement.purchaserFeedback,
-            '匹配到的feedbackProduct': feedbackProduct,
             '最终供货单价': supplierPrice,
-            '最终货币': currency,
-            '尝试的字段': {
-              'feedbackProduct?.costPrice': feedbackProduct?.costPrice,
-              'feedbackProduct?.supplierPrice': feedbackProduct?.supplierPrice,
-              'feedbackProduct?.price': feedbackProduct?.price,
-              'item.supplierPrice': item.supplierPrice,
-              'item.costPrice': item.costPrice,
-              'item.targetPrice': item.targetPrice,
-              'item.price': item.price
-            }
+            '最终priceType': resolvedPriceType,
+            '来源taxSettings': feedbackTaxSettings,
           });
           
           const existingItem: QuoteItem = {
@@ -338,13 +346,14 @@ export default function QuoteCreationIntelligent({
             unit: item.unit || 'PCS',
             imageUrl: item.imageUrl,
             
-            // 🔥 成本参数：从QR采购反馈读取，不是从QT计算结果读取
-            priceType: currency === 'USD' ? 'usd' : 'cny_with_tax',
-            supplierPrice: supplierPrice, // 🔥 原始供货单价
-            currency: currency as 'USD' | 'CNY', // 🔥 原始货币
-            exchangeRate: item.exchangeRate || globalDefaults.exchangeRate,
-            taxRate: item.taxRate || globalDefaults.taxRate,
-            exportRebateRate: item.exportRebateRate || globalDefaults.exportRebateRate,
+            // 🔥 成本参数：直接使用供应商报价传递的 priceType
+            priceType: resolvedPriceType,
+            supplierPrice: supplierPrice,
+            currency: currency as 'USD' | 'CNY',
+            // 优先使用供应商报价时的汇率/税率（保证计算一致性）
+            exchangeRate: feedbackTaxSettings?.usdRate || item.exchangeRate || globalDefaults.exchangeRate,
+            taxRate: feedbackTaxSettings?.vatRate || item.taxRate || globalDefaults.taxRate,
+            exportRebateRate: feedbackTaxSettings?.hasExportRebate ? (feedbackTaxSettings?.exportRebateRate ?? item.exportRebateRate ?? globalDefaults.exportRebateRate) : (item.exportRebateRate || globalDefaults.exportRebateRate),
             domesticFeesCNY: item.domesticFeesCNY || globalDefaults.domesticFeesCNY,
             profitMargin: item.profitMargin ?? globalDefaults.profitMargin,
             
@@ -388,14 +397,20 @@ export default function QuoteCreationIntelligent({
             '供货价': feedbackProduct?.costPrice || feedbackProduct?.supplierPrice || item.targetPrice || item.costPrice || 0
           });
           
-          // 🔥 从采购反馈中读取供货价（多个字段兼容）
+          // 🔥 从采购反馈中读取供货价和价格属性
           const supplierPrice = feedbackProduct?.costPrice || feedbackProduct?.supplierPrice || item.targetPrice || item.costPrice || 0;
           const currency = feedbackProduct?.currency || item.currency || 'CNY';
-          const supplierName = feedbackProduct?.supplierName || '供应商'; // 🔥 供应商名称（脱敏）
+          const supplierName = feedbackProduct?.supplierName || '供应商';
+
+          // 🔥 直接读取 priceType，不再靠 currency 猜测
+          const feedbackPriceType2 = feedbackProduct?.priceType;
+          const feedbackTaxSettings2 = feedbackProduct?.taxSettings;
+          const resolvedPriceType2: PriceType = feedbackPriceType2
+            ? feedbackPriceType2 as PriceType
+            : currency.toUpperCase() === 'USD' ? 'usd' : 'cny_with_tax';
           
           const newItem: QuoteItem = {
             id: item.id || `item-${index}`,
-            // 🔥 业务员需要重新编辑这些信息（客户友好版本）
             productName: item.productName || '',
             specification: item.specification || '',
             modelNo: item.modelNo || '',
@@ -403,13 +418,13 @@ export default function QuoteCreationIntelligent({
             unit: item.unit || 'PCS',
             imageUrl: item.imageUrl,
             
-            // 🔥 成本参数（从采购反馈导入，供货价不可修改！）
-            priceType: currency === 'USD' ? 'usd' : 'cny_with_tax',
+            // 🔥 成本参数：使用供应商报价传递的 priceType 和税务参数
+            priceType: resolvedPriceType2,
             supplierPrice: supplierPrice,
             currency: currency as 'USD' | 'CNY',
-            exchangeRate: globalDefaults.exchangeRate,
-            taxRate: globalDefaults.taxRate,
-            exportRebateRate: globalDefaults.exportRebateRate,
+            exchangeRate: feedbackTaxSettings2?.usdRate || globalDefaults.exchangeRate,
+            taxRate: feedbackTaxSettings2?.vatRate || globalDefaults.taxRate,
+            exportRebateRate: feedbackTaxSettings2?.hasExportRebate ? (feedbackTaxSettings2?.exportRebateRate ?? globalDefaults.exportRebateRate) : globalDefaults.exportRebateRate,
             domesticFeesCNY: globalDefaults.domesticFeesCNY,
             profitMargin: globalDefaults.profitMargin,
             
@@ -454,15 +469,44 @@ export default function QuoteCreationIntelligent({
     );
   };
 
+  // 供货单价类型切换时，将 supplierPrice 换算到新类型
+  const convertSupplierPrice = (
+    oldPrice: number,
+    oldType: PriceType,
+    newType: PriceType,
+    rate: number,
+    taxRate: number,
+  ): number => {
+    if (oldType === newType) return oldPrice;
+    // 旧类型 → 含税CNY
+    let cnyWithTax = oldPrice;
+    if (oldType === 'usd') cnyWithTax = oldPrice * rate * (1 + taxRate / 100);
+    else if (oldType === 'cny_no_tax') cnyWithTax = oldPrice * (1 + taxRate / 100);
+    // 含税CNY → 新类型
+    if (newType === 'usd') return Math.round(cnyWithTax / (1 + taxRate / 100) / rate * 10000) / 10000;
+    if (newType === 'cny_no_tax') return Math.round(cnyWithTax / (1 + taxRate / 100) * 10000) / 10000;
+    return Math.round(cnyWithTax * 10000) / 10000;
+  };
+
   // 批量应用全局默认值
   const applyGlobalDefaults = () => {
     const sourceItems = latestItemsRef.current;
     const updatedItems = sourceItems.map(item => {
+        const newRate = globalDefaults.exchangeRate;
+        const newTaxRate = globalDefaults.taxRate;
+        const newSupplierPrice = convertSupplierPrice(
+          item.supplierPrice,
+          item.priceType,
+          globalDefaults.priceType,
+          newRate,
+          newTaxRate,
+        );
         const updated = {
           ...item,
-          priceType: globalDefaults.priceType, // 🔥 新增：批量应用供货价类型
-          exchangeRate: globalDefaults.exchangeRate,
-          taxRate: globalDefaults.taxRate,
+          priceType: globalDefaults.priceType,
+          supplierPrice: newSupplierPrice,
+          exchangeRate: newRate,
+          taxRate: newTaxRate,
           exportRebateRate: globalDefaults.exportRebateRate,
           profitMargin: globalDefaults.profitMargin,
           domesticFeesCNY: globalDefaults.domesticFeesCNY,
@@ -522,6 +566,7 @@ export default function QuoteCreationIntelligent({
       requirementNo,
       qrNumber: requirementNo, // 🔥 关联的QR单号
       status: 'draft',
+      globalDefaults: { ...globalDefaults }, // 🔥 持久化弹窗顶部全局参数（含利润率）
       
       // 🔥 真实的客户和区域信息
       ...customerInfo,
@@ -622,6 +667,7 @@ export default function QuoteCreationIntelligent({
       requirementNo,
       qrNumber: requirementNo, // 🔥 关联的QR单号
       status: 'pending_supervisor', // 🔥 第一步：待区域主管审核
+      globalDefaults: { ...globalDefaults }, // 🔥 持久化弹窗顶部全局参数（含利润率）
       
       // 🔥 真实的客户和区域信息
       ...customerInfo,
@@ -1191,14 +1237,53 @@ export default function QuoteCreationIntelligent({
                         
                         {/* 第一行：供货价配置（紧凑单行布局） */}
                         <div className="flex items-end gap-3 mb-2">
-                          <div className="flex-none w-28">
+                          <div className="flex-none w-36">
                             <label className="block text-xs text-slate-600 mb-1">
                               供货单价类型
-                              <span className="text-green-500 ml-1" title="已解锁，可手动修改">🔓</span>
+                              {item.priceType && (item as any).taxSettings ? (
+                                <span
+                                  className="text-amber-500 ml-1 text-[10px] font-normal"
+                                  title={`来源：供应商报价（${(item as any).quoteMode || ''}），税率${(item as any).taxSettings?.vatRate ?? ''}%，汇率${(item as any).taxSettings?.usdRate ?? ''}`}
+                                >
+                                  🔒 供应商已定
+                                </span>
+                              ) : (
+                                <span className="text-green-500 ml-1" title="已解锁，可手动修改">🔓</span>
+                              )}
                             </label>
                             <select
                               value={item.priceType}
-                              onChange={(e) => updateItem(item.id, { priceType: e.target.value as PriceType })}
+                              onChange={(e) => {
+                                const newType = e.target.value as PriceType;
+                                const oldType = item.priceType;
+                                const oldPrice = item.supplierPrice;
+                                const rate = item.exchangeRate || 7.2;
+                                const taxRate = item.taxRate || 13;
+
+                                // 先把旧价格统一换算成"含税CNY基准"，再换算到新类型
+                                // 步骤1：旧类型 → 含税CNY
+                                let priceAsCnyWithTax = oldPrice;
+                                if (oldType === 'usd') {
+                                  priceAsCnyWithTax = oldPrice * rate * (1 + taxRate / 100);
+                                } else if (oldType === 'cny_no_tax') {
+                                  priceAsCnyWithTax = oldPrice * (1 + taxRate / 100);
+                                }
+                                // oldType === 'cny_with_tax' 时不用转
+
+                                // 步骤2：含税CNY → 新类型
+                                let newPrice = priceAsCnyWithTax;
+                                if (newType === 'usd') {
+                                  newPrice = priceAsCnyWithTax / (1 + taxRate / 100) / rate;
+                                } else if (newType === 'cny_no_tax') {
+                                  newPrice = priceAsCnyWithTax / (1 + taxRate / 100);
+                                }
+                                // newType === 'cny_with_tax' 时直接用 priceAsCnyWithTax
+
+                                updateItem(item.id, {
+                                  priceType: newType,
+                                  supplierPrice: Math.round(newPrice * 10000) / 10000,
+                                });
+                              }}
                               className="w-full px-2 py-1.5 border rounded text-xs bg-white border-orange-300 focus:ring-2 focus:ring-orange-500"
                             >
                               <option value="usd">美金</option>

@@ -34,19 +34,10 @@ import {
   SelectValue 
 } from '../ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { 
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter
-} from '../ui/dialog';
 import { toast } from 'sonner@2.0.3';
 import { PurchaseOrderDocument, PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument'; // 🔥 文档中心采购订单模板
 import { SupplierRFQData } from '../documents/templates/SupplierRFQDocument'; // 🔥 供应商询价单模板
 import QuoteCreationIntelligent from './QuoteCreationIntelligent'; // 🔥 智能报价创建页面
-import { PurchaseRequirementDocument, PurchaseRequirementDocumentData } from '../documents/templates/PurchaseRequirementDocument'; // 🔥 采购需求单模板
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport'; // 🔥 PDF导出工具
 import { usePurchaseRequirements, PurchaseRequirement, PurchaserFeedback } from '../../contexts/PurchaseRequirementContext'; // 🔥 采购需求Context
 import { usePurchaseOrders, PurchaseOrder as PurchaseOrderType, PurchaseOrderItem } from '../../contexts/PurchaseOrderContext'; // 🔥 采购订单Context
@@ -66,6 +57,11 @@ import { RFQPreviewDialog } from './purchase-order/RFQPreviewDialog';
 import { SupplierQuotationDialog } from './purchase-order/SupplierQuotationDialog';
 import { CreateRFQAndHistoryDialogs } from './purchase-order/CreateRFQAndHistoryDialogs';
 import { PurchaseOrdersTab } from './purchase-order/PurchaseOrdersTab';
+import { ProcurementRequestsTab } from './purchase-order/ProcurementRequestsTab';
+import { SupplierAllocationDialog } from './purchase-order/SupplierAllocationDialog';
+import { PurchaseOrderDetailDialog } from './purchase-order/PurchaseOrderDetailDialog';
+import { PurchaseOrderPreviewDialog } from './purchase-order/PurchaseOrderPreviewDialog';
+import { PurchaseRequirementPreviewDialog } from './purchase-order/PurchaseRequirementPreviewDialog';
 import {
   createInitialCreateOrderForm,
   createInitialEditPOForm,
@@ -300,6 +296,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [supplierQuotations, setSupplierQuotations] = useState<any[]>([]);
   const [selectedSupplierQuotation, setSelectedSupplierQuotation] = useState<any>(null);
   const [showSupplierQuotationDialog, setShowSupplierQuotationDialog] = useState(false);
+  const [showFeedbackReminderDialog, setShowFeedbackReminderDialog] = useState(false);
+  const [acceptedQuotationNo, setAcceptedQuotationNo] = useState<string>('');
   const DELETED_SUPPLIER_QUOTATIONS_KEY = 'deleted_supplier_quotations';
   const [salesContractsLite, setSalesContractsLite] = useState<any[]>([]);
   const supplierQuotationSnapshot = useMemo(() => {
@@ -359,80 +357,103 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   
   // 🔥 加载供应商报价数据：优先从后端接口拉取（采购员可见供应商提交的 BJ）
   const loadSupplierQuotationsFromApi = React.useCallback(async () => {
+    const deletedIds = getDeletedSupplierQuotationIds();
+
+    // Always read localStorage first — supplier writes here when they submit a quotation
+    const stored = localStorage.getItem('supplierQuotations');
+    const localQuotations: any[] = stored ? (() => { try { return JSON.parse(stored); } catch { return []; } })() : [];
+
+    // Local submitted/accepted/rejected quotations (non-draft) are always visible to admin
+    const localVisible = localQuotations.filter(
+      (q: any) => q.status !== 'draft' && !deletedIds.has(String(q.id))
+    );
+
     try {
       const res = await apiFetchJson<{ quotations: any[] }>('/api/supplier-quotations');
-      const deletedIds = getDeletedSupplierQuotationIds();
-      const list = filterNotDeleted(
+      const apiList: any[] = res?.quotations ?? [];
+
+      // Merge: backend records take precedence; supplement with local submitted records
+      // that don't yet exist in backend (dev environment without real DB)
+      const apiIds = new Set(apiList.map((q: any) => String(q.id)));
+      const localOnly = localVisible.filter((q: any) => !apiIds.has(String(q.id)));
+      const merged = filterNotDeleted(
         'quotation',
-        (res?.quotations ?? []).filter((q: any) => !deletedIds.has(String(q.id))),
+        [...apiList.filter((q: any) => !deletedIds.has(String(q.id))), ...localOnly],
         (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.rfqNumber || '')],
       );
-      setSupplierQuotations(list);
-      try {
-        localStorage.setItem('supplierQuotations', JSON.stringify(list));
-      } catch {}
+      setSupplierQuotations(merged);
+      // Do NOT overwrite localStorage here — supplier's local records must be preserved
     } catch (e) {
-      const stored = localStorage.getItem('supplierQuotations');
-      if (stored) {
-        const allQuotations = JSON.parse(stored);
-        const deletedIds = getDeletedSupplierQuotationIds();
-        const visibleQuotations = filterNotDeleted(
-          'quotation',
-          allQuotations.filter((q: any) => q.status !== 'draft' && !deletedIds.has(String(q.id))),
-          (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.rfqNumber || '')],
-        );
-        setSupplierQuotations(visibleQuotations);
-      }
+      // API unavailable: show local submitted quotations as fallback
+      const visibleQuotations = filterNotDeleted(
+        'quotation',
+        localVisible,
+        (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.rfqNumber || '')],
+      );
+      setSupplierQuotations(visibleQuotations);
     }
   }, [getDeletedSupplierQuotationIds]);
 
+  // Apply status change locally (localStorage + state) for quotations that only exist locally (non bj- ids)
+  const applyLocalQuotationStatus = React.useCallback((id: string, status: 'accepted' | 'rejected') => {
+    setSupplierQuotations((prev) =>
+      prev.map((q: any) => (q.id === id ? { ...q, status } : q)),
+    );
+    try {
+      const stored = localStorage.getItem('supplierQuotations');
+      if (stored) {
+        const all = JSON.parse(stored);
+        const updated = all.map((q: any) => (q.id === id ? { ...q, status } : q));
+        localStorage.setItem('supplierQuotations', JSON.stringify(updated));
+      }
+    } catch {}
+  }, []);
+
   const handleAcceptSupplierQuotation = React.useCallback(async () => {
     if (!selectedSupplierQuotation) return;
+    const qid = selectedSupplierQuotation.id;
+    // Use quotationNo (BJ-YYMMDD-XXXX) as the backend lookup key — backend supports this format
+    const backendKey = selectedSupplierQuotation.quotationNo || qid;
     try {
-      await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(selectedSupplierQuotation.id)}`, {
+      await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(backendKey)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'accepted' }),
       });
-      setSupplierQuotations((prev) =>
-        prev.map((q: any) => (q.id === selectedSupplierQuotation.id ? { ...q, status: 'accepted' as const } : q)),
-      );
-      setShowSupplierQuotationDialog(false);
-      toast.success(
-        <div className="space-y-1">
-          <p className="font-semibold">✅ 已接受报价</p>
-          <p className="text-sm">报价单号: {selectedSupplierQuotation.quotationNo}</p>
-          <p className="text-xs text-gray-500">刷新后状态会保持，可在采购订单中创建订单</p>
-        </div>,
-      );
     } catch (e: any) {
-      toast.error(e?.message || '操作失败，请重试');
+      console.warn('⚠️ 接受报价后端同步失败，降级本地模式:', e?.message);
     }
-  }, [selectedSupplierQuotation]);
+    // Always update local state regardless of backend result
+    applyLocalQuotationStatus(qid, 'accepted');
+    setShowSupplierQuotationDialog(false);
+    setAcceptedQuotationNo(selectedSupplierQuotation.quotationNo || qid);
+    setShowFeedbackReminderDialog(true);
+  }, [selectedSupplierQuotation, applyLocalQuotationStatus]);
 
   const handleRejectSupplierQuotation = React.useCallback(async () => {
     if (!selectedSupplierQuotation) return;
+    const qid = selectedSupplierQuotation.id;
+    const backendKey = selectedSupplierQuotation.quotationNo || qid;
     try {
-      await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(selectedSupplierQuotation.id)}`, {
+      await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(backendKey)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'rejected' }),
       });
-      setSupplierQuotations((prev) =>
-        prev.map((q: any) => (q.id === selectedSupplierQuotation.id ? { ...q, status: 'rejected' as const } : q)),
-      );
-      setShowSupplierQuotationDialog(false);
-      toast.info(
-        <div className="space-y-1">
-          <p className="font-semibold">❌ 已拒绝报价</p>
-          <p className="text-sm">报价单号: {selectedSupplierQuotation.quotationNo}</p>
-          <p className="text-xs text-gray-500">刷新后状态会保持</p>
-        </div>,
-      );
     } catch (e: any) {
-      toast.error(e?.message || '操作失败，请重试');
+      console.warn('⚠️ 拒绝报价后端同步失败，降级本地模式:', e?.message);
     }
-  }, [selectedSupplierQuotation]);
+    // Always update local state regardless of backend result
+    applyLocalQuotationStatus(qid, 'rejected');
+    setShowSupplierQuotationDialog(false);
+    toast.info(
+      <div className="space-y-1">
+        <p className="font-semibold">❌ 已拒绝报价</p>
+        <p className="text-sm">报价单号: {selectedSupplierQuotation.quotationNo}</p>
+        <p className="text-xs text-gray-500">状态已更新</p>
+      </div>,
+    );
+  }, [selectedSupplierQuotation, applyLocalQuotationStatus]);
 
   React.useEffect(() => {
     if (activeTab === 'supplier-quotations') {
@@ -1463,7 +1484,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           selectedRequirementForRFQ,
           rfqDeadline,
           rfqRemarks,
-          selectedProductIds
+          selectedProductIds,
+          supplierRfqNo
         );
 
         // 🔥 只包含选中的产品（ID统一 string 匹配）
@@ -1746,22 +1768,30 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 编辑询价单
   const handleEditRFQ = (rfq: RFQ) => {
     setEditingRFQ(rfq);
-    // 深拷贝documentData，确保编辑不影响原数据
-    setEditRFQData(JSON.parse(JSON.stringify(rfq.documentData)));
+    // 深拷贝documentData，确保编辑不影响原数据，并与列表XJ单号强制对齐
+    const cloned = JSON.parse(JSON.stringify(rfq.documentData || {}));
+    cloned.rfqNo = rfq.supplierRfqNo || cloned.rfqNo || '';
+    setEditRFQData(cloned);
     setShowEditRFQDialog(true);
   };
 
   // 🔥 保存编辑的询价单
   const handleSaveEditRFQ = () => {
     if (!editingRFQ || !editRFQData) return;
+    const normalizedRfqNo = String(editingRFQ.supplierRfqNo || editRFQData?.rfqNo || '').trim();
+    const normalizedDocumentData = {
+      ...editRFQData,
+      rfqNo: normalizedRfqNo || editRFQData?.rfqNo || '',
+    };
     
     // 更新RFQ，包括完整的documentData
     updateRFQ(editingRFQ.id, {
-      documentData: editRFQData,
+      documentData: normalizedDocumentData,
+      supplierRfqNo: normalizedRfqNo || editingRFQ.supplierRfqNo,
       // 同步更新关键字段
-      quotationDeadline: editRFQData.requiredResponseDate,
-      expectedDate: editRFQData.requiredDeliveryDate,
-      products: editRFQData.products?.map((p: any) => ({
+      quotationDeadline: normalizedDocumentData.requiredResponseDate,
+      expectedDate: normalizedDocumentData.requiredDeliveryDate,
+      products: normalizedDocumentData.products?.map((p: any) => ({
         id: p.no?.toString() || String(Math.random()),
         productName: p.description,
         modelNo: p.modelNo || '',
@@ -1769,7 +1799,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         quantity: p.quantity,
         unit: p.unit,
         targetPrice: p.targetPrice ? parseFloat(p.targetPrice) : undefined,
-        currency: editRFQData.terms?.currency || 'CNY'
+        currency: normalizedDocumentData.terms?.currency || 'CNY'
       }))
     });
     
@@ -1784,32 +1814,28 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 提交询价单给供应商 - 从草稿状态提交
   const handleSubmitRFQToSupplier = async (rfq: RFQ) => {
-    // ✅ If already non-draft, treat as submitted (backend mine will show it).
-    if ((rfq as any)?.status && (rfq as any).status !== 'draft') {
-      toast.success(
-        <div className="space-y-1">
-          <p className="font-semibold">✅ 询价单已提交</p>
-          <p className="text-sm">无需重复提交</p>
-        </div>
-      );
-      return;
-    }
-
-    // 🔥 检查是否已经提交过
+    // 🔥 检查是否已经提交过（以供应商询价单号优先，避免id误判）
     const existingSupplierRFQs = JSON.parse(localStorage.getItem('supplierRFQs') || '[]');
-    const alreadySubmitted = existingSupplierRFQs.some((item: any) => item.id === rfq.id);
+    const supplierRfqNo = String(rfq.supplierRfqNo || '').trim();
+    const alreadySubmitted = existingSupplierRFQs.some((item: any) => {
+      const itemNo = String(item?.supplierRfqNo || item?.rfqNumber || '').trim();
+      const sameNo = !!supplierRfqNo && itemNo !== '' && itemNo === supplierRfqNo;
+      const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(rfq.id || '').trim();
+      return sameNo || sameId;
+    });
     
     if (alreadySubmitted) {
       toast.error(
         <div className="space-y-1">
-          <p className="font-semibold">⚠️ 询价单已提交</p>
-          <p className="text-sm">该询价单已经提交给供应商，无需重复提交</p>
+          <p className="font-semibold">⚠️ 已下推供应商</p>
+          <p className="text-sm">该询价单已下推给供应商，无需重复操作</p>
         </div>
       );
       return;
     }
 
     // ✅ 同步到后端：将 RFQ 从 draft 提交为 pending（供应商端可见）
+    // 后端失败时降级走本地 localStorage 流程，不阻断操作
     try {
       await apiFetchJson<{ rfq: any }>(`/api/supplier-rfqs/${encodeURIComponent(rfq.id)}`, {
         method: 'PATCH',
@@ -1817,9 +1843,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         body: JSON.stringify({ status: 'pending' }),
       });
     } catch (err: any) {
-      console.error('❌ [提交询价单] 后端提交失败:', err);
-      toast.error(`提交失败：${err?.message || '未知错误'}`);
-      return;
+      console.warn('⚠️ [下推供应商] 后端同步失败，降级为本地模式:', err?.message);
+      // 不 return，继续执行本地 localStorage 推送
     }
     
     // 🔥 将状态从draft改为sent
@@ -1886,7 +1911,15 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     };
     
     // 保存到localStorage的supplierRFQs
-    const updatedSupplierRFQs = [...existingSupplierRFQs, supplierRFQData];
+    const updatedSupplierRFQs = [
+      ...existingSupplierRFQs.filter((item: any) => {
+        const itemNo = String(item?.supplierRfqNo || item?.rfqNumber || '').trim();
+        const sameNo = supplierRfqNo !== '' && itemNo === supplierRfqNo;
+        const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(rfq.id || '').trim();
+        return !(sameNo || sameId);
+      }),
+      supplierRFQData,
+    ];
     localStorage.setItem('supplierRFQs', JSON.stringify(updatedSupplierRFQs));
     
     // 🔥 触发storage事件（跨标签页）
@@ -1910,7 +1943,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     
     toast.success(
       <div className="space-y-1">
-        <p className="font-semibold">✅ 询价单已提交</p>
+        <p className="font-semibold">✅ 已下推供应商</p>
         <p className="text-sm">询价单号: {rfq.supplierRfqNo}</p>
         <p className="text-sm">供应商: {rfq.supplierName}</p>
         <p className="text-xs text-slate-600 mt-1">✓ 供应商将在Portal【客户需求池】中收到询价通知</p>
@@ -3055,13 +3088,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 <Button
                                   size="sm"
                                   onClick={() => {
-                                    // 🔥 提交询价单给供应商
                                     handleSubmitRFQToSupplier(rfq);
                                   }}
                                   className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
                                 >
                                   <Send className="w-3 h-3 mr-1" />
-                                  提交
+                                  下推供应商
                                 </Button>
                               </div>
                             </td>
@@ -3268,27 +3300,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   <Button
                                     size="sm"
                                     onClick={async () => {
+                                      const backendKey = quotation.quotationNo || quotation.id;
                                       try {
-                                        await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(quotation.id)}`, {
+                                        await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(backendKey)}`, {
                                           method: 'PATCH',
                                           headers: { 'Content-Type': 'application/json' },
                                           body: JSON.stringify({ status: 'accepted' }),
                                         });
-                                        setSupplierQuotations(prev =>
-                                          prev.map((q: any) =>
-                                            q.id === quotation.id ? { ...q, status: 'accepted' as const } : q
-                                          )
-                                        );
-                                        toast.success(
-                                          <div className="space-y-1">
-                                            <p className="font-semibold">✅ 已接受报价</p>
-                                            <p className="text-sm">报价单号: {quotation.quotationNo}</p>
-                                            <p className="text-xs text-slate-500">刷新后状态会保持</p>
-                                          </div>
-                                        );
                                       } catch (e: any) {
-                                        toast.error(e?.message || '操作失败，请重试');
+                                        console.warn('⚠️ 接受报价后端同步失败，降级本地模式:', e?.message);
                                       }
+                                      applyLocalQuotationStatus(quotation.id, 'accepted');
+                                      setAcceptedQuotationNo(quotation.quotationNo || quotation.id);
+                                      setShowFeedbackReminderDialog(true);
                                     }}
                                     className="h-6 text-[12px] bg-green-600 hover:bg-green-700 px-2"
                                   >
@@ -3300,27 +3324,24 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     size="sm"
                                     variant="outline"
                                     onClick={async () => {
+                                      const backendKey = quotation.quotationNo || quotation.id;
                                       try {
-                                        await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(quotation.id)}`, {
+                                        await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(backendKey)}`, {
                                           method: 'PATCH',
                                           headers: { 'Content-Type': 'application/json' },
                                           body: JSON.stringify({ status: 'rejected' }),
                                         });
-                                        setSupplierQuotations(prev =>
-                                          prev.map((q: any) =>
-                                            q.id === quotation.id ? { ...q, status: 'rejected' as const } : q
-                                          )
-                                        );
-                                        toast.info(
-                                          <div className="space-y-1">
-                                            <p className="font-semibold">❌ 已拒绝报价</p>
-                                            <p className="text-sm">报价单号: {quotation.quotationNo}</p>
-                                            <p className="text-xs text-slate-500">刷新后状态会保持</p>
-                                          </div>
-                                        );
                                       } catch (e: any) {
-                                        toast.error(e?.message || '操作失败，请重试');
+                                        console.warn('⚠️ 拒绝报价后端同步失败，降级本地模式:', e?.message);
                                       }
+                                      applyLocalQuotationStatus(quotation.id, 'rejected');
+                                      toast.info(
+                                        <div className="space-y-1">
+                                          <p className="font-semibold">❌ 已拒绝报价</p>
+                                          <p className="text-sm">报价单号: {quotation.quotationNo}</p>
+                                          <p className="text-xs text-slate-500">状态已更新</p>
+                                        </div>
+                                      );
                                     }}
                                     className="h-6 text-[12px] text-red-600 hover:text-red-700 hover:bg-red-50 px-2"
                                   >
@@ -3340,157 +3361,25 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             </div>
           </TabsContent>
 
-          {/* ==================== Tab 4: 采购请求 ==================== */}
-          <TabsContent value="procurement-requests" className="m-0">
-            <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-              <div className="flex gap-2 items-center">
-                <div className="relative flex-1">
-                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
-                  <Input
-                    placeholder="搜索采购请求号、来源询价、需求编号..."
-                    value={procurementRequestSearchTerm}
-                    onChange={(e) => setProcurementRequestSearchTerm(e.target.value)}
-                    className="pl-7 h-8 text-xs border-gray-300"
-                  />
-                </div>
-                {selectedProcurementRequestIds.length > 0 && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleBatchDeleteProcurementRequests}
-                    className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 mr-1" />
-                    批量删除 ({selectedProcurementRequestIds.length})
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            <div className="px-3 py-3">
-              <p className="text-[14px] text-gray-600 mb-2">共 {filteredProcurementRequests.length} 条采购请求</p>
-              {filteredProcurementRequests.length === 0 && purchaseOrders.filter((po) => isProcurementRequestRecord(po)).length > 0 && (
-                <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                  当前筛选条件下无数据，已保留采购请求。请清空搜索后查看全部。
-                </div>
-              )}
-              <div className="border border-gray-200 rounded overflow-hidden bg-white">
-                <table className="w-full text-[14px]">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                          checked={selectedProcurementRequestIds.length === filteredProcurementRequests.length && filteredProcurementRequests.length > 0}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedProcurementRequestIds(filteredProcurementRequests.map((o) => o.id));
-                            } else {
-                              setSelectedProcurementRequestIds([]);
-                            }
-                          }}
-                        />
-                      </th>
-                      <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                      <th className="text-left py-2 px-3 font-medium text-gray-600">采购请求号</th>
-                      <th className="text-left py-2 px-3 font-medium text-gray-600">来源</th>
-                      <th className="text-left py-2 px-3 font-medium text-gray-600">产品数量</th>
-                      <th className="text-left py-2 px-3 font-medium text-gray-600">状态</th>
-                      <th className="text-center py-2 px-3 font-medium text-gray-600">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredProcurementRequests.map((po, idx) => {
-                      const runtimeStatus = getProcurementRequestRuntimeStatus(po);
-                      return (
-                      <tr key={po.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                        <td className="py-2 px-2 text-center">
-                          <input
-                            type="checkbox"
-                            className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                            checked={selectedProcurementRequestIds.includes(po.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedProcurementRequestIds([...selectedProcurementRequestIds, po.id]);
-                              } else {
-                                setSelectedProcurementRequestIds(selectedProcurementRequestIds.filter((id) => id !== po.id));
-                              }
-                            }}
-                          />
-                        </td>
-                        <td className="py-2 px-2 text-center text-gray-500">{idx + 1}</td>
-                        <td className="py-2 px-2">
-                          <div className="font-semibold text-purple-600">{normalizeCGNumberForDisplay(po.poNumber || '')}</div>
-                          <div className="text-xs text-gray-500">申请时间: {new Date(po.orderDate || po.createdDate || Date.now()).toLocaleString()}</div>
-                        </td>
-                        <td className="py-2 px-2">
-                          <div className="text-sm text-gray-700">询价: {resolveInquirySourceRef(po) || ''}</div>
-                          <div className="text-xs text-gray-500">需求: {getRequirementNoFromPO(po) || ''}</div>
-                        </td>
-                        <td className="py-2 px-2">
-                          <span className="font-semibold">{po.items?.length || 0} 个产品</span>
-                          <div className="text-xs text-gray-500">
-                            共 {(po.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0).toLocaleString()} 件
-                          </div>
-                        </td>
-                        <td className="py-2 px-2">
-                          {runtimeStatus === 'allocated_completed' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-green-50 text-green-700 border-green-200">
-                              {getProcurementRequestStatusText(runtimeStatus)}
-                            </span>
-                          ) : runtimeStatus === 'partial_allocated' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-blue-50 text-blue-700 border-blue-200">
-                              {getProcurementRequestStatusText(runtimeStatus)}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-amber-50 text-amber-700 border-amber-200">
-                              {getProcurementRequestStatusText(runtimeStatus)}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-2 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleViewPODocument(po)}
-                              className="h-7 px-2 text-xs"
-                              title="查看采购请求详情"
-                            >
-                              <Eye className="w-3 h-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              onClick={() => openSupplierAllocationDialog(po)}
-                              disabled={runtimeStatus === 'allocated_completed'}
-                              className="h-7 px-2 text-xs bg-[#F96302] hover:bg-[#E05502] disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="按产品行分配供应商并生成采购订单草稿"
-                            >
-                              {runtimeStatus === 'allocated_completed' ? '已分配完成' : runtimeStatus === 'partial_allocated' ? '继续分配' : '分配供应商'}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                if (!window.confirm(`确定要删除采购请求 "${po.poNumber}" 吗？\n\n⚠️ 此操作不可恢复！`)) return;
-                                deletePurchaseOrder(po.id);
-                                toast.success('采购请求已删除');
-                              }}
-                              className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50"
-                              title="删除采购请求"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    )})}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </TabsContent>
+          <ProcurementRequestsTab
+            procurementRequestSearchTerm={procurementRequestSearchTerm}
+            setProcurementRequestSearchTerm={setProcurementRequestSearchTerm}
+            selectedProcurementRequestIds={selectedProcurementRequestIds}
+            setSelectedProcurementRequestIds={setSelectedProcurementRequestIds}
+            handleBatchDeleteProcurementRequests={handleBatchDeleteProcurementRequests}
+            filteredProcurementRequests={filteredProcurementRequests}
+            purchaseOrders={purchaseOrders}
+            isProcurementRequestRecord={isProcurementRequestRecord}
+            getProcurementRequestRuntimeStatus={getProcurementRequestRuntimeStatus}
+            getProcurementRequestStatusText={getProcurementRequestStatusText}
+            normalizeCGNumberForDisplay={normalizeCGNumberForDisplay}
+            resolveInquirySourceRef={resolveInquirySourceRef}
+            getRequirementNoFromPO={getRequirementNoFromPO}
+            handleViewPODocument={handleViewPODocument}
+            openSupplierAllocationDialog={openSupplierAllocationDialog}
+            deletePurchaseOrder={deletePurchaseOrder}
+            toastSuccess={(message) => toast.success(message)}
+          />
 
           <PurchaseOrdersTab
             orderSearchTerm={orderSearchTerm}
@@ -3512,435 +3401,45 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         </Tabs>
       </div>
 
-      <Dialog open={showAllocationDialog} onOpenChange={setShowAllocationDialog}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>创建采购单草稿 - 分配供应商</DialogTitle>
-            <DialogDescription>
-              选择供应商并分配产品数量，系统将生成CG采购单草稿并提交老板审核。
-            </DialogDescription>
-          </DialogHeader>
+      <SupplierAllocationDialog
+        showAllocationDialog={showAllocationDialog}
+        setShowAllocationDialog={setShowAllocationDialog}
+        allocationPO={allocationPO}
+        setAllocationPO={setAllocationPO}
+        resolveInquirySourceRef={resolveInquirySourceRef}
+        getRequirementNoFromPO={getRequirementNoFromPO}
+        allocatedProductTokensInDialog={allocatedProductTokensInDialog}
+        getProductMatchToken={getProductMatchToken}
+        getPOProductAllocationKey={getPOProductAllocationKey}
+        allocationSelectedProductKeys={allocationSelectedProductKeys}
+        toggleAllAllocationProducts={toggleAllAllocationProducts}
+        toggleAllocationProduct={toggleAllocationProduct}
+        allocationSelectedSupplierCodes={allocationSelectedSupplierCodes}
+        allocationSupplierSearchTerm={allocationSupplierSearchTerm}
+        setAllocationSupplierSearchTerm={setAllocationSupplierSearchTerm}
+        filteredAllocationSuppliers={filteredAllocationSuppliers}
+        toggleAllocationSupplier={toggleAllocationSupplier}
+        submittingAllocation={submittingAllocation}
+        submitSupplierAllocation={submitSupplierAllocation}
+      />
 
-          {allocationPO && (
-            <div className="space-y-4">
-              <div className="rounded border border-gray-200 bg-gray-50 p-4">
-                <h4 className="mb-3 text-[16px] font-semibold text-gray-900">📋 采购需求信息</h4>
-                <div className="mb-3 grid grid-cols-2 gap-3 text-[15px]">
-                  <div>
-                    <span className="text-gray-600">采购单号:</span>
-                    <span className="ml-2 font-semibold">{allocationPO.poNumber}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">来源询价:</span>
-                    <span className="ml-2 font-semibold">{resolveInquirySourceRef(allocationPO) || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">来源需求:</span>
-                    <span className="ml-2 font-semibold">{getRequirementNoFromPO(allocationPO) || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">产品数量:</span>
-                    <span className="ml-2 font-semibold">{allocationPO.items?.length || 0} 项</span>
-                  </div>
-                </div>
-                <div className="overflow-x-auto rounded border border-gray-200 bg-white">
-                  <table className="w-full text-[16px]">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="w-12 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5"
-                            checked={
-                              (allocationPO.items || []).filter((item, idx) =>
-                                !allocatedProductTokensInDialog.has(getProductMatchToken(item, idx))
-                              ).length > 0 &&
-                              allocationSelectedProductKeys.length ===
-                                (allocationPO.items || []).filter((item, idx) =>
-                                  !allocatedProductTokensInDialog.has(getProductMatchToken(item, idx))
-                                ).length
-                            }
-                            onChange={(e) => toggleAllAllocationProducts(e.target.checked)}
-                          />
-                        </th>
-                        <th className="w-10 py-2 text-center">#</th>
-                        <th className="py-2 text-left">产品名称</th>
-                        <th className="py-2 text-left">型号</th>
-                        <th className="py-2 text-right">数量</th>
-                        <th className="py-2 text-left">单位</th>
-                        <th className="py-2 text-center">分配状态</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(allocationPO.items || []).map((item, idx) => {
-                        const key = getPOProductAllocationKey(item, idx);
-                        const token = getProductMatchToken(item, idx);
-                        const isAllocated = allocatedProductTokensInDialog.has(token);
-                        const checked = allocationSelectedProductKeys.includes(key);
-                        return (
-                          <tr key={key} className="border-t border-gray-100">
-                            <td className="py-2 text-center">
-                              <input
-                                type="checkbox"
-                                className="h-5 w-5"
-                                checked={checked}
-                                disabled={isAllocated}
-                                onChange={(e) => toggleAllocationProduct(key, e.target.checked)}
-                              />
-                            </td>
-                            <td className="py-2 text-center">{idx + 1}</td>
-                            <td className="py-2">{item.productName}</td>
-                            <td className="py-2 text-gray-600">{item.modelNo}</td>
-                            <td className="py-2 text-right font-semibold">{item.quantity}</td>
-                            <td className="py-2">{item.unit}</td>
-                            <td className="py-2 text-center">
-                              {isAllocated ? (
-                                <span className="inline-flex items-center rounded border border-green-200 bg-green-50 px-2 py-0.5 text-xs text-green-700">
-                                  已分配
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
-                                  待分配
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+      <PurchaseOrderDetailDialog
+        showOrderDialog={showOrderDialog}
+        setShowOrderDialog={setShowOrderDialog}
+        viewOrder={viewOrder}
+        normalizeCGNumberForDisplay={normalizeCGNumberForDisplay}
+        resolveInquirySourceRef={resolveInquirySourceRef}
+        handleViewPODocument={handleViewPODocument}
+      />
 
-              <div className="rounded border border-gray-200 p-3">
-                <h5 className="mb-2 text-sm font-semibold text-gray-900">
-                  选择供应商 * ({allocationSelectedSupplierCodes.length} 个已选)
-                </h5>
-                <div className="relative mb-3">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <Input
-                    value={allocationSupplierSearchTerm}
-                    onChange={(e) => setAllocationSupplierSearchTerm(e.target.value)}
-                    className="h-10 pl-9 text-sm"
-                    placeholder="搜索供应商名称、产品名称、产品类别..."
-                  />
-                </div>
-                <div className="space-y-2 rounded border border-gray-200 bg-white p-2">
-                  {filteredAllocationSuppliers.map((supplier) => {
-                    const code = String(supplier.code || '');
-                    const checked = allocationSelectedSupplierCodes.includes(code);
-                    return (
-                      <div key={code} className="flex items-center justify-between rounded border border-gray-100 px-3 py-2">
-                        <label className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5"
-                            checked={checked}
-                            onChange={(e) => toggleAllocationSupplier(code, e.target.checked)}
-                          />
-                          <div>
-                            <p className="text-base font-semibold text-gray-900">{supplier.name}</p>
-                            <p className="text-sm text-gray-600">{supplier.code} | {supplier.email}</p>
-                          </div>
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-green-100 text-green-700 hover:bg-green-100">{supplier.level || 'A'}级</Badge>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="mt-2 text-sm text-gray-500">可以选择多个供应商进行分配</p>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setShowAllocationDialog(false);
-                    setAllocationPO(null);
-                  }}
-                >
-                  取消
-                </Button>
-                <Button
-                  type="button"
-                  disabled={submittingAllocation}
-                  className="bg-blue-600 text-white hover:bg-blue-700"
-                  onClick={submitSupplierAllocation}
-                >
-                  {submittingAllocation ? '创建中...' : '创建采购单草稿'}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* 订单详情对话框 */}
-      <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle style={{ fontSize: '15px' }}>采购订单详情 - {viewOrder?.poNumber}</DialogTitle>
-            <DialogDescription style={{ fontSize: '12px' }}>Purchase Order Details</DialogDescription>
-          </DialogHeader>
-          
-          {viewOrder && (
-            <div className="space-y-4">
-              {/* 🔥 基本信息 */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-blue-900 mb-2">📋 基本信息</h4>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <span className="text-gray-600">采购单号：</span>
-                    <span className="font-semibold ml-2 text-purple-600">{normalizeCGNumberForDisplay(viewOrder.poNumber)}</span>
-                  </div>
-                  {resolveInquirySourceRef(viewOrder) && (
-                    <div>
-                      <span className="text-gray-600">来源单号：</span>
-                      <span className="ml-2 text-blue-600">{resolveInquirySourceRef(viewOrder)}</span>
-                    </div>
-                  )}
-                  {viewOrder.requirementNo && (
-                    <div>
-                      <span className="text-gray-600">关联需求：</span>
-                      <span className="ml-2">{viewOrder.requirementNo}</span>
-                    </div>
-                  )}
-                  {viewOrder.rfqNumber && (
-                    <div>
-                      <span className="text-gray-600">关联询价：</span>
-                      <span className="ml-2">{viewOrder.rfqNumber}</span>
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-gray-600">订单日期：</span>
-                    <span className="ml-2">{viewOrder.orderDate}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">要求交期：</span>
-                    <span className="ml-2">{viewOrder.expectedDate}</span>
-                  </div>
-                  {viewOrder.region && (
-                    <div>
-                      <span className="text-gray-600">区域：</span>
-                      <span className="ml-2">{viewOrder.region}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 🔥 供应商信息 */}
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-orange-900 mb-2">🏢 供应商信息（溯源结果）</h4>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <span className="text-gray-600">供应商名称：</span>
-                    <span className="font-semibold ml-2">{viewOrder.supplierName}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">供应商代码：</span>
-                    <span className="ml-2">{viewOrder.supplierCode}</span>
-                  </div>
-                  {viewOrder.supplierContact && (
-                    <div>
-                      <span className="text-gray-600">联系人：</span>
-                      <span className="ml-2">{viewOrder.supplierContact}</span>
-                    </div>
-                  )}
-                  {viewOrder.supplierPhone && (
-                    <div>
-                      <span className="text-gray-600">电话：</span>
-                      <span className="ml-2">{viewOrder.supplierPhone}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 🔥 产品清单 */}
-              <div className="border-t pt-3">
-                <h4 className="font-semibold mb-2 text-xs">📦 产品清单（溯源价格）</h4>
-                <div className="border border-gray-200 rounded overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left py-2 px-2 font-medium text-gray-700">序号</th>
-                        <th className="text-left py-2 px-2 font-medium text-gray-700">产品名称</th>
-                        <th className="text-left py-2 px-2 font-medium text-gray-700">型号</th>
-                        <th className="text-right py-2 px-2 font-medium text-gray-700">数量</th>
-                        <th className="text-right py-2 px-2 font-medium text-gray-700">单价</th>
-                        <th className="text-right py-2 px-2 font-medium text-gray-700">小计</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {viewOrder.items && viewOrder.items.length > 0 ? (
-                        viewOrder.items.map((item, idx) => (
-                          <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50">
-                            <td className="py-2 px-2 text-gray-600">{idx + 1}</td>
-                            <td className="py-2 px-2">
-                              <div className="font-medium">{item.productName}</div>
-                              {item.specification && (
-                                <div className="text-[11px] text-gray-500">{item.specification}</div>
-                              )}
-                            </td>
-                            <td className="py-2 px-2 text-gray-600">{item.modelNo}</td>
-                            <td className="py-2 px-2 text-right font-medium">
-                              {item.quantity} {item.unit}
-                            </td>
-                            <td className="py-2 px-2 text-right">
-                              {item.currency} {item.unitPrice.toFixed(2)}
-                            </td>
-                            <td className="py-2 px-2 text-right font-semibold">
-                              {item.currency} {item.subtotal.toLocaleString()}
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={6} className="py-4 text-center text-gray-400">
-                            暂无产品信息
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                    <tfoot className="bg-gray-50 border-t-2 border-gray-300">
-                      <tr>
-                        <td colSpan={5} className="py-2 px-2 text-right font-semibold">
-                          总计：
-                        </td>
-                        <td className="py-2 px-2 text-right font-bold text-[#F96302]">
-                          {viewOrder.currency} {viewOrder.totalAmount.toLocaleString()}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-
-              {/* 🔥 条款信息 */}
-              <div className="grid grid-cols-2 gap-3 text-xs bg-gray-50 p-3 rounded">
-                <div>
-                  <span className="text-gray-600">付款条款：</span>
-                  <span className="ml-2">{viewOrder.paymentTerms}</span>
-                </div>
-                <div>
-                  <span className="text-gray-600">交货条款：</span>
-                  <span className="ml-2">{viewOrder.deliveryTerms}</span>
-                </div>
-              </div>
-
-              {/* 🔥 备注 */}
-              {viewOrder.remarks && (
-                <div className="text-xs">
-                  <span className="text-gray-600">备注：</span>
-                  <div className="mt-1 p-2 bg-gray-50 rounded border border-gray-200 text-gray-700 whitespace-pre-wrap">
-                    {viewOrder.remarks}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowOrderDialog(false)} className="text-xs">
-              关闭
-            </Button>
-            <Button 
-              onClick={() => {
-                if (viewOrder) {
-                  handleViewPODocument(viewOrder);
-                  setShowOrderDialog(false);
-                }
-              }}
-              className="bg-[#F96302] hover:bg-[#E05502] text-xs"
-            >
-              <Eye className="w-3 h-3 mr-1" />
-              查看PDF文档
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 🔥 采购订单文档预览对话框 - 引用文档中心模板 */}
-      <Dialog open={showPOPreview} onOpenChange={setShowPOPreview}>
-        <DialogContent className="max-w-[95vw] h-[95vh] p-0">
-          <DialogHeader className="px-6 py-4 border-b">
-            <DialogTitle style={{ fontSize: '15px' }}>
-              📋 采购订单预览 - {currentPOData?.poNo}
-            </DialogTitle>
-            <DialogDescription style={{ fontSize: '12px' }}>
-              Purchase Order Preview - 引用文档中心统一模板
-            </DialogDescription>
-          </DialogHeader>
-
-          {/* 文档预览区域 */}
-          <div className="flex-1 overflow-auto p-6 bg-gray-50">
-            {currentPOData && (
-              <div className="print-contract-content">
-                <PurchaseOrderDocument
-                  ref={poPDFRef}
-                  data={currentPOData}
-                />
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="px-6 py-4 border-t bg-white">
-            <Button
-              variant="outline"
-              onClick={() => setShowPOPreview(false)}
-              className="text-xs"
-            >
-              关闭预览
-            </Button>
-            <Button
-              variant="outline"
-              onClick={async () => {
-                if (!poPDFRef.current || !currentPOData) return;
-                const filename = generatePDFFilename('Purchase_Order', currentPOData.poNo);
-                await exportToPDFPrint(poPDFRef.current, filename);
-              }}
-              className="text-xs"
-              disabled={exportingPDF}
-            >
-              <Printer className="w-3.5 h-3.5 mr-1.5" />
-              打印/另存为PDF
-            </Button>
-            <Button
-              onClick={async () => {
-                if (!poPDFRef.current || !currentPOData) return;
-                setExportingPDF(true);
-                try {
-                  await new Promise(resolve => setTimeout(resolve, 500));
-                  const filename = generatePDFFilename('Purchase_Order', currentPOData.poNo);
-                  await exportToPDF(poPDFRef.current, filename);
-                  toast.success('采购订单PDF导出成功！');
-                } catch (error) {
-                  toast.error('PDF导出失败，请重试');
-                  console.error('PDF export error:', error);
-                } finally {
-                  setExportingPDF(false);
-                }
-              }}
-              className="bg-[#F96302] hover:bg-[#E05502] text-xs"
-              disabled={exportingPDF}
-            >
-              {exportingPDF ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  导出中...
-                </>
-              ) : (
-                <>
-                  <Download className="w-3.5 h-3.5 mr-1.5" />
-                  导出PDF
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PurchaseOrderPreviewDialog
+        showPOPreview={showPOPreview}
+        setShowPOPreview={setShowPOPreview}
+        currentPOData={currentPOData}
+        poPDFRef={poPDFRef}
+        exportingPDF={exportingPDF}
+        setExportingPDF={setExportingPDF}
+      />
 
       {/* 🔥 隐藏的PDF导出专用渲染区域 */}
       <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
@@ -3951,86 +3450,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         )}
       </div>
 
-      {/* 🔥 采购需求详情对话框 - 使用文档模板视图 */}
-      <Dialog open={showRequirementDialog} onOpenChange={setShowRequirementDialog}>
-        <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
-          {/* Hidden Title and Description for accessibility */}
-          <DialogTitle className="sr-only">采购需求单详情</DialogTitle>
-          <DialogDescription className="sr-only">
-            查看完整的采购需求单信息和产品详情
-          </DialogDescription>
-          
-          {/* Header with Print and Export buttons - Floating on top */}
-          <div className="absolute top-4 right-16 z-50 flex gap-2 print:hidden">
-            <Button 
-              variant="outline" 
-              size="sm"
-              className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
-              onClick={async () => {
-                if (viewRequirement) {
-                  try {
-                    const prData = convertToPRData(viewRequirement, user?.role);
-                    const filename = generatePDFFilename('PR', prData.requirementNo);
-                    const el = document.getElementById('pr-document-view') as HTMLDivElement | null;
-                    if (!el) {
-                      toast.error('未找到可导出的文档区域');
-                      return;
-                    }
-                    await exportToPDFPrint(el, filename);
-                    toast.success('PDF已生成！');
-                  } catch (error) {
-                    console.error('PDF导出失败:', error);
-                    toast.error('PDF导出失败');
-                  }
-                }
-              }}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              导出PDF
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm"
-              className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
-              onClick={() => {
-                window.print();
-              }}
-            >
-              <Printer className="w-4 h-4 mr-2" />
-              打印
-            </Button>
-          </div>
-
-          {/* Close Button */}
-          <button
-            onClick={() => setShowRequirementDialog(false)}
-            className="absolute right-4 top-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition-colors print:hidden"
-            aria-label="Close"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-
-          {/* Document - Full Screen */}
-          <div id="pr-document-view" className="overflow-y-auto max-h-[95vh] bg-gray-100">
-            {viewRequirement && (
-              <PurchaseRequirementDocument data={convertToPRData(viewRequirement, user?.role)} />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <PurchaseRequirementPreviewDialog
+        showRequirementDialog={showRequirementDialog}
+        setShowRequirementDialog={setShowRequirementDialog}
+        viewRequirement={viewRequirement}
+        userRole={user?.role}
+      />
 
       {/* 🔥 编辑采购订单对话框 */}
       <PurchaseOrderEditDialog
@@ -4198,6 +3623,61 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             setSelectedRequirementForQuote(null);
           }}
         />
+      )}
+
+      {/* 接受报价后的智能反馈引导弹窗 */}
+      {showFeedbackReminderDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowFeedbackReminderDialog(false)} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-4">
+            {/* 标题 */}
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900 text-base">✅ 已接受供应商报价</p>
+                <p className="text-sm text-gray-500 mt-0.5">报价单号：{acceptedQuotationNo}</p>
+              </div>
+            </div>
+
+            {/* 提醒内容 */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              <div className="space-y-1.5">
+                <p className="text-sm font-semibold text-amber-800">⚠️ 请记得反馈成本价给业务员</p>
+                <p className="text-sm text-amber-700">
+                  接受报价后，业务员还不知道采购成本，请前往
+                  <span className="font-semibold text-amber-900">「报价请求池」</span>
+                  找到对应需求，点击
+                  <span className="font-semibold text-amber-900">「智能反馈」</span>
+                  按钮，将供应商报价成本一键反馈给业务员，以便其制作销售报价单。
+                </p>
+              </div>
+            </div>
+
+            {/* 操作按钮 */}
+            <div className="flex gap-3 justify-end pt-1">
+              <Button
+                variant="outline"
+                className="text-gray-600"
+                onClick={() => setShowFeedbackReminderDialog(false)}
+              >
+                稍后处理
+              </Button>
+              <Button
+                className="bg-rose-600 hover:bg-rose-700 text-white gap-1.5"
+                onClick={() => {
+                  setShowFeedbackReminderDialog(false);
+                  setActiveTab('requirements');
+                }}
+              >
+                <Calculator className="w-4 h-4" />
+                立即前往报价请求池
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

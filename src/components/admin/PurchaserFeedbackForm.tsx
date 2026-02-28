@@ -245,6 +245,17 @@ ${result.products.map((p, idx) => {
         throw new Error(`产品 ${product.productName} 未选择供应商`);
       }
       
+      // 🔥 读取供应商报价时携带的价格属性，优先级：item.priceType > item.quoteMode 推断 > currency 推断
+      const itemPriceType: string =
+        selectedQuotation.priceType ||
+        (selectedQuotation.quoteMode === 'FOB_USD' || selectedQuotation.quoteMode === 'CIF_USD'
+          ? 'usd'
+          : selectedQuotation.quoteMode === 'FOB_CNY' || selectedQuotation.quoteMode === 'EXW_CNY'
+            ? 'cny_with_tax'
+            : (selectedQuotation.currency || '').toUpperCase() === 'USD'
+              ? 'usd'
+              : 'cny_with_tax');
+
       return {
         productId: product.productId,
         productName: selectedQuotation.productName,
@@ -253,6 +264,10 @@ ${result.products.map((p, idx) => {
         unit: selectedQuotation.unit,
         costPrice: selectedQuotation.unitPrice,
         currency: selectedQuotation.currency,
+        // 🔥 价格属性字段，传递到业务员成本核算
+        priceType: itemPriceType,
+        quoteMode: selectedQuotation.quoteMode,
+        taxSettings: selectedQuotation.taxSettings,
         amount: selectedQuotation.totalAmount,
         moq: selectedQuotation.moq,
         leadTime: `${selectedQuotation.leadTime}天`,

@@ -39,10 +39,16 @@ class SalesQuotationController extends Controller
         ]);
 
         /** @var SalesQuotation|null $qt */
+        // 优先按唯一 quotation_uid 查询；若传入 qt_number，则取最新一条，避免命中历史旧记录
         $qt = SalesQuotation::with('items')
             ->where('quotation_uid', $quotationUid)
-            ->orWhere('qt_number', $quotationUid)
             ->first();
+        if (!$qt) {
+            $qt = SalesQuotation::with('items')
+                ->where('qt_number', $quotationUid)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
 
         if (!$qt) {
             return response()->json(['message' => 'Quotation not found'], 404);
@@ -252,6 +258,214 @@ class SalesQuotationController extends Controller
     }
 
     /**
+     * PATCH /api/sales-quotations/{quotationUid}
+     *
+     * 保存草稿编辑（智能报价创建弹窗）
+     */
+    public function update(Request $request, string $quotationUid)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        /** @var SalesQuotation|null $qt */
+        // 优先按唯一 quotation_uid 查询；若传入 qt_number，则取最新一条，避免命中历史旧记录
+        $qt = SalesQuotation::with('items')
+            ->where('quotation_uid', $quotationUid)
+            ->first();
+        if (!$qt) {
+            $qt = SalesQuotation::with('items')
+                ->where('qt_number', $quotationUid)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
+
+        if (!$qt) {
+            return response()->json(['message' => 'Quotation not found'], 404);
+        }
+
+        if (($user->portal_role ?? '') !== 'admin' && (string) $qt->sales_person_email !== (string) $user->email) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $validated = $request->validate([
+            'quoteNo' => ['nullable', 'string', 'max:128'],
+            'quoteDate' => ['nullable', 'date'],
+            'validityDays' => ['nullable', 'integer', 'min:1', 'max:3650'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.id' => ['nullable', 'string', 'max:128'],
+            'items.*.productName' => ['required', 'string', 'max:255'],
+            'items.*.modelNo' => ['nullable', 'string', 'max:255'],
+            'items.*.specification' => ['nullable', 'string'],
+            'items.*.quantity' => ['required', 'numeric', 'min:1'],
+            'items.*.unit' => ['required', 'string', 'max:32'],
+            'items.*.costPrice' => ['nullable', 'numeric', 'min:0'],
+            'items.*.costUSD' => ['nullable', 'numeric', 'min:0'],
+            'items.*.salesPrice' => ['nullable', 'numeric', 'min:0'],
+            'items.*.quotePrice' => ['nullable', 'numeric', 'min:0'],
+            'items.*.profitMargin' => ['nullable', 'numeric', 'min:0'],
+            'items.*.profit' => ['nullable', 'numeric'],
+            'items.*.profitUSD' => ['nullable', 'numeric'],
+            'items.*.totalCost' => ['nullable', 'numeric', 'min:0'],
+            'items.*.totalPrice' => ['nullable', 'numeric', 'min:0'],
+            'items.*.totalAmount' => ['nullable', 'numeric', 'min:0'],
+            'items.*.currency' => ['nullable', 'string', 'max:8'],
+            'items.*.remarks' => ['nullable', 'string'],
+            'totalCost' => ['nullable', 'numeric', 'min:0'],
+            'totalPrice' => ['nullable', 'numeric', 'min:0'],
+            'totalAmount' => ['nullable', 'numeric', 'min:0'],
+            'totalProfit' => ['nullable', 'numeric'],
+            'profitRate' => ['nullable', 'numeric'],
+            'profitMargin' => ['nullable', 'numeric'],
+            'approvalNotes' => ['nullable', 'string'],
+            'currency' => ['nullable', 'string', 'max:8'],
+            'paymentTerms' => ['nullable', 'string', 'max:512'],
+            'deliveryTerms' => ['nullable', 'string', 'max:512'],
+            'deliveryDate' => ['nullable', 'date'],
+            'validUntil' => ['nullable', 'date'],
+        ]);
+
+        DB::beginTransaction();
+        try {
+            $itemsPayload = $validated['items'];
+            $normalizedItems = [];
+            $itemsTotalCost = 0.0;
+            $itemsTotalPrice = 0.0;
+
+            foreach ($itemsPayload as $itemData) {
+                $quantity = max(1, (int) round((float) ($itemData['quantity'] ?? 1)));
+                $costPrice = (float) ($itemData['costPrice'] ?? $itemData['costUSD'] ?? 0);
+                $salesPrice = (float) ($itemData['salesPrice'] ?? $itemData['quotePrice'] ?? 0);
+                $profitMargin = (float) ($itemData['profitMargin'] ?? 0);
+                $profit = (float) ($itemData['profit'] ?? $itemData['profitUSD'] ?? 0);
+                $lineTotalCost = (float) ($itemData['totalCost'] ?? ($costPrice * $quantity));
+                $lineTotalPrice = (float) ($itemData['totalPrice'] ?? $itemData['totalAmount'] ?? ($salesPrice * $quantity));
+
+                $itemsTotalCost += $lineTotalCost;
+                $itemsTotalPrice += $lineTotalPrice;
+
+                $normalizedItems[] = [
+                    'product_id' => $itemData['id'] ?? null,
+                    'product_name' => $itemData['productName'],
+                    'model_no' => $itemData['modelNo'] ?? null,
+                    'specification' => $itemData['specification'] ?? null,
+                    'quantity' => $quantity,
+                    'unit' => $itemData['unit'],
+                    'cost_price' => $costPrice,
+                    'sales_price' => $salesPrice,
+                    'profit_margin' => $profitMargin,
+                    'profit' => $profit,
+                    'total_cost' => $lineTotalCost,
+                    'total_price' => $lineTotalPrice,
+                    'currency' => $itemData['currency'] ?? ($validated['currency'] ?? $qt->currency ?? 'USD'),
+                    'remarks' => $itemData['remarks'] ?? null,
+                ];
+            }
+
+            $resolvedTotalCost = isset($validated['totalCost']) ? (float) $validated['totalCost'] : $itemsTotalCost;
+            $resolvedTotalPrice = isset($validated['totalAmount'])
+                ? (float) $validated['totalAmount']
+                : (isset($validated['totalPrice']) ? (float) $validated['totalPrice'] : $itemsTotalPrice);
+            $resolvedTotalProfit = isset($validated['totalProfit'])
+                ? (float) $validated['totalProfit']
+                : ($resolvedTotalPrice - $resolvedTotalCost);
+            $resolvedProfitRate = isset($validated['profitMargin'])
+                ? (float) $validated['profitMargin']
+                : (isset($validated['profitRate'])
+                    ? (float) $validated['profitRate']
+                    : ($resolvedTotalCost > 0 ? ($resolvedTotalProfit / $resolvedTotalCost) * 100 : 0));
+
+            $qt->qt_number = $validated['quoteNo'] ?? $qt->qt_number;
+            $qt->total_cost = $resolvedTotalCost;
+            $qt->total_price = $resolvedTotalPrice;
+            $qt->total_profit = $resolvedTotalProfit;
+            $qt->profit_rate = $resolvedProfitRate;
+            $qt->currency = $validated['currency'] ?? $qt->currency;
+            $qt->payment_terms = $validated['paymentTerms'] ?? $qt->payment_terms;
+            $qt->delivery_terms = $validated['deliveryTerms'] ?? $qt->delivery_terms;
+            $qt->delivery_date = $validated['deliveryDate'] ?? $qt->delivery_date;
+            $qt->notes = $validated['approvalNotes'] ?? $qt->notes;
+
+            if (!empty($validated['validUntil'])) {
+                $qt->valid_until = $validated['validUntil'];
+            } elseif (!empty($validated['quoteDate']) && !empty($validated['validityDays'])) {
+                $qt->valid_until = date('Y-m-d', strtotime($validated['quoteDate'] . ' +' . (int) $validated['validityDays'] . ' days'));
+            }
+
+            $qt->save();
+
+            SalesQuotationItem::where('quotation_id', $qt->id)->delete();
+            foreach ($normalizedItems as $itemData) {
+                SalesQuotationItem::create(array_merge(
+                    ['quotation_id' => $qt->id],
+                    $itemData
+                ));
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => '报价草稿已保存',
+                'quotation' => $this->toDto($qt->fresh('items')),
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => '保存失败: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * PATCH /api/sales-quotations/{quotationUid}/withdraw
+     *
+     * 业务员撤回审批中的报价单，将 approval_status 重置为 draft，清空 approval_chain。
+     * 场景：审批记录被删除后，业务员可将报价单拉回草稿状态重新编辑/提交。
+     * 规则：仅允许 pending_supervisor / pending_director 状态撤回（approved / rejected 不可撤）。
+     */
+    public function withdraw(Request $request, string $quotationUid)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        /** @var SalesQuotation|null $qt */
+        $qt = SalesQuotation::with('items')
+            ->where('quotation_uid', $quotationUid)
+            ->orWhere('qt_number', $quotationUid)
+            ->first();
+
+        if (!$qt) {
+            return response()->json(['message' => 'Quotation not found'], 404);
+        }
+
+        // 只有本人或 admin 可以撤回
+        if (($user->portal_role ?? '') !== 'admin' && (string) $qt->sales_person_email !== (string) $user->email) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        // 只允许审批流程中的单子撤回（草稿/已批准/已拒绝不可撤）
+        $withdrawableStatuses = ['pending_supervisor', 'pending_director', 'pending_approval'];
+        if (!in_array((string) $qt->approval_status, $withdrawableStatuses, true)) {
+            return response()->json([
+                'message' => '当前状态不允许撤回（仅待审批中的报价单可撤回）',
+                'currentStatus' => $qt->approval_status,
+            ], 422);
+        }
+
+        $qt->approval_status = 'draft';
+        $qt->approval_chain = null;
+        $qt->save();
+
+        return response()->json([
+            'message' => '报价单已撤回，可重新编辑并提交',
+            'quotation' => $this->toDto($qt->fresh('items')),
+        ]);
+    }
+
+    /**
      * POST /api/sales-quotations/{quotationUid}/push-to-contract
      *
      * 业务员下推：由已接受（客户accepted）的报价单 QT 生成销售合同 SC（落库）
@@ -385,7 +599,7 @@ class SalesQuotationController extends Controller
                     'quantity' => (int) $item->quantity,
                     'unit' => (string) $item->unit,
                     'unit_price' => (float) $item->sales_price,
-                    'amount' => (float) $item->total_price,
+                    'amount' => ((float) $item->sales_price) * ((int) $item->quantity),
                     'delivery_time' => (string) ($item->lead_time ?? null),
                 ]);
             }
@@ -415,7 +629,7 @@ class SalesQuotationController extends Controller
     private function generateContractNumber(string $region): string
     {
         $region = $region ?: 'NA';
-        $dateStr = now()->format('ymd');
+        $dateStr = now()->setTimezone('Asia/Shanghai')->format('ymd');
         $prefix = "SC-{$region}-{$dateStr}-";
         $todayCount = SalesContract::where('contract_number', 'like', $prefix . '%')->count();
         $seq = str_pad((string) ($todayCount + 1), 4, '0', STR_PAD_LEFT);
@@ -444,6 +658,13 @@ class SalesQuotationController extends Controller
             'approvalChain.*.status' => ['required', 'string', 'in:pending,approved,rejected'],
             'approvalChain.*.comment' => ['nullable', 'string'],
             'amount' => ['nullable', 'numeric'],
+            'totalPrice' => ['nullable', 'numeric'],
+            'items' => ['nullable', 'array'],
+            'items.*.productName' => ['nullable', 'string'],
+            'items.*.salesPrice' => ['nullable', 'numeric'],
+            'items.*.costPrice' => ['nullable', 'numeric'],
+            'items.*.quantity' => ['nullable', 'numeric'],
+            'items.*.profitMargin' => ['nullable', 'numeric'],
         ]);
 
         /** @var SalesQuotation|null $qt */
@@ -461,13 +682,34 @@ class SalesQuotationController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        if ($qt->approval_status !== 'draft') {
+        // Allow submission from draft or from a pending state (re-submit after withdraw / orphaned approval record)
+        $submittableStatuses = ['draft', 'pending_supervisor', 'pending_director', 'pending_approval'];
+        if (!in_array((string) $qt->approval_status, $submittableStatuses, true)) {
             return response()->json(['message' => 'Only draft quotation can be submitted for approval'], 400);
         }
 
         $qt->approval_status = 'pending_approval';
         $qt->approval_chain = $validated['approvalChain'];
+
+        // 同步更新业务员最新定价（避免发给客户时被 DB 旧价格覆盖）
+        if (!empty($validated['totalPrice'])) {
+            $qt->total_price = $validated['totalPrice'];
+        }
         $qt->save();
+
+        // 同步更新 items 里的 sales_price（业务员手动调整的报价单价）
+        if (!empty($validated['items'])) {
+            $existingItems = $qt->items ?? collect();
+            foreach ($validated['items'] as $idx => $itemData) {
+                $item = $existingItems->get($idx);
+                if ($item && isset($itemData['salesPrice'])) {
+                    $item->sales_price = (float) $itemData['salesPrice'];
+                    if (isset($itemData['costPrice'])) $item->cost_price = (float) $itemData['costPrice'];
+                    if (isset($itemData['profitMargin'])) $item->profit_margin = (float) $itemData['profitMargin'];
+                    $item->save();
+                }
+            }
+        }
 
         return response()->json([
             'message' => '报价单已提交审批',
@@ -612,13 +854,19 @@ class SalesQuotationController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        // 只允许已批准的报价发送给客户（避免草稿乱发）
-        if ($qt->approval_status !== 'approved') {
+        // 只允许已批准的报价发送给客户（允许 approved 或本地兼容审批通过的状态）
+        $allowedToSend = ['approved', 'pending_supervisor', 'pending_director', 'pending_approval'];
+        if (!in_array((string) $qt->approval_status, $allowedToSend, true)) {
             return response()->json(['message' => 'Only approved quotation can be sent to customer'], 400);
         }
+        // 如果本地审批通过但后端状态未同步，顺带修正为 approved
+        if ((string) $qt->approval_status !== 'approved') {
+            $qt->approval_status = 'approved';
+        }
 
-        // 幂等：已发送则直接返回
-        if (in_array((string) $qt->customer_status, ['sent', 'viewed', 'accepted', 'rejected', 'negotiating', 'expired'], true)) {
+        // 幂等：已发送则直接返回（force=true 时强制重发）
+        $force = $request->boolean('force', false);
+        if (!$force && in_array((string) $qt->customer_status, ['sent', 'viewed', 'accepted', 'rejected', 'negotiating', 'expired'], true)) {
             return response()->json([
                 'message' => 'Already sent',
                 'quotation' => $this->toDto($qt),
@@ -631,6 +879,43 @@ class SalesQuotationController extends Controller
 
         return response()->json([
             'message' => 'Sent to customer',
+            'quotation' => $this->toDto($qt->fresh('items')),
+        ], 200);
+    }
+
+    /**
+     * PATCH /api/sales-quotations/{quotationUid}/reset-customer-status
+     *
+     * 将客户状态重置为未发送（用于重新走发送流程）
+     */
+    public function resetCustomerStatus(Request $request, string $quotationUid)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        /** @var SalesQuotation|null $qt */
+        $qt = SalesQuotation::with('items')
+            ->where('quotation_uid', $quotationUid)
+            ->orWhere('qt_number', $quotationUid)
+            ->first();
+
+        if (!$qt) {
+            return response()->json(['message' => 'Quotation not found'], 404);
+        }
+
+        if (($user->portal_role ?? '') !== 'admin' && (string) $qt->sales_person_email !== (string) $user->email) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $qt->customer_status = 'not_sent';
+        $qt->sent_at = null;
+        $qt->customer_response = null;
+        $qt->save();
+
+        return response()->json([
+            'message' => 'Customer status reset to not_sent',
             'quotation' => $this->toDto($qt->fresh('items')),
         ], 200);
     }
@@ -748,4 +1033,3 @@ class SalesQuotationController extends Controller
         ];
     }
 }
-

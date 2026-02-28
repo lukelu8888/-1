@@ -57,20 +57,25 @@ Route::middleware('auth:sanctum')->group(function () {
     // Supplier RFQs (XJ) - procurement creates and submits to suppliers
     Route::post('supplier-rfqs', [SupplierRfqController::class, 'store']);
     Route::get('supplier-rfqs/mine', [SupplierRfqController::class, 'mine']);
+    Route::delete('supplier-rfqs/mine', [SupplierRfqController::class, 'clearMine']);
     Route::patch('supplier-rfqs/{rfqUid}', [SupplierRfqController::class, 'update']);
 
     // 供应商报价（BJ）：采购员列表 + 供应商提交
     Route::get('supplier-quotations', [SupplierQuotationController::class, 'index']);
     Route::post('supplier-quotations', [SupplierQuotationController::class, 'store']);
     Route::patch('supplier-quotations/{id}', [SupplierQuotationController::class, 'update']);
+    Route::delete('supplier-quotations/{id}', [SupplierQuotationController::class, 'destroy']);
 
     // 销售报价单（QT）
     Route::get('sales-quotations', [SalesQuotationController::class, 'index']);
     Route::post('sales-quotations', [SalesQuotationController::class, 'store']);
+    Route::patch('sales-quotations/{quotationUid}', [SalesQuotationController::class, 'update']);
+    Route::patch('sales-quotations/{quotationUid}/withdraw', [SalesQuotationController::class, 'withdraw']);
     Route::patch('sales-quotations/{quotationUid}/submit-approval', [SalesQuotationController::class, 'submitApproval']);
     Route::patch('sales-quotations/{quotationUid}/approve', [SalesQuotationController::class, 'approve']);
     Route::patch('sales-quotations/{quotationUid}/reject', [SalesQuotationController::class, 'reject']);
     Route::patch('sales-quotations/{quotationUid}/send-to-customer', [SalesQuotationController::class, 'sendToCustomer']);
+    Route::patch('sales-quotations/{quotationUid}/reset-customer-status', [SalesQuotationController::class, 'resetCustomerStatus']);
     Route::patch('sales-quotations/{quotationUid}/customer-response', [SalesQuotationController::class, 'customerResponse']);
     Route::post('sales-quotations/{quotationUid}/push-to-contract', [SalesQuotationController::class, 'pushToContract']);
 
@@ -94,4 +99,3 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::options('{any}', function () {
     return response()->noContent();
 })->where('any', '.*');
-

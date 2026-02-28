@@ -11,7 +11,7 @@
  * - 余款-财务收款凭证（2个状态区域）
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -67,27 +67,74 @@ export function AccountsReceivable() {
     notes: ''
   });
   
-  // 🔥 筛选需要财务处理的订单（有销售合同的订单）
+  // 🔥 直接从 salesContracts 读取已发送合同（不依赖 OrderContext 链路是否正确写入）
+  const [contractBasedOrders, setContractBasedOrders] = useState<any[]>([]);
+  useEffect(() => {
+    const load = () => {
+      try {
+        const SENT = new Set(['sent_to_customer', 'sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed']);
+        const all: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
+        const mapped = all
+          .filter((c: any) => SENT.has(c.status))
+          .map((c: any) => ({
+            id: c.id,
+            orderNumber: c.contractNumber,
+            customer: c.customerName,
+            customerEmail: c.customerEmail || '',
+            quotationNumber: c.quotationNumber,
+            date: (c.createdAt || '').split('T')[0],
+            totalAmount: c.totalAmount,
+            currency: c.currency || 'USD',
+            status: c.status === 'deposit_uploaded' ? 'Payment Proof Uploaded'
+              : c.status === 'customer_confirmed' ? 'Awaiting Deposit'
+              : c.status === 'deposit_confirmed' ? 'Deposit Received'
+              : 'Pending',
+            products: (c.products || []).map((p: any) => ({
+              name: p.productName, quantity: p.quantity, unitPrice: p.unitPrice,
+              totalPrice: (p.quantity || 0) * (p.unitPrice || 0),
+            })),
+            paymentTerms: c.paymentTerms,
+            depositPaymentProof: c.depositPaymentProof,
+            createdFrom: 'sales_contract',
+            createdAt: c.createdAt,
+          }));
+        setContractBasedOrders(mapped);
+      } catch { /* ignore */ }
+    };
+    load();
+    window.addEventListener('ordersUpdated', load);
+    window.addEventListener('salesContractCreatedLocally', load);
+    window.addEventListener('financeDataUpdated', load);
+    window.addEventListener('userChanged', load);
+    return () => {
+      window.removeEventListener('ordersUpdated', load);
+      window.removeEventListener('salesContractCreatedLocally', load);
+      window.removeEventListener('financeDataUpdated', load);
+      window.removeEventListener('userChanged', load);
+    };
+  }, []);
+
+  // 🔥 筛选需要财务处理的订单（有销售合同的订单）— 合并 OrderContext + salesContracts 两个来源
   const receivableOrders = useMemo(() => {
-    return orders.filter(order => {
-      // 只显示有合同编号的订单（以SC-开头）
-      if (!order.orderNumber?.startsWith('SC-')) {
-        return false;
-      }
-      
-      // 搜索筛选
+    // 合并去重
+    const contextOrders = orders.filter(o => o.orderNumber?.startsWith('SC-'));
+    const seen = new Set(contextOrders.map(o => o.orderNumber));
+    const extra = contractBasedOrders.filter(o => !seen.has(o.orderNumber));
+    const merged = [...contextOrders, ...extra];
+
+    return merged.filter(order => {
+      if (!order.orderNumber?.startsWith('SC-')) return false;
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         return (
           order.orderNumber.toLowerCase().includes(term) ||
-          order.customer.toLowerCase().includes(term) ||
-          order.customerEmail?.toLowerCase().includes(term)
+          (order.customer || '').toLowerCase().includes(term) ||
+          (order.customerEmail || '').toLowerCase().includes(term)
         );
       }
-      
       return true;
     });
-  }, [orders, searchTerm]);
+  }, [orders, contractBasedOrders, searchTerm]);
   
   // 🔥 统计信息
   const stats = useMemo(() => {

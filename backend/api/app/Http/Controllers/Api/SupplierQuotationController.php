@@ -85,7 +85,9 @@ class SupplierQuotationController extends Controller
     /**
      * 采购员/Admin 接受或拒绝报价
      * PATCH /api/supplier-quotations/{id}  body: { status: 'accepted'|'rejected' }
-     * id 为前端列表的 id，如 bj-123（会去掉 bj- 前缀取数字）
+     * id 支持两种格式：
+     *   - bj-{数字}  → 按数据库主键查找
+     *   - BJ-YYMMDD-XXXX（quotationNo 格式）→ 按 quotation_no 字段查找
      */
     public function update(Request $request, string $id)
     {
@@ -93,17 +95,22 @@ class SupplierQuotationController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $numericId = preg_replace('/^bj-/', '', $id);
-        if ($numericId === '' || !ctype_digit($numericId)) {
-            return response()->json(['message' => 'Invalid quotation id'], 400);
-        }
-
         $validated = $request->validate([
             'status' => ['required', 'string', 'in:accepted,rejected'],
         ]);
 
         /** @var SupplierRfqQuote|null $quote */
-        $quote = SupplierRfqQuote::query()->with('supplierRfq')->find((int) $numericId);
+        $numericId = preg_replace('/^bj-/i', '', $id);
+        if (ctype_digit($numericId) && $numericId !== '') {
+            // Format: bj-{numeric db id}
+            $quote = SupplierRfqQuote::query()->with('supplierRfq')->find((int) $numericId);
+        } else {
+            // Format: BJ-YYMMDD-XXXX — look up by quotation_no
+            $quote = SupplierRfqQuote::query()->with('supplierRfq')
+                ->where('quotation_no', $id)
+                ->first();
+        }
+
         if (!$quote || !$quote->supplierRfq) {
             return response()->json(['message' => 'Quotation not found'], 404);
         }
@@ -119,6 +126,53 @@ class SupplierQuotationController extends Controller
         return response()->json([
             'message' => $validated['status'] === 'accepted' ? '报价已接受' : '报价已拒绝',
             'quotation' => array_merge($this->quoteToDto($quote, $quote->supplierRfq), ['status' => $quote->procurement_status]),
+        ]);
+    }
+
+    /**
+     * 采购员/Admin 删除供应商报价（永久删除）
+     * DELETE /api/supplier-quotations/{id}
+     * id 支持 bj-{数字} 或 BJ-YYMMDD-XXXX 格式
+     */
+    public function destroy(Request $request, string $id)
+    {
+        if (!$this->canViewProcurementQuotations($request)) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        /** @var SupplierRfqQuote|null $quote */
+        $numericId = preg_replace('/^bj-/i', '', $id);
+        if (ctype_digit($numericId) && $numericId !== '') {
+            $quote = SupplierRfqQuote::query()->find((int) $numericId);
+        } else {
+            $quote = SupplierRfqQuote::query()->where('quotation_no', $id)->first();
+        }
+        if (!$quote) {
+            return response()->json(['message' => 'Quotation not found'], 404);
+        }
+
+        DB::transaction(function () use ($quote) {
+            $rfqId = (int) $quote->supplier_rfq_id;
+            $quote->delete();
+
+            // 若该询价下无任何报价，回退RFQ状态，避免“有报价”残留显示
+            $remaining = SupplierRfqQuote::query()
+                ->where('supplier_rfq_id', $rfqId)
+                ->exists();
+
+            if (!$remaining) {
+                SupplierRfq::query()
+                    ->where('id', $rfqId)
+                    ->update([
+                        'status' => 'submitted',
+                        'supplier_quotation_no' => null,
+                        'updated_date' => now(),
+                    ]);
+            }
+        });
+
+        return response()->json([
+            'message' => '报价已永久删除',
         ]);
     }
 

@@ -69,10 +69,13 @@ import { QuotationRequestProvider } from './contexts/QuotationRequestContext'; /
 import { SalesQuotationProvider } from './contexts/SalesQuotationContext'; // 🔥 销售报价管理（QT）
 import { SalesOrderProvider } from './contexts/SalesOrderContext'; // 🔥 销售订单管理（SO）
 import { SalesContractProvider } from './contexts/SalesContractContext'; // 🔥 销售合同管理（SC）
+import { OrganizationProvider } from './contexts/OrganizationContext'; // 🔥 供应商组织信息管理
+import { AdminOrganizationProvider } from './contexts/AdminOrganizationContext'; // 🔥 Admin主体公司信息管理
 import { RegionSelectorModal } from './components/RegionSelectorModal';
 import { RegionTransition } from './components/RegionTransition';
 import { Toaster } from './components/ui/sonner';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { ProtectedRoute } from './components/ProtectedRoute';
 // ❌ 已禁用：文件不存在
 // import PreviewPODocument from './preview-po-document';
 // import CategoryDemo from './pages/CategoryDemo';
@@ -150,29 +153,33 @@ function AppContent() {
   //   return <RealHomeDepotDemo onClose={() => setShowHomeDepotDemo(false)} />;
   // }
 
-  // If user is logged in as admin, show admin dashboard
+  // If user is logged in as admin, show admin dashboard (with route guard)
   if (user && user.type === 'admin') {
     return (
-      <Suspense fallback={<PageLoadFallback />}>
-        <LazyAdminDashboard onLogout={async () => {
-          await logout();
-          navigateTo('home');
-        }} />
-        <Toaster />
-      </Suspense>
+      <ProtectedRoute portalType="admin">
+        <Suspense fallback={<PageLoadFallback />}>
+          <LazyAdminDashboard onLogout={async () => {
+            await logout();
+            navigateTo('home');
+          }} />
+          <Toaster />
+        </Suspense>
+      </ProtectedRoute>
     );
   }
 
-  // If user is logged in as supplier, show supplier dashboard
+  // If user is logged in as supplier, show supplier dashboard (with route guard)
   if (user && user.type === 'supplier') {
     return (
-      <Suspense fallback={<PageLoadFallback />}>
-        <LazySupplierDashboard onLogout={async () => {
-          await logout();
-          navigateTo('home');
-        }} />
-        <Toaster />
-      </Suspense>
+      <ProtectedRoute portalType="supplier">
+        <Suspense fallback={<PageLoadFallback />}>
+          <LazySupplierDashboard onLogout={async () => {
+            await logout();
+            navigateTo('home');
+          }} />
+          <Toaster />
+        </Suspense>
+      </ProtectedRoute>
     );
   }
 
@@ -186,19 +193,21 @@ function AppContent() {
     );
   }
 
-  // If user is logged in as customer and on dashboard page, show dashboard
+  // If user is logged in as customer and on dashboard page, show dashboard (with route guard)
   if (user && user.type === 'customer' && currentPage === 'dashboard') {
     return (
-      <Suspense fallback={<PageLoadFallback />}>
-        <LazyCustomerDashboard
-          onLogout={async () => {
-            await logout();
-            navigateTo('home');
-          }}
-          userEmail={user.email || 'customer@example.com'}
-        />
-        <Toaster />
-      </Suspense>
+      <ProtectedRoute portalType="customer">
+        <Suspense fallback={<PageLoadFallback />}>
+          <LazyCustomerDashboard
+            onLogout={async () => {
+              await logout();
+              navigateTo('home');
+            }}
+            userEmail={user.email || 'customer@example.com'}
+          />
+          <Toaster />
+        </Suspense>
+      </ProtectedRoute>
     );
   }
 
@@ -231,13 +240,28 @@ function AppContent() {
             {currentPage === 'admin-login' && <LazyAdminLogin />}
             {currentPage === 'register' && <LazyRegister />}
             {currentPage === 'dashboard' && user && user.type === 'customer' && (
-              <LazyCustomerDashboard
-                onLogout={async () => {
-                  await logout();
-                  navigateTo('home');
-                }}
-                userEmail={user.email || 'customer@example.com'}
-              />
+              <ProtectedRoute portalType="customer">
+                <LazyCustomerDashboard
+                  onLogout={async () => {
+                    await logout();
+                    navigateTo('home');
+                  }}
+                  userEmail={user.email || 'customer@example.com'}
+                />
+              </ProtectedRoute>
+            )}
+            {currentPage === 'dashboard' && !user && (
+              <div className="flex min-h-[60vh] items-center justify-center">
+                <div className="text-center space-y-4">
+                  <p className="text-gray-600">请先登录以访问个人中心</p>
+                  <button
+                    className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600"
+                    onClick={() => navigateTo('login')}
+                  >
+                    前往登录
+                  </button>
+                </div>
+              </div>
             )}
             {currentPage === 'supplier' && <LazyBecomeSupplier />}
             {currentPage === 'furnitureinspection' && <LazyFurnitureInspectionStandards />}
@@ -277,6 +301,8 @@ export default function App() {
       <RouterProvider>
         <CartProvider>
           <UserProvider>
+            <AdminOrganizationProvider>
+            <OrganizationProvider>
             <RegionProvider>
               <InquiryProvider>
                 <OrderProvider>
@@ -310,6 +336,8 @@ export default function App() {
                 </OrderProvider>
               </InquiryProvider>
             </RegionProvider>
+            </OrganizationProvider>
+            </AdminOrganizationProvider>
           </UserProvider>
         </CartProvider>
       </RouterProvider>

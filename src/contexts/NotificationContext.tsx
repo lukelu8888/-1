@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { getCurrentUser } from '../data/authorizedUsers';
+import { notificationSupabaseService } from '../lib/supabaseService';
+import { supabase } from '../lib/supabase';
 
 // 通知类型
 export type NotificationType = 
@@ -59,124 +61,107 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>(() => {
-    // 从localStorage加载当前用户的通知
-    console.log('🔧 [NotificationProvider] 初始化状态...');
+    // 从 localStorage 加载初始数据（Supabase 加载前的缓存）
     if (typeof window !== 'undefined') {
       const currentUser = getCurrentUser();
-      console.log('  - 当前用户:', currentUser);
-      
-      if (!currentUser) {
-        console.log('  - ⚠️ 未找到当前用户，返回空数组');
-        return [];
-      }
-      
-      const key = `notifications_${currentUser.email}`;
-      console.log('  - localStorage键名:', key);
-      
-      const stored = localStorage.getItem(key);
-      console.log('  - localStorage原始数据:', stored ? stored.substring(0, 100) + '...' : '空');
-      
+      if (!currentUser) return [];
+      const stored = localStorage.getItem(`notifications_${currentUser.email}`);
       if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          console.log('  - ✅ 成功解析，通知数量:', parsed.length);
-          return parsed;
-        } catch (e) {
-          console.error('  - ❌ 解析失败:', e);
-          return [];
-        }
-      } else {
-        console.log('  - ⚠️ localStorage中没有数据');
+        try { return JSON.parse(stored); } catch { return []; }
       }
     }
     return [];
   });
 
-  // 🔄 监听用户切换，重新加载通知
-  useEffect(() => {
-    const loadNotifications = () => {
-      const currentUser = getCurrentUser();
-      console.log('👤 [NotificationProvider] 用户切换或页面加载');
-      console.log('  - 当前用户:', currentUser?.email);
-      
-      if (!currentUser) {
-        setNotifications([]);
-        return;
-      }
+  // 从 Supabase 加载通知
+  const loadFromSupabase = async (email: string) => {
+    const data = await notificationSupabaseService.getForUser(email);
+    if (data && Array.isArray(data)) {
+      setNotifications(data as Notification[]);
+      localStorage.setItem(`notifications_${email}`, JSON.stringify(data));
+    }
+  };
 
-      const stored = localStorage.getItem(`notifications_${currentUser.email}`);
-      console.log('  - localStorage键名:', `notifications_${currentUser.email}`);
-      
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          console.log('  - 已加载通知数量:', parsed.length);
-          setNotifications(parsed);
-        } catch (e) {
-          console.error('  - ❌ 解析通知失败:', e);
-          setNotifications([]);
-        }
-      } else {
-        console.log('  - ⚠️ 未找到通知数据');
-        setNotifications([]);
+  // 初始加载 & Auth 监听
+  useEffect(() => {
+    const initLoad = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        await loadFromSupabase(session.user.email);
       }
     };
+    void initLoad();
 
-    // 初始加载
-    loadNotifications();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.user?.email) {
+        void loadFromSupabase(session.user.email);
+      } else if (event === 'SIGNED_OUT') {
+        setNotifications([]);
+      }
+    });
 
-    // 监听storage事件（其他标签页的变化）
-    window.addEventListener('storage', loadNotifications);
-    
-    // 监听自定义用户切换事件
-    window.addEventListener('userChanged', loadNotifications);
+    // 兼容旧的用户切换事件
+    const handleUserChanged = () => {
+      const currentUser = getCurrentUser();
+      if (currentUser?.email) void loadFromSupabase(currentUser.email);
+    };
+    window.addEventListener('userChanged', handleUserChanged);
 
     return () => {
-      window.removeEventListener('storage', loadNotifications);
-      window.removeEventListener('userChanged', loadNotifications);
+      subscription.unsubscribe();
+      window.removeEventListener('userChanged', handleUserChanged);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Supabase Realtime 订阅（接收新通知）
+  useEffect(() => {
+    let channel: ReturnType<typeof notificationSupabaseService.subscribeToUser> | null = null;
+
+    const subscribeRealtime = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.email) return;
+      const email = session.user.email;
+      channel = notificationSupabaseService.subscribeToUser(email, (payload) => {
+        const newNotif = payload.new as Notification;
+        if (!newNotif) return;
+        setNotifications(prev => {
+          const exists = prev.find(n => n.id === newNotif.id);
+          if (exists) return prev;
+          const updated = [newNotif, ...prev];
+          localStorage.setItem(`notifications_${email}`, JSON.stringify(updated));
+          window.dispatchEvent(new CustomEvent('newNotification', { detail: newNotif }));
+          return updated;
+        });
+      });
+    };
+
+    void subscribeRealtime();
+
+    return () => {
+      if (channel) void supabase.removeChannel(channel);
     };
   }, []);
 
-  // 计算未读数量
-  const unreadCount = notifications.filter(n => !n.read).length;
-
-  // 保存到localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const currentUser = getCurrentUser();
-      if (currentUser) {
-        localStorage.setItem(`notifications_${currentUser.email}`, JSON.stringify(notifications));
-      }
-    }
-  }, [notifications]);
-
-  // 🔔 监听跨组件通知事件
+  // 监听跨组件通知事件（兼容旧代码）
   useEffect(() => {
     const handleNotificationAdded = (event: CustomEvent) => {
       const currentUser = getCurrentUser();
       if (!currentUser) return;
-
       const { email, notification } = event.detail;
-      console.log('🔔 [NotificationProvider] 收到通知事件');
-      console.log('  - 当前用户:', currentUser.email);
-      console.log('  - 通知接收人:', email);
-      console.log('  - 通知内容:', notification);
-
-      // 如果通知是发给当前用户的，更新状态
       if (email === currentUser.email) {
-        console.log('  - ✅ 通知匹配，更新状态');
-        setNotifications(prev => [notification, ...prev]);
-      } else {
-        console.log('  - ⚠️ 通知不匹配，跳过');
+        setNotifications(prev => {
+          const exists = prev.find(n => n.id === notification.id);
+          if (exists) return prev;
+          return [notification, ...prev];
+        });
       }
     };
-
     window.addEventListener('notificationAdded', handleNotificationAdded as EventListener);
-
-    return () => {
-      window.removeEventListener('notificationAdded', handleNotificationAdded as EventListener);
-    };
+    return () => window.removeEventListener('notificationAdded', handleNotificationAdded as EventListener);
   }, []);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   const addNotification = (notification: Omit<Notification, 'id' | 'createdAt' | 'read'>) => {
     const newNotification: Notification = {
@@ -185,31 +170,45 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       createdAt: Date.now(),
       read: false,
     };
-
     setNotifications(prev => [newNotification, ...prev]);
-    
-    // 🔔 触发通知事件（可用于显示toast等）
+    // 异步写入 Supabase
+    void notificationSupabaseService.send({
+      recipient_email: notification.recipient,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      related_id: notification.relatedId,
+      related_type: notification.relatedType,
+      sender: notification.sender,
+      metadata: notification.metadata,
+    }).catch(err => console.error('[Notification] send to Supabase failed:', err));
     window.dispatchEvent(new CustomEvent('newNotification', { detail: newNotification }));
   };
 
   const markAsRead = (id: string) => {
-    setNotifications(prev =>
-      prev.map(n => (n.id === id ? { ...n, read: true } : n))
-    );
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    void notificationSupabaseService.markRead(id).catch(() => {});
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev =>
-      prev.map(n => ({ ...n, read: true }))
-    );
+  const markAllAsRead = async () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.email) {
+      void notificationSupabaseService.markAllRead(session.user.email).catch(() => {});
+    }
   };
 
   const deleteNotification = (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
+    void notificationSupabaseService.delete(id).catch(() => {});
   };
 
-  const clearAll = () => {
+  const clearAll = async () => {
     setNotifications([]);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.email) {
+      void notificationSupabaseService.deleteAll(session.user.email).catch(() => {});
+    }
   };
 
   return (
@@ -237,20 +236,13 @@ export function useNotifications() {
   return context;
 }
 
-// 🔧 辅助函数：向指定用户发送通知
+// 🔧 辅助函数：向指定用户发送通知（Supabase + localStorage 双写）
 export function sendNotificationToUser(
   recipientEmail: string,
   notification: Omit<Notification, 'id' | 'createdAt' | 'read' | 'recipient'>
 ) {
   if (typeof window === 'undefined') return;
-  
-  console.log('📬 [sendNotificationToUser] 发送通知');
-  console.log('  - 接收人:', recipientEmail);
-  console.log('  - 通知类型:', notification.type);
-  console.log('  - 通知标题:', notification.title);
-  console.log('  - 通知内容:', notification.message);
-  
-  // 创建完整的通知对象
+
   const fullNotification: Notification = {
     ...notification,
     recipient: recipientEmail,
@@ -259,19 +251,25 @@ export function sendNotificationToUser(
     read: false,
   };
 
-  // 保存到目标用户的localStorage
+  // 写入 Supabase（Realtime 会推送给目标用户，如果在线）
+  void notificationSupabaseService.send({
+    recipient_email: recipientEmail,
+    type: notification.type,
+    title: notification.title,
+    message: notification.message,
+    related_id: notification.relatedId,
+    related_type: notification.relatedType,
+    sender: notification.sender,
+    metadata: notification.metadata,
+  }).catch(err => console.error('[sendNotificationToUser] Supabase failed:', err));
+
+  // 兼容旧的 localStorage 写入（目标用户不在线时的缓存）
   const stored = localStorage.getItem(`notifications_${recipientEmail}`);
-  const existingNotifications = stored ? JSON.parse(stored) : [];
-  console.log('  - 现有通知数量:', existingNotifications.length);
-  
-  const updated = [fullNotification, ...existingNotifications];
-  localStorage.setItem(`notifications_${recipientEmail}`, JSON.stringify(updated));
-  console.log('  - 保存后通知数量:', updated.length);
-  console.log('  - localStorage键名:', `notifications_${recipientEmail}`);
-  
-  // 触发事件以便实时更新
-  window.dispatchEvent(new CustomEvent('notificationAdded', { 
-    detail: { email: recipientEmail, notification: fullNotification } 
+  const existing = stored ? JSON.parse(stored) : [];
+  localStorage.setItem(`notifications_${recipientEmail}`, JSON.stringify([fullNotification, ...existing]));
+
+  // 触发事件（同一标签页内实时更新）
+  window.dispatchEvent(new CustomEvent('notificationAdded', {
+    detail: { email: recipientEmail, notification: fullNotification },
   }));
-  console.log('  - ✅ 通知已保存并触发事件');
 }

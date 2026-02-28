@@ -561,7 +561,7 @@ class SalesContractController extends Controller
         }
 
         $regionCode = $this->toRegionCode((string) ($sc->region ?? 'NA'));
-        $dateStr = now()->format('ymd');
+        $dateStr = now()->setTimezone('Asia/Shanghai')->format('ymd');
         $cgNumber = trim((string) ($validated['cgNumber'] ?? ''));
         if ($cgNumber === '') {
             $seq = $this->nextCgSequence($regionCode, $dateStr);
@@ -591,7 +591,7 @@ class SalesContractController extends Controller
 
         DB::beginTransaction();
         try {
-            $qrDateStr = now()->format('ymd');
+            $qrDateStr = now()->setTimezone('Asia/Shanghai')->format('ymd');
             $qrSeq = $this->nextQrSequence($regionCode, $qrDateStr);
             $requirementNo = "QR-{$regionCode}-{$qrDateStr}-{$qrSeq}";
 

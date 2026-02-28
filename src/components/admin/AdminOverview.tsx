@@ -10,6 +10,7 @@ import { BarChart, Bar, PieChart as RechartsPie, Pie, Cell, LineChart, Line, XAx
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { Card } from '../ui/card';
 import { useAuth } from '../../hooks/useAuth'; // 🔥 导入useAuth
+import { RealtimeStatsBar } from './RealtimeStatsBar'; // 🔥 实时统计卡片
 
 interface AdminOverviewProps {
   onNavigateToAPIDemo?: () => void;
@@ -92,6 +93,9 @@ export default function AdminOverview({ onNavigateToAPIDemo }: AdminOverviewProp
 
   return (
     <div className="space-y-4 pb-6">
+      {/* 🔥 实时业务统计卡片 - 数据来自 Supabase */}
+      <RealtimeStatsBar />
+
       {/* 🔥 业务流程编辑器Pro - 快速访问卡片（仅系统管理员可见） */}
       {currentUser?.role === 'Admin' && (
       <Card className="p-6 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 border-2 border-purple-200">

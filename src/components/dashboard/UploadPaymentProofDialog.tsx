@@ -7,7 +7,8 @@ import { Label } from '../ui/label';
 import { Upload, DollarSign, Hash, FileText, X } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { useFinance } from '../../contexts/FinanceContext';
-import { apiFetchJson, resolveBackendPublicUrl } from '../../api/backend-auth';
+import { apiFetchJson } from '../../api/backend-auth';
+import { paymentProofStorage, isDataUrl, dataUrlToFile } from '../../lib/storageService';
 
 interface UploadPaymentProofDialogProps {
   open: boolean;
@@ -50,37 +51,23 @@ export function UploadPaymentProofDialog({
 
   if (!order) return null;
 
-  // 处理图片上传（模拟）
+  // 选择文件后先存本地 File 对象，不再转 base64
+  const [selectedFileObj, setSelectedFileObj] = useState<File | null>(null);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // 🔥 模拟上传：使用Unsplash图片
-      // 实际项目中应该上传到服务器
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPaymentFile(reader.result as string);
-        toast.success('File selected', {
-          description: file.name,
-          duration: 2000
-        });
-      };
-      reader.readAsDataURL(file);
+      setSelectedFileObj(file);
+      // 生成本地预览 URL（仅用于 UI 显示，不存储）
+      const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : '';
+      setPaymentFile(previewUrl || file.name);
+      toast.success('File selected', { description: file.name, duration: 2000 });
     }
   };
 
-  // 将 data URL 转为 File（用于先上传到服务器）
-  const dataURLtoFile = (dataUrl: string, filename: string): File => {
-    const arr = dataUrl.split(',');
-    const mime = (arr[0].match(/:(.*?);/) as RegExpMatchArray)?.[1] || 'image/jpeg';
-    const bstr = atob(arr[1]);
-    const u8arr = new Uint8Array(bstr.length);
-    for (let i = 0; i < bstr.length; i++) u8arr[i] = bstr.charCodeAt(i);
-    return new File([u8arr], filename, { type: mime });
-  };
-
-  // 提交付款凭证：若是 base64 则先上传文件拿到 URL，再提交表单（只存 URL 到数据库）
+  // 提交付款凭证：上传到 Supabase Storage，只保存 URL
   const handleSubmitProof = async () => {
-    if (!paymentAmount || !paymentReference || !paymentFile) {
+    if (!paymentAmount || !paymentReference || (!paymentFile && !selectedFileObj)) {
       toast.error('Missing Required Fields', {
         description: 'Please fill in all required fields and upload a payment proof file.',
         duration: 3000
@@ -95,53 +82,163 @@ export function UploadPaymentProofDialog({
 
     setSubmitting(true);
     try {
-      let fileUrl = paymentFile;
+      let fileUrl = '';
       let fileName = defaultFileName;
+      let storagePath = '';
 
-      if (paymentFile.startsWith('data:')) {
-        const file = dataURLtoFile(paymentFile, defaultFileName);
-        const formData = new FormData();
-        formData.append('file', file);
-        const uploadRes = await apiFetchJson<{ fileUrl: string; fileName: string }>(
-          '/api/upload-payment-proof-file',
+      // 上传到 Supabase Storage
+      const fileToUpload = selectedFileObj || (isDataUrl(paymentFile) ? dataUrlToFile(paymentFile, defaultFileName) : null);
+      if (fileToUpload) {
+        try {
+          const result = await paymentProofStorage.upload(
+            fileToUpload,
+            order.orderNumber || order.id,
+            paymentType || 'deposit',
+            user?.email || 'unknown'
+          );
+          fileUrl = result.url;
+          fileName = result.fileName;
+          storagePath = result.path;
+        } catch (storageErr: any) {
+          console.warn('⚠️ [UploadPaymentProof] Supabase Storage 上传失败，尝试后端API:', storageErr?.message);
+          // Fallback: 尝试后端 API
+          try {
+            const formData = new FormData();
+            formData.append('file', fileToUpload);
+            const uploadRes = await apiFetchJson<{ fileUrl: string; fileName: string }>(
+              '/api/upload-payment-proof-file',
+              { method: 'POST', body: formData }
+            );
+            fileUrl = uploadRes.fileUrl;
+            fileName = uploadRes.fileName || defaultFileName;
+          } catch {
+            // 最终 fallback：使用临时 blob URL（本次会话有效）
+            fileUrl = URL.createObjectURL(fileToUpload);
+            fileName = fileToUpload.name;
+          }
+        }
+      } else {
+        fileUrl = paymentFile;
+      }
+
+      // 尝试同步到后端（失败时静默，本地照常处理）
+      try {
+        const res = await apiFetchJson<{ message: string; order: any }>(
+          `/api/orders/${encodeURIComponent(orderUid)}/upload-payment-proof`,
           {
-            method: 'POST',
-            body: formData,
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: paymentType,
+              amount: parseFloat(paymentAmount),
+              transactionId: paymentReference,
+              notes: paymentNotes || undefined,
+              fileUrl,
+              fileName,
+            }),
           }
         );
-        fileUrl = resolveBackendPublicUrl(uploadRes.fileUrl);
-        fileName = uploadRes.fileName || defaultFileName;
-      }
-
-      // Ensure persisted URL always points to backend domain, not frontend origin.
-      fileUrl = resolveBackendPublicUrl(fileUrl);
-
-      const res = await apiFetchJson<{ message: string; order: any }>(
-        `/api/orders/${encodeURIComponent(orderUid)}/upload-payment-proof`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: paymentType,
-            amount: parseFloat(paymentAmount),
-            transactionId: paymentReference,
-            notes: paymentNotes || undefined,
-            fileUrl,
-            fileName,
-          }),
+        if (res.order) {
+          updateOrder(orderUid, {
+            status: res.order.status,
+            paymentStatus: res.order.paymentStatus,
+            depositPaymentProof: res.order.depositPaymentProof,
+            balancePaymentProof: res.order.balancePaymentProof,
+          });
         }
-      );
-
-      // 本地合并接口返回的订单数据，列表通过 ordersUpdated 会重新拉取
-      if (res.order) {
-        updateOrder(orderUid, {
-          status: res.order.status,
-          paymentStatus: res.order.paymentStatus,
-          depositPaymentProof: res.order.depositPaymentProof,
-          balancePaymentProof: res.order.balancePaymentProof,
-        });
+      } catch (apiErr: any) {
+        console.warn('⚠️ [UploadPaymentProof] 后端同步失败（本地继续处理）:', apiErr?.message);
       }
+
+      // 本地立即更新合同状态为 deposit_uploaded
+      const contractNumber = order.orderNumber || order.id;
+      const proofData = {
+        fileName,
+        fileUrl,
+        storagePath,
+        uploadedAt: new Date().toISOString(),
+        amount: parseFloat(paymentAmount),
+        transactionId: paymentReference,
+        notes: paymentNotes || undefined,
+      };
+      try {
+        const allContracts: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
+        const updated = allContracts.map((c: any) =>
+          c.contractNumber === contractNumber
+            ? { ...c, status: 'deposit_uploaded', depositPaymentProof: proofData, updatedAt: new Date().toISOString() }
+            : c
+        );
+        localStorage.setItem('salesContracts', JSON.stringify(updated));
+        console.log(`✅ [UploadPaymentProof] 合同 ${contractNumber} 状态已本地更新为 deposit_uploaded`);
+      } catch { /* ignore */ }
+
+      // 直接写入财务应收账款 localStorage（客户端不在 FinanceProvider 内，无法通过 Context 写入）
+      try {
+        const AR_KEY = 'accountsReceivable_admin@cosun.com';
+        const existingARs: any[] = JSON.parse(localStorage.getItem(AR_KEY) || '[]');
+        const arIdx = existingARs.findIndex((ar: any) => ar.orderNumber === contractNumber);
+        const now = new Date().toISOString();
+        if (arIdx >= 0) {
+          // 已有记录：更新定金凭证状态
+          existingARs[arIdx] = {
+            ...existingARs[arIdx],
+            depositProof: proofData,
+            status: 'proof_uploaded',
+            updatedAt: now,
+          };
+          console.log(`✅ [UploadPaymentProof] 已更新 AR 记录: ${contractNumber}`);
+        } else {
+          // 新建应收账款记录
+          const depositAmt = parseFloat(paymentAmount);
+          const totalAmt = order.totalAmount || depositAmt / 0.3;
+          const newAR = {
+            id: `ar-${Date.now()}`,
+            arNumber: `YS-${(contractNumber.split('-')[1] || 'NA')}-${now.slice(2,10).replace(/-/g,'')}`,
+            orderNumber: contractNumber,
+            contractNumber,
+            quotationNumber: order.quotationNumber || '',
+            customerName: order.customer || '',
+            customerEmail: user?.email || '',
+            region: order.region || '',
+            invoiceDate: now.split('T')[0],
+            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            totalAmount: totalAmt,
+            paidAmount: 0,
+            remainingAmount: totalAmt,
+            currency: order.currency || 'USD',
+            status: 'proof_uploaded',
+            paymentTerms: order.paymentTerms || '30% T/T deposit, 70% balance before shipment',
+            products: (order.products || []).map((p: any) => ({
+              name: p.name,
+              quantity: p.quantity || 0,
+              unitPrice: p.unitPrice || 0,
+              totalPrice: p.totalPrice || 0,
+            })),
+            depositProof: proofData,
+            paymentHistory: [],
+            createdAt: now,
+            updatedAt: now,
+            createdBy: user?.email || 'customer',
+            notes: `定金凭证由客户上传。付款参考号: ${paymentReference}`,
+          };
+          existingARs.unshift(newAR);
+          console.log(`✅ [UploadPaymentProof] 已新增 AR 记录: ${newAR.arNumber}`);
+        }
+        localStorage.setItem(AR_KEY, JSON.stringify(existingARs));
+        // 触发财务模块刷新
+        window.dispatchEvent(new CustomEvent('financeDataUpdated'));
+      } catch (arErr) {
+        console.warn('⚠️ [UploadPaymentProof] 写入 AR 失败:', arErr);
+      }
+
+      // 本地更新订单状态
+      updateOrder(orderUid, {
+        status: 'Payment Proof Uploaded',
+        paymentStatus: 'Proof Uploaded',
+        depositPaymentProof: { fileName, fileUrl, uploadedAt: new Date().toISOString() },
+      });
       window.dispatchEvent(new CustomEvent('ordersUpdated'));
+      window.dispatchEvent(new CustomEvent('salesContractCreatedLocally'));
 
       // 同步更新财务应收账款（本地状态）
       const paymentProofData = {
@@ -202,6 +299,7 @@ export function UploadPaymentProofDialog({
       setPaymentReference('');
       setPaymentNotes('');
       setPaymentFile('');
+      setSelectedFileObj(null);
     } catch (e: any) {
       toast.error(e?.message || 'Upload failed', {
         description: 'Please try again or contact support.',

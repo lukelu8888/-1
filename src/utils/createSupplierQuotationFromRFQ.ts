@@ -160,7 +160,9 @@ export function createSupplierQuotationFromRFQ(
       specification: item.specification,
       quantity: item.quantity,
       unit: item.unit,
-      unitPrice: item.unitPrice || 0,
+      // Store null (not 0) so the document renderer shows "—" instead of "0.00"
+      // until the supplier completes pricing in the quotation editor.
+      unitPrice: item.unitPrice > 0 ? item.unitPrice : null,
       currency: item.currency || 'CNY',
       remarks: item.remarks
     })),

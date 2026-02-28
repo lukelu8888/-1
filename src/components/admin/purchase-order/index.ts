@@ -21,6 +21,11 @@ export { RFQPreviewDialog } from './RFQPreviewDialog';
 export { SupplierQuotationDialog } from './SupplierQuotationDialog';
 export { CreateRFQAndHistoryDialogs } from './CreateRFQAndHistoryDialogs';
 export { PurchaseOrdersTab } from './PurchaseOrdersTab';
+export { ProcurementRequestsTab } from './ProcurementRequestsTab';
+export { SupplierAllocationDialog } from './SupplierAllocationDialog';
+export { PurchaseOrderDetailDialog } from './PurchaseOrderDetailDialog';
+export { PurchaseOrderPreviewDialog } from './PurchaseOrderPreviewDialog';
+export { PurchaseRequirementPreviewDialog } from './PurchaseRequirementPreviewDialog';
 export {
   CURRENCY_OPTIONS,
   EXTRA_TERM_OPTIONS,

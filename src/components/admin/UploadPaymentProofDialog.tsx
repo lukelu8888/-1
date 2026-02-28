@@ -4,8 +4,9 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { Card } from '../ui/card';
-import { Upload, FileText, Image as ImageIcon, DollarSign, Calendar, AlertCircle, CheckCircle } from 'lucide-react';
+import { Upload, FileText, Image as ImageIcon, DollarSign, AlertCircle, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { paymentProofStorage } from '../../lib/storageService';
 
 interface UploadPaymentProofDialogProps {
   open: boolean;
@@ -25,6 +26,7 @@ export function UploadPaymentProofDialog({
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [uploadProgress, setUploadProgress] = useState<string>('');
   const [formData, setFormData] = useState({
     amount: proofType === 'deposit' ? (order?.totalAmount * 0.3 || 0) : (order?.totalAmount * 0.7 || 0),
     currency: order?.currency || 'USD',
@@ -124,89 +126,66 @@ export function UploadPaymentProofDialog({
     console.log('📁 ========================================\n');
   };
 
-  // 处理上传
-  const handleUpload = () => {
-    console.log('📤 ========================================');
-    console.log('📤 点击了"确认上传"按钮');
-    console.log('📤 ========================================');
-    console.log('  - selectedFile:', selectedFile);
-    console.log('  - formData:', formData);
-    
-    // 验证必填字段
+  // 处理上传（真实上传到 Supabase Storage）
+  const handleUpload = async () => {
     if (!selectedFile) {
-      console.error('  ❌ 验证失败：未选择文件');
-      toast.error('请选择文件', {
-        description: '请先选择要上传的付款凭证文件',
-        duration: 3000
-      });
+      toast.error('请选择文件', { description: '请先选择要上传的付款凭证文件', duration: 3000 });
       return;
     }
-    console.log('  ✅ 文件验证通过');
-
     if (!formData.amount || formData.amount <= 0) {
-      console.error('  ❌ 验证失败：付款金额无效', formData.amount);
-      toast.error('请输入付款金额', {
-        description: '付款金额必须大于0',
-        duration: 3000
-      });
+      toast.error('请输入付款金额', { description: '付款金额必须大于0', duration: 3000 });
       return;
     }
-    console.log('  ✅ 金额验证通过:', formData.amount);
 
-    console.log('  🚀 开始上传流程...');
     setUploading(true);
+    setUploadProgress('正在上传到云存储...');
 
-    // 模拟上传过程（实际项目中这里应该调用API上传到服务器/云存储）
-    setTimeout(() => {
-      console.log('  📦 生成凭证数据...');
-      
-      // 生成模拟的文件URL（实际应该是服务器返回的URL）
-      const fileUrl = previewUrl || `https://example.com/payment-proofs/${selectedFile.name}`;
-      console.log('  - 文件URL:', fileUrl);
-      
+    try {
+      const result = await paymentProofStorage.upload(
+        selectedFile,
+        order?.orderNumber || order?.id || 'unknown',
+        proofType,
+        order?.customer || 'admin'
+      );
+
+      setUploadProgress('上传成功！');
+
       const proofData = {
         uploadedAt: new Date().toISOString(),
         uploadedBy: order?.customer || 'Admin',
-        fileUrl: fileUrl,
-        fileName: selectedFile.name,
+        fileUrl: result.url,
+        storagePath: result.path,
+        fileName: result.fileName,
+        fileSize: result.fileSize,
         amount: parseFloat(formData.amount.toString()),
         currency: formData.currency,
         notes: `Payment Reference: ${formData.paymentReference || 'N/A'}. ${formData.notes || ''}`
       };
-      
-      console.log('  📋 凭证数据:', proofData);
-      console.log('  📞 调用 onUploadSuccess 回调...');
 
-      // 调用成功回调
       onUploadSuccess(proofData);
 
-      setUploading(false);
-      
-      console.log('  ✅ 上传完成！');
-      
       toast.success('✅ 上传成功！', {
-        description: `${proofType === 'deposit' ? '定金' : '余款'}凭证已上传`,
+        description: `${proofType === 'deposit' ? '定金' : '余款'}凭证已上传至云存储`,
         duration: 3000
       });
 
       // 重置表单
       setSelectedFile(null);
       setPreviewUrl('');
+      setUploadProgress('');
       setFormData({
         amount: proofType === 'deposit' ? (order?.totalAmount * 0.3 || 0) : (order?.totalAmount * 0.7 || 0),
         currency: order?.currency || 'USD',
         paymentReference: '',
         notes: ''
       });
-
-      console.log('  🔄 表单已重置');
-      console.log('  🚪 关闭对话框...');
-
-      // 关闭对话框
       onOpenChange(false);
-      
-      console.log('📤 ========================================\n');
-    }, 1500);
+    } catch (err: any) {
+      toast.error('上传失败', { description: err?.message || '请重试或联系管理员', duration: 4000 });
+    } finally {
+      setUploading(false);
+      setUploadProgress('');
+    }
   };
 
   if (!order) return null;
@@ -397,13 +376,13 @@ export function UploadPaymentProofDialog({
             <Button
               size="sm"
               className="h-9 text-xs bg-orange-500 hover:bg-orange-600"
-              onClick={handleUpload}
+              onClick={() => void handleUpload()}
               disabled={uploading || !selectedFile}
             >
               {uploading ? (
                 <>
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />
-                  上传中...
+                  {uploadProgress || '上传中...'}
                 </>
               ) : (
                 <>

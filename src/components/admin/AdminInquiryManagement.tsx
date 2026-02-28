@@ -10,7 +10,7 @@ import { Search, Filter, Eye, Reply, CheckCircle, XCircle, Clock, FileText, Aler
 import { toast } from 'sonner@2.0.3';
 import { CustomerInquiryView } from '../dashboard/CustomerInquiryView'; // 📋 使用文档中心的专业模板
 import { useInquiry } from '../../contexts/InquiryContext'; // 🚀 Use unified context
-import type { RegionType } from '../../utils/rfqNumberGenerator';
+import { generateDocumentNumber, type RegionType } from '../../utils/rfqNumberGenerator';
 import { CompactStatCard } from './CompactStatCard'; // 🎨 导入紧凑型统计卡片
 import { MultiDimensionFilters } from './MultiDimensionFilters'; // 🎯 多维度筛选组件
 import { CreateRFQFromInquiryDialog } from './CreateRFQFromInquiryDialog'; // 🔥 导入创建RFQ对话框
@@ -175,9 +175,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   // 🧪 Create Test Inquiry Function
   const createTestInquiry = (region: RegionType, customerEmail: string, companyName: string) => {
     const regionCode = region === 'North America' ? 'NA' : region === 'South America' ? 'SA' : 'EA';
-    const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-    const random = Math.floor(Math.random() * 9000) + 1000;
-    const rfqId = `RFQ-${regionCode}-${dateStr}-${random}`;
+    const rfqId = generateDocumentNumber('XJ', region);
 
     const inquiry = {
       id: rfqId,

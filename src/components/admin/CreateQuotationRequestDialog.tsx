@@ -4,6 +4,7 @@ import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
 import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 导入获取当前用户工具
 import { getSession } from '../../data/authorizedUsers'; // 🔥 导入获取用户session工具
+import { generateQRNumber, type RegionType } from '../../utils/rfqNumberGenerator';
 import { Calendar } from 'lucide-react';
 import {
   Dialog,
@@ -168,14 +169,7 @@ export function CreateQuotationRequestDialog({
       console.log('  - Email:', salesRepEmail);
       console.log('  - Name:', salesRepName);
       
-      const regionCode = inquiry.region === 'North America' ? 'NA' 
-        : inquiry.region === 'South America' ? 'SA' 
-        : inquiry.region === 'Europe & Africa' ? 'EA' 
-        : 'OT';
-      
-      const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-      const random = Math.floor(Math.random() * 9000) + 1000;
-      const requestNumber = `QR-${regionCode}-${dateStr}-${random}`;
+      const requestNumber = generateQRNumber((inquiry.region as RegionType) || 'North America');
 
       const items = editableProducts?.map((product: any) => ({
         id: product.id || `item_${Date.now()}_${Math.random()}`,
@@ -190,7 +184,7 @@ export function CreateQuotationRequestDialog({
       })) || [];
 
       const quotationRequest = {
-        id: `qr_${Date.now()}_${random}`,
+        id: `qr_${Date.now()}_${Math.floor(Math.random() * 9000) + 1000}`,
         requestNumber,
         
         sourceInquiryId: inquiry.id,

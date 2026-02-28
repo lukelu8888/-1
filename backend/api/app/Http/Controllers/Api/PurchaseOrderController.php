@@ -111,7 +111,7 @@ class PurchaseOrderController extends Controller
         DB::beginTransaction();
         try {
             $regionCode = $this->normalizeRegionCode((string) ($validated['region'] ?? 'NA'));
-            $dateStr = now()->format('ymd');
+            $dateStr = now()->setTimezone('Asia/Shanghai')->format('ymd');
             $requirementNo = (string) ($validated['requirementNo'] ?? '');
             if ($requirementNo === '') {
                 $requirementNo = "QR-{$regionCode}-{$dateStr}-" . $this->nextQrSeq($regionCode, $dateStr);

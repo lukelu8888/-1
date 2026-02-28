@@ -168,6 +168,30 @@ export default function QuotationDetailView({
           respondedAt: new Date().toISOString(),
         },
       });
+
+      // 写入跨角色 bridge，让业务员端无需等 API 刷新即可看到客户反馈理由
+      try {
+        const responseEntry = {
+          qtNumber: (quotation as any).qtNumber || (quotation as any).quotationNumber,
+          id: String(quotation.id),
+          customerStatus: newCustomerStatus,
+          customerResponse: {
+            status: feedbackType,
+            comment: feedbackMessage,
+            respondedAt: new Date().toISOString(),
+          },
+          updatedAt: new Date().toISOString(),
+        };
+        const bridgeKey = 'customer_decline_bridge';
+        const existing: any[] = JSON.parse(localStorage.getItem(bridgeKey) || '[]');
+        const idx = existing.findIndex((e: any) =>
+          e.qtNumber === responseEntry.qtNumber || e.id === responseEntry.id
+        );
+        if (idx >= 0) existing[idx] = responseEntry;
+        else existing.push(responseEntry);
+        localStorage.setItem(bridgeKey, JSON.stringify(existing));
+      } catch {}
+
       onUpdated?.();
     } catch (e: any) {
       console.error('❌ [QuotationDetailView] Feedback 落库失败:', e);

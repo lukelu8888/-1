@@ -274,9 +274,10 @@ export const generateRFQDocumentData = (
   requirement: PurchaseRequirement,
   deadline: Date,
   remarks: string,
-  selectedProductIds: string[]
+  selectedProductIds: string[],
+  rfqNoOverride?: string
 ): SupplierRFQData => {
-  const rfqNo = generateXJNumber();
+  const rfqNo = rfqNoOverride || generateXJNumber();
   
   // 只包含选中的产品
   const selectedProducts = requirement.items?.filter(item => selectedProductIds.includes(item.id)) || [];

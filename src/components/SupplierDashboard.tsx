@@ -1,28 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
-import { LayoutDashboard, Package, Factory, FileText, MessageSquare, DollarSign, LogOut, Calculator, Shield, ChevronLeft, ChevronRight, User, Bell, Beaker, Building2, Boxes, Truck, Layers, Settings, ClipboardList, GripVertical } from 'lucide-react';
+import { LayoutDashboard, Package, Factory, FileText, MessageSquare, DollarSign, LogOut, Calculator, Shield, ChevronLeft, ChevronRight, User, Bell, Beaker, Building2, Boxes, Truck, Layers, Settings, ClipboardList, GripVertical, ChevronDown, UserCircle } from 'lucide-react';
 import SupplierOverview from './supplier/SupplierOverview';
-import CustomerOrders from './supplier/CustomerOrders'; // 🔥 客户订单管理（供应商视角）
+import CustomerOrders from './supplier/CustomerOrders';
 import ProductionManagement from './supplier/ProductionManagement';
 import SupplierDocuments from './supplier/SupplierDocuments';
-import SupplierDocumentsWorkflow from './supplier/SupplierDocumentsWorkflow'; // 🔥 订单流程化文档中心
-import SupplierDocumentsWorkflowCompact from './supplier/SupplierDocumentsWorkflowCompact'; // 🔥 紧凑表格视图（台湾大厂风格）
-import SupplierDocumentsWorkflowCompactV2 from './supplier/SupplierDocumentsWorkflowCompactV2'; // 🔥 V2极致紧凑版
+import SupplierDocumentsWorkflow from './supplier/SupplierDocumentsWorkflow';
+import SupplierDocumentsWorkflowCompact from './supplier/SupplierDocumentsWorkflowCompact';
+import SupplierDocumentsWorkflowCompactV2 from './supplier/SupplierDocumentsWorkflowCompactV2';
 import SupplierMessages from './supplier/SupplierMessages';
 import SupplierFinancial from './supplier/SupplierFinancial';
-import SupplierQuotationsSimple from './supplier/SupplierQuotationsSimple'; // 🔥 使用简化版
+import SupplierQuotationsSimple from './supplier/SupplierQuotationsSimple';
 import SupplierQualityControl from './supplier/SupplierQualityControl';
-import SampleManagement from './supplier/SampleManagement'; // 🔥 样品管理
-import ResourceCenter from './supplier/ResourceCenter'; // 🔥 资源中心
-import TechnicalCenter from './supplier/TechnicalCenter'; // 🔥 技术中心
-import CategoryManagement from './supplier/CategoryManagement'; // 🔥 产品类别管理
-import IndustryInitWizard from './supplier/IndustryInitWizard'; // 🔥 行业初始化向导
-import SupplierOrderManagementCenter from './supplier/SupplierOrderManagementCenter'; // 🔥 订单管理中心
-import SupplierOrderManagementCenterV2 from './supplier/SupplierOrderManagementCenterV2'; // 🔥 订单管理中心V2
-import QuickQuotationCreator from './supplier/QuickQuotationCreator'; // 🔥 快速创建报价单
+import SampleManagement from './supplier/SampleManagement';
+import ResourceCenter from './supplier/ResourceCenter';
+import TechnicalCenter from './supplier/TechnicalCenter';
+import CategoryManagement from './supplier/CategoryManagement';
+import IndustryInitWizard from './supplier/IndustryInitWizard';
+import SupplierOrderManagementCenter from './supplier/SupplierOrderManagementCenter';
+import SupplierOrderManagementCenterV2 from './supplier/SupplierOrderManagementCenterV2';
+import QuickQuotationCreator from './supplier/QuickQuotationCreator';
+import OrganizationProfile from './supplier/OrganizationProfile';
+import UserProfile from './supplier/UserProfile';
+import { UserAvatar } from './supplier/UserProfile';
 import { Badge } from './ui/badge';
 import { getCurrentUser } from '../data/authorizedUsers';
 import { isIndustryInitialized } from '../data/industryTemplates';
+import { useOrganization } from '../contexts/OrganizationContext';
 
 interface SupplierDashboardProps {
   onLogout: () => void | Promise<void>;
@@ -39,23 +43,49 @@ interface MenuItem {
 }
 
 export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) {
-  // 从 localStorage 读取上次访问的模块，如果没有则默认为 'overview'
+  const { org, userProfile } = useOrganization();
+
   const [activeTab, setActiveTab] = useState(() => {
     const savedTab = localStorage.getItem('supplierDashboardActiveTab');
     return savedTab || 'overview';
   });
+
+  // Remember which tab was active before going to a profile page so we can go back
+  const [prevTab, setPrevTab] = useState('overview');
+
+  const navigateTo = (tab: string) => {
+    // If we're navigating away from a non-profile page, remember it
+    if (activeTab !== 'organization-profile' && activeTab !== 'user-profile') {
+      setPrevTab(activeTab);
+    }
+    setActiveTab(tab);
+  };
+
+  const goBack = () => {
+    setActiveTab(prevTab);
+  };
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  
-  // 🔥 行业初始化向导状态
   const [showInitWizard, setShowInitWizard] = useState(false);
-  
-  // 🔥 拖拽状态
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  
-  // 🔥 获取当前登录的供应商信息
+  // User dropdown menu state
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside to close user menu
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   const currentUser = getCurrentUser();
-  const companyName = currentUser?.company || '供应商公司';
+  // Use org context name, fall back to authorized user data
+  const companyName = org.name !== '供应商公司' ? org.name : (currentUser?.company || '供应商公司');
   const companyShortName = companyName.length > 6 ? companyName.substring(0, 6) + '...' : companyName;
 
   // 🔥 检查是否需要显示行业初始化向导
@@ -201,7 +231,11 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
       case 'category-management':
         return <CategoryManagement />; // 🔥 产品类别管理
       case 'order-management-center':
-        return <SupplierOrderManagementCenter />; // 🔥 订单管理中心（完整功能版）
+        return <SupplierOrderManagementCenter />;
+      case 'organization-profile':
+        return <OrganizationProfile onBack={goBack} />;
+      case 'user-profile':
+        return <UserProfile onBack={goBack} />;
       default:
         return <SupplierOverview />;
     }
@@ -221,22 +255,41 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
           sidebarCollapsed ? 'w-16' : 'w-56'
         }`}
       >
-        {/* Logo区域 */}
-        <div className="h-16 flex items-center justify-center border-b border-slate-700 px-3">
+        {/* ── Org logo / company name (clickable → Organization Profile) ── */}
+        <div
+          className="h-16 flex items-center justify-center border-b border-slate-700 px-3 cursor-pointer hover:bg-slate-700/50 transition-colors group"
+          onClick={() => navigateTo('organization-profile')}
+          title="公司信息"
+        >
           {!sidebarCollapsed ? (
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 bg-gradient-to-br from-orange-500 to-red-600 rounded flex items-center justify-center flex-shrink-0">
-                <Factory className="w-5 h-5 text-white" />
-              </div>
+            <div className="flex items-center gap-2 w-full">
+              {/* Logo or placeholder */}
+              {org.logoUrl ? (
+                <img
+                  src={org.logoUrl}
+                  alt="Company Logo"
+                  className="w-9 h-9 rounded object-contain bg-white flex-shrink-0 border border-slate-600"
+                />
+              ) : (
+                <div className="w-9 h-9 bg-gradient-to-br from-orange-500 to-red-600 rounded flex items-center justify-center flex-shrink-0 text-white font-bold text-sm select-none">
+                  {companyName.slice(0, 1)}
+                </div>
+              )}
               <div className="flex-1 min-w-0">
-                <p className="text-white truncate" style={{ fontSize: '13px', fontWeight: 600 }} title={companyName}>{companyShortName}</p>
+                <p className="text-white truncate group-hover:text-orange-300 transition-colors" style={{ fontSize: '13px', fontWeight: 600 }} title={companyName}>{companyShortName}</p>
                 <p className="text-slate-400 truncate" style={{ fontSize: '10px' }}>Supplier Portal</p>
               </div>
             </div>
           ) : (
-            <div className="w-9 h-9 bg-gradient-to-br from-orange-500 to-red-600 rounded flex items-center justify-center">
-              <Factory className="w-5 h-5 text-white" />
-            </div>
+            <>
+              {org.logoUrl ? (
+                <img src={org.logoUrl} alt="Logo" className="w-9 h-9 rounded object-contain bg-white border border-slate-600" />
+              ) : (
+                <div className="w-9 h-9 bg-gradient-to-br from-orange-500 to-red-600 rounded flex items-center justify-center text-white font-bold text-sm select-none">
+                  {companyName.slice(0, 1)}
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -265,7 +318,7 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
                     )}
                     
                     <button
-                      onClick={() => setActiveTab(item.id)}
+                      onClick={() => navigateTo(item.id)}
                       className={`w-full flex items-center gap-2 px-3 py-2.5 rounded transition-colors relative cursor-pointer ${
                         isActive 
                           ? 'bg-blue-600 text-white shadow-md' 
@@ -350,36 +403,70 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
             </div>
           </div>
 
-          {/* 右侧：功能区 */}
-          <div className="flex items-center gap-4">
-            {/* 🔥 动态显示当前登录供应商的公司名称 */}
-            <div className="hidden lg:block text-right border-r pr-4">
-              <p className="text-gray-900" style={{ fontSize: '13px', fontWeight: 500 }} title={companyName}>{companyName}</p>
+          {/* ── Right toolbar ── */}
+          <div className="flex items-center gap-3">
+            {/* Company name (links to org profile) */}
+            <button
+              onClick={() => navigateTo('organization-profile')}
+              className="hidden lg:block text-right border-r pr-4 hover:opacity-70 transition-opacity"
+              title="公司信息"
+            >
+              <p className="text-gray-900" style={{ fontSize: '13px', fontWeight: 500 }}>{companyName}</p>
               <p className="text-gray-500" style={{ fontSize: '11px' }}>Supplier</p>
-            </div>
-
-            {/* 消息通知 */}
-            <button className="relative w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors">
-              <Bell className="w-4 h-4 text-gray-600" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
             </button>
 
-            {/* 用户菜单 */}
-            <div className="flex items-center gap-2 border-l pl-4">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
-                <User className="w-4 h-4 text-white" />
-              </div>
-              <div className="hidden sm:block text-right">
-                <p className="text-gray-900" style={{ fontSize: '13px', fontWeight: 500 }}>供应商账户</p>
-                <p className="text-gray-500" style={{ fontSize: '11px' }}>Supplier</p>
-              </div>
-            </div>
+            {/* Bell */}
+            <button className="relative w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors">
+              <Bell className="w-4 h-4 text-gray-600" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+            </button>
 
-            {/* 退出登录 */}
-            <Button onClick={onLogout} variant="outline" size="sm" className="gap-2">
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">退出</span>
-            </Button>
+            {/* User menu */}
+            <div className="relative border-l pl-3" ref={userMenuRef}>
+              <button
+                onClick={() => setUserMenuOpen(v => !v)}
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-100 transition-colors"
+              >
+                <UserAvatar
+                  avatarUrl={userProfile.avatarUrl}
+                  name={userProfile.name}
+                  size={32}
+                />
+                <div className="hidden sm:block text-left">
+                  <p className="text-gray-900" style={{ fontSize: '13px', fontWeight: 500 }}>{userProfile.name}</p>
+                  <p className="text-gray-500" style={{ fontSize: '11px' }}>{userProfile.role}</p>
+                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-gray-400 hidden sm:block" />
+              </button>
+
+              {/* Dropdown */}
+              {userMenuOpen && (
+                <div className="absolute right-0 top-full mt-1.5 w-48 bg-white rounded-lg border border-gray-200 shadow-lg py-1 z-50">
+                  <button
+                    onClick={() => { navigateTo('user-profile'); setUserMenuOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <UserCircle className="w-4 h-4 text-gray-400" />
+                    个人资料
+                  </button>
+                  <button
+                    onClick={() => { navigateTo('organization-profile'); setUserMenuOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Building2 className="w-4 h-4 text-gray-400" />
+                    公司信息
+                  </button>
+                  <div className="border-t border-gray-100 my-1" />
+                  <button
+                    onClick={async () => { setUserMenuOpen(false); await onLogout(); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    退出登录
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 

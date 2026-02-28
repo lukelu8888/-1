@@ -9,26 +9,39 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { User, Building2, Mail, Lock, Eye, EyeOff, Shield } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
-import { authorizedUsers, saveSession, type AuthorizedUser } from '../data/authorizedUsers';
 import { toast } from 'sonner';
-import { apiLogin, setApiToken, setBackendUser, type BackendUser } from '../api/backend-auth';
+import { signInWithEmail, fetchProfile } from '../hooks/useSupabaseAuth';
+
+const REMEMBER_CUSTOMER_KEY = 'cosun_remember_customer';
+const REMEMBER_SUPPLIER_KEY = 'cosun_remember_supplier';
+
+// 一次性迁移：清除所有旧版 remember 数据（版本号控制，只执行一次）
+const MIGRATE_VERSION = 'v2';
+function migrateRememberKeys() {
+  if (localStorage.getItem('cosun_remember_migrated') === MIGRATE_VERSION) return;
+  // 清除旧版共享 key 和可能被旧代码写入测试账号的新 key
+  localStorage.removeItem('cosun_remember_user');
+  localStorage.removeItem('cosun_remember_customer');
+  localStorage.removeItem('cosun_remember_supplier');
+  localStorage.removeItem('cosun_remember_admin');
+  localStorage.setItem('cosun_remember_migrated', MIGRATE_VERSION);
+}
 
 export function Login() {
   const { t } = useLanguage();
   const { setUser } = useUser();
   const { navigateTo } = useRouter();
   const [showPassword, setShowPassword] = useState(false);
-  const [customerData, setCustomerData] = useState({
-    // 临时：写死测试账号，方便联调（测完再删）
-    email: 'abc.customer@test.com',
-    password: 'customer123',
-    rememberMe: true,
+
+  // 初始化：读本 Portal 专属 key，同时清除旧版共享 key
+  const [customerData, setCustomerData] = useState(() => {
+    migrateRememberKeys();
+    const saved = localStorage.getItem(REMEMBER_CUSTOMER_KEY) ?? '';
+    return { email: saved, password: '', rememberMe: !!saved };
   });
-  const [manufacturerData, setManufacturerData] = useState({
-    // 临时：写死测试账号，方便联调（测完再删）
-    email: 'gd.supplier@test.com',
-    password: 'supplier123',
-    rememberMe: true,
+  const [manufacturerData, setManufacturerData] = useState(() => {
+    const saved = localStorage.getItem(REMEMBER_SUPPLIER_KEY) ?? '';
+    return { email: saved, password: '', rememberMe: !!saved };
   });
 
   // NOTE: Admin login is moved to a standalone page (`AdminLogin.tsx`).
@@ -49,112 +62,86 @@ export function Login() {
     navigateTo('admin-login');
   };
 
-  const resolveEmail = (input: string, role: AuthorizedUser['role']): string | null => {
-    const trimmed = input.trim();
-    if (!trimmed) return null;
-    if (trimmed.includes('@')) return trimmed;
-    const match = authorizedUsers.find(
-      (u) => u.role === role && u.username.toLowerCase() === trimmed.toLowerCase()
-    );
-    return match?.email ?? null;
-  };
-
-  const toSessionUser = (backendUser: BackendUser, fallbackRole: AuthorizedUser['role']): AuthorizedUser => {
-    const email = backendUser.email;
-    const match = authorizedUsers.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (match) return match;
-
-    const username = backendUser.username || email.split('@')[0];
-    const role = (backendUser.portal_role as any) || fallbackRole;
-
-    return {
-      id: String(backendUser.id ?? username),
-      username,
-      password: '',
-      email,
-      company: backendUser.company || backendUser.company_name || 'Unknown',
-      companyId: backendUser.companyId || backendUser.company_id || '',
-      role,
-      userRole: backendUser.company_user_role || 'standard_user',
-      permissions: Array.isArray(backendUser.permissions) ? backendUser.permissions : [],
-      registeredDate: backendUser.registeredDate || new Date().toISOString().slice(0, 10),
-      hasOrders: false,
-      orderCount: 0,
-      region: (backendUser.region as any) || undefined,
-      country: backendUser.country || undefined,
-      currency: (backendUser.currency as any) || undefined,
-    };
-  };
-
   const handleCustomerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    const email = resolveEmail(customerData.email, 'customer');
-    if (!email) {
-      toast.error('Please enter a valid email (or a known username).');
-      return;
-    }
+    const email = customerData.email.trim();
+    if (!email) { toast.error('Please enter your email'); return; }
 
     try {
-      const { token, user } = await apiLogin({
-        email,
-        password: customerData.password,
-        deviceName: 'web',
-      });
-      setApiToken(token);
-      setBackendUser(user);
-      saveSession(toSessionUser(user, 'customer'));
+      const { session } = await signInWithEmail(email, customerData.password);
+      if (!session?.user) throw new Error('Login failed');
+
+      const profile = await fetchProfile(session.user.id);
+
+      if (profile && profile.portal_role === 'admin') {
+        await import('../hooks/useSupabaseAuth').then(m => m.signOut());
+        throw new Error('This is an admin account. Please use the Admin Portal.');
+      }
 
       setUser({
         type: 'customer',
-        email: user.email,
-        id: user.id != null ? String(user.id) : undefined,
-        name: user.username,
-        role: user.rbac_role ?? undefined,
-        userRole: user.company_user_role ?? undefined,
-        region: user.region ?? undefined,
+        email: session.user.email!,
+        id: session.user.id,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        region: profile?.region ?? undefined,
       });
+
+      if (customerData.rememberMe) {
+        localStorage.setItem(REMEMBER_CUSTOMER_KEY, email);
+      } else {
+        localStorage.removeItem(REMEMBER_CUSTOMER_KEY);
+      }
 
       toast.success('Login successful');
       navigateTo('dashboard');
     } catch (err: any) {
-      toast.error(err?.message || 'Login failed');
+      const msg = err?.message || '';
+      toast.error(
+        msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')
+          ? 'Invalid email or password'
+          : msg || 'Login failed'
+      );
     }
   };
 
   const handleManufacturerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    const email = resolveEmail(manufacturerData.email, 'supplier');
-    if (!email) {
-      toast.error('Please enter a valid email (or a known username).');
-      return;
-    }
+    const email = manufacturerData.email.trim();
+    if (!email) { toast.error('Please enter your email'); return; }
 
     try {
-      const { token, user } = await apiLogin({
-        email,
-        password: manufacturerData.password,
-        deviceName: 'web',
-      });
-      setApiToken(token);
-      setBackendUser(user);
-      saveSession(toSessionUser(user, 'supplier'));
+      const { session } = await signInWithEmail(email, manufacturerData.password);
+      if (!session?.user) throw new Error('Login failed');
+
+      const profile = await fetchProfile(session.user.id);
+
+      if (profile && profile.portal_role === 'admin') {
+        await import('../hooks/useSupabaseAuth').then(m => m.signOut());
+        throw new Error('This is an admin account. Please use the Admin Portal.');
+      }
 
       setUser({
         type: 'supplier',
-        email: user.email,
-        id: user.id != null ? String(user.id) : undefined,
-        name: user.username,
-        role: user.rbac_role ?? undefined,
-        userRole: user.company_user_role ?? undefined,
-        region: user.region ?? undefined,
+        email: session.user.email!,
+        id: session.user.id,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        region: profile?.region ?? undefined,
       });
 
+      if (manufacturerData.rememberMe) {
+        localStorage.setItem(REMEMBER_SUPPLIER_KEY, email);
+      } else {
+        localStorage.removeItem(REMEMBER_SUPPLIER_KEY);
+      }
+
       toast.success('Login successful');
-      // SupplierDashboard 会被 App.tsx 自动展示
     } catch (err: any) {
-      toast.error(err?.message || 'Login failed');
+      const msg = err?.message || '';
+      toast.error(
+        msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')
+          ? 'Invalid email or password'
+          : msg || 'Login failed'
+      );
     }
   };
 

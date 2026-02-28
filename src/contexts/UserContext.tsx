@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { apiLogout, clearBackendUser } from '../api/backend-auth';
+import { supabase } from '../lib/supabase';
+import { fetchProfile } from '../hooks/useSupabaseAuth';
 
 export interface UserInfo {
   companyName: string;
@@ -104,6 +106,52 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
+  // 监听 Supabase Auth 状态变化（登录/登出）
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_IN' && session?.user) {
+          const profile = await fetchProfile(session.user.id);
+          if (profile) {
+            setUserState({
+              id: session.user.id,
+              email: session.user.email!,
+              name: profile.name,
+              type: profile.portal_role === 'admin' ? 'admin'
+                  : profile.portal_role === 'supplier' ? 'supplier'
+                  : 'customer',
+              role: profile.rbac_role ?? undefined,
+              userRole: profile.rbac_role ?? undefined,
+              region: profile.region ?? undefined,
+            });
+          }
+        }
+        if (event === 'SIGNED_OUT') {
+          setUserState(null);
+        }
+      }
+    );
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // 监听角色切换事件（RBAC 内部角色切换，保持兼容）
+  useEffect(() => {
+    const handleUserChanged = (e: Event) => {
+      const rbacUser = (e as CustomEvent).detail;
+      if (!rbacUser?.email) return;
+      const internalRoles = ['CEO', 'CFO', 'Sales_Director', 'Regional_Manager', 'Sales_Manager', 'Sales_Rep', 'Finance', 'Procurement', 'Admin', 'Marketing_Ops', 'Documentation_Officer'];
+      const authUser = {
+        email: rbacUser.email,
+        type: (internalRoles.includes(rbacUser.role) ? 'admin' : 'customer') as 'admin' | 'customer',
+        name: rbacUser.name,
+        role: rbacUser.role,
+      };
+      setUserState(authUser);
+    };
+    window.addEventListener('userChanged', handleUserChanged);
+    return () => window.removeEventListener('userChanged', handleUserChanged);
+  }, []);
+
   const setUser = (authUser: AuthUser) => {
     console.log('🚨🚨🚨 [UserContext] setUser 被调用！');
     console.log('🚨🚨🚨 [UserContext] 调用栈:', new Error().stack);
@@ -128,9 +176,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     try {
       await apiLogout();
-    } finally {
-      clearUser();
-    }
+    } catch { /* 静默 */ }
+    try {
+      await supabase.auth.signOut();
+    } catch { /* 静默 */ }
+    clearUser();
   };
 
   const incrementInquiryCount = () => {

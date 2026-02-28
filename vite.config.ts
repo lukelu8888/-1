@@ -73,29 +73,19 @@
       outDir: 'build',
       rollupOptions: {
         output: {
-          manualChunks: (id) => {
-            if (id.includes('node_modules')) {
-              if (id.includes('react-dom') || id.includes('react/')) return 'vendor-react';
-              if (id.includes('recharts')) return 'vendor-recharts';
-              if (id.includes('@radix-ui')) return 'vendor-radix';
-              if (id.includes('lucide-react')) return 'vendor-lucide';
-              if (id.includes('date-fns')) return 'vendor-date-fns';
-              return 'vendor';
-            }
-          },
           chunkFileNames: 'assets/[name]-[hash].js',
           entryFileNames: 'assets/[name]-[hash].js',
           assetFileNames: 'assets/[name]-[hash][extname]',
         },
       },
     },
-    server: {
-      port: 3000,
+  server: {
+    port: 5173,
       open: true,
       proxy: {
         // Local dev: forward frontend `/api/*` to Laravel backend
         '/api': {
-          target: 'https://api.cosunchina.com',
+          target: 'http://127.0.0.1:8000',
           changeOrigin: true,
         },
       },

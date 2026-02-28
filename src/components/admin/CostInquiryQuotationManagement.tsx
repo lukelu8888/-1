@@ -274,7 +274,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       customer: {
         companyName: inq.buyerInfo?.companyName || 'N/A',
         contactPerson: inq.buyerInfo?.contactPerson || 'N/A',
-        email: inq.buyerInfo?.email || inq.userEmail || 'N/A',
+        email: [inq.buyerInfo?.email, inq.userEmail].find(e => e && e !== 'N/A' && e.includes('@')) || inq.userEmail || '',
         phone: inq.buyerInfo?.phone || 'N/A',
         mobile: inq.buyerInfo?.mobile || '',
         address: inq.buyerInfo?.address || 'N/A',
@@ -554,22 +554,36 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           console.warn('⚠️ 未找到产品的成本反馈:', item.productName);
         }
         
-        // 成本单价（从采购反）
-        const costPrice = feedbackProduct?.costPrice || 0;
-        
-        // 🔥 默认利润率18%计算销售价
+        // 成本单价（从采购反馈）
+        const rawCostPrice = feedbackProduct?.costPrice || 0;
+        const feedbackCurrency = (feedbackProduct?.currency || 'CNY').toUpperCase();
+
+        // 供应商报价通常为 CNY；需换算为销售报价的 USD
+        // 使用报价单 currency 字段，默认销售报价为 USD
+        const targetCurrency = 'USD';
+        // 固定汇率兜底（实际环境应从汇率服务获取）
+        const CNY_TO_USD = 1 / 7.2;
+        const costPriceUSD = feedbackCurrency === 'CNY' || feedbackCurrency === 'RMB'
+          ? rawCostPrice * CNY_TO_USD
+          : feedbackCurrency === 'USD'
+            ? rawCostPrice
+            : rawCostPrice; // 其他货币原样保留，如有需要可扩展
+
+        // 🔥 默认利润率18%计算销售价（基于 USD 成本）
         const defaultMargin = 0.18;
-        const salesPrice = costPrice * (1 + defaultMargin);
-        const profit = salesPrice - costPrice;
+        const salesPrice = costPriceUSD * (1 + defaultMargin);
+        const profit = salesPrice - costPriceUSD;
         
-        // 总成本和总价
-        const totalCost = costPrice * item.quantity;
+        // 总成本和总价（均为 USD）
+        const totalCost = costPriceUSD * item.quantity;
         const totalPrice = salesPrice * item.quantity;
         
         console.log(`  - ${item.productName}:`, {
           quantity: item.quantity,
-          costPrice,
-          salesPrice: salesPrice.toFixed(2),
+          rawCostPrice,
+          feedbackCurrency,
+          costPriceUSD: costPriceUSD.toFixed(4),
+          salesPrice: salesPrice.toFixed(4),
           margin: (defaultMargin * 100) + '%'
         });
         
@@ -580,13 +594,13 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           specification: item.specification || '-',
           quantity: item.quantity,
           unit: item.unit || 'PCS',
-          costPrice: costPrice,
+          costPrice: costPriceUSD,
           salesPrice: salesPrice,
           profitMargin: defaultMargin,
           profit: profit,
           totalCost: totalCost,
           totalPrice: totalPrice,
-          currency: feedbackProduct?.currency || 'USD',
+          currency: targetCurrency,
           selectedSupplier: qr.purchaserFeedback.linkedSupplier || 'N/A',
           selectedSupplierName: qr.purchaserFeedback.linkedSupplier || 'N/A',
           selectedBJ: qr.purchaserFeedback.linkedBJ || 'N/A',
@@ -615,7 +629,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         // 客户信息（从QR）
         customerCompany: qr.customer?.companyName || 'N/A',
         customerName: qr.customer?.contactPerson || 'N/A',
-        customerEmail: qr.customer?.email || '',
+        customerEmail: [qr.customer?.email, qr.sourceInquiry?.userEmail, qr.sourceInquiry?.buyerInfo?.email].find(e => e && e !== 'N/A' && e.includes('@')) || qr.customer?.email || '',
         customerPhone: qr.customer?.phone || '',
         customerAddress: qr.customer?.address || '',
         
@@ -1070,15 +1084,16 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                             </Button>
                           )}
 
-                          {/* 已提交状态：等待处理 */}
-                          {qr.status === 'partial' && (
+                          {/* 已提交状态：已有成本反馈时显示"下推报价管理"，否则同时显示状态提示和下推按钮 */}
+                          {qr.status === 'partial' && !hasPurchaserFeedback && (
                             <Button
                               size="sm"
-                              className="h-7 px-2 text-xs bg-gray-300 text-gray-500 cursor-not-allowed"
-                              disabled
+                              className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-700"
+                              onClick={() => handlePushToQuotationManagement(qr)}
+                              title="跳过采购反馈，直接下推到报价管理"
                             >
-                              <Clock className="w-3 h-3 mr-1" />
-                              等待处理
+                              <Package className="w-3 h-3 mr-1" />
+                              下推报价管理
                             </Button>
                           )}
 

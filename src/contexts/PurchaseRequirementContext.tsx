@@ -27,6 +27,16 @@ export interface PurchaserFeedbackProduct {
   unit: string;
   costPrice: number; // 成本单价（核心字段）
   currency: string; // 货币（CNY/USD/EUR）
+  // 🔥 价格属性（随供应商报价全程传递，决定下游核算逻辑）
+  priceType?: 'usd' | 'cny_with_tax' | 'cny_no_tax'; // 供货单价类型
+  quoteMode?: string;     // 供应商报价模式（EXW_CNY/FOB_CNY/FOB_USD/CIF_USD）
+  taxSettings?: {         // 供应商报价时的税务参数
+    vatRate: number;
+    exportRebateRate: number;
+    hasExportRebate: boolean;
+    usdRate: number;
+    eurRate: number;
+  };
   amount: number; // 总成本 = costPrice × quantity
   moq?: number; // 最小起订量
   leadTime?: string; // 交货期（如："30天"）

@@ -38,10 +38,13 @@ interface DocumentCounterData {
  */
 function getCurrentDateString(): string {
   const now = new Date();
-  const year = now.getFullYear().toString().slice(-2); // Last 2 digits of year
+  // Use local time fields explicitly (NOT toISOString which is UTC)
+  const year = now.getFullYear().toString().slice(-2);
   const month = (now.getMonth() + 1).toString().padStart(2, '0');
   const day = now.getDate().toString().padStart(2, '0');
-  return `${year}${month}${day}`;
+  const result = `${year}${month}${day}`;
+  console.log(`📅 [rfqNumberGenerator] getCurrentDateString → ${result} (local: ${now.toLocaleString()}, UTC: ${now.toUTCString()})`);
+  return result;
 }
 
 /**

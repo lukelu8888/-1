@@ -94,14 +94,108 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   const currentUser = getCurrentUser() as any;
   const effectiveUpdateOrder = onUpdateOrder || updateOrder;
 
-  // 🔥 筛选当前用户的活跃订单
-  const activeOrders = allOrders.filter(order => 
-    user?.email && 
-    order.customerEmail === user.email &&
+  // 当前客户邮箱：优先从 localStorage 直接读（不依赖 UserContext state 是否同步）
+  const customerEmail = (getCurrentUser()?.email || user?.email || '').toLowerCase();
+
+  // 🔥 从 salesContracts 直接读取已发送给当前客户的合同（兜底，不依赖 OrderContext 链路）
+  const [contractOrders, setContractOrders] = useState<any[]>([]);
+  useEffect(() => {
+    const loadContractOrders = () => {
+      const email = (getCurrentUser()?.email || '').toLowerCase();
+      if (!email) return;
+      try {
+        const allContracts: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
+        console.log(`📋 [ActiveOrders] salesContracts 共 ${allContracts.length} 条:`, allContracts.map(c => ({cn: c.contractNumber, status: c.status, cEmail: c.customerEmail})));
+        const SENT_STATUSES = new Set(['sent_to_customer', 'sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'payment_proof_uploaded', 'balance_uploaded']);
+        const sent = allContracts.filter((c: any) => {
+          const isSent = SENT_STATUSES.has(c.status);
+          const cEmail = (c.customerEmail || '').toLowerCase();
+          const isInvalidEmail = !cEmail || cEmail === 'n/a' || !cEmail.includes('@');
+          const emailMatch = cEmail === email || isInvalidEmail;
+          console.log(`  合同 ${c.contractNumber}: status=${c.status} isSent=${isSent} cEmail="${cEmail}" emailMatch=${emailMatch}`);
+          return isSent && emailMatch;
+        });
+        const orders = sent.map((c: any) => ({
+          id: c.id,
+          orderNumber: c.contractNumber,
+          customer: c.customerName,
+          customerEmail: email,
+          quotationNumber: c.quotationNumber,
+          date: (c.createdAt || '').split('T')[0],
+          expectedDelivery: c.deliveryTime,
+          totalAmount: c.totalAmount,
+          currency: c.currency || 'USD',
+          // 合同状态映射到订单状态
+          status: c.status === 'customer_confirmed' ? 'Awaiting Deposit'
+            : c.status === 'deposit_uploaded' ? 'Payment Proof Uploaded'
+            : c.status === 'deposit_confirmed' ? 'Deposit Received'
+            : c.status === 'cancelled' ? 'cancelled'
+            : 'Pending',
+          progress: 0,
+          products: (c.products || []).map((p: any) => ({
+            name: p.productName,
+            quantity: p.quantity,
+            unitPrice: p.unitPrice,
+            totalPrice: (p.quantity || 0) * (p.unitPrice || 0),
+            specs: p.specification || ''
+          })),
+          paymentStatus: 'Pending',
+          paymentTerms: c.paymentTerms,
+          shippingMethod: c.tradeTerms,
+          deliveryTerms: c.tradeTerms,
+          region: c.region,
+          country: c.customerCountry,
+          deliveryAddress: c.customerAddress,
+          contactPerson: c.contactPerson,
+          phone: c.contactPhone,
+          createdFrom: 'sales_contract',
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+        }));
+        // 额外从 orders_email key 读取（sendToCustomer 写入的备份）
+        let extraOrders: any[] = [];
+        try {
+          const orderKey = `orders_${email}`;
+          const savedOrders: any[] = JSON.parse(localStorage.getItem(orderKey) || '[]');
+          const existingNums = new Set(orders.map((o: any) => o.orderNumber));
+          extraOrders = savedOrders.filter((o: any) => !existingNums.has(o.orderNumber));
+          if (extraOrders.length > 0) {
+            console.log(`📦 [ActiveOrders] 从 ${orderKey} 额外读到 ${extraOrders.length} 条订单`);
+          }
+        } catch { /* ignore */ }
+
+        const combined = [...orders, ...extraOrders];
+        setContractOrders(combined);
+        console.log(`📦 [ActiveOrders] 最终显示 ${combined.length} 条已发送合同 (email: ${email})`);
+      } catch { /* ignore */ }
+    };
+    loadContractOrders();
+    window.addEventListener('userChanged', loadContractOrders);
+    window.addEventListener('ordersUpdated', loadContractOrders);
+    window.addEventListener('salesContractCreatedLocally', loadContractOrders);
+    return () => {
+      window.removeEventListener('userChanged', loadContractOrders);
+      window.removeEventListener('ordersUpdated', loadContractOrders);
+      window.removeEventListener('salesContractCreatedLocally', loadContractOrders);
+    };
+  }, []);
+
+  // 🔥 筛选当前用户的活跃订单（合并 OrderContext + salesContracts 两个来源）
+  const contextOrders = allOrders.filter(order =>
+    customerEmail &&
+    (order.customerEmail || '').toLowerCase() === customerEmail &&
     order.status !== 'delivered' &&
     order.status !== 'completed' &&
     order.status !== 'cancelled'
   );
+  // 合并去重
+  const seen = new Set<string>();
+  const activeOrders = [...contextOrders, ...contractOrders].filter(order => {
+    const key = order.orderNumber || order.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return order.status !== 'delivered' && order.status !== 'completed' && order.status !== 'cancelled';
+  });
 
   // 🔥 如果有initialOrderId，自动打开该订单的合同视图
   useEffect(() => {
@@ -150,6 +244,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
     switch (status.toLowerCase()) {
       case 'pending':
         return <Badge className="bg-orange-100 text-orange-700 border-orange-300 text-[11px]">Pending Confirmation</Badge>;
+      case 'customer_confirmed':
       case 'awaiting deposit':
         return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-300 text-[11px]">Awaiting Deposit</Badge>;
       case 'payment proof uploaded':
@@ -990,20 +1085,40 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
 
                 const orderId = selectedOrder.id || selectedOrder.orderNumber;
                 try {
-                  // 🔥 先落库：客户确认/协商/取消 写入后端
-                  await apiFetchJson<{ message: string; order: any }>(
-                    `/api/orders/${encodeURIComponent(orderId)}/customer-response`,
-                    {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        response: responseType,
-                        message: responseMessage.trim() || undefined,
-                      }),
-                    }
-                  );
-                  // 刷新订单列表（从后端拉取，含 customerFeedback）
+                  // 🔥 先落库：客户确认/协商/取消 写入后端（失败时静默，本地照常处理）
+                  try {
+                    await apiFetchJson<{ message: string; order: any }>(
+                      `/api/orders/${encodeURIComponent(orderId)}/customer-response`,
+                      {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          response: responseType,
+                          message: responseMessage.trim() || undefined,
+                        }),
+                      }
+                    );
+                  } catch (apiErr: any) {
+                    console.warn('⚠️ [ActiveOrders] customer-response API 失败（本地继续处理）:', apiErr?.message);
+                  }
+                  // 本地立即更新合同状态（不依赖后端）
+                  const now = new Date().toISOString();
+                  const contractNumber = selectedOrder.orderNumber || selectedOrder.id;
+                  const newContractStatus = responseType === 'accept' ? 'customer_confirmed' : responseType === 'reject' ? 'cancelled' : 'sent_to_customer';
+                  try {
+                    const allContracts: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
+                    const updated = allContracts.map((c: any) =>
+                      c.contractNumber === contractNumber
+                        ? { ...c, status: newContractStatus, updatedAt: now, customerFeedback: { type: responseType, message: responseMessage.trim(), submittedAt: now } }
+                        : c
+                    );
+                    localStorage.setItem('salesContracts', JSON.stringify(updated));
+                    console.log(`✅ [ActiveOrders] 合同 ${contractNumber} 状态已更新为 ${newContractStatus}`);
+                  } catch { /* ignore */ }
+
+                  // 刷新 contractOrders（重新从 salesContracts 读取）
                   window.dispatchEvent(new CustomEvent('ordersUpdated'));
+                  window.dispatchEvent(new CustomEvent('salesContractCreatedLocally'));
 
                   if (responseType === 'accept') {
                     const orderNumber = selectedOrder.orderNumber || selectedOrder.id;
@@ -1066,11 +1181,12 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                   
                   const arNumber = `YS-${region}-${dateStr}-${sequence}`;
                   
-                  addAccountReceivable({
+                  const newAR = {
+                    id: `ar-${Date.now()}`,
                     arNumber: arNumber,
                     orderNumber: orderNumber,
                     quotationNumber: selectedOrder.quotationNumber,
-                    contractNumber: orderNumber, // 销售合同号即订单号
+                    contractNumber: orderNumber,
                     customerName: selectedOrder.customer || user.name,
                     customerEmail: user.email,
                     region: region,
@@ -1082,16 +1198,32 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                     currency: orderCurrency,
                     status: 'pending',
                     paymentTerms: '30% T/T deposit, 70% balance before shipment',
-                    products: selectedOrder.products.map((p: any) => ({
+                    products: (selectedOrder.products || []).map((p: any) => ({
                       name: p.name,
                       quantity: p.quantity || p.qty || 0,
                       unitPrice: p.unitPrice || p.price || 0,
                       totalPrice: p.totalPrice || ((p.quantity || p.qty || 0) * (p.unitPrice || p.price || 0))
                     })),
                     paymentHistory: [],
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
                     createdBy: 'system-auto',
                     notes: `Auto-generated from customer contract acceptance. Quotation: ${selectedOrder.quotationNumber || 'N/A'}`
-                  });
+                  };
+                  // 通过 Context 更新内存（当前会话）
+                  addAccountReceivable(newAR);
+                  // 直接写 localStorage（客户端不在 FinanceProvider 内，确保财务切换角色后可读到）
+                  try {
+                    const AR_KEY = 'accountsReceivable_admin@cosun.com';
+                    const existingARs: any[] = JSON.parse(localStorage.getItem(AR_KEY) || '[]');
+                    const alreadyExists = existingARs.some((ar: any) => ar.orderNumber === orderNumber);
+                    if (!alreadyExists) {
+                      existingARs.unshift(newAR);
+                      localStorage.setItem(AR_KEY, JSON.stringify(existingARs));
+                      window.dispatchEvent(new CustomEvent('financeDataUpdated'));
+                      console.log(`✅ [ActiveOrders] AR 已直接写入 localStorage: ${arNumber}`);
+                    }
+                  } catch { /* ignore */ }
 
                   // 步骤5️⃣: 通知财务部门新的应收账款
                   sendNotificationToUser('finance@gaoshengda.com', {
@@ -1147,12 +1279,12 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                   });
                 }
 
-                setIsResponseOpen(false);
-                setResponseType(null);
-                setResponseMessage('');
-                setSelectedOrder(null);
                 } catch (e: any) {
                   toast.error(e?.message || '提交失败，请重试');
+                } finally {
+                  setIsResponseOpen(false);
+                  setResponseType(null);
+                  setResponseMessage('');
                 }
               }}
             >

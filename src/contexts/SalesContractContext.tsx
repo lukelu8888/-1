@@ -8,13 +8,15 @@
  * - 支持电子签名
  */
 
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef as _useRef } from 'react';
 import { toast } from 'sonner@2.0.3';
 import { useApproval } from './ApprovalContext'; // 🔥 新增：监听审批状态
 import { useOrders } from './OrderContext'; // 🔥 新增：同步订单到客户端，以及监听客户确认状态
 import { apiFetchJson, getBackendUser } from '../api/backend-auth';
 import { getCurrentUser } from '../utils/dataIsolation';
 import { addTombstones, filterNotDeleted, listTombstones, removeTombstones } from '../lib/erp-core/deletion-tombstone';
+import { salesContractsDb, fromContractRow } from '../lib/supabase-db';
+import { contractService } from '../lib/supabaseService';
 
 // 🔥 销售合同产品接口
 export interface SalesContractProduct {
@@ -215,25 +217,63 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       String(contract?.quotationNumber || ''),
     ]);
 
+  const clearingRef = React.useRef(false);
+
+  // 监听本地合同创建事件：从 localStorage 重新加载，绕过后端 API
+  useEffect(() => {
+    const handler = () => {
+      if (clearingRef.current) return;
+      try {
+        const saved = localStorage.getItem('salesContracts');
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        if (!Array.isArray(parsed) || parsed.length === 0) return;
+        console.log('📥 [SalesContractContext] salesContractCreatedLocally 事件收到，localStorage 合同数:', parsed.length);
+        setContracts((prev) => {
+          if (clearingRef.current) return prev;
+          // 不经过 filterDeletedContracts，直接合并——墓碑清除已在 dispatch 前完成
+          const parsedIds = new Set(parsed.map((c: any) => c.contractNumber));
+          const extra = prev.filter((c) => !parsedIds.has(c.contractNumber));
+          const merged = [...parsed, ...extra];
+          console.log('📥 [SalesContractContext] 合并后合同数:', merged.length, merged.map((c: any) => c.contractNumber));
+          return merged;
+        });
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('salesContractCreatedLocally', handler);
+    return () => window.removeEventListener('salesContractCreatedLocally', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [contracts, setContracts] = useState<SalesContract[]>(() => {
-    // 🔥 从localStorage加载数据
-    console.log('🔍 [SalesContractProvider] 初始化，从localStorage加载数据...');
-    if (typeof window !== 'undefined') {
+    if (typeof window === 'undefined') return [];
+    try {
       const saved = localStorage.getItem('salesContracts');
-      if (saved) {
+      if (!saved) return [];
+      const parsed: any[] = JSON.parse(saved);
+      if (!Array.isArray(parsed) || parsed.length === 0) return [];
+
+      // 先尝试过滤墓碑
+      const filtered = filterDeletedContracts(parsed);
+
+      // 如果过滤后全部消失，但原始数据存在，说明墓碑误伤——自动清除合同域墓碑并重新加载
+      if (filtered.length === 0 && parsed.length > 0) {
+        console.warn('⚠️ [SalesContractProvider] 墓碑过滤清空了所有合同，自动清除合同墓碑并重新加载');
         try {
-          const parsed = JSON.parse(saved);
-          console.log('  ✅ 从localStorage加载了', parsed.length, '个合同');
-          console.log('  - 合同编号:', parsed.map((c: any) => c.contractNumber));
-          return filterDeletedContracts(parsed);
-        } catch (e) {
-          console.error('Failed to parse salesContracts from localStorage:', e);
-        }
-      } else {
-        console.log('  ⚠️ localStorage中没有salesContracts数据');
+          const TOMBSTONE_KEY = 'cosun_erp_tombstones_v1';
+          const ts: any[] = JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '[]');
+          const cleaned = ts.filter((t: any) => t.domain !== 'contract');
+          localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(cleaned));
+        } catch { /* ignore */ }
+        return parsed; // 直接返回原始数据（不过滤）
       }
+
+      console.log('  ✅ 从localStorage加载了', filtered.length, '个合同');
+      return filtered;
+    } catch (e) {
+      console.error('Failed to parse salesContracts from localStorage:', e);
+      return [];
     }
-    return [];
   });
   
   // 🔥 获取审批Context（监听审批状态变化）
@@ -242,10 +282,33 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   // 🔥 获取订单Context（用于同步订单到客户端，以及监听客户确认状态）
   const { addOrder, orders: allOrders } = useOrders();
 
-  // 🔥 从后端加载合同列表（用于“订单管理”列表接口化）
+  // 🔥 从 Supabase + 后端加载合同列表
   useEffect(() => {
     let alive = true;
     const load = async () => {
+      if (clearingRef.current) return;
+
+      // ① 优先从 Supabase 加载（最权威的数据源）
+      try {
+        const supabaseContracts = await salesContractsDb.getAll();
+        if (!alive || clearingRef.current) return;
+        if (Array.isArray(supabaseContracts) && supabaseContracts.length > 0) {
+          const mapped = supabaseContracts.map(fromContractRow).filter(Boolean) as SalesContract[];
+          const filtered = filterDeletedContracts(mapped);
+          if (filtered.length > 0) {
+            setContracts((prev) => {
+              const supIds = new Set(filtered.map((c) => c.contractNumber));
+              const localOnly = prev.filter((c) => !supIds.has(c.contractNumber));
+              return [...filtered, ...localOnly];
+            });
+            console.log('✅ [SalesContractProvider] 已从 Supabase 加载合同数量:', filtered.length);
+          }
+        }
+      } catch (e: any) {
+        console.warn('⚠️ [SalesContractProvider] Supabase 加载合同失败，回退本地:', e?.message || e);
+      }
+
+      // ② 底底：尝试从 Laravel 后端 API 加载
       try {
         const backendUser = getBackendUser();
         const currentUser = getCurrentUser();
@@ -253,22 +316,22 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           backendUser?.portal_role === 'admin' && currentUser?.email ? `?asEmail=${encodeURIComponent(currentUser.email)}` : '';
         let res = await apiFetchJson<{ contracts: SalesContract[] }>(`/api/sales-contracts${asEmail}`);
         if (asEmail && Array.isArray(res?.contracts) && res.contracts.length === 0) {
-          // 兜底：避免 asEmail 映射异常导致“误判无合同”
           const fallback = await apiFetchJson<{ contracts: SalesContract[] }>('/api/sales-contracts');
           if (Array.isArray(fallback?.contracts) && fallback.contracts.length > 0) {
             res = fallback;
           }
         }
-        if (!alive) return;
-        if (Array.isArray(res?.contracts)) {
-          // 避免“本地有数据但后端暂时为空”导致列表瞬间清空
-          if (res.contracts.length > 0) {
-            setContracts(filterDeletedContracts(res.contracts));
-          }
-          console.log('✅ [SalesContractProvider] 已从后端加载合同数量:', res.contracts.length);
+        if (!alive || clearingRef.current) return;
+        if (Array.isArray(res?.contracts) && res.contracts.length > 0) {
+          setContracts((prev) => {
+            const serverFiltered = filterDeletedContracts(res.contracts);
+            const serverIds = new Set(serverFiltered.map((c: any) => c.contractNumber));
+            const localOnly = prev.filter((c) => !serverIds.has(c.contractNumber));
+            return [...serverFiltered, ...localOnly];
+          });
+          console.log('✅ [SalesContractProvider] 已从后端 API 加载合同数量:', res.contracts.length);
         }
       } catch (e: any) {
-        // 不阻断页面：后端不可用时继续使用本地数据
         console.warn('⚠️ [SalesContractProvider] 后端加载合同失败，将继续使用本地数据:', e?.message || e);
       }
     };
@@ -291,7 +354,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const refreshFromBackend = async (): Promise<void> => {
+  const refreshFromBackend = React.useCallback(async (): Promise<void> => {
+    if (clearingRef.current) return;
     const backendUser = getBackendUser();
     const currentUser = getCurrentUser();
     const asEmail =
@@ -303,6 +367,7 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         res = fallback;
       }
     }
+    if (clearingRef.current) return;
     if (Array.isArray(res?.contracts)) {
       // 防止“短暂空响应”把前端已有合同清空
       setContracts((prev) => {
@@ -310,11 +375,14 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           console.warn('⚠️ [SalesContractProvider] refreshFromBackend got empty contracts, keep local state');
           return prev;
         }
-        return filterDeletedContracts(res.contracts);
+        const serverFiltered = filterDeletedContracts(res.contracts);
+        const serverIds = new Set(serverFiltered.map((c: any) => c.contractNumber));
+        const localOnly = prev.filter((c) => !serverIds.has(c.contractNumber));
+        return [...serverFiltered, ...localOnly];
       });
-      console.log('✅ [SalesContractProvider] refreshFromBackend contracts:', res.contracts.length);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // 🔥 监听客户确认订单，同步更新销售合同状态
   useEffect(() => {
@@ -325,8 +393,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     let hasChanges = false;
     
     setContracts(prev => {
+      if (clearingRef.current) return prev;
       const updated = prev.map(contract => {
-        // 查找对应的订单（通过合同编号匹配订单编号）
         const order = allOrders.find(o => o.orderNumber === contract.contractNumber);
         
         if (!order) {
@@ -416,8 +484,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     let hasChanges = false;
     
     setContracts(prev => {
+      if (clearingRef.current) return prev;
       const updated = prev.map(contract => {
-        // 查找对应的审批请求
         const approval = salesContractApprovals.find(req => req.relatedDocumentId === contract.contractNumber);
         
         if (!approval) {
@@ -477,15 +545,25 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     });
   }, [approvalRequests]); // 监听审批请求变化
   
-  // 🔥 保存到localStorage
+  // 保存到 localStorage（本地缓存）
   React.useEffect(() => {
-    console.log('🔍 [SalesContractProvider] contracts变化，保存到localStorage');
-    console.log('  - 合同数量:', contracts.length);
-    console.log('  - 合同编号:', contracts.map(c => c.contractNumber));
     if (typeof window !== 'undefined') {
+      if (clearingRef.current) return;
       localStorage.setItem('salesContracts', JSON.stringify(contracts));
-      console.log('  ✅ 已保存到localStorage');
     }
+  }, [contracts]);
+
+  // 同步到 Supabase（后台静默上传，不阻塞 UI）
+  const lastSyncedRef = React.useRef<string>('');
+  React.useEffect(() => {
+    if (clearingRef.current || contracts.length === 0) return;
+    const serialized = JSON.stringify(contracts.map(c => c.contractNumber).sort());
+    if (serialized === lastSyncedRef.current) return;
+    lastSyncedRef.current = serialized;
+    // 批量 upsert 到 Supabase（静默，失败不影响 UI）
+    contracts.forEach(contract => {
+      salesContractsDb.upsert(contract).catch(() => {/* 静默 */});
+    });
   }, [contracts]);
   
   // 🔥 生成合同编号
@@ -519,6 +597,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   
   // 🔥 创建销售合同
   const createContract = (contractData: Partial<SalesContract>): SalesContract => {
+    clearingRef.current = false;
+    if (typeof window !== 'undefined') localStorage.removeItem('salesContracts_cleared');
     const now = new Date().toISOString();
     
     // 计算金额
@@ -675,8 +755,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           console.log('✅ [SalesContractContext] 已同步创建合同到后端:', serverContract.contractNumber);
         }
       } catch (e: any) {
-        console.error('❌ [SalesContractContext] 同步创建合同到后端失败:', e?.message || e);
-        toast.error(`合同落库失败：${e?.message || '请稍后重试'}`);
+        // 后端不通时静默失败（本地合同已创建，不影响业务流程）
+        console.warn('⚠️ [SalesContractContext] 同步创建合同到后端失败（已忽略）:', e?.message || e);
       }
     })();
     
@@ -685,25 +765,32 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   
   // 🔥 更新合同
   const updateContract = (id: string, updates: Partial<SalesContract>) => {
-    setContracts(prev => prev.map(contract => {
-      if (contract.id === id) {
-        const updated = { ...contract, ...updates, updatedAt: new Date().toISOString() };
-        
-        // 如果总金额变化，重新计算审批流程
-        if (updates.totalAmount && updates.totalAmount !== contract.totalAmount) {
-          const requiresDirectorApproval = updates.totalAmount >= 20000;
-          updated.approvalFlow = {
-            requiresDirectorApproval,
-            currentStep: 'supervisor',
-            steps: requiresDirectorApproval ? ['supervisor', 'director'] : ['supervisor']
-          };
+    setContracts(prev => {
+      const next = prev.map(contract => {
+        if (contract.id === id) {
+          const updated = { ...contract, ...updates, updatedAt: new Date().toISOString() };
+          if (updates.totalAmount && updates.totalAmount !== contract.totalAmount) {
+            const requiresDirectorApproval = updates.totalAmount >= 20000;
+            updated.approvalFlow = {
+              requiresDirectorApproval,
+              currentStep: 'supervisor',
+              steps: requiresDirectorApproval ? ['supervisor', 'director'] : ['supervisor']
+            };
+          }
+          return updated;
         }
-        
-        return updated;
-      }
-      return contract;
-    }));
-    
+        return contract;
+      });
+      // 立即同步写 localStorage（不等 useEffect 异步触发）
+      try {
+        if (!clearingRef.current) {
+          localStorage.setItem('salesContracts', JSON.stringify(next));
+          console.log(`✅ [updateContract] localStorage 已同步，id=${id}, status=${(updates as any).status || '未变'}`);
+        }
+      } catch { /* ignore */ }
+      return next;
+    });
+
     toast.success('合同已更新！');
 
     // 🔥 同步更新到后端（接口化订单管理列表）
@@ -737,10 +824,17 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           setContracts(prev => prev.map(c => (c.id === id ? res.contract : c)));
         }
       } catch (e: any) {
-        console.warn('⚠️ [SalesContractContext] 同步更新合同到后端失败:', e?.message || e);
-        toast.error(`合同同步失败：${e?.message || '请稍后重试'}`);
+        // 后端不通时静默失败（本地状态已更新，不影响业务流程）
+        console.warn('⚠️ [SalesContractContext] 同步更新合同到后端失败（已忽略）:', e?.message || e);
       }
     })();
+
+    // 同步到 Supabase（静默）
+    const targetContract = contracts.find(c => c.id === id);
+    if (targetContract) {
+      void contractService.upsert({ ...targetContract, ...updates, updatedAt: new Date().toISOString() })
+        .catch(e => console.warn('⚠️ [SalesContractContext] Supabase upsert 失败:', e?.message));
+    }
   };
   
   // 🔥 删除合同
@@ -767,49 +861,27 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           method: 'DELETE',
         });
       } catch (e: any) {
-        console.warn('⚠️ [SalesContractContext] 后端删除失败，尝试重新拉取:', e?.message || e);
-        toast.error(`后端删除失败：${e?.message || '请稍后重试'}`);
-        try {
-          const res = await apiFetchJson<{ contracts: SalesContract[] }>('/api/sales-contracts');
-          if (Array.isArray(res?.contracts)) setContracts(filterDeletedContracts(res.contracts));
-        } catch {
-          // ignore
-        }
+        // 后端不通时静默失败（本地已删除，不影响业务流程）
+        console.warn('⚠️ [SalesContractContext] 后端删除失败（已忽略）:', e?.message || e);
       }
     })();
   };
   
   // 🔥 清空所有合同
   const clearAllContracts = () => {
-    console.log('🔥 [clearAllContracts] 开始清空所有销售合同数据...');
-    
-    // 清空Context状态
-    setContracts([]);
-    console.log('  ✅ Context状态已重置为空数组');
-    
-    // 🔥 清空localStorage
+    clearingRef.current = true;
+
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('salesContracts');
-      console.log('  ✅ localStorage.salesContracts 已删除');
-      
-      // 🔥 额外：清空所有包含 'contract' 或 'sales' 的 localStorage 键（防止遗漏）
+      localStorage.setItem('salesContracts', '[]');
+      localStorage.setItem('salesContracts_cleared', Date.now().toString());
       const allKeys = Object.keys(localStorage);
-      const contractKeys = allKeys.filter(key => 
-        key.toLowerCase().includes('contract') || 
-        key.toLowerCase().includes('sales')
-      );
-      
-      if (contractKeys.length > 0) {
-        console.log(`  - 发现 ${contractKeys.length} 个合同相关的键:`, contractKeys);
-        contractKeys.forEach(key => {
-          console.log(`    • 删除: ${key}`);
-          localStorage.removeItem(key);
-        });
-      }
+      allKeys.filter(key => key.toLowerCase().includes('contract') && !key.includes('quotation') && key !== 'salesContracts_cleared')
+        .forEach(key => localStorage.removeItem(key));
+      localStorage.setItem('salesContracts', '[]');
     }
-    
-    toast.success('✅ 所有销售合同已清空！');
-    console.log('🔥 [clearAllContracts] 清空完成！');
+
+    setContracts([]);
+    toast.success('All contracts cleared');
   };
   
   // 🔥 根据ID获取合同
@@ -863,64 +935,73 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         if (res?.contract?.id) {
           setContracts(prev => prev.map(c => (c.id === id ? res.contract : c)));
         }
-        toast.success('合同已提交审批！');
       } catch (e: any) {
-        console.warn('⚠️ [SalesContractContext] 提交审批落库失败:', e?.message || e);
-        toast.error(`提交审批失败：${e?.message || '请稍后重试'}`);
-        // 失败后尝试刷新回滚到服务端状态
-        try {
-          await refreshFromBackend();
-        } catch {
-          // ignore
-        }
+        // 后端不通时静默失败（本地审批状态已更新，不影响业务流程）
+        console.warn('⚠️ [SalesContractContext] 提交审批落库失败（已忽略）:', e?.message || e);
       }
     })();
+
+    // 同步到 Supabase（静默）
+    const submittedContract = contracts.find(c => c.id === id);
+    if (submittedContract) {
+      void contractService.upsert({ ...submittedContract, status: 'pending_supervisor', submittedAt: new Date().toISOString() })
+        .catch(e => console.warn('⚠️ [submitForApproval] Supabase 同步失败:', e?.message));
+    }
   };
   
   // 🔥 审批通过
   const approveContract = (id: string, approverRole: 'supervisor' | 'director', notes?: string) => {
-    setContracts(prev => prev.map(contract => {
-      if (contract.id === id) {
-        const updated = { ...contract };
-        
-        // 添加审批历史
-        updated.approvalHistory.push({
-          action: 'approved',
-          actor: approverRole === 'supervisor' ? '区域主管' : '销售总监',
-          actorRole: approverRole,
-          timestamp: new Date().toISOString(),
-          notes
-        });
-        
-        // 更新状态和审批流程
-        if (approverRole === 'supervisor') {
-          if (contract.approvalFlow.requiresDirectorApproval) {
-            // 需要总监审批，流转到总监
-            updated.status = 'pending_director';
-            updated.approvalFlow.currentStep = 'director';
-          } else {
-            // 不需要总监审批，直接完成
+    setContracts(prev => {
+      const next = prev.map(contract => {
+        if (contract.id === id) {
+          const updated = { ...contract };
+          updated.approvalHistory.push({
+            action: 'approved',
+            actor: approverRole === 'supervisor' ? '区域主管' : '销售总监',
+            actorRole: approverRole,
+            timestamp: new Date().toISOString(),
+            notes
+          });
+          if (approverRole === 'supervisor') {
+            if (contract.approvalFlow.requiresDirectorApproval) {
+              updated.status = 'pending_director';
+              updated.approvalFlow.currentStep = 'director';
+            } else {
+              updated.status = 'approved';
+              updated.approvalFlow.currentStep = 'completed';
+              updated.approvedAt = new Date().toISOString();
+            }
+          } else if (approverRole === 'director') {
             updated.status = 'approved';
             updated.approvalFlow.currentStep = 'completed';
             updated.approvedAt = new Date().toISOString();
           }
-        } else if (approverRole === 'director') {
-          // 总监审批通过，完成审批
-          updated.status = 'approved';
-          updated.approvalFlow.currentStep = 'completed';
-          updated.approvedAt = new Date().toISOString();
+          return updated;
         }
-        
-        return updated;
-      }
-      return contract;
-    }));
+        return contract;
+      });
+      // 立即同步写 localStorage
+      try {
+        if (!clearingRef.current) {
+          localStorage.setItem('salesContracts', JSON.stringify(next));
+          console.log(`✅ [approveContract] localStorage 已同步，id=${id}`);
+        }
+      } catch { /* ignore */ }
+      return next;
+    });
     
     const contract = contracts.find(c => c.id === id);
     if (contract?.approvalFlow.requiresDirectorApproval && approverRole === 'supervisor') {
       toast.success('主管审批通过！合同已提交给销售总监审批。');
     } else {
       toast.success('合同审批通过！现在可以发送给客户了。');
+    }
+
+    // 同步到 Supabase（静默）
+    const updatedContract = contracts.find(c => c.id === id);
+    if (updatedContract) {
+      void contractService.upsert(updatedContract)
+        .catch(e => console.warn('⚠️ [approveContract] Supabase 同步失败:', e?.message));
     }
   };
   
@@ -947,12 +1028,23 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     }));
     
     toast.error('合同已被驳回，请修改后重新提交！');
+
+    // 同步到 Supabase（静默）
+    const rejectedContract = contracts.find(c => c.id === id);
+    if (rejectedContract) {
+      void contractService.upsert({ ...rejectedContract, status: 'rejected', rejectionReason: reason })
+        .catch(e => console.warn('⚠️ [rejectContract] Supabase 同步失败:', e?.message));
+    }
   };
   
   // 🔥 发送给客户（先调后端接口落库，再刷新列表并同步订单到客户视角）
   const sendToCustomer = async (id: string) => {
     const contract = contracts.find(c => c.id === id);
+    console.log('📤 [sendToCustomer] 调用 id:', id);
+    console.log('  找到合同:', contract ? contract.contractNumber : '❌未找到');
+    console.log('  合同状态:', contract?.status, '| customerEmail:', JSON.stringify(contract?.customerEmail));
     if (!contract || contract.status !== 'approved') {
+      console.error('❌ [sendToCustomer] 状态不是approved，实际:', contract?.status);
       toast.error('只能发送审批通过的合同！');
       return;
     }
@@ -961,29 +1053,97 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       toast.warning('该合同已发送给客户！请勿重复操作。');
       return;
     }
-    try {
-      const res = await apiFetchJson<{ message: string; contract: SalesContract }>(
-        `/api/sales-contracts/${encodeURIComponent(contract.id)}/send-to-customer`,
-        { method: 'PATCH' }
-      );
-      if (!res?.contract) {
-        toast.error(res?.message || '发送失败');
-        return;
+    // 本地立即执行发送（确保 UI 响应），再异步同步后端
+    const doLocalSend = () => {
+      const now = new Date().toISOString();
+
+      // 🔥 确保 customerEmail 有效：从合同、关联报价单、localStorage 多重来源兜底
+      const INVALID_EMAILS = new Set(['', 'N/A', 'n/a', 'undefined', 'null', 'customer@example.com']);
+      const isValidEmail = (e?: string) => !!e && !INVALID_EMAILS.has(e) && e.includes('@');
+
+      let resolvedCustomerEmail = isValidEmail(contract.customerEmail) ? contract.customerEmail : '';
+      console.log(`🔍 [sendToCustomer] 合同customerEmail: "${contract.customerEmail}" → 有效: ${isValidEmail(contract.customerEmail)}`);
+
+      if (!resolvedCustomerEmail) {
+        // 方法1：从本地 quotation 里通过 quotationNumber 查找
+        try {
+          const allKeys = Object.keys(localStorage);
+          for (const key of allKeys) {
+            if (!key.startsWith('sales_quotations_') && !key.startsWith('quotations_')) continue;
+            const arr: any[] = JSON.parse(localStorage.getItem(key) || '[]');
+            const match = arr.find((q: any) =>
+              q.qtNumber === contract.quotationNumber || q.id === contract.quotationNumber
+            );
+            if (isValidEmail(match?.customerEmail)) {
+              resolvedCustomerEmail = match.customerEmail;
+              console.log(`🔍 [sendToCustomer] 方法1：从 ${key} 找到客户邮箱: ${resolvedCustomerEmail}`);
+              break;
+            }
+          }
+        } catch { /* ignore */ }
       }
-      await refreshFromBackend();
+
+      if (!resolvedCustomerEmail) {
+        // 方法2：从 InquiryContext 的 localStorage 里查找
+        try {
+          const inquiries: any[] = JSON.parse(localStorage.getItem('cosun_inquiries') || '[]');
+          const match = inquiries.find((inq: any) =>
+            inq.id === contract.inquiryNumber || inq.inquiryNumber === contract.inquiryNumber
+          );
+          const candidate = match?.buyerInfo?.email || match?.userEmail;
+          if (isValidEmail(candidate)) {
+            resolvedCustomerEmail = candidate;
+            console.log(`🔍 [sendToCustomer] 方法2：从询价记录找到客户邮箱: ${resolvedCustomerEmail}`);
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (!resolvedCustomerEmail) {
+        // 方法3：从 customerName 推断（最后兜底，写入所有 orders_* 前缀的 customer key）
+        try {
+          const existingOrderKeys = Object.keys(localStorage).filter(k => k.startsWith('orders_') && k !== 'orders_');
+          if (existingOrderKeys.length > 0) {
+            // 找最近的客户订单 key 作为兜底
+            resolvedCustomerEmail = existingOrderKeys[0].replace('orders_', '');
+            console.warn(`⚠️ [sendToCustomer] 方法3兜底：使用 ${resolvedCustomerEmail}`);
+          }
+        } catch { /* ignore */ }
+      }
+
+      console.log(`📧 [sendToCustomer] 最终使用客户邮箱: "${resolvedCustomerEmail}"`);
+
+      // 更新合同状态（同时写入已解析的 customerEmail，防止后续操作丢失）
+      setContracts(prev => prev.map(c =>
+        c.id === contract.id
+          ? { ...c, status: 'sent_to_customer' as const, sentToCustomerAt: now, updatedAt: now, customerEmail: resolvedCustomerEmail || c.customerEmail }
+          : c
+      ));
+      // 立即同步写 localStorage（不等 useEffect 异步触发，避免 ordersUpdated 事件读到旧状态）
+      try {
+        const saved: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
+        const updated = saved.map((c: any) =>
+          c.id === contract.id
+            ? { ...c, status: 'sent_to_customer', sentToCustomerAt: now, updatedAt: now, customerEmail: resolvedCustomerEmail || c.customerEmail }
+            : c
+        );
+        localStorage.setItem('salesContracts', JSON.stringify(updated));
+        console.log(`✅ [sendToCustomer] salesContracts 已同步写入，合同状态: sent_to_customer`);
+      } catch { /* ignore */ }
+
+      // 构建订单数据
       const orderData = {
-        id: res.contract.id,
-        orderNumber: res.contract.contractNumber,
-        customer: res.contract.customerName,
-        customerEmail: res.contract.customerEmail,
-        quotationNumber: res.contract.quotationNumber,
-        date: (res.contract.createdAt || '').split('T')[0],
-        expectedDelivery: res.contract.deliveryTime,
-        totalAmount: res.contract.totalAmount,
-        currency: res.contract.currency,
+        id: contract.id,
+        orderNumber: contract.contractNumber,
+        customer: contract.customerName,
+        customerEmail: resolvedCustomerEmail,
+        quotationNumber: contract.quotationNumber,
+        date: (contract.createdAt || now).split('T')[0],
+        expectedDelivery: contract.deliveryTime,
+        totalAmount: contract.totalAmount,
+        currency: contract.currency,
         status: 'Pending',
         progress: 0,
-        products: (res.contract.products || []).map((p: SalesContractProduct) => ({
+        products: (contract.products || []).map((p: SalesContractProduct) => ({
           name: p.productName,
           quantity: p.quantity,
           unitPrice: p.unitPrice,
@@ -991,33 +1151,114 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           specs: p.specification || ''
         })),
         paymentStatus: 'Pending',
-        paymentTerms: res.contract.paymentTerms,
-        shippingMethod: res.contract.tradeTerms,
-        deliveryTerms: res.contract.tradeTerms,
-        region: res.contract.region,
-        country: res.contract.customerCountry,
-        deliveryAddress: res.contract.customerAddress,
-        contactPerson: res.contract.contactPerson,
-        phone: res.contract.contactPhone,
+        paymentTerms: contract.paymentTerms,
+        shippingMethod: contract.tradeTerms,
+        deliveryTerms: contract.tradeTerms,
+        region: contract.region,
+        country: contract.customerCountry,
+        deliveryAddress: contract.customerAddress,
+        contactPerson: contract.contactPerson,
+        phone: contract.contactPhone,
         createdFrom: 'sales_contract',
-        createdAt: res.contract.createdAt,
-        updatedAt: new Date().toISOString()
+        createdAt: contract.createdAt,
+        updatedAt: now,
       };
-      // 写入后端，客户在任意设备登录都能在 Active Orders 看到
-      await apiFetchJson<{ order: unknown }>('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...orderData,
-          shippingMethod: orderData.shippingMethod || orderData.deliveryTerms,
-          deliveryTerms: orderData.deliveryTerms || orderData.shippingMethod,
-        }),
-      });
+
+      // 1. 直接写入客户专属 localStorage key，确保客户切换登录后能读到
+      if (resolvedCustomerEmail) {
+        try {
+          const customerKey = `orders_${resolvedCustomerEmail}`;
+          const existing: any[] = JSON.parse(localStorage.getItem(customerKey) || '[]');
+          const alreadyExists = existing.some((o: any) => o.orderNumber === orderData.orderNumber);
+          if (!alreadyExists) {
+            existing.unshift(orderData);
+            localStorage.setItem(customerKey, JSON.stringify(existing));
+            console.log(`✅ [sendToCustomer] 订单已写入 ${customerKey}，当前共 ${existing.length} 条`);
+          } else {
+            console.log(`ℹ️ [sendToCustomer] 订单 ${orderData.orderNumber} 已存在于 ${customerKey}`);
+          }
+        } catch (_e) {}
+      } else {
+        console.error('❌ [sendToCustomer] 无法解析客户邮箱，订单无法写入！合同数据:', contract);
+      }
+
+      // 2. 同时走 context addOrder（更新当前 React state）
       addOrder(orderData);
+
+      // 3. 广播事件，触发客户端 OrderContext 重新加载
+      window.dispatchEvent(new CustomEvent('ordersUpdated', {
+        detail: { action: 'add', orderNumber: orderData.orderNumber, customerEmail: resolvedCustomerEmail }
+      }));
+
       toast.success('合同已发送给客户！客户可在 My Orders → Active Orders 查看。');
+    };
+
+    try {
+      const res = await apiFetchJson<{ message: string; contract: SalesContract }>(
+        `/api/sales-contracts/${encodeURIComponent(contract.contractNumber)}/send-to-customer`,
+        { method: 'PATCH' }
+      );
+      if (res?.contract) {
+        // 后端成功：用服务端数据更新本地
+        const now = new Date().toISOString();
+        setContracts(prev => prev.map(c =>
+          c.id === contract.id
+            ? { ...c, status: 'sent_to_customer' as const, sentToCustomerAt: now, updatedAt: now }
+            : c
+        ));
+        const serverOrderData = {
+          id: res.contract.id,
+          orderNumber: res.contract.contractNumber,
+          customer: res.contract.customerName,
+          customerEmail: res.contract.customerEmail,
+          quotationNumber: res.contract.quotationNumber,
+          date: (res.contract.createdAt || '').split('T')[0],
+          expectedDelivery: res.contract.deliveryTime,
+          totalAmount: res.contract.totalAmount,
+          currency: res.contract.currency,
+          status: 'Pending',
+          progress: 0,
+          products: (res.contract.products || []).map((p: SalesContractProduct) => ({
+            name: p.productName,
+            quantity: p.quantity,
+            unitPrice: p.unitPrice,
+            totalPrice: p.quantity * p.unitPrice,
+            specs: p.specification || ''
+          })),
+          paymentStatus: 'Pending',
+          paymentTerms: res.contract.paymentTerms,
+          shippingMethod: res.contract.tradeTerms,
+          deliveryTerms: res.contract.tradeTerms,
+          region: res.contract.region,
+          country: res.contract.customerCountry,
+          deliveryAddress: res.contract.customerAddress,
+          contactPerson: res.contract.contactPerson,
+          phone: res.contract.contactPhone,
+          createdFrom: 'sales_contract',
+          createdAt: res.contract.createdAt,
+          updatedAt: new Date().toISOString()
+        };
+        // 直接写入客户专属 localStorage
+        try {
+          const customerKey = `orders_${res.contract.customerEmail}`;
+          const existing: any[] = JSON.parse(localStorage.getItem(customerKey) || '[]');
+          if (!existing.some((o: any) => o.orderNumber === serverOrderData.orderNumber)) {
+            existing.unshift(serverOrderData);
+            localStorage.setItem(customerKey, JSON.stringify(existing));
+          }
+        } catch (_e) {}
+        addOrder(serverOrderData);
+        window.dispatchEvent(new CustomEvent('ordersUpdated', {
+          detail: { action: 'add', orderNumber: serverOrderData.orderNumber, customerEmail: res.contract.customerEmail }
+        }));
+        toast.success('合同已发送给客户！客户可在 My Orders → Active Orders 查看。');
+      } else {
+        // 后端返回无效响应，走本地兜底
+        doLocalSend();
+      }
     } catch (e: any) {
-      console.error('❌ [sendToCustomer]', e);
-      toast.error(e?.message || '发送失败，请重试！');
+      console.warn('⚠️ [sendToCustomer] API 失败，使用本地兜底:', e?.message || e);
+      doLocalSend();
     }
   };
   

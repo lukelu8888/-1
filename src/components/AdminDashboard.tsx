@@ -35,6 +35,9 @@ import CustomerRelationshipManagerPro from './crm/CustomerRelationshipManagerPro
 // import { AdminFloatingToolbar } from './AdminFloatingToolbar'; // 🔧 Admin浮动工具栏 - 已禁用
 import { useAuth } from '../hooks/useAuth'; // 🔥 导入认证钩子
 import { hasPermission, type Permission } from '../lib/rbac-config'; // 🔥 导入权限检查函数
+import { useAdminOrganization } from '../contexts/AdminOrganizationContext';
+import AdminOrganizationProfile from './admin/AdminOrganizationProfile';
+import AdminUserProfile, { AdminUserAvatar } from './admin/AdminUserProfile';
 import FinanceDashboard from './dashboards/FinanceDashboardPro'; // 🔥 财务专员作台（Pro版 - 大厂级专业财务看板）
 import ProcurementDashboard from './dashboards/ProcurementDashboard'; // 🔥 采购专员工作台
 import MarketingOpsDashboard from './dashboards/MarketingOpsDashboard'; // 🔥 运营专员工作台
@@ -79,7 +82,20 @@ interface AdminDashboardProps {
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   // 🔥 获取当前登录用户
   const { currentUser } = useAuth();
-  
+  const { adminOrg, adminUserProfile } = useAdminOrganization();
+
+  // user menu dropdown state
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  // previous tab (for back navigation from profile pages)
+  const [prevTab, setPrevTab] = useState('overview');
+
+  const navigateTo = (tab: string) => {
+    setPrevTab(activeTab);
+    setActiveTab(tab);
+    setUserMenuOpen(false);
+  };
+  const goBack = () => setActiveTab(prevTab);
+
   // 从 localStorage 读取上次访问的模块，如果没有则默认为 'overview'
   const [activeTab, setActiveTab] = useState(() => {
     // 🔥 修复：根据用户角色设置默认Tab，不从localStorage读取
@@ -936,6 +952,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         return <SalesForecastingTargetsProMaxEditable />;
       case 'sales-data-management': // 销售数据管理与计算中心
         return <SalesDataManagementCenter />;
+      case 'admin-company-profile':
+        return <AdminOrganizationProfile onBack={goBack} />;
+      case 'admin-user-profile':
+        return <AdminUserProfile onBack={goBack} />;
       default:
         return <AdminOverview onNavigateToAPIDemo={() => setActiveTab('social-media-marketing')} />;
     }
@@ -950,24 +970,46 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           width: sidebarCollapsed ? '64px' : `${sidebarWidth}px` 
         }}
       >
-        {/* Logo区域 */}
-        <div className="h-16 flex items-center justify-center border-b border-slate-700 px-3">
+        {/* Logo区域 - 点击进入公司信息页 */}
+        <button
+          onClick={() => navigateTo('admin-company-profile')}
+          className="h-16 flex items-center justify-center border-b border-slate-700 px-3 w-full hover:bg-slate-700/50 transition-colors group"
+          title="公司信息"
+        >
           {!sidebarCollapsed ? (
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 bg-gradient-to-br from-red-500 to-red-700 rounded flex items-center justify-center flex-shrink-0">
-                <Building2 className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-white truncate" style={{ fontSize: '13px', fontWeight: 600 }}>高盛达富</p>
+            <div className="flex items-center gap-2 w-full">
+              {adminOrg.logoUrl ? (
+                <img
+                  src={adminOrg.logoUrl}
+                  alt="Company Logo"
+                  className="w-9 h-9 rounded object-contain bg-white/10 flex-shrink-0"
+                />
+              ) : (
+                <div className="w-9 h-9 bg-gradient-to-br from-red-500 to-red-700 rounded flex items-center justify-center flex-shrink-0">
+                  <Building2 className="w-5 h-5 text-white" />
+                </div>
+              )}
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-white truncate group-hover:text-red-300 transition-colors" style={{ fontSize: '13px', fontWeight: 600 }}>
+                  {adminOrg.nameCN || '高盛达富'}
+                </p>
                 <p className="text-slate-400 truncate" style={{ fontSize: '10px' }}>Admin Portal</p>
               </div>
             </div>
           ) : (
-            <div className="w-9 h-9 bg-gradient-to-br from-red-500 to-red-700 rounded flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-white" />
-            </div>
+            adminOrg.logoUrl ? (
+              <img
+                src={adminOrg.logoUrl}
+                alt="Company Logo"
+                className="w-9 h-9 rounded object-contain bg-white/10"
+              />
+            ) : (
+              <div className="w-9 h-9 bg-gradient-to-br from-red-500 to-red-700 rounded flex items-center justify-center">
+                <Building2 className="w-5 h-5 text-white" />
+              </div>
+            )
           )}
-        </div>
+        </button>
 
         {/* 导航菜单 */}
         <nav className="flex-1 overflow-y-auto py-4 px-2">
@@ -1240,7 +1282,72 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           <div className="flex items-center gap-3">
             {/* 🔥 用户角色切换器 */}
             <UserRoleSwitcher />
-            
+
+            {/* 用户头像 + 下拉菜单 */}
+            <div className="relative">
+              <button
+                onClick={() => setUserMenuOpen(v => !v)}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                title="个人菜单"
+              >
+                <AdminUserAvatar
+                  avatarUrl={adminUserProfile.avatarUrl}
+                  name={currentUser?.name || adminUserProfile.name}
+                  size={32}
+                />
+                <div className="hidden sm:block text-left">
+                  <p className="text-[13px] font-medium text-slate-800 leading-tight">
+                    {currentUser?.name || adminUserProfile.name || '管理员'}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {currentUser?.role || adminUserProfile.role || 'Admin'}
+                  </p>
+                </div>
+                <Edit className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+
+              {userMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setUserMenuOpen(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden">
+                    <div className="px-3 py-2.5 border-b border-slate-100">
+                      <p className="text-[12px] font-semibold text-slate-700 truncate">
+                        {currentUser?.name || adminUserProfile.name}
+                      </p>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        {currentUser?.email || ''}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => navigateTo('admin-user-profile')}
+                      className="w-full text-left px-3 py-2.5 text-[13px] text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition-colors"
+                    >
+                      <Edit className="w-3.5 h-3.5 text-slate-400" />
+                      个人资料
+                    </button>
+                    <button
+                      onClick={() => navigateTo('admin-company-profile')}
+                      className="w-full text-left px-3 py-2.5 text-[13px] text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition-colors"
+                    >
+                      <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                      公司信息
+                    </button>
+                    <div className="border-t border-slate-100" />
+                    <button
+                      onClick={() => { setUserMenuOpen(false); onLogout(); }}
+                      className="w-full text-left px-3 py-2.5 text-[13px] text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      退出登录
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
             <Button 
               variant="outline" 
               size="sm"

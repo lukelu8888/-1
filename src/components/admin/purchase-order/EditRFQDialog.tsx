@@ -14,6 +14,16 @@ import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { TERMS_OPTIONS } from './purchaseOrderConstants';
+import { authorizedUsers } from '../../../data/authorizedUsers';
+
+// Derive supplier company names from authorised users list
+const SUPPLIER_COMPANY_OPTIONS: string[] = Array.from(
+  new Set(
+    authorizedUsers
+      .filter((u: any) => u.role === 'supplier' && u.company)
+      .map((u: any) => u.company as string)
+  )
+).sort();
 
 type EditRFQDialogProps = {
   showEditRFQDialog: boolean;
@@ -65,14 +75,14 @@ export const EditRFQDialog: React.FC<EditRFQDialogProps> = ({
             <div className="bg-green-50 border border-green-200 rounded-lg p-3">
               <h4 className="text-xs font-semibold text-green-900 mb-2">🏭 供应商信息</h4>
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-[10px] text-gray-600">公司名称</Label>
-                  <Input
-                    value={editRFQData.supplier?.companyName || ''}
-                    onChange={(e) => setEditRFQData({ ...editRFQData, supplier: { ...editRFQData.supplier, companyName: e.target.value } })}
-                    className="text-xs h-7"
-                  />
-                </div>
+                <EditableSelect
+                  label="公司名称"
+                  value={editRFQData.supplier?.companyName || ''}
+                  onChange={(val) => setEditRFQData({ ...editRFQData, supplier: { ...editRFQData.supplier, companyName: val } })}
+                  options={SUPPLIER_COMPANY_OPTIONS}
+                  placeholder="搜索或输入供应商名称..."
+                  searchable
+                />
                 <div>
                   <Label className="text-[10px] text-gray-600">联系人</Label>
                   <Input

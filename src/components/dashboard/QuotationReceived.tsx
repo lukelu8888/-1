@@ -42,6 +42,54 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
     setSelectedIds([]);
   }, [user?.email]);
 
+  const readCustomerBridge = (email: string): any[] => {
+    try {
+      const raw = localStorage.getItem('customer_quotations_bridge');
+      if (!raw) return [];
+      const all: any[] = JSON.parse(raw);
+      return all.filter((q: any) =>
+        String(q.customerEmail || '').toLowerCase() === email.toLowerCase()
+      );
+    } catch { return []; }
+  };
+
+  const mergeWithBridge = (apiList: any[], email: string): any[] => {
+    const bridge = readCustomerBridge(email);
+    if (bridge.length === 0) return apiList;
+
+    const bridgeMap = new Map<string, any>();
+    bridge.forEach((b: any) => {
+      if (b.qtNumber) bridgeMap.set(String(b.qtNumber), b);
+      if (b.id) bridgeMap.set(String(b.id), b);
+    });
+
+    const patched = apiList.map((q: any) => {
+      const bridgeEntry = bridgeMap.get(String(q.qtNumber)) || bridgeMap.get(String(q.id));
+      if (!bridgeEntry) return q;
+
+      // 客户已确认（accepted）时不降级，完全以 API 为准
+      if (q.customerStatus === 'accepted') return q;
+
+      // bridge 里是 sent（业务员刚发 / 重发），无论 API 是 not_sent 还是 rejected，都用 bridge 覆盖
+      // 因为 bridge 代表业务员最新的发送操作，比 DB 里的旧 rejected 状态更新
+      if (bridgeEntry.customerStatus === 'sent') {
+        return { ...q, ...bridgeEntry };
+      }
+
+      // 其他情况：API 是 not_sent 时，用 bridge 覆盖
+      if (q.customerStatus === 'not_sent' && bridgeEntry.customerStatus !== 'not_sent') {
+        return { ...q, ...bridgeEntry };
+      }
+
+      return q;
+    });
+
+    // 把 bridge 里 API 没有的条目也加进来
+    const patchedIds = new Set(patched.map((q: any) => String(q.qtNumber || q.id)));
+    const extra = bridge.filter((b: any) => !patchedIds.has(String(b.qtNumber || b.id)));
+    return [...patched, ...extra];
+  };
+
   // 🔥 从服务器加载“客户收到的报价”（接口：GET /api/sales-quotations，customer 角色会自动按 customer_email 过滤）
   useEffect(() => {
     if (!user?.email) return;
@@ -55,13 +103,15 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
         const url = `/api/sales-quotations?view=customer&t=${Date.now()}`;
         const res = await apiFetchJson<{ quotations: any[] }>(url, { cache: 'no-store' as any });
         if (!alive) return;
-        setServerQuotations(Array.isArray(res?.quotations) ? res.quotations : []);
+        const apiList = Array.isArray(res?.quotations) ? res.quotations : [];
+        setServerQuotations(mergeWithBridge(apiList, user.email!));
         setLastFetchedAt(new Date().toISOString());
       } catch (e: any) {
         console.error('❌ [QuotationReceived] 加载 /api/sales-quotations 失败:', e);
         if (!alive) return;
-        setServerQuotations([]);
-        setLastError(e?.message || 'Request failed');
+        const bridgeOnly = readCustomerBridge(user.email!);
+        setServerQuotations(bridgeOnly);
+        setLastError(bridgeOnly.length > 0 ? null : (e?.message || 'Request failed'));
         setLastFetchedAt(new Date().toISOString());
       } finally {
         if (!alive) return;
@@ -114,7 +164,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
   // 🔥 后端已按customer_email过滤，这里只做状态兜底过滤
   const quotations = (serverQuotations || [])
     .filter((q: any) =>
-      filterNotDeleted('quotation', [q], (item: any) => [
+      filterNotDeleted('customer_quotation', [q], (item: any) => [
         String(item?.id || ''),
         String(item?.qtNumber || ''),
         String(item?.quotationNumber || ''),
@@ -383,7 +433,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
       }
 
       if (deletionMarkers.length > 0) {
-        addTombstones('quotation', deletionMarkers, {
+        addTombstones('customer_quotation', deletionMarkers, {
           reason: 'manual_delete',
           deletedBy: user?.email || 'unknown',
         });
@@ -505,6 +555,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Valid Until</TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Product</TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Quantity</TableHead>
+                  <TableHead className="font-bold" style={{ fontSize: '14px' }}>Unit Price</TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Total Price</TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Status</TableHead>
                   <TableHead className="font-bold text-right" style={{ fontSize: '14px' }}>Actions</TableHead>
@@ -580,8 +631,19 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                         )}
                       </TableCell>
                       <TableCell className="text-xs text-gray-700">{totalQuantity} pcs</TableCell>
+                      <TableCell className="text-xs text-gray-700">
+                        {(() => {
+                          const firstItem = quotation.items?.[0];
+                          const up = Number(firstItem?.salesPrice ?? firstItem?.unitPrice ?? firstItem?.quotePrice ?? 0);
+                          if (!up) return '—';
+                          const currency = quotation.currency || firstItem?.currency || 'USD';
+                          const symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : currency;
+                          const formatted = up.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          return `${symbol}${formatted}${quotation.items && quotation.items.length > 1 ? ' ~' : ''}`;
+                        })()}
+                      </TableCell>
                       <TableCell className="text-xs font-medium text-gray-900">
-                        ${(quotation.totalPrice || 0).toLocaleString()} {/* 🔥 使用totalPrice */}
+                        ${(quotation.totalPrice || 0).toLocaleString()}
                       </TableCell>
                       <TableCell className="text-xs">{getStatusBadgeWithTooltip(quotation)}</TableCell>
                       <TableCell className="text-xs">

@@ -6,6 +6,9 @@ import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombst
 import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
 import { emitErpEvent } from '../lib/erp-core/event-bus';
 import { subscribeErpEvent } from '../lib/erp-core/event-bus';
+import { ordersDb, fromOrderRow } from '../lib/supabase-db';
+import { supabase } from '../lib/supabase';
+import { orderService } from '../lib/supabaseService';
 
 // 订单接口
 export interface Order {
@@ -178,6 +181,22 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       const currentUser = getCurrentUser();
       if (!currentUser) return;
 
+
+      // Supabase 优先
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const supabaseOrders = currentUser.type === 'admin'
+            ? await orderService.getAll()
+            : await orderService.getByCustomerEmail(currentUser.email);
+          if (Array.isArray(supabaseOrders) && supabaseOrders.length > 0 && alive) {
+            const filtered = filterNotDeleted('order', supabaseOrders as Order[], o => getOrderMarkers(o));
+            setOrders(filtered);
+            return;
+          }
+        }
+      } catch { /* fallback to legacy sources */ }
+
       if (currentUser.type === 'admin') {
         try {
           const res = await apiFetchJson<{ orders: Order[] }>('/api/orders');
@@ -218,8 +237,67 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) {
         const customerOrders = getUserData<Order>('orders', currentUser.email);
+
+        // 额外从 salesContracts 中读取发送给当前客户的合同（兜底：customerEmail 可能写错了 key）
+        const contractOrders: Order[] = [];
+        try {
+          const allContracts: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
+          const email = currentUser.email.toLowerCase();
+          const sentContracts = allContracts.filter((c: any) => {
+            const cEmail = (c.customerEmail || '').toLowerCase();
+            const isForThisCustomer = cEmail === email;
+            const isSent = c.status === 'sent_to_customer' || c.status === 'sent' || c.status === 'customer_confirmed';
+            // 如果邮箱匹配 或 邮箱无效但合同已发送（宽松匹配）
+            const isInvalidEmail = !cEmail || cEmail === 'n/a' || !cEmail.includes('@');
+            return isSent && (isForThisCustomer || isInvalidEmail);
+          });
+          sentContracts.forEach((c: any) => {
+            contractOrders.push({
+              id: c.id,
+              orderNumber: c.contractNumber,
+              customer: c.customerName,
+              customerEmail: currentUser.email, // 用当前客户 email 修正
+              quotationNumber: c.quotationNumber,
+              date: (c.createdAt || '').split('T')[0],
+              expectedDelivery: c.deliveryTime,
+              totalAmount: c.totalAmount,
+              currency: c.currency,
+              status: c.status === 'customer_confirmed' ? 'Awaiting Deposit'
+                : c.status === 'deposit_uploaded' ? 'Payment Proof Uploaded'
+                : c.status === 'deposit_confirmed' ? 'Deposit Received'
+                : c.status === 'cancelled' ? 'cancelled'
+                : 'Pending',
+              progress: 0,
+              products: (c.products || []).map((p: any) => ({
+                name: p.productName,
+                quantity: p.quantity,
+                unitPrice: p.unitPrice,
+                totalPrice: p.quantity * p.unitPrice,
+                specs: p.specification || ''
+              })),
+              paymentStatus: 'Pending',
+              paymentTerms: c.paymentTerms,
+              shippingMethod: c.tradeTerms,
+              deliveryTerms: c.tradeTerms,
+              region: c.region,
+              country: c.customerCountry,
+              deliveryAddress: c.customerAddress,
+              contactPerson: c.contactPerson,
+              phone: c.contactPhone,
+              createdFrom: 'sales_contract',
+              createdAt: c.createdAt,
+              updatedAt: c.updatedAt,
+            } as Order);
+          });
+          if (contractOrders.length > 0) {
+            console.log(`📦 [OrderContext] 从 salesContracts 兜底读取 ${contractOrders.length} 条已发送合同`);
+          }
+        } catch { /* ignore */ }
+
+        // 合并两个来源，去重
+        const combined = [...customerOrders, ...contractOrders];
         const seen = new Set<string>();
-        const dedupedOrders = customerOrders.filter(o => {
+        const dedupedOrders = combined.filter(o => {
           const key = o.orderNumber || o.id;
           if (seen.has(key)) return false;
           seen.add(key);
@@ -233,7 +311,9 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
     loadOrders();
     const handleOrdersUpdated = () => { void loadOrders(); };
+    const handleUserChanged = () => { void loadOrders(); };
     window.addEventListener('ordersUpdated', handleOrdersUpdated);
+    window.addEventListener('userChanged', handleUserChanged);
     const unsubscribeErpEvents = subscribeErpEvent((event) => {
       if (event.domain !== 'order') return;
       if (
@@ -244,10 +324,16 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         void loadOrders();
       }
     });
+
+    // Supabase Realtime 订阅（当 Supabase 有数据时刷新）
+    const realtimeChannel = ordersDb.subscribeChanges(() => { void loadOrders(); });
+
     return () => {
       alive = false;
       window.removeEventListener('ordersUpdated', handleOrdersUpdated);
+      window.removeEventListener('userChanged', handleUserChanged);
       unsubscribeErpEvents();
+      void supabase.removeChannel(realtimeChannel);
     };
   }, []);
 
@@ -283,6 +369,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     console.log('  - 正在保存到localStorage: orders_' + customerEmail);
     setUserData('orders', updatedOrders, customerEmail);
     console.log('  ✅ localStorage保存完成');
+    // 同步到 Supabase（静默）
+    ordersDb.upsert(order).catch(() => {/* 静默 */});
     
     // 更新当前Context状态
     const currentUser = getCurrentUser();
@@ -367,6 +455,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           
           // 保存到该客户的专属存储
           setUserData('orders', updated, customerEmail);
+
+          // 同步到 Supabase（静默）
+          const updatedOrder = updated.find(o => o.id === orderId || o.orderNumber === orderId);
+          if (updatedOrder) void ordersDb.upsert(updatedOrder).catch(() => {});
           
           // 重新聚合所有数据
           const refreshedOrders = getAllCustomersData<Order>('orders');
@@ -449,6 +541,10 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         
         // 🔥 保存到localStorage
         setUserData('orders', updated, customerEmail);
+
+        // 同步到 Supabase（静默）
+        const updatedOrder = updated.find(o => o.id === orderId || o.orderNumber === orderId);
+        if (updatedOrder) void ordersDb.upsert(updatedOrder).catch(() => {});
         
         // 🔥 直接设置state，避免触发重复保存
         console.log('  - 正在更新React state...');

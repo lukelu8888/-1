@@ -10,7 +10,7 @@ import { PurchaseRequirementDocument } from './templates/PurchaseRequirementDocu
 import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
 import { QuotationDocument } from './templates/QuotationDocument';
 import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument';
-import { SalesContractDocumentPaginated } from './SalesContractDocumentPaginated';
+import { SalesContractViewerPage } from './SalesContractViewerPage'; // 🔥 新页面级 Viewer
 import type { CustomerInquiryData } from './templates/CustomerInquiryDocument';
 import type { QuotationData } from './templates/QuotationDocument';
 import type { SalesContractData } from './templates/SalesContractDocument';
@@ -33,16 +33,7 @@ import type { PurchaseRequirementDocumentData } from './templates/PurchaseRequir
  */
 
 export function DocumentTestPage() {
-  const [activeDoc, setActiveDoc] = useState<'inquiry' | 'quotation' | 'sc' | 'po' | 'rfq' | 'supplier-quotation' | 'soa' | 'ci' | 'pl' | 'pi' | 'pr' | null>('inquiry');
-  const [salesContractZoom, setSalesContractZoom] = useState(50);
-
-  const handleSalesContractZoomIn = () => {
-    setSalesContractZoom((prev) => Math.min(150, prev + 10));
-  };
-
-  const handleSalesContractZoomOut = () => {
-    setSalesContractZoom((prev) => Math.max(40, prev - 10));
-  };
+  const [activeDoc, setActiveDoc] = useState<'inquiry' | 'quotation' | 'sc' | 'po' | 'rfq' | 'supplier-quotation' | 'soa' | 'ci' | 'pl' | 'pi' | 'pr' | null>('sc');
 
   // 示例数据：客户询价单
   const sampleInquiryData: CustomerInquiryData = {
@@ -1019,103 +1010,71 @@ export function DocumentTestPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* 顶部导航 */}
-      <div className="bg-white border-b shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            {/* 🔥 可拖拽导航栏 */}
-            <div className="flex-1">
-              <DraggableDocNav
-                activeDoc={activeDoc as DocType | null}
-                onDocChange={(docType) => setActiveDoc(docType)}
-              />
-            </div>
-          </div>
+    // 占满视口，flex-col，让 SalesContractViewerPage 能 flex-1
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* ── 顶部标签导航 ── */}
+      <div className="bg-white border-b shadow-sm shrink-0">
+        <div className="max-w-7xl mx-auto px-6 py-3">
+          <DraggableDocNav
+            activeDoc={activeDoc as DocType | null}
+            onDocChange={(docType) => setActiveDoc(docType)}
+          />
         </div>
       </div>
 
-      {/* 文档预览区域 */}
-      <div className="py-8" style={{ background: '#525659', minHeight: '100vh' }}>
+      {/* ── 主内容区（flex-1，min-h-0 防止 flex 子元素撑破）── */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+
+        {/* 销售合同：新页面级 Viewer（A4 分页 + 缩放 + 打印） */}
         {activeDoc === 'sc' && (
-          <div className="fixed right-6 top-1/2 -translate-y-1/2 z-30">
-            <div className="bg-white border border-gray-300 rounded-lg shadow-md overflow-hidden">
-              <button
-                type="button"
-                onClick={handleSalesContractZoomIn}
-                disabled={salesContractZoom >= 150}
-                className="w-10 h-10 text-lg font-semibold border-b border-gray-200 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="放大销售合同"
-              >
-                +
-              </button>
-              <div className="w-10 h-10 flex items-center justify-center text-xs font-semibold text-gray-700 border-b border-gray-200">
-                {salesContractZoom}%
+          <SalesContractViewerPage
+            data={sampleSCData}
+            fileName={`${sampleSCData.contractNo}.pdf`}
+          />
+        )}
+
+        {/* 其他文档：保持原有渲染方式（灰色背景滚动区） */}
+        {activeDoc !== 'sc' && (
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: '#525659', padding: '32px 24px' }}>
+            {!activeDoc && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#e2e8f0' }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>📄</div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>请从上方选择文档类型</div>
               </div>
-              <button
-                type="button"
-                onClick={handleSalesContractZoomOut}
-                disabled={salesContractZoom <= 40}
-                className="w-10 h-10 text-lg font-semibold hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                aria-label="缩小销售合同"
-              >
-                -
-              </button>
-            </div>
+            )}
+            {activeDoc === 'inquiry' && (
+              <CustomerInquiryDocument data={sampleInquiryData} />
+            )}
+            {activeDoc === 'quotation' && (
+              <QuotationDocument data={sampleQuotationData} />
+            )}
+            {activeDoc === 'po' && (
+              <PurchaseOrderDocument data={samplePOData} />
+            )}
+            {activeDoc === 'rfq' && (
+              <SupplierRFQDocument data={sampleRFQData} />
+            )}
+            {activeDoc === 'supplier-quotation' && (
+              <SupplierQuotationDocument data={sampleSupplierQuotationData} />
+            )}
+            {activeDoc === 'pr' && (
+              <PurchaseRequirementDocument data={samplePRData} />
+            )}
+            {activeDoc === 'soa' && (
+              <StatementOfAccountDocument data={sampleSOAData} />
+            )}
+            {activeDoc === 'ci' && (
+              <CommercialInvoiceDocument data={sampleCIData} />
+            )}
+            {activeDoc === 'pl' && (
+              <PackingListDocument data={samplePLData} />
+            )}
+            {activeDoc === 'pi' && (
+              <ProformaInvoiceDocument data={samplePIData} />
+            )}
           </div>
         )}
-        <div className="max-w-none">
-          {activeDoc === 'inquiry' && (
-            <CustomerInquiryDocument data={sampleInquiryData} />
-          )}
-          {activeDoc === 'quotation' && (
-            <QuotationDocument data={sampleQuotationData} />
-          )}
-          {activeDoc === 'sc' && (
-            <div style={{ zoom: `${salesContractZoom}%` }}>
-              <SalesContractDocumentPaginated data={sampleSCData} />
-            </div>
-          )}
-          {activeDoc === 'po' && (
-            <PurchaseOrderDocument data={samplePOData} />
-          )}
-          {activeDoc === 'rfq' && (
-            <SupplierRFQDocument data={sampleRFQData} /> // 🔥 供应商询价单
-          )}
-          {activeDoc === 'supplier-quotation' && (
-            <SupplierQuotationDocument data={sampleSupplierQuotationData} /> // 🔥 供应商报价单
-          )}
-          {activeDoc === 'pr' && (
-            <PurchaseRequirementDocument data={samplePRData} /> // 🔥 采购需求单
-          )}
-          {activeDoc === 'soa' && (
-            <StatementOfAccountDocument data={sampleSOAData} />
-          )}
-          {activeDoc === 'ci' && (
-            <CommercialInvoiceDocument data={sampleCIData} />
-          )}
-          {activeDoc === 'pl' && (
-            <PackingListDocument data={samplePLData} />
-          )}
-          {activeDoc === 'pi' && (
-            <ProformaInvoiceDocument data={samplePIData} />
-          )}
-        </div>
-      </div>
-
-      {/* 页脚说明 */}
-      <div className="max-w-7xl mx-auto px-6 pb-8">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-900 mb-2">💡 使用说明</h3>
-          <ul className="text-sm text-blue-800 space-y-1">
-            <li>• 这是文档模板的测试页面，使用示例数据展示</li>
-            <li>• 🎯 <span className="font-semibold">拖拽排序：</span>鼠标悬停在标签按钮上，会显示拖拽手柄（≡），可以拖动标签调整顺序，拖拽后顺序会自动保存</li>
-            <li>• 使用右上角的缩放按钮可以放大/缩小文档（50%-200%），点击重置按钮恢复100%</li>
-            <li>• 实际使用时，数据将从 KV Store 读取业务数据</li>
-            <li>• 文档支持 A4 打印，可直接打印或导出PDF</li>
-            <li>• 文档格式符合国际商业标准，可直接发送给客户</li>
-          </ul>
-        </div>
       </div>
     </div>
   );

@@ -22,6 +22,71 @@ export interface Supplier {
   qualityRate: number;
   status: 'active' | 'inactive' | 'suspended';
   capacity: string;
+  /** URL or data-URI of supplier logo. Undefined = show placeholder. */
+  logoUrl?: string;
+}
+
+/**
+ * Normalised supplier profile used by document rendering.
+ * All fields guaranteed (with empty-string fallbacks) so renderers
+ * never have to null-check.
+ */
+export interface SupplierProfile {
+  id: string;
+  name: string;
+  nameEn: string;
+  code: string;
+  email: string;
+  phone: string;
+  address: string;
+  contactPerson: string;
+  logoUrl: string | null;   // null → show placeholder
+}
+
+/** Convert a raw Supplier record to the normalised SupplierProfile shape */
+export function toSupplierProfile(s: Supplier): SupplierProfile {
+  return {
+    id:            s.id,
+    name:          s.name,
+    nameEn:        s.nameEn,
+    code:          s.code,
+    email:         s.email,
+    phone:         s.phone,
+    address:       s.address,
+    contactPerson: s.contact,
+    logoUrl:       s.logoUrl ?? null,
+  };
+}
+
+/**
+ * Look up a supplier by email, code, id or name (in that priority order).
+ * Returns null when no match found.
+ */
+export function findSupplier(query: {
+  email?: string | null;
+  code?:  string | null;
+  id?:    string | null;
+  name?:  string | null;
+}): Supplier | null {
+  const db = suppliersDatabase;
+
+  if (query.email) {
+    const hit = db.find(s => s.email.toLowerCase() === query.email!.toLowerCase());
+    if (hit) return hit;
+  }
+  if (query.code) {
+    const hit = db.find(s => s.code === query.code);
+    if (hit) return hit;
+  }
+  if (query.id) {
+    const hit = db.find(s => s.id === query.id);
+    if (hit) return hit;
+  }
+  if (query.name) {
+    const hit = db.find(s => s.name === query.name || s.nameEn === query.name);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 // 🔥 供应商数据库 - 真实数据

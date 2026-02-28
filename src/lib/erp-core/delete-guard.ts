@@ -1,9 +1,7 @@
 export function canDeleteInquiry(record: any): boolean {
   if (!record) return false;
-  const status = String(record.status || '').toLowerCase();
-  const submitted = Boolean(record.isSubmitted);
-  // Customer-side rule: only draft/not-submitted inquiries are deletable.
-  return !submitted && (status === '' || status === 'draft');
+  // Customer-side rule: all inquiries are deletable by the client.
+  return true;
 }
 
 export function canDeleteQuotation(record: any): boolean {

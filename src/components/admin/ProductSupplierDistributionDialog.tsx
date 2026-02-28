@@ -17,6 +17,7 @@ import { Search, Building2, Package, Send, CheckCircle2, AlertCircle, Star } fro
 import { toast } from 'sonner@2.0.3';
 import { useRFQs } from '../../contexts/RFQContext';
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
+import { generateDocumentNumber, type RegionType } from '../../utils/rfqNumberGenerator';
 
 /**
  * 📋 产品-供应商分发选择器
@@ -262,15 +263,13 @@ export function ProductSupplierDistributionDialog({
   }, [quotationRequest, productSupplierMatrix]);
 
   // 生成RFQ编号
-  const generateRFQNumber = (region: string) => {
-    const regionCode = region === 'North America' ? 'NA'
-      : region === 'South America' ? 'SA'
-      : region === 'Europe & Africa' ? 'EA'
-      : 'OT';
-    
-    const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-    const random = Math.floor(Math.random() * 9000) + 1000;
-    return `RFQ-${regionCode}-${dateStr}-${random}`;
+  const generateRFQNumber = (region: string): string => {
+    const safeRegion: RegionType =
+      region === 'North America' ? 'North America'
+      : region === 'South America' ? 'South America'
+      : region === 'Europe & Africa' ? 'Europe & Africa'
+      : 'North America';
+    return generateDocumentNumber('RFQ', safeRegion);
   };
 
   // 提交：按供应商维度创建RFQ
