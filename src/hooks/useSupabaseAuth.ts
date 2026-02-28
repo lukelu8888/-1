@@ -37,11 +37,11 @@ export async function signInWithEmail(email: string, password: string) {
 export async function signOut() {
   const { error } = await supabase.auth.signOut()
   if (error) throw error
-  // 清理旧的 localStorage keys（兼容旧系统）；不清除 remember keys，它们是跨会话记忆
+  // 清理所有会话相关 keys（不清除 remember keys）
   const keysToRemove = [
     'cosun_api_token', 'cosun_backend_user', 'cosun_auth_user',
     'cosun_current_user', 'cosun_user_session', 'cosun_session_expiry',
-    'cosun_remember_user', // 旧版共享 key，统一废弃
+    'cosun_remember_user',
   ]
   keysToRemove.forEach(k => localStorage.removeItem(k))
 }
@@ -166,10 +166,19 @@ function syncToLegacyStorage(profile: SupabaseProfile) {
       name: profile.name,
       role: profile.rbac_role ?? 'Admin',
       region: profile.region ?? 'all',
+      type: 'admin',
     }
     localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser))
-    // 触发 userChanged 事件，让所有监听器更新
     window.dispatchEvent(new CustomEvent('userChanged', { detail: rbacUser }))
+  } else {
+    // 非 admin 登录时，必须清除旧的 admin cosun_current_user，防止数据隔离系统误判
+    localStorage.removeItem('cosun_current_user')
+    window.dispatchEvent(new CustomEvent('userChanged', { detail: {
+      email: profile.email,
+      type: profile.portal_role,
+      role: profile.portal_role,
+      region: profile.region ?? 'all',
+    }}))
   }
 
   // cosun_backend_user（backend-auth.ts 读取）
