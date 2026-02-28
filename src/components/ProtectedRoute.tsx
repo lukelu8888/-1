@@ -9,6 +9,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useRouter } from '../contexts/RouterContext';
+import { useUser } from '../contexts/UserContext';
 
 type PortalType = 'admin' | 'customer' | 'supplier';
 
@@ -50,98 +51,13 @@ function AccessDeniedScreen({ message, onRedirect }: { message: string; onRedire
 
 export function ProtectedRoute({ portalType, children }: ProtectedRouteProps) {
   const { navigateTo } = useRouter();
-  const [status, setStatus] = useState<'loading' | 'allowed' | 'denied' | 'unauthenticated'>('loading');
-  const [denyMessage, setDenyMessage] = useState('');
+  const { user } = useUser();
 
-  useEffect(() => {
-    let mounted = true;
-
-    const check = async () => {
-      try {
-        // 最多等 6 秒，防止永久转圈
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise<null>(resolve => setTimeout(() => resolve(null), 6000));
-        const result = await Promise.race([sessionPromise, timeoutPromise]);
-
-        if (!mounted) return;
-
-        // 超时
-        if (result === null) {
-          setStatus('unauthenticated');
-          return;
-        }
-
-        const { data: { session } } = result as Awaited<typeof sessionPromise>;
-
-        if (!session) {
-          if (mounted) setStatus('unauthenticated');
-          return;
-        }
-
-        // 优先从 user_metadata 读（无需额外网络请求），fallback 到 user_profiles
-        const metaRole = session.user.user_metadata?.portal_role as string | undefined;
-        if (metaRole) {
-          if (!mounted) return;
-          if (metaRole === portalType) {
-            setStatus('allowed');
-          } else {
-            setDenyMessage(
-              portalType === 'admin' ? '此页面仅限管理员访问'
-              : portalType === 'supplier' ? '此页面仅限供应商访问'
-              : '此页面仅限客户访问'
-            );
-            setStatus('denied');
-          }
-          return;
-        }
-
-        // fallback：从 user_profiles 获取 portal_role
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('portal_role')
-          .eq('id', session.user.id)
-          .single();
-
-        if (!mounted) return;
-
-        const userPortal = (profile?.portal_role || '') as string;
-        if (userPortal === portalType) {
-          setStatus('allowed');
-        } else {
-          setDenyMessage(
-            portalType === 'admin' ? '此页面仅限管理员访问'
-            : portalType === 'supplier' ? '此页面仅限供应商访问'
-            : '此页面仅限客户访问'
-          );
-          setStatus('denied');
-        }
-      } catch {
-        if (mounted) setStatus('unauthenticated');
-      }
-    };
-
-    void check();
-
-    // 监听 Auth 状态变化
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session && mounted) {
-        setStatus('unauthenticated');
-      } else if (session && mounted && status === 'loading') {
-        void check();
-      }
-    });
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, [portalType]);
-
-  if (status === 'loading') return <LoadingScreen />;
-
-  if (status === 'unauthenticated') {
-    // 未登录 → 跳到对应登录页
+  // UserContext 已经通过 Supabase onAuthStateChange 同步了登录状态
+  // 直接用 user.type 判断，无需再次查询 Supabase，避免转圈
+  if (!user) {
     const loginPage = portalType === 'admin' ? 'admin-login' : 'login';
+    // 延迟跳转，避免初始化瞬间闪跳
     return (
       <AccessDeniedScreen
         message="请先登录"
@@ -150,7 +66,19 @@ export function ProtectedRoute({ portalType, children }: ProtectedRouteProps) {
     );
   }
 
-  if (status === 'denied') {
+  const portalTypeMap: Record<string, string> = {
+    admin: 'admin',
+    customer: 'customer',
+    supplier: 'supplier',
+    manufacturer: 'supplier',
+  };
+  const userPortal = portalTypeMap[user.type] ?? user.type;
+
+  if (userPortal !== portalType) {
+    const denyMessage =
+      portalType === 'admin' ? '此页面仅限管理员访问'
+      : portalType === 'supplier' ? '此页面仅限供应商访问'
+      : '此页面仅限客户访问';
     return (
       <AccessDeniedScreen
         message={denyMessage}
