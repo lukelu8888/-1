@@ -57,35 +57,66 @@ export function ProtectedRoute({ portalType, children }: ProtectedRouteProps) {
     let mounted = true;
 
     const check = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      try {
+        // 最多等 6 秒，防止永久转圈
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<null>(resolve => setTimeout(() => resolve(null), 6000));
+        const result = await Promise.race([sessionPromise, timeoutPromise]);
 
-      if (!session) {
-        if (mounted) setStatus('unauthenticated');
-        return;
-      }
+        if (!mounted) return;
 
-      // 从 user_profiles 获取 portal_role
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('portal_role')
-        .eq('id', session.user.id)
-        .single();
+        // 超时
+        if (result === null) {
+          setStatus('unauthenticated');
+          return;
+        }
 
-      if (!mounted) return;
+        const { data: { session } } = result as Awaited<typeof sessionPromise>;
 
-      const userPortal = (profile?.portal_role || session.user.user_metadata?.portal_role || '') as string;
+        if (!session) {
+          if (mounted) setStatus('unauthenticated');
+          return;
+        }
 
-      if (userPortal === portalType) {
-        setStatus('allowed');
-      } else {
-        setDenyMessage(
-          portalType === 'admin'
-            ? '此页面仅限管理员访问'
-            : portalType === 'supplier'
-            ? '此页面仅限供应商访问'
+        // 优先从 user_metadata 读（无需额外网络请求），fallback 到 user_profiles
+        const metaRole = session.user.user_metadata?.portal_role as string | undefined;
+        if (metaRole) {
+          if (!mounted) return;
+          if (metaRole === portalType) {
+            setStatus('allowed');
+          } else {
+            setDenyMessage(
+              portalType === 'admin' ? '此页面仅限管理员访问'
+              : portalType === 'supplier' ? '此页面仅限供应商访问'
+              : '此页面仅限客户访问'
+            );
+            setStatus('denied');
+          }
+          return;
+        }
+
+        // fallback：从 user_profiles 获取 portal_role
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('portal_role')
+          .eq('id', session.user.id)
+          .single();
+
+        if (!mounted) return;
+
+        const userPortal = (profile?.portal_role || '') as string;
+        if (userPortal === portalType) {
+          setStatus('allowed');
+        } else {
+          setDenyMessage(
+            portalType === 'admin' ? '此页面仅限管理员访问'
+            : portalType === 'supplier' ? '此页面仅限供应商访问'
             : '此页面仅限客户访问'
-        );
-        setStatus('denied');
+          );
+          setStatus('denied');
+        }
+      } catch {
+        if (mounted) setStatus('unauthenticated');
       }
     };
 
@@ -95,6 +126,8 @@ export function ProtectedRoute({ portalType, children }: ProtectedRouteProps) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session && mounted) {
         setStatus('unauthenticated');
+      } else if (session && mounted && status === 'loading') {
+        void check();
       }
     });
 
