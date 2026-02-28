@@ -234,15 +234,13 @@ function AppContent() {
             {currentPage === 'admin-login' && <LazyAdminLogin />}
             {currentPage === 'register' && <LazyRegister />}
             {currentPage === 'dashboard' && user && user.type === 'customer' && (
-              <ProtectedRoute portalType="customer">
-                <LazyCustomerDashboard
-                  onLogout={async () => {
-                    await logout();
-                    navigateTo('home');
-                  }}
-                  userEmail={user.email || 'customer@example.com'}
-                />
-              </ProtectedRoute>
+              <LazyCustomerDashboard
+                onLogout={async () => {
+                  await logout();
+                  navigateTo('home');
+                }}
+                userEmail={user.email || 'customer@example.com'}
+              />
             )}
             {currentPage === 'dashboard' && !user && (
               <div className="flex min-h-[60vh] items-center justify-center">
