@@ -153,33 +153,29 @@ function AppContent() {
   //   return <RealHomeDepotDemo onClose={() => setShowHomeDepotDemo(false)} />;
   // }
 
-  // If user is logged in as admin, show admin dashboard (with route guard)
+  // If user is logged in as admin, show admin dashboard
   if (user && user.type === 'admin') {
     return (
-      <ProtectedRoute portalType="admin">
-        <Suspense fallback={<PageLoadFallback />}>
-          <LazyAdminDashboard onLogout={async () => {
-            await logout();
-            navigateTo('home');
-          }} />
-          <Toaster />
-        </Suspense>
-      </ProtectedRoute>
+      <Suspense fallback={<PageLoadFallback />}>
+        <LazyAdminDashboard onLogout={async () => {
+          await logout();
+          navigateTo('home');
+        }} />
+        <Toaster />
+      </Suspense>
     );
   }
 
-  // If user is logged in as supplier, show supplier dashboard (with route guard)
+  // If user is logged in as supplier, show supplier dashboard
   if (user && user.type === 'supplier') {
     return (
-      <ProtectedRoute portalType="supplier">
-        <Suspense fallback={<PageLoadFallback />}>
-          <LazySupplierDashboard onLogout={async () => {
-            await logout();
-            navigateTo('home');
-          }} />
-          <Toaster />
-        </Suspense>
-      </ProtectedRoute>
+      <Suspense fallback={<PageLoadFallback />}>
+        <LazySupplierDashboard onLogout={async () => {
+          await logout();
+          navigateTo('home');
+        }} />
+        <Toaster />
+      </Suspense>
     );
   }
 
@@ -193,21 +189,19 @@ function AppContent() {
     );
   }
 
-  // If user is logged in as customer and on dashboard page, show dashboard (with route guard)
+  // If user is logged in as customer and on dashboard page, show dashboard
   if (user && user.type === 'customer' && currentPage === 'dashboard') {
     return (
-      <ProtectedRoute portalType="customer">
-        <Suspense fallback={<PageLoadFallback />}>
-          <LazyCustomerDashboard
-            onLogout={async () => {
-              await logout();
-              navigateTo('home');
-            }}
-            userEmail={user.email || 'customer@example.com'}
-          />
-          <Toaster />
-        </Suspense>
-      </ProtectedRoute>
+      <Suspense fallback={<PageLoadFallback />}>
+        <LazyCustomerDashboard
+          onLogout={async () => {
+            await logout();
+            navigateTo('home');
+          }}
+          userEmail={user.email || 'customer@example.com'}
+        />
+        <Toaster />
+      </Suspense>
     );
   }
 
