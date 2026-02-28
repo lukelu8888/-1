@@ -69,20 +69,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
   });
 
   // Authentication user state
-  const [user, setUserState] = useState<AuthUser | null>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('cosun_auth_user');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          console.error('Failed to parse saved auth user:', e);
-          return null;
-        }
-      }
-    }
-    return null;
-  });
+  // 初始值为 null，必须等 Supabase onAuthStateChange 验证 session 后才设置
+  // 不直接信任 localStorage，防止跨 portal 污染
+  const [user, setUserState] = useState<AuthUser | null>(null);
 
   // Save to localStorage whenever userInfo changes
   useEffect(() => {
@@ -106,28 +95,54 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // 监听 Supabase Auth 状态变化（登录/登出）
+  // 监听 Supabase Auth 状态变化（登录/登出/刷新）
   useEffect(() => {
+    const applySession = async (session: any) => {
+      if (!session?.user) { setUserState(null); return; }
+      const profile = await fetchProfile(session.user.id);
+      if (profile) {
+        setUserState({
+          id: session.user.id,
+          email: session.user.email!,
+          name: profile.name,
+          type: profile.portal_role === 'admin' ? 'admin'
+              : profile.portal_role === 'supplier' ? 'supplier'
+              : 'customer',
+          role: profile.rbac_role ?? undefined,
+          userRole: profile.rbac_role ?? undefined,
+          region: profile.region ?? undefined,
+        });
+      } else {
+        // profile 查不到时，用 user_metadata 兜底
+        const meta = session.user.user_metadata ?? {};
+        const portalRole = meta.portal_role ?? 'customer';
+        setUserState({
+          id: session.user.id,
+          email: session.user.email!,
+          name: meta.name ?? session.user.email!.split('@')[0],
+          type: portalRole === 'admin' ? 'admin'
+              : portalRole === 'supplier' ? 'supplier'
+              : 'customer',
+          role: meta.rbac_role ?? undefined,
+          userRole: meta.rbac_role ?? undefined,
+          region: meta.region ?? undefined,
+        });
+      }
+    };
+
+    // 页面刷新时主动检查已有 session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      void applySession(session);
+    });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user) {
-          const profile = await fetchProfile(session.user.id);
-          if (profile) {
-            setUserState({
-              id: session.user.id,
-              email: session.user.email!,
-              name: profile.name,
-              type: profile.portal_role === 'admin' ? 'admin'
-                  : profile.portal_role === 'supplier' ? 'supplier'
-                  : 'customer',
-              role: profile.rbac_role ?? undefined,
-              userRole: profile.rbac_role ?? undefined,
-              region: profile.region ?? undefined,
-            });
-          }
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          await applySession(session);
         }
         if (event === 'SIGNED_OUT') {
           setUserState(null);
+          localStorage.removeItem('cosun_auth_user');
         }
       }
     );
