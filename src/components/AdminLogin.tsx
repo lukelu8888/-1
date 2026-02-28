@@ -381,14 +381,14 @@ export default function AdminLogin() {
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => quickLogin('ceo', 'cosun2024')}
+                      onClick={() => quickLogin('ceo', 'Cosun123!')}
                       className="px-3 py-2.5 bg-gradient-to-br from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 rounded-lg text-xs transition-all border border-purple-200 font-semibold shadow-sm hover:shadow"
                     >
                       👨‍💼 CEO
                     </button>
                     <button
                       type="button"
-                      onClick={() => quickLogin('cfo', 'cosun2024')}
+                      onClick={() => quickLogin('cfo', 'Cosun123!')}
                       className="px-3 py-2.5 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 rounded-lg text-xs transition-all border border-blue-200 font-semibold shadow-sm hover:shadow"
                     >
                       💼 CFO
@@ -404,7 +404,7 @@ export default function AdminLogin() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => quickLogin('sales.director', 'cosun2024')}
+                    onClick={() => quickLogin('sales.director', 'Cosun123!')}
                     className="w-full px-3 py-2.5 bg-gradient-to-br from-indigo-50 to-indigo-100 hover:from-indigo-100 hover:to-indigo-200 text-indigo-700 rounded-lg text-xs transition-all border border-indigo-200 font-semibold shadow-sm hover:shadow"
                   >
                     📊 销售总监
@@ -420,21 +420,21 @@ export default function AdminLogin() {
                   <div className="grid grid-cols-3 gap-1.5">
                     <button
                       type="button"
-                      onClick={() => quickLogin('john.smith', 'cosun2024')}
+                      onClick={() => quickLogin('john.smith', 'Cosun123!')}
                       className="px-2 py-2 bg-gradient-to-br from-rose-50 to-rose-100 hover:from-rose-100 hover:to-rose-200 text-rose-700 rounded-lg text-[10px] transition-all border border-rose-200 font-semibold leading-tight shadow-sm hover:shadow"
                     >
                       🇺🇸 北美
                     </button>
                     <button
                       type="button"
-                      onClick={() => quickLogin('carlos.silva', 'cosun2024')}
+                      onClick={() => quickLogin('carlos.silva', 'Cosun123!')}
                       className="px-2 py-2 bg-gradient-to-br from-amber-50 to-amber-100 hover:from-amber-100 hover:to-amber-200 text-amber-700 rounded-lg text-[10px] transition-all border border-amber-200 font-semibold leading-tight shadow-sm hover:shadow"
                     >
                       🇧🇷 南美
                     </button>
                     <button
                       type="button"
-                      onClick={() => quickLogin('hans.mueller', 'cosun2024')}
+                      onClick={() => quickLogin('hans.mueller', 'Cosun123!')}
                       className="px-2 py-2 bg-gradient-to-br from-sky-50 to-sky-100 hover:from-sky-100 hover:to-sky-200 text-sky-700 rounded-lg text-[10px] transition-all border border-sky-200 font-semibold leading-tight shadow-sm hover:shadow"
                     >
                       🇪🇺 欧非
@@ -451,21 +451,21 @@ export default function AdminLogin() {
                   <div className="grid grid-cols-3 gap-1.5">
                     <button
                       type="button"
-                      onClick={() => quickLogin('zhangwei', 'cosun123')}
+                      onClick={() => quickLogin('zhangwei', 'Cosun123!')}
                       className="px-2 py-2 bg-gradient-to-br from-orange-50 to-orange-100 hover:from-orange-100 hover:to-orange-200 text-orange-700 rounded-lg text-[10px] transition-all border border-orange-200 font-semibold leading-tight shadow-sm hover:shadow"
                     >
                       👨‍💼 张伟
                     </button>
                     <button
                       type="button"
-                      onClick={() => quickLogin('lifang', 'cosun2024')}
+                      onClick={() => quickLogin('lifang', 'Cosun123!')}
                       className="px-2 py-2 bg-gradient-to-br from-yellow-50 to-yellow-100 hover:from-yellow-100 hover:to-yellow-200 text-yellow-700 rounded-lg text-[10px] transition-all border border-yellow-200 font-semibold leading-tight shadow-sm hover:shadow"
                     >
                       👩 李芳
                     </button>
                     <button
                       type="button"
-                      onClick={() => quickLogin('wangfang', 'cosun2024')}
+                      onClick={() => quickLogin('wangfang', 'Cosun123!')}
                       className="px-2 py-2 bg-gradient-to-br from-teal-50 to-teal-100 hover:from-teal-100 hover:to-teal-200 text-teal-700 rounded-lg text-[10px] transition-all border border-teal-200 font-semibold leading-tight shadow-sm hover:shadow"
                     >
                       👩‍💻 王芳
@@ -482,14 +482,14 @@ export default function AdminLogin() {
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => quickLogin('finance', 'cosun2024')}
+                      onClick={() => quickLogin('finance', 'Cosun123!')}
                       className="px-3 py-2.5 bg-gradient-to-br from-cyan-50 to-cyan-100 hover:from-cyan-100 hover:to-cyan-200 text-cyan-700 rounded-lg text-xs transition-all border border-cyan-200 font-semibold shadow-sm hover:shadow"
                     >
                       💰 财务
                     </button>
                     <button
                       type="button"
-                      onClick={() => quickLogin('procurement', 'cosun2024')}
+                      onClick={() => quickLogin('procurement', 'Cosun123!')}
                       className="px-3 py-2.5 bg-gradient-to-br from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 text-emerald-700 rounded-lg text-xs transition-all border border-emerald-200 font-semibold shadow-sm hover:shadow"
                     >
                       🛒 采购
@@ -506,14 +506,14 @@ export default function AdminLogin() {
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => quickLogin('admin', 'admin123')}
+                      onClick={() => quickLogin('admin', 'Cosun123!')}
                       className="px-3 py-2.5 bg-gradient-to-br from-slate-50 to-slate-100 hover:from-slate-100 hover:to-slate-200 text-slate-700 rounded-lg text-xs transition-all border border-slate-200 font-semibold shadow-sm hover:shadow"
                     >
                       🛠️ 系统管理员
                     </button>
                     <button
                       type="button"
-                      onClick={() => quickLogin('marketing', 'cosun2024')}
+                      onClick={() => quickLogin('marketing', 'Cosun123!')}
                       className="px-3 py-2.5 bg-gradient-to-br from-pink-50 to-pink-100 hover:from-pink-100 hover:to-pink-200 text-pink-700 rounded-lg text-xs transition-all border border-pink-200 font-semibold shadow-sm hover:shadow"
                     >
                       📱 运营专员
@@ -529,7 +529,7 @@ export default function AdminLogin() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => quickLogin('supplier', 'supplier123')}
+                    onClick={() => quickLogin('supplier', 'Cosun123!')}
                     className="w-full px-3 py-2.5 bg-gradient-to-br from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 rounded-lg text-xs transition-all border border-green-200 font-semibold shadow-sm hover:shadow"
                   >
                     🏭 张涛 - 供应商

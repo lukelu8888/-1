@@ -412,7 +412,7 @@ export function Login() {
                           type="button"
                           onClick={() => {
                             const username = 'zhang';
-                            const password = 'supplier123';
+                            const password = 'Cosun123!';
                             const user = authenticateUser(username, password);
                             
                             if (user && user.role === 'supplier') {
@@ -431,14 +431,14 @@ export function Login() {
                             <span className="text-[10px] text-blue-600 font-semibold">A级</span>
                           </div>
                           <div className="text-[10px] text-gray-500 mt-1">电气设备 • 128订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">zhang / supplier123</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">zhang / Cosun123!</div>
                         </button>
                         
                         <button
                           type="button"
                           onClick={() => {
                             const username = 'li';
-                            const password = 'supplier123';
+                            const password = 'Cosun123!';
                             const user = authenticateUser(username, password);
                             
                             if (user && user.role === 'supplier') {
@@ -457,14 +457,14 @@ export function Login() {
                             <span className="text-[10px] text-blue-600 font-semibold">A级</span>
                           </div>
                           <div className="text-[10px] text-gray-500 mt-1">卫浴产品 • 96订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">li / supplier123</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">li / Cosun123!</div>
                         </button>
                         
                         <button
                           type="button"
                           onClick={() => {
                             const username = 'chen';
-                            const password = 'supplier123';
+                            const password = 'Cosun123!';
                             const user = authenticateUser(username, password);
                             
                             if (user && user.role === 'supplier') {
@@ -483,7 +483,7 @@ export function Login() {
                             <span className="text-[10px] text-blue-600 font-semibold">A级</span>
                           </div>
                           <div className="text-[10px] text-gray-500 mt-1">建筑材料 • 156订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">chen / supplier123</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">chen / Cosun123!</div>
                         </button>
                         
                         {/* 真实供应商账户 - B级 */}
@@ -491,7 +491,7 @@ export function Login() {
                           type="button"
                           onClick={() => {
                             const username = 'wang';
-                            const password = 'supplier123';
+                            const password = 'Cosun123!';
                             const user = authenticateUser(username, password);
                             
                             if (user && user.role === 'supplier') {
@@ -510,14 +510,14 @@ export function Login() {
                             <span className="text-[10px] text-amber-600 font-semibold">B级</span>
                           </div>
                           <div className="text-[10px] text-gray-500 mt-1">门窗配件 • 64订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">wang / supplier123</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">wang / Cosun123!</div>
                         </button>
                         
                         <button
                           type="button"
                           onClick={() => {
                             const username = 'zhao';
-                            const password = 'supplier123';
+                            const password = 'Cosun123!';
                             const user = authenticateUser(username, password);
                             
                             if (user && user.role === 'supplier') {
@@ -536,7 +536,7 @@ export function Login() {
                             <span className="text-[10px] text-amber-600 font-semibold">B级</span>
                           </div>
                           <div className="text-[10px] text-gray-500 mt-1">劳保用品 • 45订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">zhao / supplier123</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">zhao / Cosun123!</div>
                         </button>
                         
                         {/* 真实供应商账户 - C级 */}
@@ -544,7 +544,7 @@ export function Login() {
                           type="button"
                           onClick={() => {
                             const username = 'liu';
-                            const password = 'supplier123';
+                            const password = 'Cosun123!';
                             const user = authenticateUser(username, password);
                             
                             if (user && user.role === 'supplier') {
@@ -563,23 +563,23 @@ export function Login() {
                             <span className="text-[10px] text-gray-600 font-semibold">C级</span>
                           </div>
                           <div className="text-[10px] text-gray-500 mt-1">电气设备 • 18订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">liu / supplier123</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">liu / Cosun123!</div>
                         </button>
                         
                         {/* 🔥 新增询价供应商 */}
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_b', 'supplier123'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 广州优质五金</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">五金配件 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_b / supplier123</div></button>
+                        <button type="button" onClick={() => { const user = authenticateUser('supplier_b', 'Cosun123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 广州优质五金</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">五金配件 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_b / Cosun123!</div></button>
                         
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_c', 'supplier123'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 东莞精工卫浴</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">卫浴产品 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_c / supplier123</div></button>
+                        <button type="button" onClick={() => { const user = authenticateUser('supplier_c', 'Cosun123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 东莞精工卫浴</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">卫浴产品 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_c / Cosun123!</div></button>
                         
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_d', 'supplier123'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 佛山安全劳保</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">劳保用品 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_d / supplier123</div></button>
+                        <button type="button" onClick={() => { const user = authenticateUser('supplier_d', 'Cosun123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 佛山安全劳保</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">劳保用品 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_d / Cosun123!</div></button>
                         
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_e', 'supplier123'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 中山照明电器</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">LED照明 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_e / supplier123</div></button>
+                        <button type="button" onClick={() => { const user = authenticateUser('supplier_e', 'Cosun123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 中山照明电器</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">LED照明 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_e / Cosun123!</div></button>
                         
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_f', 'supplier123'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 温州五金配件</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">五金建材 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_f / supplier123</div></button>
+                        <button type="button" onClick={() => { const user = authenticateUser('supplier_f', 'Cosun123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 温州五金配件</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">五金建材 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_f / Cosun123!</div></button>
                         
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_g', 'supplier123'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 宁波电气设备</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">开关插座 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_g / supplier123</div></button>
+                        <button type="button" onClick={() => { const user = authenticateUser('supplier_g', 'Cosun123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 宁波电气设备</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">开关插座 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_g / Cosun123!</div></button>
                         
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_h', 'supplier123'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 杭州智能家居</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">智能设备 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_h / supplier123</div></button>
+                        <button type="button" onClick={() => { const user = authenticateUser('supplier_h', 'Cosun123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 杭州智能家居</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">智能设备 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_h / Cosun123!</div></button>
                       </div>
                     </div>
                   </div>
