@@ -1,94 +1,105 @@
-// 🔥 用户认证和权限管理 Hook
+// 用户认证和权限管理 Hook
+// 改造后：从 UserContext 读取 Supabase session，不再独立依赖 localStorage
+// switchUser 保留用于 Admin 内部 RBAC 角色切换
+
 import { useState, useEffect } from 'react';
-import { User, DEMO_USERS, hasPermission, Permission } from '../lib/rbac-config';
+import { useUser } from '../contexts/UserContext';
+import { User, hasPermission, Permission } from '../lib/rbac-config';
 
-// 从 localStorage 获取当前用户
-export function useAuth() {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+const INTERNAL_ROLES = [
+  'CEO', 'CFO', 'Sales_Director', 'Regional_Manager', 'Sales_Manager',
+  'Sales_Rep', 'Finance', 'Procurement', 'Admin', 'Marketing_Ops',
+  'Documentation_Officer',
+] as const;
 
-  // 🔥 从localStorage加载用户
-  const loadUserFromStorage = () => {
-    const storedUser = localStorage.getItem('cosun_current_user');
-    
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        setCurrentUser(user);
-        console.log('✅ 已加载用户:', user.name, '角色:', user.role);
-        
-        // 🔥 同步更新 cosun_auth_user（确保数据隔离逻辑正常工作）
-        // 内部员工（所有RBAC角色）都是admin类型，外部用户才是customer类型
-        const internalRoles = ['CEO', 'CFO', 'Sales_Director', 'Regional_Manager', 'Sales_Manager', 'Sales_Rep', 'Finance', 'Procurement', 'Admin', 'Marketing_Ops', 'Documentation_Officer'];
-        const authUser = {
-          email: user.email,
-          type: internalRoles.includes(user.role) ? 'admin' : 'customer'
-        };
-        localStorage.setItem('cosun_auth_user', JSON.stringify(authUser));
-      } catch (error) {
-        console.error('Failed to parse user from localStorage', error);
-        setCurrentUser(null);
-      }
-    } else {
-      // ✅ 真实登录：未登录时保持空，不再默认注入 DEMO 用户
-      setCurrentUser(null);
-    }
+function buildRbacUser(stored: any): User | null {
+  if (!stored?.email) return null;
+  return {
+    id: stored.id ?? stored.email,
+    name: stored.name ?? stored.email.split('@')[0],
+    email: stored.email,
+    role: stored.role ?? 'Admin',
+    region: stored.region ?? 'all',
   };
+}
 
+export function useAuth() {
+  const { user: authUser } = useUser();
+
+  // RBAC 角色状态：初始从 localStorage 读取（用于 Admin 内部角色切换）
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const stored = localStorage.getItem('cosun_current_user');
+      if (stored) return buildRbacUser(JSON.parse(stored));
+    } catch { /* ignore */ }
+    return null;
+  });
+  const [isLoading, setIsLoading] = useState(false);
+
+  // 当 Supabase session 变化时，同步 RBAC 用户
+  // 只在没有手动切换过角色（或切换角色的人与当前 session 不同）时覆盖
   useEffect(() => {
-    // 初始加载
-    loadUserFromStorage();
-    setIsLoading(false);
+    if (!authUser) {
+      // 登出时清空 RBAC 用户
+      setCurrentUser(null);
+      localStorage.removeItem('cosun_current_user');
+      return;
+    }
 
-    // 🔥 监听自定义事件（用于同一页面内的切换）
-    const handleUserChange = (event: CustomEvent) => {
-      console.log('🔄 检测到用户切换事件:', event.detail);
-      setCurrentUser(event.detail);
-    };
-
-    // 🔥 监听storage事件（用于跨标签页同步）
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'cosun_current_user' && e.newValue) {
-        try {
-          const user = JSON.parse(e.newValue);
-          console.log('🔄 检测到localStorage变化:', user.name);
-          setCurrentUser(user);
-        } catch (error) {
-          console.error('Failed to parse user from storage event', error);
+    if (authUser.type === 'admin') {
+      // 检查 localStorage 里是否已有同一账号的 RBAC 角色记录
+      try {
+        const stored = localStorage.getItem('cosun_current_user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          // 同一账号：保留已有的 RBAC 角色（允许角色切换器工作）
+          if (parsed.email === authUser.email) {
+            setCurrentUser(buildRbacUser(parsed));
+            return;
+          }
         }
-      }
-    };
+      } catch { /* ignore */ }
 
+      // 新登录的管理员：用 Supabase session 数据初始化 RBAC 用户
+      const rbacUser: User = {
+        id: authUser.id ?? authUser.email,
+        name: authUser.name ?? authUser.email.split('@')[0],
+        email: authUser.email,
+        role: (authUser.role as any) ?? 'Admin',
+        region: (authUser.region as any) ?? 'all',
+      };
+      setCurrentUser(rbacUser);
+      localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser));
+
+      // 同步 cosun_auth_user 供 dataIsolation 使用
+      localStorage.setItem('cosun_auth_user', JSON.stringify({
+        email: authUser.email,
+        type: 'admin',
+      }));
+    }
+  }, [authUser]);
+
+  // 监听 RBAC 角色切换事件（UserRoleSwitcher 发出）
+  useEffect(() => {
+    const handleUserChange = (event: CustomEvent) => {
+      const rbacUser = buildRbacUser(event.detail);
+      if (rbacUser) setCurrentUser(rbacUser);
+    };
     window.addEventListener('userChanged', handleUserChange as EventListener);
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('userChanged', handleUserChange as EventListener);
-      window.removeEventListener('storage', handleStorageChange);
-    };
+    return () => window.removeEventListener('userChanged', handleUserChange as EventListener);
   }, []);
 
-  // 切换用户
+  // Admin 内部角色切换（不触发 Supabase 重新登录）
   const switchUser = (user: User) => {
-    console.log('🔄 切换用户到:', user.name, '角色:', user.role);
     setCurrentUser(user);
     localStorage.setItem('cosun_current_user', JSON.stringify(user));
-    
-    // 🔥 同步更新 cosun_auth_user（用于QuotationContext等数据隔离逻辑）
-    // 内部员工（所有RBAC角色）都是admin类型，外部用户才是customer类型
-    const internalRoles = ['CEO', 'CFO', 'Sales_Director', 'Regional_Manager', 'Sales_Manager', 'Sales_Rep', 'Finance', 'Procurement', 'Admin', 'Marketing_Ops', 'Documentation_Officer'];
-    const authUser = {
+    localStorage.setItem('cosun_auth_user', JSON.stringify({
       email: user.email,
-      type: internalRoles.includes(user.role) ? 'admin' : 'customer'
-    };
-    localStorage.setItem('cosun_auth_user', JSON.stringify(authUser));
-    console.log('✅ 已同步更新 cosun_auth_user:', authUser);
-    
-    // 🔥 触发自定义事件，通知其他组件
+      type: INTERNAL_ROLES.includes(user.role as any) ? 'admin' : 'customer',
+    }));
     window.dispatchEvent(new CustomEvent('userChanged', { detail: user }));
   };
 
-  // 检查权限
   const checkPermission = (permission: Permission): boolean => {
     if (!currentUser) return false;
     return hasPermission(currentUser, permission);

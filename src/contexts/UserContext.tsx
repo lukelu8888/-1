@@ -153,28 +153,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 监听角色切换事件（RBAC 内部角色切换，保持兼容）
-  useEffect(() => {
-    const handleUserChanged = (e: Event) => {
-      const rbacUser = (e as CustomEvent).detail;
-      if (!rbacUser?.email) return;
-      const internalRoles = ['CEO', 'CFO', 'Sales_Director', 'Regional_Manager', 'Sales_Manager', 'Sales_Rep', 'Finance', 'Procurement', 'Admin', 'Marketing_Ops', 'Documentation_Officer'];
-      const authUser = {
-        email: rbacUser.email,
-        type: (internalRoles.includes(rbacUser.role) ? 'admin' : 'customer') as 'admin' | 'customer',
-        name: rbacUser.name,
-        role: rbacUser.role,
-      };
-      setUserState(authUser);
-    };
-    window.addEventListener('userChanged', handleUserChanged);
-    return () => window.removeEventListener('userChanged', handleUserChanged);
-  }, []);
-
   const setUser = (authUser: AuthUser) => {
-    console.log('🚨🚨🚨 [UserContext] setUser 被调用！');
-    console.log('🚨🚨🚨 [UserContext] 调用栈:', new Error().stack);
-    console.log('🚨🚨🚨 [UserContext] 设置的用户数据:', JSON.stringify(authUser, null, 2));
     setUserState(authUser);
   };
 

@@ -98,17 +98,7 @@ export default function AdminLogin() {
         region: profile?.region ?? 'all',
       });
 
-      // 触发 userChanged 让 RBAC 系统同步
-      const rbacUser = {
-        id: session.user.id,
-        email: session.user.email!,
-        name: profile?.name ?? session.user.email!.split('@')[0],
-        role: profile?.rbac_role ?? 'Admin',
-        region: profile?.region ?? 'all',
-      };
-      localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser));
-      window.dispatchEvent(new CustomEvent('userChanged', { detail: rbacUser }));
-
+      // useAuth 会监听 onAuthStateChange 自动同步 RBAC 用户，无需手动写 localStorage
       setIsLoading(false);
       return; // 登录成功，后面由 onAuthStateChange / setUser 触发页面跳转
 
@@ -140,16 +130,7 @@ export default function AdminLogin() {
         await signOut();
         throw new Error('此账号无管理员权限');
       }
-      // UserContext via onAuthStateChange will handle state update
-      const rbacUser = {
-        id: session.user.id,
-        email: session.user.email!,
-        name: profile?.name ?? session.user.email!.split('@')[0],
-        role: profile?.rbac_role ?? 'Admin',
-        region: profile?.region ?? 'all',
-      };
-      localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser));
-      window.dispatchEvent(new CustomEvent('userChanged', { detail: rbacUser }));
+      // useAuth 监听 onAuthStateChange 自动同步 RBAC 用户
     } catch (err: any) {
       setError(err?.message || '快速登录失败');
     } finally {
