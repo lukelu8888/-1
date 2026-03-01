@@ -475,13 +475,25 @@ export const inquiryService = {
 
   async upsert(inquiry: any) {
     const row = toInquiryRow(inquiry)
+    // 先尝试按 id upsert
     const { data, error } = await supabase
       .from('inquiries')
-      .upsert(row, { onConflict: 'id' })
+      .upsert(row, { onConflict: 'id', ignoreDuplicates: false })
       .select()
       .single()
-    if (error) return handleError(error, 'upsert inquiry')
-    return fromInquiryRow(data)
+    if (!error) return fromInquiryRow(data)
+    // inquiry_number unique 冲突：改为按 inquiry_number 更新
+    if (error.code === '23505') {
+      const { data: updated, error: err2 } = await supabase
+        .from('inquiries')
+        .update({ ...row, updated_at: new Date().toISOString() })
+        .eq('inquiry_number', row.inquiry_number)
+        .select()
+        .single()
+      if (err2) return handleError(err2, 'upsert inquiry (by inquiry_number)')
+      return fromInquiryRow(updated)
+    }
+    return handleError(error, 'upsert inquiry')
   },
 
   async updateStatus(id: string, status: string, extra: Record<string, any> = {}) {
