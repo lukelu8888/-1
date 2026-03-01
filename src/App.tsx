@@ -83,7 +83,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 
 function AppContent() {
   const { currentPage, categoryParams, navigateTo } = useRouter();
-  const { user, logout } = useUser();
+  const { user, authLoading, logout } = useUser();
   const { setRegion } = useRegion();
   const [showHomeDepotDemo, setShowHomeDepotDemo] = useState(false);
   const isKnownPublicPage =
@@ -152,6 +152,11 @@ function AppContent() {
   // if (showHomeDepotDemo) {
   //   return <RealHomeDepotDemo onClose={() => setShowHomeDepotDemo(false)} />;
   // }
+
+  // 等待 Supabase session 验证完成，防止闪烁或卡死
+  if (authLoading) {
+    return <PageLoadFallback />;
+  }
 
   // If user is logged in as admin, show admin dashboard
   if (user && user.type === 'admin') {

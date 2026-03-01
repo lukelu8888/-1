@@ -109,6 +109,9 @@ export default function AdminLogin() {
       localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser));
       window.dispatchEvent(new CustomEvent('userChanged', { detail: rbacUser }));
 
+      setIsLoading(false);
+      return; // 登录成功，后面由 onAuthStateChange / setUser 触发页面跳转
+
     } catch (err: any) {
       const msg = err?.message || '';
       if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) {
@@ -137,9 +140,7 @@ export default function AdminLogin() {
         await signOut();
         throw new Error('此账号无管理员权限');
       }
-      const { setUser } = await import('../contexts/UserContext').then(m => ({ setUser: null }));
       // UserContext via onAuthStateChange will handle state update
-      // Force navigate to admin dashboard
       const rbacUser = {
         id: session.user.id,
         email: session.user.email!,

@@ -33,6 +33,7 @@ interface UserContextType {
   generateInquiryNumber: (region: string) => string; // 🔥 Updated: 需要传入区域代码
   peekInquiryNumber: (region: string) => string; // 🔥 Updated: 需要传入区域代码
   user: AuthUser | null;
+  authLoading: boolean;
   setUser: (user: AuthUser) => void;
   clearUser: () => void;
   logout: () => Promise<void>;
@@ -69,9 +70,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
   });
 
   // Authentication user state
-  // 初始值为 null，必须等 Supabase onAuthStateChange 验证 session 后才设置
-  // 不直接信任 localStorage，防止跨 portal 污染
+  // 初始值为 null，必须等 Supabase session 验证后才设置
   const [user, setUserState] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   // Save to localStorage whenever userInfo changes
   useEffect(() => {
@@ -132,16 +133,19 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     // 页面刷新时主动检查已有 session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      void applySession(session);
+      void applySession(session).finally(() => setAuthLoading(false));
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          setAuthLoading(true);
           await applySession(session);
+          setAuthLoading(false);
         }
         if (event === 'SIGNED_OUT') {
           setUserState(null);
+          setAuthLoading(false);
           localStorage.removeItem('cosun_auth_user');
         }
       }
@@ -264,6 +268,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         generateInquiryNumber,
         peekInquiryNumber, // 🔥 New: Preview next number without incrementing
         user,
+        authLoading,
         setUser,
         clearUser,
         logout
