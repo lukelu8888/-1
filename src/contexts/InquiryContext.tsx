@@ -4,6 +4,8 @@ import type { RegionType } from '../utils/rfqNumberGenerator';
 import { executeCustomerInquiry, executeSystemDistribute, updateWorkflowState, WorkflowContext } from '../utils/workflowEngineV2';
 import { getCurrentUser, getUserData, setUserData, getUserStorageKey } from '../utils/dataIsolation'; // 🔥 新增：导入获取当前用户
 import { apiFetchJson, getApiToken, getBackendUser } from '../api/backend-auth';
+import { inquiryService } from '../lib/supabaseService';
+import { supabase } from '../lib/supabase';
 import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
 import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
 import { emitErpEvent } from '../lib/erp-core/event-bus';
@@ -314,10 +316,35 @@ const loadStoredInquiries = (): Inquiry[] => {
 };
 
 export function InquiryProvider({ children }: { children: ReactNode }) {
-  // Load inquiries from localStorage
+  // Load inquiries from localStorage（作为 Supabase 加载前的初始值）
   const [inquiries, setInquiries] = useState<Inquiry[]>(() => {
     return loadStoredInquiries();
   });
+
+  // Supabase 优先加载：登录后立即从 Supabase 拉取询价数据
+  const loadFromSupabase = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const currentUser = getCurrentUser() as any;
+      const isAdmin = currentUser?.type === 'admin';
+      const data = isAdmin
+        ? await inquiryService.getSubmitted()
+        : await inquiryService.getByUserEmail(session.user.email!);
+      if (Array.isArray(data) && data.length > 0) {
+        setInquiries(prev => {
+          // 保留本地草稿，用 Supabase 数据覆盖已提交单
+          const localDrafts = prev.filter(i => i && !i.isSubmitted);
+          const serverMap = new Map((data as Inquiry[]).map(i => [i.id, i]));
+          const merged = [...(data as Inquiry[])];
+          for (const draft of localDrafts) {
+            if (!serverMap.has(draft.id)) merged.push(draft);
+          }
+          return merged;
+        });
+      }
+    } catch { /* 静默：Supabase 不可用时保持 localStorage 数据 */ }
+  };
 
   // Save to localStorage whenever inquiries change
   useEffect(() => {
@@ -439,12 +466,19 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const run = () => {
-      void refreshInquiries().catch(err => {
-        console.error('❌ Failed to load inquiries from backend:', err);
-      });
+      void refreshInquiries().catch(() => {/* 静默 */});
     };
 
-    // initial best-effort refresh
+    // Supabase 优先加载（覆盖 localStorage 初始值）
+    void loadFromSupabase();
+
+    // 监听 Supabase Auth 状态，登录后重新加载
+    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') void loadFromSupabase();
+      if (event === 'SIGNED_OUT') setInquiries([]);
+    });
+
+    // initial best-effort refresh（兼容旧后端 API）
     setInquiries(loadStoredInquiries());
     run();
 
@@ -471,6 +505,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     });
 
     return () => {
+      authSub.unsubscribe();
       window.removeEventListener('authTokenChanged', handleToken as EventListener);
       window.removeEventListener('userChanged', handleUserChanged as EventListener);
       unsubscribeErpEvents();
@@ -499,6 +534,9 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       
       return updated;
     });
+    // 静默同步到 Supabase（不阻塞 UI）
+    void inquiryService.upsert(inquiry).catch(() => {/* 静默 */});
+
     emitInquiryEvent(ERP_EVENT_KEYS.INQUIRY_CREATED, inquiry, {
       status: inquiry.status,
       isSubmitted: inquiry.isSubmitted,
@@ -557,7 +595,10 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
   };
 
   const updateInquiryStatus = (id: string, status: Inquiry['status']) => {
-    // If admin, persist status to DB (best effort)
+    // 同步到 Supabase（静默）
+    void inquiryService.updateStatus(id, status).catch(() => {/* 静默 */});
+
+    // If admin, also persist to legacy backend (best effort)
     const backendUser = getBackendUser();
     const currentUser = getCurrentUser();
     if (canUseAdminInquiryApis(currentUser, backendUser) && getApiToken()) {
@@ -565,7 +606,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
-      }).catch(err => console.error('❌ Failed to update inquiry status:', err));
+      }).catch(() => {/* 静默 */});
     }
 
     setInquiries(prev =>
@@ -592,11 +633,12 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    setInquiries(prev =>
-      prev.map(inq =>
-        inq.id === id ? { ...inq, ...updatedInquiry } : inq
-      )
-    );
+    setInquiries(prev => {
+      const next = prev.map(inq => inq.id === id ? { ...inq, ...updatedInquiry } : inq);
+      const updated = next.find(i => i.id === id);
+      if (updated) void inquiryService.upsert(updated).catch(() => {/* 静默 */});
+      return next;
+    });
   };
 
   const deleteInquiry = (id: string) => {
@@ -607,14 +649,16 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       saveDeletedInquiryMarkers(activeEmail, markers);
     }
 
-    // If admin, delete from DB (best effort)
+    // 同步删除到 Supabase（静默）
+    void inquiryService.delete(id).catch(() => {/* 静默 */});
+
+    // Also delete from legacy backend (best effort)
     const backendUser = getBackendUser();
     const currentUser = getCurrentUser();
     if (canUseAdminInquiryApis(currentUser, backendUser) && getApiToken()) {
       void apiFetchJson(`/api/admin/inquiries/${encodeURIComponent(id)}`, { method: 'DELETE' })
-        .catch(err => console.error('❌ Failed to delete inquiry:', err));
+        .catch(() => {/* 静默 */});
     } else if (getApiToken()) {
-      // Non-admin route may be unavailable in some environments; keep best-effort.
       void apiFetchJson(`/api/inquiries/${encodeURIComponent(id)}`, { method: 'DELETE' })
         .catch(() => {});
     }
@@ -644,18 +688,13 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     const previousStatus = inquiry.status;
     const previousSubmittedAt = inquiry.submittedAt;
     
+    const submittedInquiry = { ...inquiry, isSubmitted: true, status: 'pending' as const, submittedAt: Date.now() };
     setInquiries(prev =>
-      prev.map(inq =>
-        inq.id === id 
-          ? { 
-              ...inq, 
-              isSubmitted: true, 
-              status: 'pending', // 🔥 提交时状态从 draft 变为 pending
-              submittedAt: Date.now() 
-            } 
-          : inq
-      )
+      prev.map(inq => inq.id === id ? submittedInquiry : inq)
     );
+
+    // 静默同步提交状态到 Supabase
+    void inquiryService.upsert(submittedInquiry).catch(() => {/* 静默 */});
 
     const token = getApiToken();
     if (token) {
