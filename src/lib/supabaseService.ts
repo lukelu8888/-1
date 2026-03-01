@@ -823,9 +823,15 @@ function fromNotificationRow(r: any) {
 
 // Inquiry 转换
 function toInquiryRow(i: any) {
+  // createdAt 可能是毫秒数字或 ISO 字符串，统一转为 ISO 字符串
+  const toIso = (v: any) => {
+    if (!v) return new Date().toISOString();
+    if (typeof v === 'number') return new Date(v).toISOString();
+    return String(v);
+  };
   return {
     id: i.id,
-    inquiry_number: i.inquiryNumber || null,
+    inquiry_number: i.inquiryNumber || i.id,
     date: i.date || new Date().toISOString().split('T')[0],
     user_email: i.userEmail || '',
     company_id: i.companyId || null,
@@ -838,8 +844,8 @@ function toInquiryRow(i: any) {
     shipping_info: i.shippingInfo || null,
     container_info: i.containerInfo || null,
     products: i.products || [],
-    created_at: i.createdAt || Date.now(),
-    submitted_at: i.submittedAt || null,
+    created_at: toIso(i.createdAt),
+    submitted_at: i.submittedAt ? toIso(i.submittedAt) : null,
   }
 }
 
