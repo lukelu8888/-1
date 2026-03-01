@@ -534,8 +534,11 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       
       return updated;
     });
-    // 静默同步到 Supabase（不阻塞 UI）
-    void inquiryService.upsert(inquiry).catch(() => {/* 静默 */});
+    // 同步到 Supabase
+    void inquiryService.upsert(inquiry).then(result => {
+      if (result) console.log('[Supabase] inquiry saved:', result.id);
+      else console.warn('[Supabase] inquiry upsert returned null - check RLS/schema');
+    }).catch(err => console.error('[Supabase] inquiry upsert error:', err));
 
     emitInquiryEvent(ERP_EVENT_KEYS.INQUIRY_CREATED, inquiry, {
       status: inquiry.status,
@@ -693,8 +696,11 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       prev.map(inq => inq.id === id ? submittedInquiry : inq)
     );
 
-    // 静默同步提交状态到 Supabase
-    void inquiryService.upsert(submittedInquiry).catch(() => {/* 静默 */});
+    // 同步提交状态到 Supabase
+    void inquiryService.upsert(submittedInquiry).then(result => {
+      if (result) console.log('[Supabase] inquiry submitted:', result.id);
+      else console.warn('[Supabase] inquiry submit upsert returned null - check RLS/schema');
+    }).catch(err => console.error('[Supabase] inquiry submit error:', err));
 
     const token = getApiToken();
     if (token) {
