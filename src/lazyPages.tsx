@@ -101,4 +101,3 @@ export const LazyAdvancedFormDemo = React.lazy(() => import('./components/Advanc
 export const LazyClearSalesOrderHelper = React.lazy(() => import('./components/admin/ClearSalesOrderHelper'));
 export const LazyDocumentTestPage = React.lazy(() => import('./components/documents/DocumentTestPage'));
 export const LazyHeaderLayoutOptions = React.lazy(() => import('./components/documents/HeaderLayoutOptions'));
-export const LazyTestInquiryFlow = React.lazy(() => import('./test-inquiry-flow'));

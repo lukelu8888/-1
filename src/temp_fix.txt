@@ -1,8 +1,0 @@
-termination: '如一方严重违约且在收到守约方书面通知后15日内仍未纠正，守约方有权单方面解除合同并要求违约方承担违约责任及赔偿损失。'
-    },
-    approval: {
-      requester: 'Li Ming (Procurement Manager)',
-      approver: 'Wang Ming (General Manager)',
-      approvalDate: '2025-12-20'
-    }
-  };

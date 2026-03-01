@@ -40,7 +40,6 @@ import {
   LazyClearSalesOrderHelper,
   LazyDocumentTestPage,
   LazyHeaderLayoutOptions,
-  LazyTestInquiryFlow,
 } from './lazyPages';
 import { LanguageProvider } from './contexts/LanguageContext';
 
@@ -278,7 +277,6 @@ function AppContent() {
             {currentPage === 'clear-sales-orders' && <LazyClearSalesOrderHelper />}
             {currentPage === 'document-test' && <LazyDocumentTestPage />}
             {currentPage === 'header-layout-options' && <LazyHeaderLayoutOptions />}
-            {currentPage === 'test-inquiry-flow' && <LazyTestInquiryFlow />}
             {!isKnownPublicPage && <LazyHome />}
             </Suspense>
           </main>
