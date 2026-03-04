@@ -18,7 +18,7 @@ import { CreateQuotationRequestDialog } from './CreateQuotationRequestDialog'; /
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext'; // 🔥 导入QuotationRequest Context
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
 import { generateQRNumber } from '../../utils/xjNumberGenerator'; // 🔥 导入QR编号生成
-import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 导入当前用户工具
+import { useUser } from '../../contexts/UserContext'; // 🔥 从 Supabase Auth 读取当前用户
 
 interface AdminInquiryManagementProps {
   onCreateQuotation?: (inquiry: any) => void;
@@ -50,7 +50,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   
   // 🔥 获取采购需求Context，用于下推成本询报
   const { requirements: purchaseRequirements, addRequirement: addPurchaseRequirement } = usePurchaseRequirements();
-  const currentUser = getCurrentUser();
+  const { user: currentUser } = useUser();
   
   // 🔥 下推成本询报：从INQ创建QR
   const handlePushToCostInquiry = (inquiry: any) => {
@@ -126,46 +126,14 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     return mapping[code] || code; // Return original if no mapping found
   };
 
+  // 从 Supabase Auth (useUser) 同步用户区域和角色，不依赖 localStorage
   useEffect(() => {
-    const loadUserInfo = () => {
-      const currentUserStr = localStorage.getItem('cosun_current_user');
-      console.log('🔍 [AdminInquiry] localStorage中的current_user:', currentUserStr);
-      if (currentUserStr) {
-        try {
-          const currentUser = JSON.parse(currentUserStr);
-          // Convert region code to full name
-          const fullRegionName = regionCodeToFullName(currentUser.region);
-          setCurrentUserRegion(fullRegionName);
-          setCurrentUserRole(currentUser.userRole || currentUser.role || null);
-          console.log('✅ [AdminInquiry] 当前用户区域代码:', currentUser.region);
-          console.log('✅ [AdminInquiry] 转换后的完整区域名:', fullRegionName);
-          console.log('✅ [AdminInquiry] 当前用户角色:', currentUser.userRole || currentUser.role);
-          console.log('✅ [AdminInquiry] 当前用户:', currentUser.email);
-        } catch (e) {
-          console.error('❌ [AdminInquiry] Failed to parse current user:', e);
-        }
-      } else {
-        console.error('❌ [AdminInquiry] localStorage中没有cosun_current_user');
-      }
-    };
-
-    // Load on mount
-    loadUserInfo();
-
-    // Listen for user change events
-    const handleUserChange = () => {
-      console.log('🔄 [AdminInquiry] 检测到用户切换事件');
-      loadUserInfo();
-    };
-
-    window.addEventListener('userChanged', handleUserChange);
-    window.addEventListener('storage', handleUserChange);
-
-    return () => {
-      window.removeEventListener('userChanged', handleUserChange);
-      window.removeEventListener('storage', handleUserChange);
-    };
-  }, []);
+    if (currentUser) {
+      const fullRegionName = regionCodeToFullName(currentUser.region || '');
+      setCurrentUserRegion(fullRegionName);
+      setCurrentUserRole(currentUser.role || currentUser.userRole || null);
+    }
+  }, [currentUser]);
 
   // 🧪 Create Test Inquiry Function
   const createTestInquiry = (region: RegionType, customerEmail: string, companyName: string) => {
