@@ -221,35 +221,5 @@ export function useNotifications() {
   return context;
 }
 
-// 🔧 辅助函数：向指定用户发送通知（Supabase + localStorage 双写）
-export function sendNotificationToUser(
-  recipientEmail: string,
-  notification: Omit<Notification, 'id' | 'createdAt' | 'read' | 'recipient'>
-) {
-  if (typeof window === 'undefined') return;
-
-  const fullNotification: Notification = {
-    ...notification,
-    recipient: recipientEmail,
-    id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    createdAt: Date.now(),
-    read: false,
-  };
-
-  // 写入 Supabase（Realtime 会推送给目标用户，如果在线）
-  void notificationSupabaseService.send({
-    recipient_email: recipientEmail,
-    type: notification.type,
-    title: notification.title,
-    message: notification.message,
-    related_id: notification.relatedId,
-    related_type: notification.relatedType,
-    sender: notification.sender,
-    metadata: notification.metadata,
-  }).catch(err => console.error('[sendNotificationToUser] Supabase failed:', err));
-
-  // 触发事件（同一标签页内实时更新）
-  window.dispatchEvent(new CustomEvent('notificationAdded', {
-    detail: { email: recipientEmail, notification: fullNotification },
-  }));
-}
+// 向后兼容重新导出 — 实现已移至 src/utils/notificationUtils.ts
+export { sendNotificationToUser } from '../utils/notificationUtils';

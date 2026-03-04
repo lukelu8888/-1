@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Eye, Edit, CheckCircle, XCircle, Truck, Package, Clock, Search, DollarSign, Trash2, Printer, FileText, Download, Send, ShoppingCart, RefreshCw } from 'lucide-react';
-import { useOrders, Order, generateTestOrders } from '../../contexts/OrderContext';
+import { useOrders, Order } from '../../contexts/OrderContext';
 import { sendNotificationToUser } from '../../contexts/NotificationContext';
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument';
@@ -429,27 +429,17 @@ export default function AdminActiveOrders() {
 
   return (
     <div className="space-y-4">
-      {/* 调试按钮 - 重新生成测试数据（包含SC-NA-251215-0001） */}
+      {/* 刷新按钮 */}
       <div className="flex justify-end">
         <Button
           size="sm"
           variant="outline"
-          className="h-8 px-3 text-xs border-orange-500 text-orange-600 hover:bg-orange-50"
-          onClick={() => {
-            // 清除所有订单数据
-            if (typeof window !== 'undefined') {
-              const keys = Object.keys(localStorage).filter(k => k.includes('orders'));
-              keys.forEach(k => localStorage.removeItem(k));
-            }
-            // 重新生成测试数据
-            generateTestOrders();
-            // 刷新页面
-            window.location.reload();
-          }}
-          title="清除并重新生成测试订单数据（包含SC-NA-251215-0001）"
+          className="h-8 px-3 text-xs border-gray-400 text-gray-600 hover:bg-gray-50"
+          onClick={() => window.location.reload()}
+          title="从 Supabase 重新加载订单数据"
         >
           <RefreshCw className="w-3.5 h-3.5 mr-1" />
-          重置测试数据
+          刷新数据
         </Button>
       </div>
 
