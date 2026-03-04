@@ -199,7 +199,7 @@ const mockSuppliers: Supplier[] = [
 ];
 
 export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFromInquiryDialogProps) {
-  const { addRFQ } = useXJs();
+  const { addXJ } = useXJs();
   
   // 🔥 每个产品对应的选中供应商
   // 数据结构：{ [productId]: [supplierId1, supplierId2, ...] }
@@ -294,7 +294,7 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
 
           const xjNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
           
-          addRFQ({
+          addXJ({
             id: `rfq_${Date.now()}_${supplierId}_${item.id}`,
             xjNumber,
             

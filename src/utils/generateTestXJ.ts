@@ -111,8 +111,8 @@ if (typeof window !== 'undefined') {
     const testRFQs = generateTestMultiProductRFQ();
     
     testRFQs.forEach(rfq => {
-      const { addRFQ } = useXJs();
-      addRFQ(rfq);
+      const { addXJ } = useXJs();
+      addXJ(rfq);
     });
     
     console.log('✅ 已生成测试XJ数据:', testRFQs.length);

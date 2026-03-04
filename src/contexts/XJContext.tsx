@@ -432,12 +432,12 @@ export const XJProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   return (
     <XJContext.Provider value={{
       xjs,
-      addRFQ,
-      updateRFQ,
-      deleteRFQ,
-      getRFQById,
-      getRFQsByRequirement,
-      getRFQsBySupplier,
+      addXJ,
+      updateXJ,
+      deleteXJ,
+      getXJById,
+      getXJsByRequirement,
+      getXJsBySupplier,
       addQuoteToXJ,
       refreshMineFromBackend
     }}>

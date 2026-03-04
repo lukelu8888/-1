@@ -135,7 +135,7 @@ const mockSuppliers: Supplier[] = [
 ];
 
 export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogProps) {
-  const { addRFQ } = useXJs();
+  const { addXJ } = useXJs();
   
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -195,7 +195,7 @@ export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogPro
 
         const xjNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
         
-        addRFQ({
+        addXJ({
           id: `rfq_${Date.now()}_${supplierId}`,
           xjNumber,
           
