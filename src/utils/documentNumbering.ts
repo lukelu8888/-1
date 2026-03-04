@@ -23,13 +23,6 @@ export const DOCUMENT_LEVELS: Record<string, DocumentLevel> = {
     enName: 'Customer Inquiry',
     color: 'blue'
   },
-  'XJ': {
-    level: 1,
-    code: 'INQ',
-    name: '客户询价',
-    enName: 'Customer Inquiry',
-    color: 'blue'
-  },
   'QR': {
     level: 2,
     code: 'QR',

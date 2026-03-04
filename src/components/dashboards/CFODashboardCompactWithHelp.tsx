@@ -725,7 +725,7 @@ export function CFODashboardCompactWithHelp() {
                   <Building2 className="size-4 text-blue-600" />
                   <h4 className="text-sm font-semibold text-slate-900">{region.region}</h4>
                 </div>
-                <Badge className={region.status === 'excellent' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'} className="text-xs">
+                <Badge className={`text-xs ${region.status === 'excellent' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                   {region.margin.toFixed(1)}%
                 </Badge>
               </div>

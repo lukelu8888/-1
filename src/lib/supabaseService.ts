@@ -869,17 +869,308 @@ function fromNotificationRow(r: any) {
   }
 }
 
-// Inquiry 转换
-// 将前端 region 全名映射为 Supabase 存储的区域代码
-const REGION_NAME_TO_CODE: Record<string, string> = {
-  'North America': 'NA',
-  'South America': 'SA',
-  'Europe & Africa': 'EA',
-  'NA': 'NA',
-  'SA': 'SA',
-  'EA': 'EA',
+// ============================================================
+// 通用区域转换工具（所有表共用）
+// DB 统一存 region_code (NA/SA/EA)，前端可能传全名或代码
+// ============================================================
+export const REGION_NAME_TO_CODE: Record<string, string> = {
+  'North America': 'NA', 'north america': 'NA', 'north-america': 'NA',
+  'South America': 'SA', 'south america': 'SA', 'south-america': 'SA',
+  'Europe & Africa': 'EA', 'europe & africa': 'EA', 'EMEA': 'EA', 'emea': 'EA',
+  'NA': 'NA', 'SA': 'SA', 'EA': 'EA',
 };
 
+export const REGION_CODE_TO_NAME: Record<string, string> = {
+  'NA': 'North America',
+  'SA': 'South America',
+  'EA': 'Europe & Africa',
+};
+
+/** 前端 region 值 → DB region_code */
+export function toRegionCode(region: string | null | undefined): string | null {
+  if (!region) return null;
+  return REGION_NAME_TO_CODE[region] || region;
+}
+
+/** DB region_code → 前端 region 值（保持代码格式，不转全名） */
+export function fromRegionCode(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return code; // 前端统一用代码（NA/SA/EA）
+}
+
+/** 安全生成 UUID（若传入的 id 不是 UUID 格式则重新生成） */
+export function toUUID(id: string | null | undefined): string {
+  if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return id;
+  }
+  return crypto.randomUUID();
+}
+
+/** 日期转 ISO 格式 YYYY-MM-DD */
+export function toIsoDate(v: any): string | null {
+  if (!v) return null;
+  if (typeof v === 'string' && v.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+    const [m, d, y] = v.split('/');
+    return `${y}-${m}-${d}`;
+  }
+  if (typeof v === 'string' && v.includes('T')) return v.split('T')[0];
+  return String(v);
+}
+
+// ============================================================
+// sales_quotations 服务
+// ============================================================
+function toQTRow(q: any) {
+  return {
+    id: toUUID(q.id),
+    qt_number: q.qtNumber || q.qt_number || '',
+    qr_number: q.qrNumber || q.qr_number || null,
+    inq_number: q.inqNumber || q.inq_number || null,
+    inquiry_id: toUUID(q.inquiryId || q.inquiry_id) === q.inquiryId ? q.inquiryId : null,
+    region_code: toRegionCode(q.region || q.region_code),
+    customer_name: q.customerName || q.customer_name || '',
+    customer_email: q.customerEmail || q.customer_email || '',
+    customer_company: q.customerCompany || q.customer_company || '',
+    sales_person: q.salesPerson || q.sales_person || '',
+    sales_person_name: q.salesPersonName || q.sales_person_name || '',
+    items: q.items || [],
+    total_cost: q.totalCost ?? q.total_cost ?? 0,
+    total_price: q.totalPrice ?? q.total_price ?? 0,
+    total_profit: q.totalProfit ?? q.total_profit ?? 0,
+    profit_rate: q.profitRate ?? q.profit_rate ?? 0,
+    currency: q.currency || 'USD',
+    payment_terms: q.paymentTerms || q.payment_terms || '',
+    delivery_terms: q.deliveryTerms || q.delivery_terms || '',
+    delivery_date: toIsoDate(q.deliveryDate || q.delivery_date),
+    approval_status: q.approvalStatus || q.approval_status || 'draft',
+    approval_chain: q.approvalChain || q.approval_chain || [],
+    customer_status: q.customerStatus || q.customer_status || 'not_sent',
+    customer_response: q.customerResponse || q.customer_response || null,
+    so_number: q.soNumber || q.so_number || null,
+    pushed_to_contract: q.pushedToContract ?? q.pushed_to_contract ?? false,
+    pushed_contract_number: q.pushedContractNumber || q.pushed_contract_number || null,
+    internal_notes: q.internalNotes || q.internal_notes || null,
+    customer_notes: q.customerNotes || q.customer_notes || null,
+  };
+}
+
+function fromQTRow(r: any) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    qtNumber: r.qt_number,
+    qrNumber: r.qr_number,
+    inqNumber: r.inq_number,
+    inquiryId: r.inquiry_id,
+    region: fromRegionCode(r.region_code),
+    customerName: r.customer_name,
+    customerEmail: r.customer_email,
+    customerCompany: r.customer_company,
+    salesPerson: r.sales_person,
+    salesPersonName: r.sales_person_name,
+    items: r.items || [],
+    totalCost: r.total_cost || 0,
+    totalPrice: r.total_price || 0,
+    totalProfit: r.total_profit || 0,
+    profitRate: r.profit_rate || 0,
+    currency: r.currency || 'USD',
+    paymentTerms: r.payment_terms || '',
+    deliveryTerms: r.delivery_terms || '',
+    deliveryDate: r.delivery_date,
+    approvalStatus: r.approval_status || 'draft',
+    approvalChain: r.approval_chain || [],
+    customerStatus: r.customer_status || 'not_sent',
+    customerResponse: r.customer_response,
+    soNumber: r.so_number,
+    pushedToContract: r.pushed_to_contract || false,
+    pushedContractNumber: r.pushed_contract_number,
+    pushedContractAt: r.pushed_contract_at,
+    pushedBy: r.pushed_by,
+    internalNotes: r.internal_notes,
+    customerNotes: r.customer_notes,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+// (salesQuotationService defined above at line ~283, kept there with full methods)
+
+// ============================================================
+// supplier_xjs 服务
+// ============================================================
+function toXJRow(x: any) {
+  return {
+    id: toUUID(x.id),
+    xj_number: x.xjNumber || x.xj_number || '',
+    supplier_xj_no: x.supplierXjNo || x.supplier_xj_no || null,
+    supplier_quotation_no: x.supplierQuotationNo || x.supplier_quotation_no || null,
+    source_qr_number: x.sourceQRNumber || x.source_qr_number || null,
+    source_inquiry_id: x.sourceInquiryId || x.source_inquiry_id || null,
+    source_inquiry_number: x.sourceInquiryNumber || x.source_inquiry_number || null,
+    requirement_no: x.requirementNo || x.requirement_no || null,
+    source_ref: x.sourceRef || x.source_ref || null,
+    region_code: toRegionCode(x.region || x.region_code),
+    customer_name: x.customerName || x.customer_name || null,
+    customer_region: x.customerRegion || x.customer_region || null,
+    supplier_code: x.supplierCode || x.supplier_code || '',
+    supplier_name: x.supplierName || x.supplier_name || '',
+    supplier_contact: x.supplierContact || x.supplier_contact || null,
+    supplier_email: x.supplierEmail || x.supplier_email || '',
+    products: x.products || [],
+    product_name: x.productName || x.product_name || '',
+    model_no: x.modelNo || x.model_no || '',
+    specification: x.specification || null,
+    quantity: x.quantity || 0,
+    unit: x.unit || 'pcs',
+    target_price: x.targetPrice ?? x.target_price ?? null,
+    currency: x.currency || 'USD',
+    expected_date: toIsoDate(x.expectedDate || x.expected_date),
+    quotation_deadline: toIsoDate(x.quotationDeadline || x.quotation_deadline),
+    priority: x.priority || 'medium',
+    status: x.status || 'pending',
+    quotes: x.quotes || [],
+    remarks: x.remarks || null,
+    created_by: x.createdBy || x.created_by || '',
+  };
+}
+
+function fromXJRow(r: any) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    xjNumber: r.xj_number,
+    supplierXjNo: r.supplier_xj_no,
+    supplierQuotationNo: r.supplier_quotation_no,
+    sourceQRNumber: r.source_qr_number,
+    sourceInquiryId: r.source_inquiry_id,
+    sourceInquiryNumber: r.source_inquiry_number,
+    requirementNo: r.requirement_no,
+    sourceRef: r.source_ref,
+    region: fromRegionCode(r.region_code),
+    customerName: r.customer_name,
+    customerRegion: r.customer_region,
+    supplierCode: r.supplier_code,
+    supplierName: r.supplier_name,
+    supplierContact: r.supplier_contact,
+    supplierEmail: r.supplier_email,
+    products: r.products || [],
+    productName: r.product_name,
+    modelNo: r.model_no,
+    specification: r.specification,
+    quantity: r.quantity,
+    unit: r.unit,
+    targetPrice: r.target_price,
+    currency: r.currency,
+    expectedDate: r.expected_date,
+    quotationDeadline: r.quotation_deadline,
+    priority: r.priority,
+    status: r.status,
+    quotes: r.quotes || [],
+    remarks: r.remarks,
+    createdBy: r.created_by,
+    createdDate: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export const xjService = {
+  async getAll() {
+    const { data, error } = await supabase.from('supplier_xjs').select('*').is('deleted_at', null).order('created_at', { ascending: false });
+    if (error) return handleError(error, 'getAll supplier_xjs');
+    return (data || []).map(fromXJRow);
+  },
+  async getByEmail(email: string) {
+    const { data, error } = await supabase.from('supplier_xjs').select('*').is('deleted_at', null).or(`supplier_email.eq.${email},created_by.eq.${email}`).order('created_at', { ascending: false });
+    if (error) return handleError(error, 'getByEmail supplier_xjs');
+    return (data || []).map(fromXJRow);
+  },
+  async upsert(x: any) {
+    const row = toXJRow(x);
+    const { data, error } = await supabase.from('supplier_xjs').upsert(row, { onConflict: 'id' }).select().single();
+    if (error) return handleError(error, 'upsert supplier_xj');
+    return fromXJRow(data);
+  },
+  async delete(id: string) {
+    const { error } = await supabase.from('supplier_xjs').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) return handleError(error, 'delete supplier_xj');
+  },
+};
+
+// ============================================================
+// quotation_requests 服务
+// ============================================================
+function toQRRow(q: any) {
+  return {
+    id: toUUID(q.id),
+    request_number: q.requestNumber || q.request_number || '',
+    region_code: toRegionCode(q.region || q.region_code),
+    source_inquiry_id: q.sourceInquiryId || q.source_inquiry_id || null,
+    source_inquiry_number: q.sourceInquiryNumber || q.source_inquiry_number || '',
+    customer_name: q.customerName || q.customer_name || '',
+    customer_email: q.customerEmail || q.customer_email || null,
+    customer_company: q.customerCompany || q.customer_company || null,
+    products: q.items || q.products || [],
+    status: q.status || 'pending',
+    assigned_to: q.assignedTo || q.assigned_to || null,
+    requested_by: q.requestedBy || q.requested_by || null,
+    requested_by_name: q.requestedByName || q.requested_by_name || null,
+    request_date: toIsoDate(q.requestDate || q.request_date),
+    expected_quote_date: toIsoDate(q.expectedQuoteDate || q.expected_quote_date),
+    urgency: q.urgency || 'medium',
+    xj_ids: q.rfqIds || q.xjIds || q.xj_ids || [],
+    xj_count: q.rfqCount || q.xjCount || q.xj_count || 0,
+    priority: q.priority || 'medium',
+    notes: q.notes || null,
+  };
+}
+
+function fromQRRow(r: any) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    requestNumber: r.request_number,
+    region: fromRegionCode(r.region_code),
+    sourceInquiryId: r.source_inquiry_id,
+    sourceInquiryNumber: r.source_inquiry_number,
+    customerName: r.customer_name,
+    customerEmail: r.customer_email,
+    customerCompany: r.customer_company,
+    items: r.products || [],
+    status: r.status,
+    assignedTo: r.assigned_to,
+    requestedBy: r.requested_by,
+    requestedByName: r.requested_by_name,
+    requestDate: r.request_date,
+    expectedQuoteDate: r.expected_quote_date,
+    urgency: r.urgency || 'medium',
+    rfqIds: r.xj_ids || [],
+    rfqCount: r.xj_count || 0,
+    priority: r.priority,
+    notes: r.notes,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export const quotationRequestService = {
+  async getAll() {
+    const { data, error } = await supabase.from('quotation_requests').select('*').is('deleted_at', null).order('created_at', { ascending: false });
+    if (error) return handleError(error, 'getAll quotation_requests');
+    return (data || []).map(fromQRRow);
+  },
+  async upsert(q: any) {
+    const row = toQRRow(q);
+    const { data, error } = await supabase.from('quotation_requests').upsert(row, { onConflict: 'id' }).select().single();
+    if (error) return handleError(error, 'upsert quotation_request');
+    return fromQRRow(data);
+  },
+  async delete(id: string) {
+    const { error } = await supabase.from('quotation_requests').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) return handleError(error, 'delete quotation_request');
+  },
+};
+
+// Inquiry 转换（使用顶部统一工具函数）
 function toInquiryRow(i: any) {
   // createdAt 可能是毫秒数字或 ISO 字符串，统一转为 ISO 字符串
   const toIso = (v: any) => {
@@ -887,18 +1178,8 @@ function toInquiryRow(i: any) {
     if (typeof v === 'number') return new Date(v).toISOString();
     return String(v);
   };
-  // date 统一转为 ISO 日期格式 YYYY-MM-DD（兼容 toLocaleDateString 输出）
-  const toIsoDate = (v: any) => {
-    if (!v) return new Date().toISOString().split('T')[0];
-    // 处理美式格式 MM/DD/YYYY
-    if (typeof v === 'string' && v.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-      const [m, d, y] = v.split('/');
-      return `${y}-${m}-${d}`;
-    }
-    return v.split('T')[0];
-  };
   // region 存代码（NA/SA/EA），不存全名
-  const regionCode = REGION_NAME_TO_CODE[i.region] || i.region || null;
+  const regionCode = toRegionCode(i.region);
   // id：如果前端传的是询价编号（INQ-格式），生成新 UUID；否则直接用
   const id = (i.id && i.id.startsWith('INQ-'))
     ? crypto.randomUUID()

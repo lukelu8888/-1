@@ -561,11 +561,6 @@ export function Header() {
         { name: '6ft Step Ladder', price: '$79', image: 'https://images.unsplash.com/photo-1558906050-d6d6aa390fd3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0b29sJTIwY2hlc3QlMjB3b3Jrc2hvcHxlbnwxfHx8fDE3NjEyMDQwODB8MA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Sturdy' },
         { name: 'Extension Ladder 24ft', price: '$199', image: 'https://images.unsplash.com/photo-1558906050-d6d6aa390fd3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0b29sJTIwY2hlc3QlMjB3b3Jrc2hvcHxlbnwxfHx8fDE3NjEyMDQwODB8MA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Heavy Duty' }
       ],
-      'Tool Storage': [
-        { name: 'Tool Bag 16"', price: '$39', image: 'https://images.unsplash.com/photo-1558906050-d6d6aa390fd3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0b29sJTIwY2hlc3QlMjB3b3Jrc2hvcHxlbnwxfHx8fDE3NjEyMDQwODB8MA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Portable' },
-        { name: 'Tool Box 26"', price: '$59', image: 'https://images.unsplash.com/photo-1558906050-d6d6aa390fd3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0b29sJTIwY2hlc3QlMjB3b3Jrc2hvcHxlbnwxfHx8fDE3NjEyMDQwODB8MA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Organized' }
-      ],
-      
       // Windows & Doors
       'Exterior Doors': [
         { name: 'Steel Entry Door', price: '$499', image: 'https://images.unsplash.com/photo-1632752323710-6a73d814bcd4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxleHRlcmlvciUyMGRvb3IlMjBlbnRyeXxlbnwxfHx8fDE3NjEyMDAwMjh8MA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Secure' },
@@ -598,10 +593,6 @@ export function Header() {
       'Door Frames & Jambs': [
         { name: 'Pre-Hung Door Frame', price: '$179', image: 'https://images.unsplash.com/photo-1759262151165-3330c14fd982?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxpbnRlcmlvciUyMGRvb3IlMjBtb2Rlcm58ZW58MXx8fHwxNzYxMjA0MDc5fDA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Easy Install' },
         { name: 'Door Trim Kit', price: '$49', image: 'https://images.unsplash.com/photo-1759262151165-3330c14fd982?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxpbnRlcmlvciUyMGRvb3IlMjBtb2Rlcm58ZW58MXx8fHwxNzYxMjA0MDc5fDA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Complete' }
-      ],
-      'Window Treatments': [
-        { name: 'Cordless Blinds', price: '$79', image: 'https://images.unsplash.com/photo-1544279772-ca624c6c6200?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx3aW5kb3clMjBjdXJ0YWlucyUyMGJsaW5kc3xlbnwxfHx8fDE3NjEyMDIxODF8MA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Child Safe' },
-        { name: 'Blackout Curtains', price: '$59', image: 'https://images.unsplash.com/photo-1544279772-ca624c6c6200?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx3aW5kb3clMjBjdXJ0YWlucyUyMGJsaW5kc3xlbnwxfHx8fDE3NjEyMDIxODF8MA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Privacy' }
       ],
       'Weather Stripping': [
         { name: 'Door Sweep 36"', price: '$12', image: 'https://images.unsplash.com/photo-1632752323710-6a73d814bcd4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxleHRlcmlvciUyMGRvb3IlMjBlbnRyeXxlbnwxfHx8fDE3NjEyMDAwMjh8MA&ixlib=rb-4.1.0&q=80&w=1080', badge: 'Energy Saving' },
