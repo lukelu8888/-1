@@ -1382,20 +1382,19 @@ export const purchaseOrderService = {
 function toPRRow(p: any) {
   return {
     id: toUUID(p.id),
-    requirement_number: p.requirementNumber || p.requirement_number || '',
+    // DB 实际列名是 requirement_no，兼容前端 requirementNo / requirementNumber
+    requirement_no: p.requirementNo || p.requirementNumber || p.requirement_no || p.requirement_number || '',
     source_inquiry_id: p.sourceInquiryId || p.source_inquiry_id || null,
     source_inquiry_number: p.sourceInquiryNumber || p.source_inquiry_number || null,
-    region_code: toRegionCode(p.region || p.region_code),
-    customer_name: p.customerName || p.customer_name || '',
-    customer_email: p.customerEmail || p.customer_email || null,
+    region: p.region || fromRegionCode(p.region_code) || null,
+    customer_name: p.customerName || p.customer?.companyName || p.customer_name || '',
+    customer_email: p.customerEmail || p.customer?.email || p.customer_email || null,
     items: p.items || p.products || [],
     status: p.status || 'pending',
-    requested_by: p.requestedBy || p.requested_by || null,
-    requested_by_name: p.requestedByName || p.requested_by_name || null,
-    assigned_to: p.assignedTo || p.assigned_to || null,
-    priority: p.priority || 'medium',
-    notes: p.notes || null,
+    notes: p.notes || p.specialRequirements || null,
     created_by: p.createdBy || p.created_by || null,
+    assigned_to: p.assignedTo || p.assigned_to || null,
+    source_inquiry_number: p.sourceInquiryNumber || p.source_inquiry_number || null,
   }
 }
 
@@ -1403,20 +1402,21 @@ function fromPRRow(r: any) {
   if (!r) return null
   return {
     id: r.id,
-    requirementNumber: r.requirement_number,
+    // 统一用 requirementNo 匹配前端组件字段
+    requirementNo: r.requirement_no || r.requirement_number || '',
+    requirementNumber: r.requirement_no || r.requirement_number || '',
     sourceInquiryId: r.source_inquiry_id,
     sourceInquiryNumber: r.source_inquiry_number,
-    region: fromRegionCode(r.region_code),
+    region: r.region || fromRegionCode(r.region_code),
     customerName: r.customer_name,
     customerEmail: r.customer_email,
+    customer: { companyName: r.customer_name || '', email: r.customer_email || '' },
     items: r.items || [],
     status: r.status,
-    requestedBy: r.requested_by,
-    requestedByName: r.requested_by_name,
-    assignedTo: r.assigned_to,
-    priority: r.priority,
     notes: r.notes,
     createdBy: r.created_by,
+    assignedTo: r.assigned_to,
+    createdDate: r.created_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
