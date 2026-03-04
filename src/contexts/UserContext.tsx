@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { fetchProfile } from '../hooks/useSupabaseAuth';
+import { nextInquiryNumber } from '../lib/supabaseService';
 
 export interface UserInfo {
   companyName: string;
@@ -29,8 +30,8 @@ interface UserContextType {
   userInfo: UserInfo | null;
   setUserInfo: (info: UserInfo) => void;
   incrementInquiryCount: () => void;
-  generateInquiryNumber: (region: string) => string; // 🔥 Updated: 需要传入区域代码
-  peekInquiryNumber: (region: string) => string; // 🔥 Updated: 需要传入区域代码
+  generateInquiryNumber: (region: string) => Promise<string>; // 调用 Supabase RPC next_inquiry_number（并发安全）
+  peekInquiryNumber: (region: string) => string; // 本地预览格式，仅用于 UI 展示，不消耗序号
   user: AuthUser | null;
   authLoading: boolean;
   setUser: (user: AuthUser) => void;
@@ -208,52 +209,30 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const generateInquiryNumber = (region: string) => {
-    const date = new Date();
-    const yy = String(date.getFullYear()).slice(2); // 🔥 YY instead of YYYY
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    const dateStr = `${yy}${mm}${dd}`;
-    
-    // 🔥 使用区域化计数器：统计今天同区域的询价数量
-    if (typeof window !== 'undefined') {
-      const counterKey = `cosun_inquiry_counter_${region}_${dateStr}`;
-      let counter = 1;
-      const saved = localStorage.getItem(counterKey);
-      if (saved) {
-        counter = parseInt(saved, 10) + 1;
-      }
-      // 保存递增后的计数器
-      localStorage.setItem(counterKey, String(counter));
-      
-      const sequence = String(counter).padStart(4, '0');
-      return `INQ-${region}-${dateStr}-${sequence}`;
+  // 并发安全的编号生成：调用 Supabase RPC next_inquiry_number
+  // number_sequences 表原子递增，多用户同时提交不会重号
+  const generateInquiryNumber = async (region: string): Promise<string> => {
+    try {
+      return await nextInquiryNumber(region);
+    } catch (err) {
+      // RPC 失败时本地降级（极端网络异常兜底，格式一致但序号可能重复）
+      console.error('[UserContext] next_inquiry_number RPC failed, falling back to local:', err);
+      const date = new Date();
+      const dateStr = String(date.getFullYear()).slice(2)
+        + String(date.getMonth() + 1).padStart(2, '0')
+        + String(date.getDate()).padStart(2, '0');
+      return `INQ-${region}-${dateStr}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`;
     }
-    
-    return `INQ-${region}-${dateStr}-0001`;
   };
 
-  const peekInquiryNumber = (region: string) => {
+  // UI 预览专用：本地构造编号格式，不消耗 Supabase 序号
+  // 仅用于对话框展示"预计编号"，提交时以 RPC 返回值为准
+  const peekInquiryNumber = (region: string): string => {
     const date = new Date();
-    const yy = String(date.getFullYear()).slice(2); // 🔥 YY instead of YYYY
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    const dateStr = `${yy}${mm}${dd}`;
-    
-    // 🔥 预览下一个编号而不递增计数器
-    if (typeof window !== 'undefined') {
-      const counterKey = `cosun_inquiry_counter_${region}_${dateStr}`;
-      let counter = 1;
-      const saved = localStorage.getItem(counterKey);
-      if (saved) {
-        counter = parseInt(saved, 10) + 1;
-      }
-      
-      const sequence = String(counter).padStart(4, '0');
-      return `INQ-${region}-${dateStr}-${sequence}`;
-    }
-    
-    return `INQ-${region}-${dateStr}-0001`;
+    const dateStr = String(date.getFullYear()).slice(2)
+      + String(date.getMonth() + 1).padStart(2, '0')
+      + String(date.getDate()).padStart(2, '0');
+    return `INQ-${region}-${dateStr}-????`;
   };
 
   return (
