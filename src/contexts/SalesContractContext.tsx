@@ -17,6 +17,7 @@ import { getCurrentUser } from '../utils/dataIsolation';
 import { addTombstones, filterNotDeleted, listTombstones, removeTombstones } from '../lib/erp-core/deletion-tombstone';
 import { salesContractsDb, fromContractRow } from '../lib/supabase-db';
 import { contractService } from '../lib/supabaseService';
+import { supabase } from '../lib/supabase';
 
 // 🔥 销售合同产品接口
 export interface SalesContractProduct {
@@ -219,62 +220,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
 
   const clearingRef = React.useRef(false);
 
-  // 监听本地合同创建事件：从 localStorage 重新加载，绕过后端 API
-  useEffect(() => {
-    const handler = () => {
-      if (clearingRef.current) return;
-      try {
-        const saved = localStorage.getItem('salesContracts');
-        if (!saved) return;
-        const parsed = JSON.parse(saved);
-        if (!Array.isArray(parsed) || parsed.length === 0) return;
-        console.log('📥 [SalesContractContext] salesContractCreatedLocally 事件收到，localStorage 合同数:', parsed.length);
-        setContracts((prev) => {
-          if (clearingRef.current) return prev;
-          // 不经过 filterDeletedContracts，直接合并——墓碑清除已在 dispatch 前完成
-          const parsedIds = new Set(parsed.map((c: any) => c.contractNumber));
-          const extra = prev.filter((c) => !parsedIds.has(c.contractNumber));
-          const merged = [...parsed, ...extra];
-          console.log('📥 [SalesContractContext] 合并后合同数:', merged.length, merged.map((c: any) => c.contractNumber));
-          return merged;
-        });
-      } catch { /* ignore */ }
-    };
-    window.addEventListener('salesContractCreatedLocally', handler);
-    return () => window.removeEventListener('salesContractCreatedLocally', handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  const [contracts, setContracts] = useState<SalesContract[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const saved = localStorage.getItem('salesContracts');
-      if (!saved) return [];
-      const parsed: any[] = JSON.parse(saved);
-      if (!Array.isArray(parsed) || parsed.length === 0) return [];
-
-      // 先尝试过滤墓碑
-      const filtered = filterDeletedContracts(parsed);
-
-      // 如果过滤后全部消失，但原始数据存在，说明墓碑误伤——自动清除合同域墓碑并重新加载
-      if (filtered.length === 0 && parsed.length > 0) {
-        console.warn('⚠️ [SalesContractProvider] 墓碑过滤清空了所有合同，自动清除合同墓碑并重新加载');
-        try {
-          const TOMBSTONE_KEY = 'cosun_erp_tombstones_v1';
-          const ts: any[] = JSON.parse(localStorage.getItem(TOMBSTONE_KEY) || '[]');
-          const cleaned = ts.filter((t: any) => t.domain !== 'contract');
-          localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(cleaned));
-        } catch { /* ignore */ }
-        return parsed; // 直接返回原始数据（不过滤）
-      }
-
-      console.log('  ✅ 从localStorage加载了', filtered.length, '个合同');
-      return filtered;
-    } catch (e) {
-      console.error('Failed to parse salesContracts from localStorage:', e);
-      return [];
-    }
-  });
+  const [contracts, setContracts] = useState<SalesContract[]>([]);
   
   // 🔥 获取审批Context（监听审批状态变化）
   const { requests: approvalRequests } = useApproval();
@@ -282,104 +229,48 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   // 🔥 获取订单Context（用于同步订单到客户端，以及监听客户确认状态）
   const { addOrder, orders: allOrders } = useOrders();
 
-  // 🔥 从 Supabase + 后端加载合同列表
+  // 🔥 从 Supabase 加载合同列表（Supabase-first）
   useEffect(() => {
     let alive = true;
     const load = async () => {
       if (clearingRef.current) return;
-
-      // ① 优先从 Supabase 加载（最权威的数据源）
       try {
-        const supabaseContracts = await salesContractsDb.getAll();
+        const data = await contractService.getAll();
         if (!alive || clearingRef.current) return;
-        if (Array.isArray(supabaseContracts) && supabaseContracts.length > 0) {
-          const mapped = supabaseContracts.map(fromContractRow).filter(Boolean) as SalesContract[];
-          const filtered = filterDeletedContracts(mapped);
-          if (filtered.length > 0) {
-            setContracts((prev) => {
-              const supIds = new Set(filtered.map((c) => c.contractNumber));
-              const localOnly = prev.filter((c) => !supIds.has(c.contractNumber));
-              return [...filtered, ...localOnly];
-            });
-            console.log('✅ [SalesContractProvider] 已从 Supabase 加载合同数量:', filtered.length);
-          }
+        if (Array.isArray(data) && data.length > 0) {
+          const filtered = filterDeletedContracts(data as SalesContract[]);
+          setContracts(filtered);
         }
       } catch (e: any) {
-        console.warn('⚠️ [SalesContractProvider] Supabase 加载合同失败，回退本地:', e?.message || e);
-      }
-
-      // ② 底底：尝试从 Laravel 后端 API 加载
-      try {
-        const backendUser = getBackendUser();
-        const currentUser = getCurrentUser();
-        const asEmail =
-          backendUser?.portal_role === 'admin' && currentUser?.email ? `?asEmail=${encodeURIComponent(currentUser.email)}` : '';
-        let res = await apiFetchJson<{ contracts: SalesContract[] }>(`/api/sales-contracts${asEmail}`);
-        if (asEmail && Array.isArray(res?.contracts) && res.contracts.length === 0) {
-          const fallback = await apiFetchJson<{ contracts: SalesContract[] }>('/api/sales-contracts');
-          if (Array.isArray(fallback?.contracts) && fallback.contracts.length > 0) {
-            res = fallback;
-          }
-        }
-        if (!alive || clearingRef.current) return;
-        if (Array.isArray(res?.contracts) && res.contracts.length > 0) {
-          setContracts((prev) => {
-            const serverFiltered = filterDeletedContracts(res.contracts);
-            const serverIds = new Set(serverFiltered.map((c: any) => c.contractNumber));
-            const localOnly = prev.filter((c) => !serverIds.has(c.contractNumber));
-            return [...serverFiltered, ...localOnly];
-          });
-          console.log('✅ [SalesContractProvider] 已从后端 API 加载合同数量:', res.contracts.length);
-        }
-      } catch (e: any) {
-        console.warn('⚠️ [SalesContractProvider] 后端加载合同失败，将继续使用本地数据:', e?.message || e);
+        console.warn('⚠️ [SalesContractProvider] Supabase 加载合同失败:', e?.message || e);
       }
     };
 
-    // 首次加载 + 登录后（token变化）重试一次，避免Provider先于登录初始化导致401后不再刷新
     void load();
-    const onAuthChanged = () => void load();
-    try {
-      window.addEventListener('authTokenChanged', onAuthChanged);
-    } catch {
-      // ignore
-    }
+
+    // 监听 Auth 状态变化，登录后重新加载
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') void load();
+      else if (event === 'SIGNED_OUT') setContracts([]);
+    });
+
     return () => {
       alive = false;
-      try {
-        window.removeEventListener('authTokenChanged', onAuthChanged);
-      } catch {
-        // ignore
-      }
+      subscription.unsubscribe();
     };
   }, []);
 
   const refreshFromBackend = React.useCallback(async (): Promise<void> => {
     if (clearingRef.current) return;
-    const backendUser = getBackendUser();
-    const currentUser = getCurrentUser();
-    const asEmail =
-      backendUser?.portal_role === 'admin' && currentUser?.email ? `?asEmail=${encodeURIComponent(currentUser.email)}` : '';
-    let res = await apiFetchJson<{ contracts: SalesContract[] }>(`/api/sales-contracts${asEmail}`);
-    if (asEmail && Array.isArray(res?.contracts) && res.contracts.length === 0) {
-      const fallback = await apiFetchJson<{ contracts: SalesContract[] }>('/api/sales-contracts');
-      if (Array.isArray(fallback?.contracts) && fallback.contracts.length > 0) {
-        res = fallback;
+    try {
+      const data = await contractService.getAll();
+      if (clearingRef.current) return;
+      if (Array.isArray(data) && data.length > 0) {
+        const filtered = filterDeletedContracts(data as SalesContract[]);
+        setContracts(filtered);
       }
-    }
-    if (clearingRef.current) return;
-    if (Array.isArray(res?.contracts)) {
-      // 防止“短暂空响应”把前端已有合同清空
-      setContracts((prev) => {
-        if (res.contracts.length === 0 && prev.length > 0) {
-          console.warn('⚠️ [SalesContractProvider] refreshFromBackend got empty contracts, keep local state');
-          return prev;
-        }
-        const serverFiltered = filterDeletedContracts(res.contracts);
-        const serverIds = new Set(serverFiltered.map((c: any) => c.contractNumber));
-        const localOnly = prev.filter((c) => !serverIds.has(c.contractNumber));
-        return [...serverFiltered, ...localOnly];
-      });
+    } catch (e: any) {
+      console.warn('⚠️ [SalesContractProvider] refreshFromBackend 失败:', e?.message || e);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -545,26 +436,7 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     });
   }, [approvalRequests]); // 监听审批请求变化
   
-  // 保存到 localStorage（本地缓存）
-  React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      if (clearingRef.current) return;
-      localStorage.setItem('salesContracts', JSON.stringify(contracts));
-    }
-  }, [contracts]);
-
-  // 同步到 Supabase（后台静默上传，不阻塞 UI）
-  const lastSyncedRef = React.useRef<string>('');
-  React.useEffect(() => {
-    if (clearingRef.current || contracts.length === 0) return;
-    const serialized = JSON.stringify(contracts.map(c => c.contractNumber).sort());
-    if (serialized === lastSyncedRef.current) return;
-    lastSyncedRef.current = serialized;
-    // 批量 upsert 到 Supabase（静默，失败不影响 UI）
-    contracts.forEach(contract => {
-      salesContractsDb.upsert(contract).catch(() => {/* 静默 */});
-    });
-  }, [contracts]);
+  // Supabase-first: 写操作直接调用 contractService.upsert，不再写 localStorage
   
   // 🔥 生成合同编号
   const normalizeContractRegionCode = (region: string): string => {

@@ -759,9 +759,11 @@ function fromARRow(r: any) {
 
 // SalesQuotation 转换
 function toSalesQuotationRow(q: any) {
+  const uuid = toUUID(q.id)
   return {
-    id: q.id,
-    qt_number: q.qtNumber,
+    id: uuid,
+    qt_number: q.qtNumber || q.qt_number,
+    quotation_number: q.qtNumber || q.qt_number || uuid,
     qr_number: q.qrNumber || null,
     inq_number: q.inqNumber || null,
     inquiry_number: q.inqNumber || null,
