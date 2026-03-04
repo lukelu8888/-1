@@ -33,6 +33,7 @@ import { PurchaseRequirement, PurchaserFeedback } from '../../contexts/PurchaseR
 import { SalesQuotation, SalesQuotationItem, useSalesQuotations } from '../../contexts/SalesQuotationContext';
 import { useInquiries } from '../../contexts/InquiryContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
+import { supabase } from '../../lib/supabase';
 
 interface CreateQuotationFromFeedbackProps {
   open: boolean;
@@ -147,16 +148,25 @@ export function CreateQuotationFromFeedback({
   const totalProfit = totalPrice - totalCost;
   const profitRate = totalCost > 0 ? totalProfit / totalCost : 0;
   
-  // 🔥 生成 QT 编号
-  const generateQTNumber = () => {
+  // 🔥 生成 QT 编号（调用 next_number_ex RPC）
+  const generateQTNumber = async (): Promise<string> => {
     const region = qr.region || 'NA';
-    const date = new Date();
-    const yy = date.getFullYear().toString().slice(-2);
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    const random = Math.floor(1000 + Math.random() * 9000);
-    
-    return `QT-${region}-${yy}${mm}${dd}-${random}`;
+    try {
+      const { data, error } = await supabase.rpc('next_number_ex', {
+        p_doc_type: 'QT',
+        p_region_code: region,
+        p_customer_id: null,
+      });
+      if (error) throw error;
+      return data as string;
+    } catch (err) {
+      console.error('[CreateQuotationFromFeedback] next_number_ex failed, using fallback:', err);
+      const date = new Date();
+      const dateStr = date.getFullYear().toString().slice(-2)
+        + String(date.getMonth() + 1).padStart(2, '0')
+        + String(date.getDate()).padStart(2, '0');
+      return `QT-${region}-${dateStr}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`;
+    }
   };
   
   // 🔥 查找关联的客户询价单
@@ -181,7 +191,7 @@ export function CreateQuotationFromFeedback({
   const relatedInquiry = findRelatedInquiry();
   
   // 🔥 提交报价单
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (items.length === 0) {
       toast.error('请至少添加一个产品');
       return;
@@ -194,7 +204,7 @@ export function CreateQuotationFromFeedback({
       return;
     }
     
-    const qtNumber = generateQTNumber();
+    const qtNumber = await generateQTNumber();
     const today = new Date().toISOString().split('T')[0];
     const validUntilDate = new Date();
     validUntilDate.setDate(validUntilDate.getDate() + validityDays);

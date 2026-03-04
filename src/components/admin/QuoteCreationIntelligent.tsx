@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../../lib/supabase';
 import { createPortal } from 'react-dom';
 import { X, Calculator, DollarSign, TrendingUp, AlertCircle, Info, ChevronDown, ChevronUp, Save, Send, Sparkles, FileText } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -376,12 +377,24 @@ export default function QuoteCreationIntelligent({
         
         setItems(existingItems);
       } else {
-        // 🔥 新建模式：从采购需求单创建
+        // 🔥 新建模式：从采购需求单创建，调用 RPC 生成编号
         const region = requirement.region || 'NA';
-        const date = new Date();
-        const dateStr = `${String(date.getFullYear()).slice(2)}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
-        const newQuoteNo = `QT-${region}-${dateStr}-0001`;
-        setQuoteNo(newQuoteNo);
+        void (async () => {
+          try {
+            const { data, error } = await supabase.rpc('next_number_ex', {
+              p_doc_type: 'QT',
+              p_region_code: region,
+              p_customer_id: null,
+            });
+            if (error) throw error;
+            setQuoteNo(data as string);
+          } catch (err) {
+            console.error('[QuoteCreationIntelligent] next_number_ex failed, using fallback:', err);
+            const date = new Date();
+            const dateStr = `${String(date.getFullYear()).slice(2)}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+            setQuoteNo(`QT-${region}-${dateStr}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`);
+          }
+        })();
         
         // 导入产品（从采购反馈中获取成本价）
         const initialItems: QuoteItem[] = requirement.items.map((item: any, index: number) => {
