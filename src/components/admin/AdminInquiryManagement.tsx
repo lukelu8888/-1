@@ -195,14 +195,6 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       })
     : inquiries; // CEO, CFO, and Sales_Director can see all inquiries
 
-  console.log(`📊 [区域过滤] 总询价数: ${inquiries.length} | 过滤后: ${regionFilteredInquiries.length} | 用户角色: ${currentUserRole} | 用户区域: ${currentUserRegion}`);
-
-  // 🔥 调试：打印询价单的userEmail信息
-  console.log('\n📊 [AdminInquiryManagement] === 询价单userEmail调试 ===');
-  regionFilteredInquiries.forEach(inq => {
-    console.log(`  - ${inq.id}: userEmail="${inq.userEmail || '❌ 未设置'}" | buyerInfo.email="${inq.buyerInfo?.email || '❌ 未设置'}"`);
-  });
-  console.log('='.repeat(60) + '\n');
 
   // Use real inquiries (no fallback sample data needed)
   const displayInquiries = regionFilteredInquiries
@@ -221,17 +213,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       priority: 'Medium' // Default priority
     }));
 
-  // 🔍 调试：检查是否有数据以及region字段
-  console.log('🔍 [数据检查] displayInquiries数量:', displayInquiries.length);
-  if (displayInquiries.length > 0) {
-    console.log('🔍 [数据检查] 第一条询价示例:', {
-      id: displayInquiries[0].id,
-      region: displayInquiries[0].region,
-      customer: displayInquiries[0].customer.name,
-      products: displayInquiries[0].products?.map((p: any) => p.name)
-    });
-  } else {
-    console.warn('⚠️ [数据检查] 当前没有询价数据，请先创建测试询价！');
+  if (displayInquiries.length === 0) {
   }
 
   // 🎯 从数据中提取唯一值用于筛选选项

@@ -19,7 +19,7 @@ import { CreateQuotationRequestDialog } from './CreateQuotationRequestDialog';
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
 import { generateQRNumber } from '../../utils/xjNumberGenerator';
-import { getCurrentUser } from '../../utils/dataIsolation';
+import { useUser } from '../../contexts/UserContext';
 import { extractModelNo, extractSpecification } from '../../utils/productDataExtractor';
 import { apiFetchJson } from '../../api/backend-auth';
 
@@ -54,33 +54,18 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const { addInquiry, getSubmittedInquiries, deleteInquiry, refreshInquiries } = useInquiry();
   const inquiries = getSubmittedInquiries();
   
-  // 🔍 Debug: Log inquiries data
+  // 组件挂载时刷新一次数据
   useEffect(() => {
-    console.log('🔍 [AdminInquiryManagementNew] Current inquiries:', {
-      count: inquiries.length,
-      inquiries: inquiries.map(inq => ({
-        id: inq.id,
-        region: inq.region,
-        isSubmitted: inq.isSubmitted,
-        status: inq.status
-      }))
-    });
-  }, [inquiries]);
-  
-  // 🔄 组件挂载时主动刷新数据（确保业务员能看到最新数据）
-  useEffect(() => {
-    console.log('🔄 [AdminInquiryManagementNew] Component mounted, refreshing inquiries...');
-    void refreshInquiries().catch(err => {
-      console.error('❌ [AdminInquiryManagementNew] Failed to refresh:', err);
-    });
-  }, [refreshInquiries]);
+    void refreshInquiries().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // 🔥 获取QuotationRequest数据，用于检查是否已下推
   const { getQuotationRequestsByInquiry } = useQuotationRequests();
   
   // 🔥 获取采购需求Context，用于下推成本询报
   const { requirements: purchaseRequirements, addRequirement: addPurchaseRequirement } = usePurchaseRequirements();
-  const currentUser = getCurrentUser();
+  const { user: currentUser } = useUser();
   
   // 🔥 批量删除处理函数
   const handleBulkDelete = () => {
@@ -246,35 +231,14 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     return mapping[code] || code;
   };
 
+  // 从 Supabase Auth 同步用户区域和角色
   useEffect(() => {
-    const loadUserInfo = () => {
-      const currentUserStr = localStorage.getItem('cosun_current_user');
-      if (currentUserStr) {
-        try {
-          const currentUser = JSON.parse(currentUserStr);
-          const fullRegionName = regionCodeToFullName(currentUser.region);
-          setCurrentUserRegion(fullRegionName);
-          setCurrentUserRole(currentUser.userRole || currentUser.role || null);
-        } catch (e) {
-          console.error('❌ [AdminInquiry] Failed to parse current user:', e);
-        }
-      }
-    };
-
-    loadUserInfo();
-
-    const handleUserChange = () => {
-      loadUserInfo();
-    };
-
-    window.addEventListener('userChanged', handleUserChange);
-    window.addEventListener('storage', handleUserChange);
-
-    return () => {
-      window.removeEventListener('userChanged', handleUserChange);
-      window.removeEventListener('storage', handleUserChange);
-    };
-  }, []);
+    if (currentUser) {
+      const fullRegionName = regionCodeToFullName(currentUser.region || '');
+      setCurrentUserRegion(fullRegionName);
+      setCurrentUserRole(currentUser.role || currentUser.userRole || null);
+    }
+  }, [currentUser]);
 
   // Helper: normalize region for matching (supports both codes and full names)
   const normalizeRegionForMatch = (r: string | null | undefined): string[] => {
@@ -322,34 +286,13 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       })()
     : inquiries;
 
-  // 🔍 Debug: Log filtering steps
-  useEffect(() => {
-    console.log('📊 [AdminInquiryManagementNew] Data flow:', {
-      '1. inquiries (from getSubmittedInquiries)': inquiries.length,
-      '2. regionFilteredInquiries': regionFilteredInquiries.length,
-      '3. currentUserRole': currentUserRole,
-      '4. currentUserRegion': currentUserRegion,
-      '5. sample inquiry ids': inquiries.slice(0, 3).map(inq => inq.id)
-    });
-  }, [inquiries, regionFilteredInquiries, currentUserRole, currentUserRegion]);
 
   // Map inquiries to display format
   const displayInquiries = regionFilteredInquiries
-    .filter(inq => {
-      if (!inq.id) {
-        console.warn('⚠️ [AdminInquiryManagementNew] Inquiry missing id:', inq);
-        return false;
-      }
-      const parts = inq.id.split('-');
-      const isValid = parts.length >= 4;
-      if (!isValid) {
-        console.warn('⚠️ [AdminInquiryManagementNew] Inquiry id format invalid:', inq.id, 'parts:', parts.length);
-      }
-      return isValid;
-    })
+    .filter(inq => !!inq.id)
     .map(inq => ({
       ...inq,
-      inquiryNumber: inq.id,
+      inquiryNumber: inq.inquiryNumber || inq.id,
       customer: {
         name: inq.buyerInfo?.companyName || 'N/A',
         email: inq.userEmail || inq.buyerInfo?.email || 'N/A',
@@ -362,10 +305,6 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       priority: 'Medium'
     }));
 
-  // 🔍 Debug: Log displayInquiries count
-  useEffect(() => {
-    console.log('📋 [AdminInquiryManagementNew] displayInquiries count:', displayInquiries.length);
-  }, [displayInquiries.length]);
 
   // 🎯 从数据中提取唯一值
   const uniqueRegions = [...new Set(displayInquiries.map(inq => inq.region).filter(Boolean))];
@@ -425,18 +364,6 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     return matchesSearch && matchesFilter && matchesRegion && matchesCustomer && matchesSalesRep && matchesCountry && matchesDateRange;
   });
 
-  // 🔍 Debug: Log final filtered count
-  useEffect(() => {
-    console.log('✅ [AdminInquiryManagementNew] Final filteredInquiries count:', filteredInquiries.length, {
-      searchTerm,
-      filterStatus,
-      filterRegion,
-      filterCustomer,
-      filterSalesRep,
-      filterCountry,
-      filterDateRange
-    });
-  }, [filteredInquiries.length, searchTerm, filterStatus, filterRegion, filterCustomer, filterSalesRep, filterCountry, filterDateRange]);
 
   const handleStatusChange = (newStatus: string) => {
     if (!selectedInquiry) return;
@@ -492,11 +419,12 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
 
   useEffect(() => {
     const visibleIds = new Set(filteredInquiries.map((inquiry) => inquiry.id));
-    const nextSelected = new Set(Array.from(selectedIds).filter((id) => visibleIds.has(id)));
-    if (nextSelected.size !== selectedIds.size) {
-      setSelectedIds(nextSelected);
-    }
-  }, [filteredInquiries, selectedIds]);
+    setSelectedIds(prev => {
+      const next = new Set(Array.from(prev).filter(id => visibleIds.has(id)));
+      return next.size !== prev.size ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredInquiries.length]);
 
   return (
     <div className="space-y-4">

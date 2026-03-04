@@ -52,15 +52,12 @@ export function useAuth() {
         const stored = localStorage.getItem('cosun_current_user');
         if (stored) {
           const parsed = JSON.parse(stored);
-          // 同一账号：保留已有的 RBAC 角色（允许角色切换器工作）
-          if (parsed.email === authUser.email) {
-            setCurrentUser(buildRbacUser(parsed));
-            return;
-          }
+          // 同一账号：保留已有的 RBAC 角色，不重复 setCurrentUser 避免循环
+          if (parsed.email === authUser.email) return;
         }
       } catch { /* ignore */ }
 
-      // 新登录的管理员：用 Supabase session 数据初始化 RBAC 用户
+      // 新登录：用 Supabase session 数据初始化 RBAC 用户
       const rbacUser: User = {
         id: authUser.id ?? authUser.email,
         name: authUser.name ?? authUser.email.split('@')[0],
@@ -70,14 +67,9 @@ export function useAuth() {
       };
       setCurrentUser(rbacUser);
       localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser));
-
-      // 同步 cosun_auth_user 供 dataIsolation 使用
-      localStorage.setItem('cosun_auth_user', JSON.stringify({
-        email: authUser.email,
-        type: 'admin',
-      }));
+      localStorage.setItem('cosun_auth_user', JSON.stringify({ email: authUser.email, type: 'admin' }));
     }
-  }, [authUser]);
+  }, [authUser?.email, authUser?.type]);
 
   // 监听 RBAC 角色切换事件（UserRoleSwitcher 发出）
   useEffect(() => {
