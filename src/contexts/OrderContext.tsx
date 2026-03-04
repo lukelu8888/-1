@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getUserData, setUserData, getAllCustomersData, getCurrentUser } from '../utils/dataIsolation';
+import { getCurrentUser } from '../utils/dataIsolation';
 import { toast } from 'react-toastify';
 
 import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
@@ -229,67 +229,23 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addOrder = (order: Order) => {
-    console.log('📥 [OrderContext.addOrder] 收到订单添加请求');
-    console.log('  - 订单编号:', order.orderNumber);
-    console.log('  - 客户名称:', order.customer);
-    console.log('  - 客户邮箱:', order.customerEmail);
-    console.log('  - 区域信息:', order.region);
-    console.log('  - 订单金额:', order.totalAmount, order.currency);
-    
-    // 🔒 添加订单到对应客户的存储
-    const customerEmail = order.customerEmail;
-    
-    if (!customerEmail) {
-      console.error('❌ [OrderContext.addOrder] Order must have customerEmail');
-      console.error('  - 订单对象:', order);
+    if (!order.customerEmail) {
       toast.error('订单创建失败', { description: '订单缺少客户邮箱信息' });
       return;
     }
-    
-    console.log('✅ [OrderContext.addOrder] customerEmail验证通过:', customerEmail);
-    
-    // 读取该客户的现有订单
-    const customerOrders = getUserData<Order>('orders', customerEmail);
-    console.log(`  - 客户 ${customerEmail} 现有订单数:`, customerOrders.length);
-    
-    // 添加新订单
-    const updatedOrders = [order, ...customerOrders];
-    console.log('  - 添加后总订单数:', updatedOrders.length);
-    
-    // 保存到该客户的专属存储
-    console.log('  - 正在保存到localStorage: orders_' + customerEmail);
-    setUserData('orders', updatedOrders, customerEmail);
-    console.log('  ✅ localStorage保存完成');
-    // 同步到 Supabase（静默）
-    ordersDb.upsert(order).catch(() => {/* 静默 */});
-    
-    // 更新当前Context状态
-    const currentUser = getCurrentUser();
-    console.log('  - 当前用户类型:', currentUser?.type);
-    
-    if (currentUser?.type === 'admin') {
-      console.log('  - Admin用户，重新聚合所有订单...');
-      const allOrders = getAllCustomersData<Order>('orders');
-      console.log('  - 聚合后总订单数:', allOrders.length);
-      setOrders(allOrders);
-      console.log('  ✅ Context状态已更新');
-    } else {
-      console.log('  - 客户用户，更新自己的订单列表');
-      setOrders(updatedOrders);
-      console.log('  ✅ Context状态已更新');
-    }
-    
-    // 🔥 触发自定义事件，通知所有监听器订单数据已更新
-    console.log('📢 [OrderContext.addOrder] 触发ordersUpdated事件');
-    window.dispatchEvent(new CustomEvent('ordersUpdated', { 
-      detail: { 
-        action: 'add', 
-        orderNumber: order.orderNumber,
-        customerEmail: customerEmail
-      } 
+
+    // Supabase 主写入（异步，不阻塞 UI）
+    void orderService.upsert(order).catch(() => {});
+
+    // 立即更新 React State
+    setOrders(prev => {
+      const exists = prev.some(o => o.id === order.id || o.orderNumber === order.orderNumber);
+      return exists ? prev.map(o => (o.id === order.id || o.orderNumber === order.orderNumber) ? { ...o, ...order } : o) : [order, ...prev];
+    });
+
+    window.dispatchEvent(new CustomEvent('ordersUpdated', {
+      detail: { action: 'add', orderNumber: order.orderNumber, customerEmail: order.customerEmail }
     }));
-    
-    console.log('🎉 [OrderContext.addOrder] 订单添加完成！');
     emitOrderEvent(ERP_EVENT_KEYS.ORDER_CREATED, order, {
       status: order.status,
       quotationNumber: order.quotationNumber || null,
@@ -297,172 +253,20 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   };
 
   const updateOrder = (orderId: string, updates: Partial<Order>) => {
-    console.log('🔄 [OrderContext.updateOrder] 更新订单:', orderId);
-    console.log('  - 更新内容:', updates);
-    console.log('  - 🔍 当前Context中的订单数:', orders.length);
-    
-    // 🔒 更新订单：需要找到对应客户并更新其数据
-    const currentUser = getCurrentUser();
-    
-    if (currentUser?.type === 'admin') {
-      // Admin更新：需要找到订单属于哪个客户
-      const allOrders = getAllCustomersData<Order>('orders');
-      const orderToUpdate = allOrders.find(o => o.id === orderId || o.orderNumber === orderId);
-      
-      console.log('  - Admin模式，查找订单:', orderToUpdate?.orderNumber);
-      
-      if (orderToUpdate) {
-        const customerEmail = orderToUpdate.customerEmail;
-        if (customerEmail) {
-          console.log('  - 订单所属客户:', customerEmail);
-          
-          const customerOrders = getUserData<Order>('orders', customerEmail);
-          console.log('  - 客户现有订单数:', customerOrders.length);
-          console.log('  - 🔍 现有订单列表（更新前）:');
-          customerOrders.forEach((o, idx) => {
-            console.log(`    ${idx + 1}. ${o.orderNumber} (id: ${o.id})`);
-          });
-          
-          // 🔥 检测重复订单
-          const duplicates = customerOrders.filter(o => 
-            o.orderNumber === orderToUpdate.orderNumber || o.id === orderId
-          );
-          if (duplicates.length > 1) {
-            console.error(`  ⚠️ 检测到 ${duplicates.length} 个重复订单！`);
-            console.error('  - 重复订单详情:', duplicates);
-          }
-          
-          const updated = customerOrders.map(o => 
-            (o.id === orderId || o.orderNumber === orderId) 
-              ? { ...o, ...updates, updatedAt: new Date().toISOString() } 
-              : o
-          );
-          
-          console.log('  - 更新后订单数:', updated.length);
-          console.log('  - 🔍 更新后订单列表:');
-          updated.forEach((o, idx) => {
-            console.log(`    ${idx + 1}. ${o.orderNumber} (id: ${o.id}, status: ${o.status})`);
-          });
-          
-          // 保存到该客户的专属存储
-          setUserData('orders', updated, customerEmail);
+    const merged = { ...updates, updatedAt: new Date().toISOString() };
 
-          // 同步到 Supabase（静默）
-          const updatedOrder = updated.find(o => o.id === orderId || o.orderNumber === orderId);
-          if (updatedOrder) void ordersDb.upsert(updatedOrder).catch(() => {});
-          
-          // 重新聚合所有数据
-          const refreshedOrders = getAllCustomersData<Order>('orders');
-          console.log('  - 重新聚合后总订单数:', refreshedOrders.length);
-          setOrders(refreshedOrders);
-          
-          console.log('  ✅ 订单更新完成（Admin模式）');
-        }
-      } else {
-        console.error('  ❌ 未找到订单:', orderId);
-      }
-    } else {
-      // 客户更新自己的订单
-      const customerEmail = currentUser?.email;
-      if (customerEmail) {
-        console.log('  - 客户模式，客户邮箱:', customerEmail);
-        
-        const customerOrders = getUserData<Order>('orders', customerEmail);
-        console.log('  - 🔍 客户现有订单数:', customerOrders.length);
-        console.log('  - 🔍 现有订单列表（更新前）:');
-        customerOrders.forEach((o, idx) => {
-          console.log(`    ${idx + 1}. ${o.orderNumber || 'NO-NUMBER'} (id: ${o.id}, status: ${o.status})`);
-        });
-        
-        // 🔥 检测localStorage中的重复订单
-        const duplicates = customerOrders.filter(o => 
-          o.orderNumber === orderId || o.id === orderId
-        );
-        if (duplicates.length > 1) {
-          console.error(`  ⚠️⚠️⚠️ 警告：在localStorage中检测到 ${duplicates.length} 个重复订单！`);
-          console.error('  - 重复订单详情:');
-          duplicates.forEach((dup, idx) => {
-            console.error(`    ${idx + 1}. orderNumber: ${dup.orderNumber}, id: ${dup.id}, status: ${dup.status}`);
-          });
-          console.error('  - 🔧 正在去重...');
-          
-          // 🔥 去重：保留第一个，删除其余
-          const seen = new Set<string>();
-          const deduped = customerOrders.filter(o => {
-            const key = o.orderNumber || o.id;
-            if (seen.has(key)) {
-              console.log(`    ❌ 删除重复订单: ${key}`);
-              return false;
-            }
-            seen.add(key);
-            return true;
-          });
-          
-          console.log(`  - ✅ 去重完成，订单数从 ${customerOrders.length} 减少到 ${deduped.length}`);
-          
-          // 使用去重后的数据
-          const updated = deduped.map((order) =>
-            (order.id === orderId || order.orderNumber === orderId)
-              ? { ...order, ...updates, updatedAt: new Date().toISOString() } 
-              : order
-          );
-          
-          console.log('  - 更新后订单数:', updated.length);
-          
-          // 保存去重后的数据
-          setUserData('orders', updated, customerEmail);
-          setOrders(updated);
-          
-          console.log('  ✅ 订单更新完成（客户模式，已去重）');
-          return;
-        }
-        
-        // 🔥 修复：使用id或orderNumber匹配订单
-        const updated = customerOrders.map((order) =>
-          (order.id === orderId || order.orderNumber === orderId)
-            ? { ...order, ...updates, updatedAt: new Date().toISOString() } 
-            : order
-        );
-        
-        console.log('  - 更新后订单数:', updated.length);
-        console.log('  - 🔍 更新后订单列表:');
-        updated.forEach((o, idx) => {
-          console.log(`    ${idx + 1}. ${o.orderNumber || 'NO-NUMBER'} (id: ${o.id}, status: ${o.status})`);
-        });
-        
-        // 🔥 保存到localStorage
-        setUserData('orders', updated, customerEmail);
+    // 更新 React State（立即响应 UI）
+    setOrders(prev => prev.map(o =>
+      (o.id === orderId || o.orderNumber === orderId) ? { ...o, ...merged } : o
+    ));
 
-        // 同步到 Supabase（静默）
-        const updatedOrder = updated.find(o => o.id === orderId || o.orderNumber === orderId);
-        if (updatedOrder) void ordersDb.upsert(updatedOrder).catch(() => {});
-        
-        // 🔥 直接设置state，避免触发重复保存
-        console.log('  - 正在更新React state...');
-        setOrders(updated);
-        
-        console.log('  ✅ 订单更新完成（客户模式）');
-      } else {
-        console.error('  ❌ 无法获取客户邮箱');
-        // Fallback：无法获取customerEmail时，仅更新状态
-        setOrders((prevOrders) =>
-          prevOrders.map((order) =>
-            (order.id === orderId || order.orderNumber === orderId)
-              ? { ...order, ...updates, updatedAt: new Date().toISOString() } 
-              : order
-          )
-        );
-      }
+    // Supabase 主写入（异步）
+    const target = orders.find(o => o.id === orderId || o.orderNumber === orderId);
+    if (target) {
+      void orderService.upsert({ ...target, ...merged }).catch(() => {});
     }
-    
-    // 🔥 触发自定义事件
-    console.log('📢 [OrderContext.updateOrder] 触发ordersUpdated事件');
-    window.dispatchEvent(new CustomEvent('ordersUpdated', { 
-      detail: { 
-        action: 'update', 
-        orderId: orderId 
-      } 
-    }));
+
+    window.dispatchEvent(new CustomEvent('ordersUpdated', { detail: { action: 'update', orderId } }));
     emitOrderEvent(ERP_EVENT_KEYS.ORDER_STATUS_CHANGED, {
       id: orderId,
       orderNumber: String(updates.orderNumber || orderId),
@@ -472,112 +276,26 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     });
   };
 
+
   const deleteOrder = (orderId: string) => {
-    // 🔒 删除订单：需要找到对应客户并删除其数据
     const currentUser = getCurrentUser();
+    const orderToDelete = orders.find(o => o.id === orderId || o.orderNumber === orderId);
     const deletionMarkers = new Set<string>([String(orderId)]);
-    
-    if (currentUser?.type === 'admin') {
-      // Admin删除：需要找到订单属于哪个客户
-      const allOrders = getAllCustomersData<Order>('orders');
-      const orderToDelete = allOrders.find(o => o.id === orderId || o.orderNumber === orderId);
-      
-      if (orderToDelete) {
-        getOrderMarkers(orderToDelete).forEach((m) => deletionMarkers.add(m));
-        const customerEmail = orderToDelete.customerEmail;
-        if (customerEmail) {
-          const customerOrders = getUserData<Order>('orders', customerEmail);
-          const filtered = customerOrders.filter(o => o.id !== orderId && o.orderNumber !== orderId);
-          setUserData('orders', filtered, customerEmail);
-          
-          // 重新聚合所有数据
-          const next = filterNotDeleted('order', getAllCustomersData<Order>('orders'), (order) =>
-            getOrderMarkers(order),
-          );
-          setOrders(next);
-        }
-      }
-    } else {
-      // 客户删除自己的订单
-      const customerEmail = currentUser?.email;
-      const filteredState = orders.filter((order) => order.id !== orderId && order.orderNumber !== orderId);
-      setOrders(filteredState);
-      if (customerEmail) {
-        const customerOrders = getUserData<Order>('orders', customerEmail);
-        const filtered = customerOrders.filter((order) => order.id !== orderId && order.orderNumber !== orderId);
-        const orderToDelete = customerOrders.find((order) => order.id === orderId || order.orderNumber === orderId);
-        if (orderToDelete) {
-          getOrderMarkers(orderToDelete).forEach((m) => deletionMarkers.add(m));
-        }
-        setUserData('orders', filtered, customerEmail);
-      }
-    }
+    if (orderToDelete) getOrderMarkers(orderToDelete).forEach((m) => deletionMarkers.add(m));
+
+    setOrders(prev => prev.filter(o => o.id !== orderId && o.orderNumber !== orderId));
 
     addTombstones('order', Array.from(deletionMarkers), {
       reason: 'manual_delete',
       deletedBy: currentUser?.email || 'unknown',
     });
     window.dispatchEvent(new CustomEvent('ordersUpdated', { detail: { action: 'delete', orderId } }));
-    emitOrderEvent(ERP_EVENT_KEYS.ORDER_DELETED, {
-      id: orderId,
-      orderNumber: String(orderId),
-    });
+    emitOrderEvent(ERP_EVENT_KEYS.ORDER_DELETED, { id: orderId, orderNumber: String(orderId) });
   };
 
   const clearAllOrders = () => {
-    console.log('🔥 [clearAllOrders] 开始清空所有订单数据...');
-    
-    // 🔒 清空所有订单：仅Admin可以执行此操作
-    const currentUser = getCurrentUser();
-    
-    if (currentUser?.type === 'admin') {
-      console.log('  - Admin用户，清空所有客户的订单数据');
-      
-      // 🔥 方法1：通过已有订单找到所有客户邮箱并清空
-      const allOrders = getAllCustomersData<Order>('orders');
-      console.log(`  - 当前订单总数: ${allOrders.length}`);
-      
-      if (allOrders.length > 0) {
-        const customerEmails = new Set(allOrders.map(o => o.customerEmail).filter(Boolean));
-        console.log(`  - 找到 ${customerEmails.size} 个客户`);
-        
-        customerEmails.forEach(email => {
-          if (email) {
-            console.log(`    • 清空客户 ${email} 的订单数据`);
-            setUserData('orders', [], email);
-            localStorage.removeItem(`orders_${email}`);
-          }
-        });
-      }
-      
-      // 🔥 方法2：暴力清空所有包含 'orders' 的 localStorage 键
-      console.log('  - 扫描并清空所有包含"orders"的localStorage键...');
-      const allKeys = Object.keys(localStorage);
-      const orderKeys = allKeys.filter(key => key.includes('orders'));
-      console.log(`  - 找到 ${orderKeys.length} 个订单相关的键:`, orderKeys);
-      
-      orderKeys.forEach(key => {
-        console.log(`    • 删除: ${key}`);
-        localStorage.removeItem(key);
-      });
-      
-      // 更新状态
-      setOrders([]);
-      console.log('  ✅ 所有订单数据已清空！');
-      console.log('  ✅ Context状态已重置为空数组');
-      
-    } else {
-      // 客户删除自己的订单
-      console.log('  - 客户用户，清空自己的订单数据');
-      const customerEmail = currentUser?.email;
-      if (customerEmail) {
-        setUserData('orders', [], customerEmail);
-        localStorage.removeItem(`orders_${customerEmail}`);
-      }
-      setOrders([]);
-    }
-    
-    console.log('🔥 [clearAllOrders] 清空完成！');
+    setOrders([]);
+    window.dispatchEvent(new CustomEvent('ordersUpdated', { detail: { action: 'clear' } }));
   };
 
   const getOrderByQuotation = (quotationNumber: string) => {

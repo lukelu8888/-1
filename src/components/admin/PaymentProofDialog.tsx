@@ -4,7 +4,6 @@ import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { FileText, Download, Calendar, DollarSign, Hash, FileCheck, X, Eye, Image as ImageIcon, ZoomIn, ZoomOut } from 'lucide-react';
 import { toast } from 'sonner';
-import { resolveBackendPublicUrl } from '../../api/backend-auth';
 
 interface PaymentProofDialogProps {
   open: boolean;
@@ -19,7 +18,7 @@ export function PaymentProofDialog({ open, onOpenChange, order }: PaymentProofDi
   if (!order || !order.depositPaymentProof) return null;
 
   const proof = order.depositPaymentProof;
-  const resolvedFileUrl = resolveBackendPublicUrl(proof.fileUrl);
+  const resolvedFileUrl = proof.fileUrl || '';
   const uploadDate = new Date(proof.uploadedAt).toLocaleString('zh-CN');
   
   // 判断文件类型
