@@ -25,7 +25,7 @@ import { toast } from 'sonner@2.0.3';
 import { useOrders } from '../../contexts/OrderContext';
 import { useQuotations } from '../../contexts/QuotationContext';
 import { useInquiry } from '../../contexts/InquiryContext'; // 🔥 导入InquiryContext
-import { sendNotificationToUser } from '../../contexts/NotificationContext'; // 🆕 导入通知功能
+import { sendNotificationToUser } from '../../utils/notificationUtils'; // 🆕 导入通知功能
 import { getCurrentUser } from '../../data/authorizedUsers'; // 🆕 获取当前用户信息
 import EditQuotationDialog from './EditQuotationDialog';
 import ViewQuotationDialog from './ViewQuotationDialog';

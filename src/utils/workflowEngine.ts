@@ -1,5 +1,5 @@
 import workflowConfig from '../config/businessWorkflow';
-import { sendNotificationToUser } from '../contexts/NotificationContext';
+import { sendNotificationToUser } from '../utils/notificationUtils';
 
 /**
  * 🔄 业务流程引擎

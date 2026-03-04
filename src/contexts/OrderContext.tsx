@@ -700,8 +700,3 @@ export function useOrders() {
   return context;
 }
 
-
-// 已废弃：数据现在来自 Supabase
-export function generateTestOrders() {
-  console.warn('[generateTestOrders] deprecated — data comes from Supabase');
-}

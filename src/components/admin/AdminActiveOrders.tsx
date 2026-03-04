@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Eye, Edit, CheckCircle, XCircle, Truck, Package, Clock, Search, DollarSign, Trash2, Printer, FileText, Download, Send, ShoppingCart, RefreshCw } from 'lucide-react';
 import { useOrders, Order } from '../../contexts/OrderContext';
-import { sendNotificationToUser } from '../../contexts/NotificationContext';
+import { sendNotificationToUser } from '../../utils/notificationUtils';
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument';
 import { adaptOrderToSalesContract } from '../../utils/documentDataAdapters';

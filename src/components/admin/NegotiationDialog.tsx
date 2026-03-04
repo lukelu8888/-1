@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { Quotation } from './QuotationManagement';
 import { toast } from 'sonner@2.0.3';
-import { sendNotificationToUser } from '../../contexts/NotificationContext';
+import { sendNotificationToUser } from '../../utils/notificationUtils';
 
 interface NegotiationDialogProps {
   open: boolean;

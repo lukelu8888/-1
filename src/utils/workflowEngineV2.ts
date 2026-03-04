@@ -4,7 +4,7 @@
  * 支持74个触发器的自动化执行
  */
 
-import { sendNotificationToUser } from '../contexts/NotificationContext';
+import { sendNotificationToUser } from '../utils/notificationUtils';
 
 // ===== 工作流上下文接口 =====
 export interface WorkflowContext {

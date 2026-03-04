@@ -9,7 +9,7 @@ import { CheckCircle2, XCircle, Upload, Download, Eye, DollarSign, Calendar, Fil
 import { toast } from 'sonner@2.0.3';
 import { useFinance, AccountReceivable } from '../../contexts/FinanceContext';
 import { useOrders } from '../../contexts/OrderContext';
-import { sendNotificationToUser } from '../../contexts/NotificationContext';
+import { sendNotificationToUser } from '../../utils/notificationUtils';
 import { resolveBackendPublicUrl } from '../../api/backend-auth';
 
 interface ConfirmReceiptDialogProps {

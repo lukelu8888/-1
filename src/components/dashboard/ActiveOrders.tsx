@@ -34,7 +34,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Checkbox } from '../ui/checkbox'; // 🔥 新增
 import { useOrders } from '../../contexts/OrderContext';
 import { useUser } from '../../contexts/UserContext';
-import { sendNotificationToUser } from '../../contexts/NotificationContext';
+import { sendNotificationToUser } from '../../utils/notificationUtils';
 import { apiFetchJson } from '../../api/backend-auth';
 import { useFinance } from '../../contexts/FinanceContext';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument'; // 🔥 使用文档中心模板

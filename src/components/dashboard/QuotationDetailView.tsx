@@ -6,7 +6,7 @@ import { Printer, Download, X, CheckCircle, XCircle, MessageSquare, Calculator }
 import { Quotation } from '../admin/QuotationManagement';
 import { QuotationDocument, QuotationData } from '../documents/templates/QuotationDocument'; // 🔥 使用文档中心的业务员报价单模版
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 使用SalesQuotationContext
-import { sendNotificationToUser } from '../../contexts/NotificationContext';
+import { sendNotificationToUser } from '../../utils/notificationUtils';
 import { useUser } from '../../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
 import { apiFetchJson } from '../../api/backend-auth';
