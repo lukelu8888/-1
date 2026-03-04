@@ -12,6 +12,7 @@ import { toast } from 'sonner@2.0.3';
 import { CustomerInquiryView } from '../dashboard/CustomerInquiryView';
 import { useInquiry } from '../../contexts/InquiryContext';
 import type { RegionType } from '../../utils/xjNumberGenerator';
+import { nextQRNumber } from '../../utils/xjNumberGenerator';
 import { CompactStatCard } from './CompactStatCard';
 import { MultiDimensionFilters } from './MultiDimensionFilters';
 import { CreateXJFromInquiryDialog } from './CreateXJFromInquiryDialog';
@@ -159,6 +160,12 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
         })
       };
       
+      // 生成 QR 编号
+      const regionCode = (inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA');
+      const qrNumber = await nextQRNumber(regionCode);
+      (requestData as any).requirementNo = qrNumber;
+      (requestData as any).qr_number = qrNumber;
+
       console.log('📤 [下推成本询报] 发送请求:', requestData);
       
       const response = await purchaseRequirementService.upsert(requestData);
