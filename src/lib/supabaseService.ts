@@ -1390,7 +1390,7 @@ function toPRRow(p: any) {
     urgency: p.urgency || 'medium',
     required_date: p.requiredDate || p.required_date || null,
     items: p.items || p.products || [],
-    status: p.status || 'pending',
+    status: (['pending','in_progress','completed','cancelled','partial','processing','submitted','quoted','draft'].includes(p.status) ? p.status : 'pending'),
     notes: p.notes || p.specialRequirements || null,
     created_by: p.createdBy || p.created_by || null,
     assigned_to: p.assignedTo || p.assigned_to || null,
