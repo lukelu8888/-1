@@ -54,11 +54,6 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   
   // 🔥 下推成本询报：从INQ创建QR
   const handlePushToCostInquiry = (inquiry: any) => {
-    console.log('🔽 开始下推成本询报，询价单:', inquiry);
-    console.log('  - inquiryNumber:', inquiry.inquiryNumber);
-    console.log('  - buyerInfo:', inquiry.buyerInfo);
-    console.log('  - customer:', inquiry.customer);
-    console.log('  - products:', inquiry.products);
     
     const newQR = {
       id: `qr_${Date.now()}`,
@@ -243,17 +238,9 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
 
   // Use real inquiries (no fallback sample data needed)
   const displayInquiries = regionFilteredInquiries
-    // 🧹 Filter out old format inquiries (INQ-YYMMDD-XXXX without region)
-    .filter(inq => {
-      // New format: INQ-{REGION}-YYMMDD-XXXX
-      // Old format: INQ-YYMMDD-XXXX (should be filtered out)
-      const parts = inq.id.split('-');
-      return parts.length >= 4; // New format has at least 4 parts
-    })
     .map(inq => ({
       ...inq,
-      // Map to admin format
-      inquiryNumber: inq.id,
+      inquiryNumber: inq.inquiryNumber || inq.id,
       customer: {
         name: inq.buyerInfo?.companyName || 'N/A',
         email: inq.userEmail || inq.buyerInfo?.email || 'N/A',
@@ -289,57 +276,18 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     displayInquiries.map(inq => inq.assignedTo).filter(Boolean)
   )]; // 可能为空，因为询价可能未分配
 
-  // 🔍 调试日志：打印筛选条件和数据
-  console.log('🎯 [筛选调试] ==================');
-  console.log('📊 总询价数:', displayInquiries.length);
-  console.log('🔍 当前筛选条件:', {
-    searchTerm,
-    filterStatus,
-    filterRegion,
-    filterCustomer,
-    filterProduct,
-  });
-  console.log('📋 可用选项:', {
-    uniqueRegions,
-    uniqueCustomers: uniqueCustomers.slice(0, 5),
-    uniqueProducts: uniqueProducts.slice(0, 5),
-  });
-
   const filteredInquiries = displayInquiries.filter((inquiry) => {
-    // 基础筛选
     const matchesSearch = searchTerm === '' || 
       inquiry.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       inquiry.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inquiry.id.toLowerCase().includes(searchTerm.toLowerCase());
-    
+      (inquiry.inquiryNumber || inquiry.id).toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filterStatus === 'all' || inquiry.status === filterStatus;
-    
-    // 🎯 多维度筛选
     const matchesRegion = filterRegion === 'all' || inquiry.region === filterRegion;
     const matchesCustomer = filterCustomer === 'all' || inquiry.customer.name === filterCustomer;
     const matchesProduct = filterProduct === 'all' || 
       inquiry.products?.some((p: any) => p.name === filterProduct);
-    
-    // 调试单条数据
-    const passes = matchesSearch && matchesFilter && matchesRegion && matchesCustomer && matchesProduct;
-    
-    if (filterRegion !== 'all' || filterCustomer !== 'all' || filterProduct !== 'all') {
-      console.log(`  ${inquiry.id}:`, {
-        region: inquiry.region,
-        matchesRegion,
-        customer: inquiry.customer.name,
-        matchesCustomer,
-        products: inquiry.products?.map((p: any) => p.name).join(', '),
-        matchesProduct,
-        passes,
-      });
-    }
-    
-    return passes;
+    return matchesSearch && matchesFilter && matchesRegion && matchesCustomer && matchesProduct;
   });
-
-  console.log('✅ 筛选后数量:', filteredInquiries.length);
-  console.log('==================\n');
 
   const handleStatusChange = (newStatus: string) => {
     if (!selectedInquiry) return;
@@ -555,7 +503,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                             className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
                             onClick={() => setSelectedInquiry(inquiry)}
                           >
-                            {inquiry.id}
+                            {inquiry.inquiryNumber || inquiry.id}
                           </button>
                         </DialogTrigger>
                         <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
