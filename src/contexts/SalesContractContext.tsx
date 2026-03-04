@@ -160,7 +160,7 @@ interface SalesContractContextType {
   contracts: SalesContract[];
   
   // CRUD操作
-  createContract: (contractData: Partial<SalesContract>) => SalesContract;
+  createContract: (contractData: Partial<SalesContract>) => Promise<SalesContract>;
   updateContract: (id: string, updates: Partial<SalesContract>) => void;
   deleteContract: (id: string) => void;
   getContractById: (id: string) => SalesContract | undefined;
@@ -447,27 +447,28 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     return 'NA';
   };
 
-  const generateContractNumber = (region: string): string => {
+  const generateContractNumber = async (region: string): Promise<string> => {
     const normalizedRegion = normalizeContractRegionCode(region);
-    const now = new Date();
-    const year = now.getFullYear().toString().slice(-2);
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const dateStr = `${year}${month}${day}`;
-    
-    // 计算区域内今天的合同数量
-    const todayContracts = contracts.filter(c => {
-      const cRegion = c.contractNumber.split('-')[1];
-      const cDate = c.contractNumber.split('-')[2];
-      return cRegion === normalizedRegion && cDate === dateStr;
-    });
-    
-    const sequence = String(todayContracts.length + 1).padStart(4, '0');
-    return `SC-${normalizedRegion}-${dateStr}-${sequence}`;
+    try {
+      const { data, error } = await supabase.rpc('next_number_ex', {
+        p_doc_type: 'SC',
+        p_region_code: normalizedRegion,
+        p_customer_id: null,
+      });
+      if (error) throw error;
+      return data as string;
+    } catch (err) {
+      console.error('[SalesContractContext] next_number_ex RPC failed, using local fallback:', err);
+      const now = new Date();
+      const dateStr = now.getFullYear().toString().slice(-2)
+        + String(now.getMonth() + 1).padStart(2, '0')
+        + String(now.getDate()).padStart(2, '0');
+      return `SC-${normalizedRegion}-${dateStr}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`;
+    }
   };
   
   // 🔥 创建销售合同
-  const createContract = (contractData: Partial<SalesContract>): SalesContract => {
+  const createContract = async (contractData: Partial<SalesContract>): Promise<SalesContract> => {
     clearingRef.current = false;
     const now = new Date().toISOString();
     
@@ -480,10 +481,12 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     
     // 判断是否需要总监审批
     const requiresDirectorApproval = totalAmount >= 20000;
+
+    const contractNumber = await generateContractNumber(contractData.region || 'NA');
     
     const newContract: SalesContract = {
       id: `SC-${Date.now()}`,
-      contractNumber: generateContractNumber(contractData.region || 'NA'),
+      contractNumber,
       quotationNumber: contractData.quotationNumber || '',
       inquiryNumber: contractData.inquiryNumber,
       
@@ -603,16 +606,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   // 🔥 清空所有合同
   const clearAllContracts = () => {
     clearingRef.current = true;
-
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('salesContracts', '[]');
-      localStorage.setItem('salesContracts_cleared', Date.now().toString());
-      const allKeys = Object.keys(localStorage);
-      allKeys.filter(key => key.toLowerCase().includes('contract') && !key.includes('quotation') && key !== 'salesContracts_cleared')
-        .forEach(key => localStorage.removeItem(key));
-      localStorage.setItem('salesContracts', '[]');
-    }
-
     setContracts([]);
     toast.success('All contracts cleared');
   };
