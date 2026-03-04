@@ -138,21 +138,31 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    let resolved = false;
-    const resolve = async (session: any) => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(sessionTimeout);
-      await applySession(session);
+    // 先用 getSession() 同步读本地 token，最快路径
+    let initialDone = false;
+    supabase.auth.getSession().then(async ({ data, error }) => {
+      if (error) console.warn('[Auth] getSession error:', error.message);
+      initialDone = true;
+      await applySession(data?.session ?? null);
       setAuthLoading(false);
-    };
+    }).catch(async () => {
+      initialDone = true;
+      setUserState(null);
+      setAuthLoading(false);
+    });
 
-    // INITIAL_SESSION 从本地 storage 读取，几乎瞬时，必须先注册才能捕获
+    // 硬兜底：2秒内 getSession 没返回就强制结束 loading
+    const hardTimeout = setTimeout(() => {
+      if (!initialDone) {
+        console.warn('[Auth] hard timeout — forcing authLoading=false');
+        setAuthLoading(false);
+      }
+    }, 2000);
+
+    // 监听后续状态变化
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'INITIAL_SESSION') {
-          await resolve(session);
-        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           setAuthLoading(true);
           await applySession(session);
           setAuthLoading(false);
@@ -164,16 +174,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    // 兜底：若 INITIAL_SESSION 3秒内未触发（极少数情况），用 getSession 补救
-    const sessionTimeout = setTimeout(() => {
-      if (!resolved) {
-        console.warn('Auth init timeout, falling back to getSession');
-        supabase.auth.getSession().then(({ data }) => resolve(data.session)).catch(() => resolve(null));
-      }
-    }, 3000);
-
     return () => {
-      clearTimeout(sessionTimeout);
+      clearTimeout(hardTimeout);
       subscription.unsubscribe();
     };
   }, []);
