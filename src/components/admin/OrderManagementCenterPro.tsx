@@ -164,31 +164,7 @@ export default function OrderManagementCenterPro() {
       }
     } catch {}
 
-    const loadPendingCount = async () => {
-      try {
-        const [qtRes, scRes] = await Promise.all([
-          apiFetchJson<{
-            pending: any[];
-            approved: any[];
-            rejected: any[];
-            submitted: any[];
-          }>(`/api/approval-center/quotation-requests?asEmail=${encodeURIComponent(currentUserEmail)}`),
-          apiFetchJson<{
-            pending: any[];
-            approved: any[];
-            rejected: any[];
-            submitted: any[];
-          }>(`/api/approval-center/contract-requests?asEmail=${encodeURIComponent(currentUserEmail)}`),
-        ]);
-
-        const count = (qtRes?.pending?.length || 0) + (scRes?.pending?.length || 0);
-        setMyPendingCount(count);
-      } catch (error) {
-        console.error('❌ [OrderManagementCenterPro] 加载待审批数量失败:', error);
-      }
-    };
-
-    void loadPendingCount();
+    // 待审批数量从 localStorage 缓存读取，避免调用已禁用的后端 API
 
     const handlePendingChanged = (event: Event) => {
       const customEvent = event as CustomEvent<{ count?: number }>;
