@@ -654,7 +654,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                         className="font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition-colors"
                         onClick={() => openInquiryDetail(inquiry)}
                       >
-                        {inquiry.id}
+                        {inquiry.inquiryNumber || inquiry.id}
                       </button>
                     </TableCell>
                     <TableCell className="py-3" style={{ fontSize: '12px' }}>
