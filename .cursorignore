@@ -1,0 +1,19 @@
+# Exclude large directories from Cursor AI indexing
+node_modules/
+build/
+dist/
+.git/
+backend/
+docs/
+public/
+*.zip
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.woff
+*.woff2
+*.ttf
+*.eot
