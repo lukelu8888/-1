@@ -138,26 +138,28 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // 先用 getSession() 同步读本地 token，最快路径
     let initialDone = false;
-    supabase.auth.getSession().then(async ({ data, error }) => {
-      if (error) console.warn('[Auth] getSession error:', error.message);
+
+    // 用 Promise.race 强制 800ms 超时，防止 getSession 挂起
+    const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 800));
+    const sessionPromise = supabase.auth.getSession().then(({ data }) => data?.session ?? null).catch(() => null);
+
+    Promise.race([sessionPromise, timeout]).then(async (session) => {
+      if (initialDone) return;
       initialDone = true;
-      await applySession(data?.session ?? null);
-      setAuthLoading(false);
-    }).catch(async () => {
-      initialDone = true;
-      setUserState(null);
+      await applySession(session);
       setAuthLoading(false);
     });
 
-    // 硬兜底：2秒内 getSession 没返回就强制结束 loading
+    // 最终兜底：1.5秒还没完成就强制结束
     const hardTimeout = setTimeout(() => {
       if (!initialDone) {
-        console.warn('[Auth] hard timeout — forcing authLoading=false');
+        console.warn('[Auth] hard timeout');
+        initialDone = true;
+        setUserState(null);
         setAuthLoading(false);
       }
-    }, 2000);
+    }, 1500);
 
     // 监听后续状态变化
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
