@@ -136,7 +136,7 @@ export function InquiryManagement() {
     const regionCode = REGION_CODES[userRegion] || 'NA';
     const customerProfile = getCustomerProfile();
 
-    const inquiryNumber = await nextInquiryNumber(regionCode);
+    const inquiryNumber = await nextInquiryNumber(regionCode, user?.id ?? undefined);
 
     const newInquiry = {
       id: crypto.randomUUID(),

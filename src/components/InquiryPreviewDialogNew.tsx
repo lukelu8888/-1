@@ -220,7 +220,7 @@ export function InquiryPreviewDialog({
       // Generate number from Supabase DB (atomic, concurrency-safe)
       let finalInquiryNumber: string;
       try {
-        finalInquiryNumber = await nextInquiryNumber(regionCode);
+        finalInquiryNumber = await nextInquiryNumber(regionCode, user?.id ?? undefined);
       } catch (numErr) {
         console.error('[Submit] Failed to generate inquiry number:', numErr);
         toast.error('Failed to generate inquiry number. Please try again.');

@@ -30,7 +30,7 @@ interface UserContextType {
   userInfo: UserInfo | null;
   setUserInfo: (info: UserInfo) => void;
   incrementInquiryCount: () => void;
-  generateInquiryNumber: (region: string) => Promise<string>; // 调用 Supabase RPC next_inquiry_number（并发安全）
+  generateInquiryNumber: (region: string, customerId?: string) => Promise<string>; // 调用 Supabase RPC next_inquiry_number（并发安全）
   peekInquiryNumber: (region: string) => string; // 本地预览格式，仅用于 UI 展示，不消耗序号
   user: AuthUser | null;
   authLoading: boolean;
@@ -211,9 +211,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   // 并发安全的编号生成：调用 Supabase RPC next_inquiry_number
   // number_sequences 表原子递增，多用户同时提交不会重号
-  const generateInquiryNumber = async (region: string): Promise<string> => {
+  const generateInquiryNumber = async (region: string, customerId?: string): Promise<string> => {
     try {
-      return await nextInquiryNumber(region);
+      return await nextInquiryNumber(region, customerId ?? user?.id ?? undefined);
     } catch (err) {
       // RPC 失败时本地降级（极端网络异常兜底，格式一致但序号可能重复）
       console.error('[UserContext] next_inquiry_number RPC failed, falling back to local:', err);

@@ -443,9 +443,10 @@ export const notificationSupabaseService = {
 // ============================================================
 // 编号生成（DB 原子递增，并发安全）
 // ============================================================
-export async function nextInquiryNumber(regionCode: string = 'NA'): Promise<string> {
+export async function nextInquiryNumber(regionCode: string = 'NA', customerId?: string): Promise<string> {
   const { data, error } = await supabase.rpc('next_inquiry_number', {
     p_region_code: regionCode,
+    p_customer_id: customerId ?? null,
   })
   if (error) {
     console.error('[Supabase] next_inquiry_number RPC failed:', error.message)

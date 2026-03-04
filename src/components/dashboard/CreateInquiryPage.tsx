@@ -182,7 +182,7 @@ export function CreateInquiryPage({
 
     let inquiryNumber: string;
     try {
-      inquiryNumber = await nextInquiryNumber(regionCode);
+      inquiryNumber = await nextInquiryNumber(regionCode, user?.id ?? undefined);
     } catch (err) {
       console.error('Failed to generate inquiry number:', err);
       toast.error('Failed to generate inquiry number');
