@@ -2,15 +2,67 @@
  * Document Number Generator for B2B Trade System
  * Supports: INQ, QUO, SC, CI, PL, YS, SK, QR, XJ, BJ, QT, SO, PO
  * Format: {TYPE}-{REGION}-YYMMDD-XXXX
- * 
- * Important: Sequence numbers are cumulative and NEVER reset daily.
- * The date part reflects the document creation date, but the sequence continues incrementing.
- * 
- * Examples:
- * Day 1 (Nov 21): SC-NA-251121-0001, SC-NA-251121-0002
- * Day 2 (Nov 22): SC-NA-251122-0003, SC-NA-251122-0004
- * Day 3 (Nov 23): SC-NA-251123-0005, SC-NA-251123-0006
+ *
+ * Preferred: Use async RPC variants (nextQRNumber, nextXJNumber, nextBJNumber…)
+ * which call next_number_ex on Supabase for concurrent-safe numbering.
+ * Legacy sync functions remain for backward compatibility only.
  */
+import { supabase } from '../lib/supabase';
+
+// ========== Supabase RPC — async number generators ==========
+
+function localFallback(prefix: string, region?: string): string {
+  const now = new Date();
+  const dateStr = now.getFullYear().toString().slice(-2)
+    + String(now.getMonth() + 1).padStart(2, '0')
+    + String(now.getDate()).padStart(2, '0');
+  const rand = String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0');
+  return region ? `${prefix}-${region}-${dateStr}-${rand}` : `${prefix}-${dateStr}-${rand}`;
+}
+
+export async function nextQRNumber(region = 'NA'): Promise<string> {
+  try {
+    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'QR', p_region_code: region, p_customer_id: null });
+    if (error) throw error;
+    return data as string;
+  } catch (e) {
+    console.error('[xjNumberGenerator] nextQRNumber RPC failed:', e);
+    return localFallback('QR');
+  }
+}
+
+export async function nextXJNumber(): Promise<string> {
+  try {
+    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'XJ', p_region_code: 'UNKNOWN', p_customer_id: null });
+    if (error) throw error;
+    return data as string;
+  } catch (e) {
+    console.error('[xjNumberGenerator] nextXJNumber RPC failed:', e);
+    return localFallback('XJ');
+  }
+}
+
+export async function nextBJNumber(): Promise<string> {
+  try {
+    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'BJ', p_region_code: 'UNKNOWN', p_customer_id: null });
+    if (error) throw error;
+    return data as string;
+  } catch (e) {
+    console.error('[xjNumberGenerator] nextBJNumber RPC failed:', e);
+    return localFallback('BJ');
+  }
+}
+
+export async function nextCGNumber(): Promise<string> {
+  try {
+    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'CG', p_region_code: 'UNKNOWN', p_customer_id: null });
+    if (error) throw error;
+    return data as string;
+  } catch (e) {
+    console.error('[xjNumberGenerator] nextCGNumber RPC failed:', e);
+    return localFallback('CG');
+  }
+}
 
 const DOCUMENT_COUNTER_KEY = 'document_counter_data';
 

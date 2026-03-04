@@ -4,7 +4,7 @@ import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
 import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 导入获取当前用户工具
 import { getSession } from '../../data/authorizedUsers'; // 🔥 导入获取用户session工具
-import { generateQRNumber, type RegionType } from '../../utils/xjNumberGenerator';
+import { nextQRNumber, type RegionType } from '../../utils/xjNumberGenerator';
 import { Calendar } from 'lucide-react';
 import {
   Dialog,
@@ -139,7 +139,7 @@ export function CreateQuotationRequestDialog({
     }
   }, [open]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!inquiry) return;
 
     if (!expectedQuoteDate) {
@@ -169,7 +169,9 @@ export function CreateQuotationRequestDialog({
       console.log('  - Email:', salesRepEmail);
       console.log('  - Name:', salesRepName);
       
-      const requestNumber = generateQRNumber((inquiry.region as RegionType) || 'North America');
+      const requestNumber = await nextQRNumber(
+        inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA'
+      );
 
       const items = editableProducts?.map((product: any) => ({
         id: product.id || `item_${Date.now()}_${Math.random()}`,
