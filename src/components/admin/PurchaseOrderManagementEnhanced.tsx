@@ -46,8 +46,8 @@ import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 报价C
 import { PurchaserFeedbackForm } from './PurchaserFeedbackForm'; // 🔥 智能采购反馈表单
 import { useUser } from '../../contexts/UserContext'; // 🔥 用户Context
 import { useApproval } from '../../contexts/ApprovalContext';
-import { generateXJNumber } from '../../utils/xjNumberGenerator'; // 🔥 XJ编号生成器
-import { generateCGNumber, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
+import { generateXJNumber, nextXJNumber } from '../../utils/xjNumberGenerator'; // 🔥 XJ编号生成器
+import { generateCGNumber, nextCGNumberAsync, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
 import { contractService, xjService, supplierQuotationService } from '../../lib/supabaseService';
 import { TERMS_OPTIONS } from './purchase-order/purchaseOrderConstants'; // 🔥 从常量文件导入
 import { PurchaseOrderEditDialog } from './purchase-order/PurchaseOrderEditDialog';
@@ -1429,8 +1429,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       // 🔥 为每个供应商创建一份完整的询价单（包含所有选中产品），并落库到后端
       const createdXJs: XJ[] = [];
       await Promise.all(selectedSuppliers.map(async (supplier) => {
-        // 🔥 生成供应商专属询价单号（XJ开头，从0001开始递增）
-        const supplierXjNo = generateXJNumber();
+        // 🔥 生成供应商专属询价单号（XJ，调用 Supabase RPC）
+        const supplierXjNo = await nextXJNumber();
 
         // 🔥 生成完整的询价单文档数据
         const xjDocumentData = generateXJDocumentData(
@@ -2015,7 +2015,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         return [supplierCode, supplierItems] as const;
       });
 
-      distribution.forEach(([supplierCode, supplierItems]) => {
+      for (const [supplierCode, supplierItems] of distribution) {
         const supplier = allSuppliers.find((s) => s.code === supplierCode);
         if (!supplier) {
           throw new Error(`供应商不存在: ${supplierCode}`);
@@ -2036,7 +2036,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           new Set(tracedItems.map((it) => normalizeCurrencyCode(it.currency)).filter(Boolean))
         );
         const draftCurrency = currencyCandidates[0] || normalizeCurrencyCode(po.currency || 'USD') || 'USD';
-        const newPoNumber = generateCGNumber(po.region || 'NA');
+        const newPoNumber = await nextCGNumberAsync();
         addPurchaseOrder({
           ...po,
           id: `po-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
@@ -2055,7 +2055,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           parentRequestPoNumber: po.poNumber as any,
         } as any);
         createdPONumbers.push(newPoNumber);
-      });
+      }
 
       // 参照“创建询价单”逻辑：
       // 仅下推选中产品，未选中产品继续保留在采购请求池（待后续分配）
@@ -2144,7 +2144,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 提交创建订单
-  const handleSubmitCreateOrder = () => {
+  const handleSubmitCreateOrder = async () => {
     if (!selectedRequirement) return;
     
     // 验证必填字段
@@ -2165,9 +2165,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       return;
     }
 
-    // 生成新的采购订单编号：CG-<REGION>-YYMMDD-XXXX（序号全局递增，不按天重置）
-    const today = new Date();
-    const newPONumber = generateCGNumber(selectedRequirement.region);
+    const newPONumber = await nextCGNumberAsync();
 
     // 🔥 生成产品清单并计算总金额
     const products = items.map((item, index) => {

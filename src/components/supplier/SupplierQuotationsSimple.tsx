@@ -10,7 +10,7 @@ import { useXJs } from '../../contexts/XJContext';
 import { useUser } from '../../contexts/UserContext';
 import { SimpleQuoteForm } from './SimpleQuoteForm';
 import XJDocumentViewer from './XJDocumentViewer';
-import { generateBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
+import { nextBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
 
 export default function SupplierQuotationsSimple() {
   const { user } = useUser();
@@ -69,12 +69,12 @@ export default function SupplierQuotationsSimple() {
   }, [xjs, user?.email]);
 
   // 🔥 提交报价
-  const handleSubmitQuote = (formData: any, type: 'draft' | 'submit') => {
+  const handleSubmitQuote = async (formData: any, type: 'draft' | 'submit') => {
     if (!selectedRFQ || !user) return;
     
     if (type === 'submit') {
-      // 🔥 生成供应商报价单号（BJ开头）
-      const supplierQuotationNo = generateBJNumber();
+      // 🔥 生成供应商报价单号（BJ，调用 Supabase RPC）
+      const supplierQuotationNo = await nextBJNumber();
       
       const quote = {
         supplierCode: user.email,

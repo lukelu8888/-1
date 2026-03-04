@@ -19,7 +19,7 @@ import { SupplierQuotationDocument, SupplierQuotationData } from '../documents/t
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
-import { generateBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
+import { generateBJNumber, nextBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
 
 /**
  * 🔥 供应商视角：询价报价管理
@@ -177,11 +177,11 @@ export default function SupplierQuotations() {
   }, [selectedRFQ, quoteForm, editingDraft]);
 
   // 🔥 确认提交报价
-  const handleConfirmSubmitQuote = useCallback(() => {
+  const handleConfirmSubmitQuote = useCallback(async () => {
     if (!selectedRFQ || !pendingQuoteData || !user) return;
     
-    // 🔥 生成供应商报价单号（BJ开头，从0001开始递增）
-    const supplierQuotationNo = generateBJNumber();
+    // 🔥 生成供应商报价单号（BJ，调用 Supabase RPC）
+    const supplierQuotationNo = await nextBJNumber();
     
     const quote = {
       supplierCode: user.email,

@@ -1,3 +1,5 @@
+import { supabase } from '../lib/supabase';
+
 const CG_COUNTER_KEY = 'cg_document_counter_data_v1';
 const CQ_COUNTER_KEY = 'cq_request_counter_data_v1';
 
@@ -63,7 +65,22 @@ export const generateCGNumber = (region?: string | null): string => {
   const next = current + 1;
   data.counters[counterKey] = next;
   saveCounterData(data);
-  return `CG-${regionCode}-${getDateYYMMDD()}-${String(next).padStart(4, '0')}`;
+  return `CG-${getDateYYMMDD()}-${String(next).padStart(4, '0')}`;
+};
+
+export const nextCGNumberAsync = async (): Promise<string> => {
+  try {
+    const { data, error } = await supabase.rpc('next_number_ex', {
+      p_doc_type: 'CG',
+      p_region_code: 'UNKNOWN',
+      p_customer_id: null,
+    });
+    if (error) throw error;
+    return data as string;
+  } catch (e) {
+    console.error('[purchaseOrderNumberGenerator] nextCGNumberAsync RPC failed:', e);
+    return generateCGNumber();
+  }
 };
 
 export const generateCQNumber = (): string => {
