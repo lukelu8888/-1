@@ -137,39 +137,41 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // 页面刷新时主动检查已有 session（5秒超时保护，防止卡死）
+    // 兜底超时：若 INITIAL_SESSION 长时间未触发（网络异常），15秒后认为未登录
+    let resolved = false;
     const sessionTimeout = setTimeout(() => {
-      console.warn('getSession timeout, treating as logged-out');
-      setUserState(null);
-      setAuthLoading(false);
-    }, 5000);
-
-    supabase.auth.getSession()
-      .then(({ data: { session } }) => applySession(session))
-      .catch((err) => {
-        console.error('getSession failed, treating as logged-out:', err);
+      if (!resolved) {
+        console.warn('Auth init timeout, treating as logged-out');
         setUserState(null);
-      })
-      .finally(() => {
-        clearTimeout(sessionTimeout);
         setAuthLoading(false);
-      });
+      }
+    }, 15000);
 
+    // 注册 onAuthStateChange（先注册确保不错过事件）
+    // INITIAL_SESSION 事件在页面加载时触发，携带当前本地 session（无需网络）
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (event === 'INITIAL_SESSION') {
+          resolved = true;
+          clearTimeout(sessionTimeout);
+          await applySession(session);
+          setAuthLoading(false);
+        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           setAuthLoading(true);
           await applySession(session);
           setAuthLoading(false);
-        }
-        if (event === 'SIGNED_OUT') {
+        } else if (event === 'SIGNED_OUT') {
           setUserState(null);
           setAuthLoading(false);
           localStorage.removeItem('cosun_auth_user');
         }
       }
     );
-    return () => subscription.unsubscribe();
+
+    return () => {
+      clearTimeout(sessionTimeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const setUser = (authUser: AuthUser) => {
