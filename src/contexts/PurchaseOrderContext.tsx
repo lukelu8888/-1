@@ -142,46 +142,21 @@ const mergePurchaseOrders = (localOrders: PurchaseOrder[], serverOrders: Purchas
 
 export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // 修复历史误删：过去把 SC/XJ 等来源号错误写入 order tombstone，导致订单列表被误隐藏
+  // 注：CQ tombstone 修复逻辑已移除（历史 localStorage 数据已废弃，Supabase 为唯一数据源）
   useEffect(() => {
     const removedLegacy = removeTombstones((t) => {
       if (t.domain !== 'order') return false;
       const marker = String(t.marker || '').trim().toUpperCase();
       const reason = String(t.reason || '').trim();
       if (reason !== 'manual-delete-purchase-order') return false;
-      // 仅清理“非采购单本体”的错误 marker，保留真正 PO/CQ 删除标记
       return /^(SC-|QT-|RFQ-|INQ-|XJ-|SO-|QR-)/.test(marker);
     });
-
-    // 修复历史误操作：系统曾错误调用删除采购请求，写入了 CQ 的 tombstone，导致采购请求池被永久隐藏
-    // 仅当本地仍存在同号 CQ 单据时，移除该 tombstone，避免影响用户手动删除的真实意图
-    let removedCQ = 0;
-    try {
-      const raw = localStorage.getItem('purchaseOrders');
-      const parsed = raw ? JSON.parse(raw) : [];
-      const existingCQ = new Set(
-        (Array.isArray(parsed) ? parsed : [])
-          .map((o: any) => String(o?.poNumber || '').trim().toUpperCase())
-          .filter((no: string) => /^CQ-\d{6}-\d{4}$/.test(no))
-      );
-      if (existingCQ.size > 0) {
-        removedCQ = removeTombstones((t) => {
-          if (t.domain !== 'order') return false;
-          const reason = String(t.reason || '').trim();
-          if (reason !== 'manual-delete-purchase-order') return false;
-          const marker = String(t.marker || '').trim().toUpperCase();
-          return /^CQ-\d{6}-\d{4}$/.test(marker) && existingCQ.has(marker);
-        });
-      }
-    } catch {
-      removedCQ = 0;
-    }
-
-    const totalRemoved = removedLegacy + removedCQ;
-    if (totalRemoved > 0) {
-      console.warn(`⚠️ [PurchaseOrderContext] removed ${totalRemoved} invalid order tombstones (legacy=${removedLegacy}, cq=${removedCQ})`);
+    if (removedLegacy > 0) {
+      console.warn(`⚠️ [PurchaseOrderContext] removed ${removedLegacy} invalid order tombstones`);
       window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
     }
   }, []);
+
 
   // 修复历史数据：若存在由 CQ 请求拆出的 CG 子单，但 CQ 主请求被误删，则自动补回 CQ 记录
   useEffect(() => {
@@ -247,95 +222,6 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
     });
   }, []);
 
-  // 兜底恢复：若采购需求中已记录“采购单号: CQ-xxxx”，但 CQ 请求单在采购订单池缺失，则自动补回
-  useEffect(() => {
-    setPurchaseOrders((prev) => {
-      let requirements: any[] = [];
-      try {
-        const rawReq = localStorage.getItem('purchaseRequirements');
-        const parsedReq = rawReq ? JSON.parse(rawReq) : [];
-        requirements = Array.isArray(parsedReq) ? parsedReq : [];
-      } catch {
-        requirements = [];
-      }
-      if (!requirements.length) return prev;
-
-      const byPo = new Map<string, PurchaseOrder>();
-      prev.forEach((o) => byPo.set(String(o.poNumber || '').trim().toUpperCase(), o));
-      let changed = false;
-      const next = [...prev];
-      const cqMarkersToKeep = new Set<string>();
-
-      requirements.forEach((req: any) => {
-        const special = String(req?.specialRequirements || '');
-        const match = special.match(/采购单号[:：]\s*(CQ-\d{6}-\d{4})/i);
-        if (!match) return;
-        const cqNo = String(match[1] || '').trim().toUpperCase();
-        if (!cqNo) return;
-        cqMarkersToKeep.add(cqNo);
-        if (byPo.has(cqNo)) return;
-
-        const items = Array.isArray(req?.items)
-          ? req.items.map((item: any, idx: number) => ({
-              id: String(item?.id || `item-${idx + 1}`),
-              productName: String(item?.productName || 'Unknown Product'),
-              modelNo: String(item?.modelNo || item?.productName || '-'),
-              specification: String(item?.specification || ''),
-              quantity: Number(item?.quantity || 0),
-              unit: String(item?.unit || 'PCS'),
-              unitPrice: Number(item?.targetPrice || 0),
-              currency: normalizeCurrencyCode(item?.targetCurrency || req?.currency || '') || 'USD',
-              subtotal: Number(item?.quantity || 0) * Number(item?.targetPrice || 0),
-              hsCode: String(item?.hsCode || ''),
-              packingRequirement: String(item?.packingRequirement || ''),
-              remarks: String(item?.remarks || ''),
-            }))
-          : [];
-
-        const recovered: PurchaseOrder = {
-          id: `recovered-${cqNo.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          poNumber: cqNo,
-          requirementNo: String(req?.requirementNo || '').trim(),
-          sourceRef: String(req?.sourceInquiryNumber || req?.sourceRef || '').trim(),
-          sourceSONumber: String(req?.salesOrderNo || req?.sourceRef || '').trim(),
-          salesContractNumber: String(req?.sourceRef || '').trim(),
-          xjNumber: String(req?.sourceInquiryNumber || '').trim(),
-          supplierName: '待采购分配',
-          supplierCode: 'TBD',
-          region: String(req?.region || 'NA'),
-          items,
-          totalAmount: 0,
-          currency: normalizeCurrencyCode(req?.currency || items?.[0]?.currency || 'USD') || 'USD',
-          paymentTerms: '待采购确认',
-          deliveryTerms: '待采购确认',
-          orderDate: String(req?.createdDate || new Date().toISOString()),
-          expectedDate: String(req?.requiredDate || new Date().toISOString()),
-          status: 'pending',
-          paymentStatus: 'unpaid',
-          remarks: special || '系统自动补回采购请求',
-          createdBy: String(req?.createdBy || 'system'),
-          createdDate: String(req?.createdDate || new Date().toISOString()),
-          updatedDate: new Date().toISOString(),
-          ...( { procurementRequestStatus: 'pending_procurement_assignment' } as any ),
-        };
-        next.push(recovered);
-        byPo.set(cqNo, recovered);
-        changed = true;
-      });
-
-      if (cqMarkersToKeep.size > 0) {
-        const removed = removeTombstones((t) => {
-          if (t.domain !== 'order') return false;
-          if (String(t.reason || '') !== 'manual-delete-purchase-order') return false;
-          const marker = String(t.marker || '').trim().toUpperCase();
-          return /^CQ-\d{6}-\d{4}$/.test(marker) && cqMarkersToKeep.has(marker);
-        });
-        if (removed > 0) changed = true;
-      }
-
-      return changed ? filterVisiblePurchaseOrders(next) : prev;
-    });
-  }, []);
 
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
 
