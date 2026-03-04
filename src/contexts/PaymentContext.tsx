@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getUserData, setUserData } from '../utils/dataIsolation';
+import { paymentService } from '../lib/supabaseService';
+import { supabase } from '../lib/supabase';
 import { useFinance } from './FinanceContext';
 
 // 💰 收款记录类型（Payment Collection Record）
@@ -45,25 +46,25 @@ const PaymentContext = createContext<PaymentContextType | undefined>(undefined);
 export function PaymentProvider({ children }: { children: ReactNode }) {
   const { updateAccountReceivable } = useFinance();
   
-  // 🔥 使用localStorage持久化（收款数据存储在admin@cosun.com账号下）
-  const [payments, setPayments] = useState<PaymentRecord[]>(() => {
-    if (typeof window !== 'undefined') {
-      const financeEmail = 'admin@cosun.com'; // 财务数据统一存储在admin账号下
-      const data = getUserData<PaymentRecord>('paymentRecords', financeEmail);
-      console.log('🔧 [PaymentContext] 加载收款记录数据:', data?.length || 0, '条');
-      return data || [];
-    }
-    return [];
-  });
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
 
-  // 🔥 持久化到localStorage
+  // Supabase-first: 从 payments 表加载
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const financeEmail = 'admin@cosun.com';
-      setUserData('paymentRecords', payments, financeEmail);
-      console.log('💾 [PaymentContext] 收款记录数据已保存:', payments.length, '条');
-    }
-  }, [payments]);
+    let alive = true;
+    const load = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const rows = await paymentService.getAll();
+      if (!alive || !Array.isArray(rows)) return;
+      setPayments(rows.filter(Boolean) as PaymentRecord[]);
+    };
+    void load();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') void load();
+      else if (event === 'SIGNED_OUT') setPayments([]);
+    });
+    return () => { alive = false; subscription.unsubscribe(); };
+  }, []);
 
   // 📝 生成收款编号：SK-{REGION}-YYMMDD-XXXX
   const generatePaymentNumber = (region: string): string => {
@@ -93,20 +94,19 @@ export function PaymentProvider({ children }: { children: ReactNode }) {
       status: payment.status || 'confirmed' // 默认已确认
     };
     
-    setPayments(prev => {
-      console.log('✅ [PaymentContext] 收款记录已创建:', newPayment.paymentNumber);
-      return [newPayment, ...prev];
-    });
-    
+    setPayments(prev => [newPayment, ...prev]);
+    paymentService.upsert(newPayment).catch(() => {});
     return newPayment;
   };
 
   // 🔄 更新收款记录
   const updatePayment = (id: string, updates: Partial<PaymentRecord>) => {
-    setPayments(prev =>
-      prev.map(p => (p.id === id ? { ...p, ...updates } : p))
-    );
-    console.log('✅ [PaymentContext] 收款记录已更新:', id, updates);
+    setPayments(prev => {
+      const next = prev.map(p => (p.id === id ? { ...p, ...updates } : p));
+      const updated = next.find(p => p.id === id);
+      if (updated) paymentService.upsert(updated).catch(() => {});
+      return next;
+    });
   };
 
   // ✅ 确认收款（财务确认）
@@ -152,7 +152,7 @@ export function PaymentProvider({ children }: { children: ReactNode }) {
   // 🗑️ 删除收款记录
   const deletePayment = (id: string) => {
     setPayments(prev => prev.filter(p => p.id !== id));
-    console.log('🗑️ [PaymentContext] 收款记录已删除:', id);
+    paymentService.delete(id).catch(() => {});
   };
 
   return (

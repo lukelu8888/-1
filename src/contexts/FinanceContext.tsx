@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getUserData, setUserData, getCurrentUser } from '../utils/dataIsolation';
-import { accountsReceivableDb, fromARRow } from '../lib/supabase-db';
+import { arService } from '../lib/supabaseService';
+import { supabase } from '../lib/supabase';
 
 // 应收账款类型
 export interface AccountReceivable {
@@ -81,88 +81,42 @@ interface FinanceContextType {
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export function FinanceProvider({ children }: { children: ReactNode }) {
-  // 🔥 使用localStorage持久化（Finance数据存储在admin@cosun.com账号下）
-  const [accountsReceivable, setAccountsReceivable] = useState<AccountReceivable[]>(() => {
-    if (typeof window !== 'undefined') {
-      const financeEmail = 'admin@cosun.com'; // 财务数据统一存储在admin账号下
-      const data = getUserData<AccountReceivable>('accountsReceivable', financeEmail); // 🔥 修正参数顺序
-      console.log('🔧 [FinanceContext] 加载应收账款数据:', data?.length || 0, '条');
-      return data || [];
-    }
-    return [];
-  });
+  const [accountsReceivable, setAccountsReceivable] = useState<AccountReceivable[]>([]);
 
-  // 🔥 持久化到localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const financeEmail = 'admin@cosun.com';
-      setUserData('accountsReceivable', accountsReceivable, financeEmail);
-      console.log('💾 [FinanceContext] 应收账款数据已保存:', accountsReceivable.length, '条');
-    }
-  }, [accountsReceivable]);
-
-  // 从 Supabase 加载应收账款（初始化时）
+  // Supabase-first: 从 accounts_receivable 表加载
   useEffect(() => {
     let alive = true;
-    accountsReceivableDb.getAll().then((rows) => {
-      if (!alive || !Array.isArray(rows) || rows.length === 0) return;
-      const mapped = rows.map(fromARRow).filter(Boolean) as AccountReceivable[];
-      setAccountsReceivable((prev) => {
-        const supIds = new Set(mapped.map((a) => a.orderNumber));
-        const localOnly = prev.filter((a) => !supIds.has(a.orderNumber));
-        const merged = [...mapped, ...localOnly];
-        console.log('✅ [FinanceContext] 已从 Supabase 加载应收账款:', merged.length, '条');
-        return merged;
-      });
-    }).catch((e) => console.warn('⚠️ [FinanceContext] Supabase AR 加载失败:', e?.message));
-    return () => { alive = false; };
+    const load = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const rows = await arService.getAll();
+      if (!alive || !Array.isArray(rows)) return;
+      setAccountsReceivable(rows.filter(Boolean) as AccountReceivable[]);
+    };
+    void load();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') void load();
+      else if (event === 'SIGNED_OUT') setAccountsReceivable([]);
+    });
+    return () => { alive = false; subscription.unsubscribe(); };
   }, []);
 
-  // Supabase Realtime 监听 AR 变化
+  // Realtime 订阅
   useEffect(() => {
-    const channel = accountsReceivableDb.subscribeChanges((payload) => {
-      if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-        const updated = fromARRow(payload.new);
-        if (!updated) return;
+    const channel = arService.subscribeToChanges((payload) => {
+      const { eventType, new: newRow, old: oldRow } = payload;
+      if (eventType === 'INSERT' || eventType === 'UPDATE') {
+        const updated = newRow as AccountReceivable;
         setAccountsReceivable((prev) => {
-          const exists = prev.find((a) => a.orderNumber === updated.orderNumber);
-          if (exists) return prev.map((a) => a.orderNumber === updated.orderNumber ? { ...a, ...updated } : a);
-          return [updated, ...prev];
+          const exists = prev.find((a) => a.id === updated.id);
+          return exists ? prev.map((a) => a.id === updated.id ? { ...a, ...updated } : a) : [updated, ...prev];
         });
-      } else if (payload.eventType === 'DELETE') {
-        const deleted = payload.old;
-        setAccountsReceivable((prev) => prev.filter((a) => a.id !== deleted?.id));
+      } else if (eventType === 'DELETE') {
+        const deletedId = (oldRow as any)?.id;
+        if (deletedId) setAccountsReceivable((prev) => prev.filter((a) => a.id !== deletedId));
       }
     });
-    return () => { channel.unsubscribe(); };
-  }, []);
-
-  // 监听客户端直接写入的 financeDataUpdated 事件，重新从 localStorage + Supabase 加载
-  useEffect(() => {
-    const handleFinanceDataUpdated = () => {
-      const financeEmail = 'admin@cosun.com';
-      const fresh = getUserData<AccountReceivable>('accountsReceivable', financeEmail);
-      if (fresh && fresh.length > 0) {
-        setAccountsReceivable(fresh);
-        console.log('🔄 [FinanceContext] financeDataUpdated 事件触发，重新加载:', fresh.length, '条');
-      }
-      // 同时从 Supabase 刷新
-      accountsReceivableDb.getAll().then((rows) => {
-        if (!Array.isArray(rows) || rows.length === 0) return;
-        const mapped = rows.map(fromARRow).filter(Boolean) as AccountReceivable[];
-        setAccountsReceivable((prev) => {
-          const supIds = new Set(mapped.map((a) => a.orderNumber));
-          const localOnly = prev.filter((a) => !supIds.has(a.orderNumber));
-          return [...mapped, ...localOnly];
-        });
-      }).catch(() => {/* 静默 */});
-    };
-    window.addEventListener('financeDataUpdated', handleFinanceDataUpdated);
-    window.addEventListener('userChanged', handleFinanceDataUpdated);
-    return () => {
-      window.removeEventListener('financeDataUpdated', handleFinanceDataUpdated);
-      window.removeEventListener('userChanged', handleFinanceDataUpdated);
-    };
+    return () => { void supabase.removeChannel(channel); };
   }, []);
 
   const addAccountReceivable = (ar: Omit<AccountReceivable, 'id' | 'createdAt'>) => {
@@ -183,7 +137,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     });
 
     // 同步到 Supabase（静默）
-    accountsReceivableDb.upsert(newAR).catch(() => {/* 静默 */});
+    arService.upsert(newAR).catch(() => {});
     
     return newAR;
   };
@@ -194,7 +148,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       // 同步到 Supabase
       const updated = next.find(a => a.id === id);
       if (updated) {
-        void accountsReceivableDb.upsert(updated).catch(() => {});
+        void arService.upsert(updated).catch(() => {});
       }
       return next;
     });
@@ -213,7 +167,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       })
     );
     // 同步到 Supabase（静默）
-    accountsReceivableDb.updateByOrderNumber(orderNumber, updates).catch(() => {/* 静默 */});
+    arService.updateByOrderNumber(orderNumber, updates).catch(() => {});
   };
 
   const recordPayment = (id: string, payment: {
@@ -249,7 +203,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       // 同步到 Supabase
       const updated = next.find(a => a.id === id);
       if (updated) {
-        void accountsReceivableDb.upsert(updated).catch(() => {});
+        void arService.upsert(updated).catch(() => {});
       }
       return next;
     });

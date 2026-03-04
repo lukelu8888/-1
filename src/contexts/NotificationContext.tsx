@@ -60,25 +60,12 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
-  const [notifications, setNotifications] = useState<Notification[]>(() => {
-    // 从 localStorage 加载初始数据（Supabase 加载前的缓存）
-    if (typeof window !== 'undefined') {
-      const currentUser = getCurrentUser();
-      if (!currentUser) return [];
-      const stored = localStorage.getItem(`notifications_${currentUser.email}`);
-      if (stored) {
-        try { return JSON.parse(stored); } catch { return []; }
-      }
-    }
-    return [];
-  });
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  // 从 Supabase 加载通知
   const loadFromSupabase = async (email: string) => {
     const data = await notificationSupabaseService.getForUser(email);
     if (data && Array.isArray(data)) {
       setNotifications(data as Notification[]);
-      localStorage.setItem(`notifications_${email}`, JSON.stringify(data));
     }
   };
 
@@ -128,10 +115,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         setNotifications(prev => {
           const exists = prev.find(n => n.id === newNotif.id);
           if (exists) return prev;
-          const updated = [newNotif, ...prev];
-          localStorage.setItem(`notifications_${email}`, JSON.stringify(updated));
           window.dispatchEvent(new CustomEvent('newNotification', { detail: newNotif }));
-          return updated;
+          return [newNotif, ...prev];
         });
       });
     };
@@ -262,11 +247,6 @@ export function sendNotificationToUser(
     sender: notification.sender,
     metadata: notification.metadata,
   }).catch(err => console.error('[sendNotificationToUser] Supabase failed:', err));
-
-  // 兼容旧的 localStorage 写入（目标用户不在线时的缓存）
-  const stored = localStorage.getItem(`notifications_${recipientEmail}`);
-  const existing = stored ? JSON.parse(stored) : [];
-  localStorage.setItem(`notifications_${recipientEmail}`, JSON.stringify([fullNotification, ...existing]));
 
   // 触发事件（同一标签页内实时更新）
   window.dispatchEvent(new CustomEvent('notificationAdded', {

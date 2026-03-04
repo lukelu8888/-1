@@ -197,30 +197,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* fallback to legacy sources */ }
 
-      if (currentUser.type === 'admin') {
-        try {
-          const res = await apiFetchJson<{ orders: Order[] }>('/api/orders');
-          const serverOrders = filterNotDeleted(
-            'order',
-            Array.isArray(res?.orders) ? res.orders : [],
-            (order) => getOrderMarkers(order),
-          );
-          if (alive) setOrders(serverOrders);
-        } catch (e) {
-          const allOrders = getAllCustomersData<Order>('orders');
-          const seen = new Set<string>();
-          const dedupedOrders = allOrders.filter(o => {
-            const key = o.orderNumber || o.id;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-          if (alive) {
-            setOrders(filterNotDeleted('order', dedupedOrders, (order) => getOrderMarkers(order)));
-          }
-        }
-        return;
-      }
+      // Supabase is the only source; no admin fallback needed
+      return;
 
       // 客户模式：优先从后端拉取，客户在任意设备都能看到业务员“发送客户”的订单
       try {

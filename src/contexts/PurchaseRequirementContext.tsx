@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { apiFetchJson } from '../api/backend-auth';
-import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
+import { purchaseRequirementService } from '../lib/supabaseService';
+import { supabase } from '../lib/supabase';
+
 
 // 🔥 采购需求产品项接口
 export interface PurchaseRequirementItem {
@@ -150,169 +151,47 @@ const filterVisibleRequirements = (list: PurchaseRequirement[]): PurchaseRequire
   filterNotDeleted('document', list, (req) => getRequirementMarkers(req));
 
 export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // 🔥 从localStorage加载初始数据，保留用户创建的所有采购需求
-  const [requirements, setRequirements] = useState<PurchaseRequirement[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('purchaseRequirements');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          
-          // 🔥 修复：不要清空所有数据，而是过滤掉有问题的记录并尝试修复
-          const validRequirements = parsed.map((req: any) => {
-            // 如果缺少customer字段，尝试从其他地方获取或使用默认值
-            if (!req.customer) {
-              console.warn('⚠️ QR缺少customer字段，使用默认值:', req.requirementNo);
-              req.customer = {
-                companyName: 'Unknown Customer',
-                contactPerson: 'N/A',
-                email: 'unknown@example.com',
-                phone: 'N/A',
-                address: 'N/A'
-              };
-            }
-            
-            // 如果items为空或格式不正确，尝试修复
-            if (!req.items || req.items.length === 0) {
-              console.warn('⚠️ QR的items为空:', req.requirementNo);
-              // 保留这个QR，但标记items为空
-            }
-            
-            return req;
-          });
-          
-          const deletedMarkers = getDeletedRequirementMarkers();
-          const filteredRequirements = validRequirements.filter((req: PurchaseRequirement) => {
-            const markers = getRequirementMarkers(req);
-            return !markers.some((m) => deletedMarkers.has(m));
-          });
-          const visible = filterVisibleRequirements(filteredRequirements);
-          console.log('✅ 从localStorage加载采购需求数据，总数:', visible.length);
-          return visible;
-        } catch (e) {
-          console.error('❌ 加载采购需求数据失败:', e);
-          // 不要返回空数组，保持localStorage中的原始数据
-          console.error('⚠️ 保留localStorage中的原始数据，不进行清空');
-          return [];
-        }
-      }
-    }
-    
-    // 如果没有保存的数据，返回空数组
-    console.log('📋 初始化采购需求为空数组');
-    return [];
-  });
+  const [requirements, setRequirements] = useState<PurchaseRequirement[]>([]);
 
-  // 🔥 修复：添加标志区分"初始化"和"后续更新"，防止首次渲染覆盖localStorage
-  const [isInitialized, setIsInitialized] = React.useState(false);
-
-  // 🔥 业务员/采购员：从服务端拉取采购需求并合并（含采购接受的报价→purchaserFeedback），保证看到成本价与建议
+  // Supabase-first: 从 purchase_requirements 表加载
   useEffect(() => {
-    let cancelled = false;
-    apiFetchJson<{ requirements: PurchaseRequirement[] }>('/api/purchase-requirements')
-      .then((data) => {
-        if (cancelled || !data?.requirements?.length) return;
-        const deletedMarkers = getDeletedRequirementMarkers();
-        const apiList = filterVisibleRequirements((data.requirements as PurchaseRequirement[]).filter((req) => {
-          const markers = getRequirementMarkers(req);
-          return !markers.some((m) => deletedMarkers.has(m));
-        }));
-        setRequirements((prev) => {
-          const byNo = new Map<string, PurchaseRequirement>();
-          prev.forEach((r) => {
-            const key = r.requirementNo || r.id;
-            if (key) byNo.set(key, r);
-          });
-          apiList.forEach((apiR) => {
-            const key = apiR.requirementNo || apiR.id;
-            if (key) byNo.set(key, apiR);
-          });
-          return filterVisibleRequirements(Array.from(byNo.values()));
-        });
-      })
-      .catch(() => { /* 未登录或网络错误时保留本地数据 */ });
-    return () => { cancelled = true; };
+    let alive = true;
+    const load = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const rows = await purchaseRequirementService.getAll();
+      if (!alive || !Array.isArray(rows)) return;
+      setRequirements(rows.filter(Boolean) as PurchaseRequirement[]);
+    };
+    void load();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') void load();
+      else if (event === 'SIGNED_OUT') setRequirements([]);
+    });
+    return () => { alive = false; subscription.unsubscribe(); };
   }, []);
 
-  React.useEffect(() => {
-    // 首次渲染时标记为已初始化，但不保存数据
-    if (!isInitialized) {
-      setIsInitialized(true);
-      return;
-    }
-    
-    // 🔥 只在非初始化状态下保存数据
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('purchaseRequirements', JSON.stringify(requirements));
-      console.log('💾 采购需求已保存到localStorage，总数:', requirements.length);
-    }
-  }, [requirements, isInitialized]);
 
   const addRequirement = (requirement: PurchaseRequirement) => {
-    console.log('➕ 添加新采购需求:', requirement);
     setRequirements(prev => {
-      const newRequirements = filterVisibleRequirements([...prev, requirement]);
-      console.log('  ✅ 当前采购需求总数:', newRequirements.length);
-      return newRequirements;
+      const exists = prev.some(r => r.id === requirement.id);
+      return exists ? prev : [...prev, requirement];
     });
+    purchaseRequirementService.upsert(requirement).catch((e) => console.warn('⚠️ PR upsert failed:', e));
   };
 
   const updateRequirement = (id: string, updates: Partial<PurchaseRequirement>) => {
-    console.log('🔄 [PurchaseRequirementContext] 更新采购需求:', {
-      id,
-      updates,
-      updateKeys: Object.keys(updates)
-    });
-    
     setRequirements(prev => {
-      const targetReq = prev.find(req => req.id === id);
-      if (!targetReq) {
-        console.error('❌ [PurchaseRequirementContext] 未找到要更新的需求:', id);
-        return prev;
-      }
-      
-      console.log('  ✅ 找到目标需求:', {
-        requirementNo: targetReq.requirementNo,
-        currentStatus: targetReq.status,
-        newStatus: updates.status,
-        createdBy: targetReq.createdBy
-      });
-      
-      const newReqs = filterVisibleRequirements(prev.map(req => req.id === id ? { ...req, ...updates } : req));
-      console.log('  💾 更新后的需求列表数量:', newReqs.length);
-      return newReqs;
+      const next = prev.map(req => req.id === id ? { ...req, ...updates } : req);
+      const updated = next.find(r => r.id === id);
+      if (updated) purchaseRequirementService.upsert(updated).catch(() => {});
+      return next;
     });
   };
 
   const deleteRequirement = (id: string) => {
-    console.warn('🗑️ [PurchaseRequirementContext] 删除采购需求:', id);
-    
-    setRequirements(prev => {
-      const targetReq = prev.find(req => req.id === id);
-      if (targetReq) {
-        console.warn('  ⚠️ 即将删除:', {
-          requirementNo: targetReq.requirementNo,
-          createdBy: targetReq.createdBy,
-          status: targetReq.status,
-          itemCount: targetReq.items?.length
-        });
-      }
-
-      const markers = new Set(getDeletedRequirementMarkers());
-      markers.add(String(id));
-      if (targetReq?.requirementNo) {
-        markers.add(String(targetReq.requirementNo));
-      }
-      saveDeletedRequirementMarkers(markers);
-      addTombstones('document', Array.from(markers), {
-        reason: 'manual-delete-purchase-requirement',
-        deletedBy: 'admin',
-      });
-      
-      const newReqs = filterVisibleRequirements(prev.filter(req => req.id !== id));
-      console.warn('  📊 删除后剩余需求数量:', newReqs.length);
-      return newReqs;
-    });
+    setRequirements(prev => prev.filter(req => req.id !== id));
+    purchaseRequirementService.delete(id).catch(() => {});
   };
 
   const getRequirementById = (id: string) => {
@@ -321,27 +200,9 @@ export const PurchaseRequirementProvider: React.FC<{ children: ReactNode }> = ({
 
   const refreshPurchaseRequirementsFromApi = React.useCallback(async () => {
     try {
-      const data = await apiFetchJson<{ requirements: PurchaseRequirement[] }>('/api/purchase-requirements');
-      const deletedMarkers = getDeletedRequirementMarkers();
-      const apiList = filterVisibleRequirements(((data?.requirements ?? []) as PurchaseRequirement[]).filter((req) => {
-        const markers = getRequirementMarkers(req);
-        return !markers.some((m) => deletedMarkers.has(m));
-      }));
-      setRequirements((prev) => {
-        const byNo = new Map<string, PurchaseRequirement>();
-        prev.forEach((r) => {
-          const key = r.requirementNo || r.id;
-          if (key) byNo.set(key, r);
-        });
-        apiList.forEach((apiR) => {
-          const key = apiR.requirementNo || apiR.id;
-          if (key) byNo.set(key, apiR);
-        });
-        return filterVisibleRequirements(Array.from(byNo.values()));
-      });
-    } catch {
-      // 未登录或网络错误时静默失败，由调用方 toast
-    }
+      const rows = await purchaseRequirementService.getAll();
+      if (Array.isArray(rows)) setRequirements(rows.filter(Boolean) as PurchaseRequirement[]);
+    } catch { /* 静默失败 */ }
   }, []);
 
   return (

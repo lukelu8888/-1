@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { apiFetchJson } from '../api/backend-auth';
+import { purchaseOrderService } from '../lib/supabaseService';
+import { supabase } from '../lib/supabase';
 import { addTombstones, filterNotDeleted, removeTombstones } from '../lib/erp-core/deletion-tombstone';
 
 // 🔥 采购订单状态
@@ -336,58 +337,26 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
     });
   }, []);
 
-  // 🔥 先从 localStorage 启动，随后由接口数据覆盖（接口优先，本地兜底）
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('purchaseOrders');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          console.log('📦 从localStorage加载采购订单数据，总数:', parsed.length);
-          return filterVisiblePurchaseOrders(parsed);
-        } catch (e) {
-          console.error('❌ 加载采购订单数据失败:', e);
-        }
-      }
-    }
-    return [];
-  });
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
 
-  // 🔥 每次purchaseOrders变化时，自动保存到localStorage
-  React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('purchaseOrders', JSON.stringify(purchaseOrders));
-      console.log('💾 采购订单已保存到localStorage，总数:', purchaseOrders.length);
-    }
-  }, [purchaseOrders]);
-
-  // 接口化：加载采购订单列表
+  // Supabase-first: 从 purchase_orders 表加载
   useEffect(() => {
     let alive = true;
-    const loadPurchaseOrders = async () => {
-      try {
-        const res = await apiFetchJson<{ purchaseOrders: PurchaseOrder[] }>('/api/purchase-orders');
-        const serverOrders = Array.isArray(res?.purchaseOrders) ? res.purchaseOrders : [];
-        if (!alive) return;
-        // 合并策略：防止“前端刚新增但后端尚未落库”导致列表瞬间消失
-        setPurchaseOrders((prev) => filterVisiblePurchaseOrders(mergePurchaseOrders(prev, serverOrders)));
-      } catch (e) {
-        // 接口失败时保留本地
-        console.warn('⚠️ [PurchaseOrderContext] load purchase-orders failed, fallback to localStorage:', e);
-      }
+    const load = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const rows = await purchaseOrderService.getAll();
+      if (!alive || !Array.isArray(rows)) return;
+      setPurchaseOrders(rows.filter(Boolean) as PurchaseOrder[]);
     };
-
-    void loadPurchaseOrders();
-    const onUpdated = () => { void loadPurchaseOrders(); };
-    const onAuthChanged = () => { void loadPurchaseOrders(); };
-    window.addEventListener('purchaseOrdersUpdated', onUpdated);
-    window.addEventListener('authTokenChanged', onAuthChanged);
-    return () => {
-      alive = false;
-      window.removeEventListener('purchaseOrdersUpdated', onUpdated);
-      window.removeEventListener('authTokenChanged', onAuthChanged);
-    };
+    void load();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') void load();
+      else if (event === 'SIGNED_OUT') setPurchaseOrders([]);
+    });
+    return () => { alive = false; subscription.unsubscribe(); };
   }, []);
+
 
   const addPurchaseOrder = (order: PurchaseOrder) => {
     console.log('➕ 添加新采购订单:', order);
@@ -397,19 +366,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
       console.log('  ✅ 当前采购订单总数:', newOrders.length);
       return filterVisiblePurchaseOrders(newOrders);
     });
-    window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-    void (async () => {
-      try {
-        await apiFetchJson<{ purchaseOrder: PurchaseOrder }>('/api/purchase-orders', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(order),
-        });
-        window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-      } catch (e) {
-        console.warn('⚠️ [PurchaseOrderContext] addPurchaseOrder sync failed:', e);
-      }
-    })();
+    purchaseOrderService.upsert(order).catch((e) => console.warn('⚠️ PO upsert failed:', e));
   };
 
   const updatePurchaseOrder = (id: string, updates: Partial<PurchaseOrder>) => {
@@ -420,19 +377,8 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
         ? { ...order, ...updates, updatedDate: new Date().toISOString() }
         : order
     ))));
-    window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-    void (async () => {
-      try {
-        await apiFetchJson<{ purchaseOrder: PurchaseOrder }>(`/api/purchase-orders/${encodeURIComponent(poRef)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updates),
-        });
-        window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-      } catch (e) {
-        console.warn('⚠️ [PurchaseOrderContext] updatePurchaseOrder sync failed:', e);
-      }
-    })();
+    const updated = purchaseOrders.find(o => o.id === id || o.poNumber === id);
+    if (updated) purchaseOrderService.upsert({ ...updated, ...updates }).catch((e) => console.warn('⚠️ PO update failed:', e));
   };
 
   const deletePurchaseOrder = (id: string) => {
@@ -444,17 +390,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
       deletedBy: 'admin',
     });
     setPurchaseOrders(prev => filterVisiblePurchaseOrders(prev.filter(order => order.id !== id && order.poNumber !== id)));
-    window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-    void (async () => {
-      try {
-        await apiFetchJson(`/api/purchase-orders/${encodeURIComponent(poRef)}`, {
-          method: 'DELETE',
-        });
-        window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-      } catch (e) {
-        console.warn('⚠️ [PurchaseOrderContext] deletePurchaseOrder sync failed:', e);
-      }
-    })();
+    purchaseOrderService.delete(id).catch((e) => console.warn('⚠️ PO delete failed:', e));
   };
 
   const getPurchaseOrderById = (id: string) => {

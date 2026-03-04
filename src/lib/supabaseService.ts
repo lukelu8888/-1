@@ -1227,3 +1227,304 @@ function fromInquiryRow(r: any) {
     submittedAt: r.submitted_at,
   }
 }
+
+// ============================================================
+// payments 服务
+// ============================================================
+function toPaymentRow(p: any) {
+  return {
+    id: toUUID(p.id),
+    payment_number: p.paymentNumber || p.payment_number || '',
+    order_number: p.orderNumber || p.order_number || null,
+    contract_number: p.contractNumber || p.contract_number || null,
+    customer_name: p.customerName || p.customer_name || '',
+    customer_email: p.customerEmail || p.customer_email || '',
+    amount: p.amount || 0,
+    currency: p.currency || 'USD',
+    payment_type: p.paymentType || p.payment_type || 'deposit',
+    payment_method: p.paymentMethod || p.payment_method || null,
+    status: p.status || 'pending',
+    due_date: toIsoDate(p.dueDate || p.due_date),
+    paid_date: toIsoDate(p.paidDate || p.paid_date),
+    bank_info: p.bankInfo || p.bank_info || null,
+    attachment_url: p.attachmentUrl || p.attachment_url || null,
+    notes: p.notes || null,
+    created_by: p.createdBy || p.created_by || null,
+  }
+}
+
+function fromPaymentRow(r: any) {
+  if (!r) return null
+  return {
+    id: r.id,
+    paymentNumber: r.payment_number,
+    orderNumber: r.order_number,
+    contractNumber: r.contract_number,
+    customerName: r.customer_name,
+    customerEmail: r.customer_email,
+    amount: r.amount || 0,
+    currency: r.currency || 'USD',
+    paymentType: r.payment_type,
+    paymentMethod: r.payment_method,
+    status: r.status,
+    dueDate: r.due_date,
+    paidDate: r.paid_date,
+    bankInfo: r.bank_info,
+    attachmentUrl: r.attachment_url,
+    notes: r.notes,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+export const paymentService = {
+  async getAll() {
+    const { data, error } = await supabase.from('payments').select('*').is('deleted_at', null).order('created_at', { ascending: false })
+    if (error) return handleError(error, 'getAll payments')
+    return (data || []).map(fromPaymentRow)
+  },
+  async getByEmail(email: string) {
+    const { data, error } = await supabase.from('payments').select('*').is('deleted_at', null).eq('customer_email', email).order('created_at', { ascending: false })
+    if (error) return handleError(error, 'getByEmail payments')
+    return (data || []).map(fromPaymentRow)
+  },
+  async upsert(p: any) {
+    const row = toPaymentRow(p)
+    const { data, error } = await supabase.from('payments').upsert(row, { onConflict: 'id' }).select().single()
+    if (error) return handleError(error, 'upsert payment')
+    return fromPaymentRow(data)
+  },
+  async delete(id: string) {
+    const { error } = await supabase.from('payments').update({ deleted_at: new Date().toISOString() }).eq('id', id)
+    if (error) return handleError(error, 'delete payment')
+  },
+  subscribeToChanges(callback: (payload: any) => void) {
+    return supabase.channel('payments_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, callback).subscribe()
+  },
+}
+
+// ============================================================
+// purchase_orders 服务
+// ============================================================
+function toPORow(p: any) {
+  return {
+    id: toUUID(p.id),
+    po_number: p.poNumber || p.po_number || '',
+    requirement_no: p.requirementNo || p.requirement_no || null,
+    xj_number: p.xjNumber || p.xj_number || null,
+    supplier_code: p.supplierCode || p.supplier_code || '',
+    supplier_name: p.supplierName || p.supplier_name || '',
+    supplier_email: p.supplierEmail || p.supplier_email || '',
+    region_code: toRegionCode(p.region || p.region_code),
+    items: p.items || p.products || [],
+    total_amount: p.totalAmount || p.total_amount || 0,
+    currency: p.currency || 'USD',
+    payment_terms: p.paymentTerms || p.payment_terms || null,
+    delivery_terms: p.deliveryTerms || p.delivery_terms || null,
+    expected_delivery_date: toIsoDate(p.expectedDeliveryDate || p.expected_delivery_date),
+    status: p.status || 'draft',
+    notes: p.notes || null,
+    created_by: p.createdBy || p.created_by || null,
+  }
+}
+
+function fromPORow(r: any) {
+  if (!r) return null
+  return {
+    id: r.id,
+    poNumber: r.po_number,
+    requirementNo: r.requirement_no,
+    xjNumber: r.xj_number,
+    supplierCode: r.supplier_code,
+    supplierName: r.supplier_name,
+    supplierEmail: r.supplier_email,
+    region: fromRegionCode(r.region_code),
+    items: r.items || [],
+    totalAmount: r.total_amount || 0,
+    currency: r.currency || 'USD',
+    paymentTerms: r.payment_terms,
+    deliveryTerms: r.delivery_terms,
+    expectedDeliveryDate: r.expected_delivery_date,
+    status: r.status,
+    notes: r.notes,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+export const purchaseOrderService = {
+  async getAll() {
+    const { data, error } = await supabase.from('purchase_orders').select('*').is('deleted_at', null).order('created_at', { ascending: false })
+    if (error) return handleError(error, 'getAll purchase_orders')
+    return (data || []).map(fromPORow)
+  },
+  async upsert(p: any) {
+    const row = toPORow(p)
+    const { data, error } = await supabase.from('purchase_orders').upsert(row, { onConflict: 'id' }).select().single()
+    if (error) return handleError(error, 'upsert purchase_order')
+    return fromPORow(data)
+  },
+  async delete(id: string) {
+    const { error } = await supabase.from('purchase_orders').update({ deleted_at: new Date().toISOString() }).eq('id', id)
+    if (error) return handleError(error, 'delete purchase_order')
+  },
+  subscribeToChanges(callback: (payload: any) => void) {
+    return supabase.channel('purchase_orders_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, callback).subscribe()
+  },
+}
+
+// ============================================================
+// purchase_requirements 服务
+// ============================================================
+function toPRRow(p: any) {
+  return {
+    id: toUUID(p.id),
+    requirement_number: p.requirementNumber || p.requirement_number || '',
+    source_inquiry_id: p.sourceInquiryId || p.source_inquiry_id || null,
+    source_inquiry_number: p.sourceInquiryNumber || p.source_inquiry_number || null,
+    region_code: toRegionCode(p.region || p.region_code),
+    customer_name: p.customerName || p.customer_name || '',
+    customer_email: p.customerEmail || p.customer_email || null,
+    items: p.items || p.products || [],
+    status: p.status || 'pending',
+    requested_by: p.requestedBy || p.requested_by || null,
+    requested_by_name: p.requestedByName || p.requested_by_name || null,
+    assigned_to: p.assignedTo || p.assigned_to || null,
+    priority: p.priority || 'medium',
+    notes: p.notes || null,
+    created_by: p.createdBy || p.created_by || null,
+  }
+}
+
+function fromPRRow(r: any) {
+  if (!r) return null
+  return {
+    id: r.id,
+    requirementNumber: r.requirement_number,
+    sourceInquiryId: r.source_inquiry_id,
+    sourceInquiryNumber: r.source_inquiry_number,
+    region: fromRegionCode(r.region_code),
+    customerName: r.customer_name,
+    customerEmail: r.customer_email,
+    items: r.items || [],
+    status: r.status,
+    requestedBy: r.requested_by,
+    requestedByName: r.requested_by_name,
+    assignedTo: r.assigned_to,
+    priority: r.priority,
+    notes: r.notes,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+export const purchaseRequirementService = {
+  async getAll() {
+    const { data, error } = await supabase.from('purchase_requirements').select('*').is('deleted_at', null).order('created_at', { ascending: false })
+    if (error) return handleError(error, 'getAll purchase_requirements')
+    return (data || []).map(fromPRRow)
+  },
+  async upsert(p: any) {
+    const row = toPRRow(p)
+    const { data, error } = await supabase.from('purchase_requirements').upsert(row, { onConflict: 'id' }).select().single()
+    if (error) return handleError(error, 'upsert purchase_requirement')
+    return fromPRRow(data)
+  },
+  async delete(id: string) {
+    const { error } = await supabase.from('purchase_requirements').update({ deleted_at: new Date().toISOString() }).eq('id', id)
+    if (error) return handleError(error, 'delete purchase_requirement')
+  },
+  subscribeToChanges(callback: (payload: any) => void) {
+    return supabase.channel('purchase_requirements_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_requirements' }, callback).subscribe()
+  },
+}
+
+// ============================================================
+// approval_records 服务（扩展版）
+// ============================================================
+export const approvalRecordService = {
+  async getAll() {
+    const { data, error } = await supabase.from('approval_records').select('*').order('created_at', { ascending: false })
+    if (error) return handleError(error, 'getAll approval_records')
+    return data || []
+  },
+  async getForApprover(email: string) {
+    const { data, error } = await supabase.from('approval_records').select('*').or(`current_approver.eq.${email},submitted_by.eq.${email}`).order('created_at', { ascending: false })
+    if (error) return handleError(error, 'getForApprover approval_records')
+    return data || []
+  },
+  async upsert(record: any) {
+    const row = {
+      id: toUUID(record.id),
+      type: record.type || 'quotation',
+      related_document_id: record.relatedDocumentId || record.related_document_id || '',
+      related_document_type: record.relatedDocumentType || record.related_document_type || '',
+      related_document: record.relatedDocument || record.related_document || null,
+      submitted_by: record.submittedBy || record.submitted_by || '',
+      submitted_by_name: record.submittedByName || record.submitted_by_name || '',
+      submitted_by_role: record.submittedByRole || record.submitted_by_role || '',
+      submitted_at: record.submittedAt || record.submitted_at || new Date().toISOString(),
+      region: toRegionCode(record.region),
+      current_approver: record.currentApprover || record.current_approver || '',
+      current_approver_role: record.currentApproverRole || record.current_approver_role || '',
+      next_approver: record.nextApprover || record.next_approver || null,
+      next_approver_role: record.nextApproverRole || record.next_approver_role || null,
+      requires_director_approval: record.requiresDirectorApproval ?? record.requires_director_approval ?? false,
+      status: record.status || 'pending',
+      urgency: record.urgency || 'normal',
+      amount: record.amount || 0,
+      currency: record.currency || 'USD',
+      customer_name: record.customerName || record.customer_name || '',
+      customer_email: record.customerEmail || record.customer_email || '',
+      product_summary: record.productSummary || record.product_summary || '',
+      approval_history: record.approvalHistory || record.approval_history || [],
+      deadline: record.deadline || null,
+    }
+    const { data, error } = await supabase.from('approval_records').upsert(row, { onConflict: 'id' }).select().single()
+    if (error) return handleError(error, 'upsert approval_record')
+    return fromApprovalRow(data)
+  },
+  async updateStatus(id: string, status: string, history: any[]) {
+    const { data, error } = await supabase.from('approval_records').update({ status, approval_history: history, updated_at: new Date().toISOString() }).eq('id', id).select().single()
+    if (error) return handleError(error, 'updateStatus approval_record')
+    return fromApprovalRow(data)
+  },
+  subscribeToChanges(email: string, callback: (payload: any) => void) {
+    return supabase.channel(`approval_records_${email}`).on('postgres_changes', { event: '*', schema: 'public', table: 'approval_records' }, callback).subscribe()
+  },
+}
+
+function fromApprovalRow(r: any) {
+  if (!r) return null
+  return {
+    id: r.id,
+    type: r.type,
+    relatedDocumentId: r.related_document_id,
+    relatedDocumentType: r.related_document_type,
+    relatedDocument: r.related_document,
+    submittedBy: r.submitted_by,
+    submittedByName: r.submitted_by_name,
+    submittedByRole: r.submitted_by_role,
+    submittedAt: r.submitted_at,
+    region: r.region,
+    currentApprover: r.current_approver,
+    currentApproverRole: r.current_approver_role,
+    nextApprover: r.next_approver,
+    nextApproverRole: r.next_approver_role,
+    requiresDirectorApproval: r.requires_director_approval,
+    status: r.status,
+    urgency: r.urgency,
+    amount: r.amount,
+    currency: r.currency,
+    customerName: r.customer_name,
+    customerEmail: r.customer_email,
+    productSummary: r.product_summary,
+    approvalHistory: r.approval_history || [],
+    deadline: r.deadline,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
