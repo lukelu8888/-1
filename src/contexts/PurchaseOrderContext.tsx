@@ -419,13 +419,9 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
     void (async () => {
       for (const order of orders) {
         try {
-          await apiFetchJson('/api/purchase-orders', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(order),
-          });
+          await purchaseOrderService.upsert(order);
         } catch (e) {
-          console.warn('⚠️ [PurchaseOrderContext] addPurchaseOrderBatch item sync failed:', order.poNumber, e);
+          console.warn('⚠️ [PurchaseOrderContext] addPurchaseOrderBatch Supabase upsert failed:', (order as any).poNumber, e);
         }
       }
       window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));

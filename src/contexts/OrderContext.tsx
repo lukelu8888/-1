@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { getUserData, setUserData, getAllCustomersData, getCurrentUser } from '../utils/dataIsolation';
 import { toast } from 'react-toastify';
-import { apiFetchJson } from '../api/backend-auth';
+
 import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
 import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
 import { emitErpEvent } from '../lib/erp-core/event-bus';
@@ -197,94 +197,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         }
       } catch { /* fallback to legacy sources */ }
 
-      // Supabase is the only source; no admin fallback needed
-      return;
-
-      // 客户模式：优先从后端拉取，客户在任意设备都能看到业务员“发送客户”的订单
-      try {
-        const res = await apiFetchJson<{ orders: Order[] }>('/api/orders');
-        const serverOrders = filterNotDeleted(
-          'order',
-          Array.isArray(res?.orders) ? res.orders : [],
-          (order) => getOrderMarkers(order),
-        );
-        if (alive) {
-          setOrders(serverOrders);
-          // 同步到本地，便于离线或后续更新
-          if (serverOrders.length > 0) setUserData('orders', serverOrders, currentUser.email);
-        }
-      } catch (e) {
-        const customerOrders = getUserData<Order>('orders', currentUser.email);
-
-        // 额外从 salesContracts 中读取发送给当前客户的合同（兜底：customerEmail 可能写错了 key）
-        const contractOrders: Order[] = [];
-        try {
-          const allContracts: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-          const email = currentUser.email.toLowerCase();
-          const sentContracts = allContracts.filter((c: any) => {
-            const cEmail = (c.customerEmail || '').toLowerCase();
-            const isForThisCustomer = cEmail === email;
-            const isSent = c.status === 'sent_to_customer' || c.status === 'sent' || c.status === 'customer_confirmed';
-            // 如果邮箱匹配 或 邮箱无效但合同已发送（宽松匹配）
-            const isInvalidEmail = !cEmail || cEmail === 'n/a' || !cEmail.includes('@');
-            return isSent && (isForThisCustomer || isInvalidEmail);
-          });
-          sentContracts.forEach((c: any) => {
-            contractOrders.push({
-              id: c.id,
-              orderNumber: c.contractNumber,
-              customer: c.customerName,
-              customerEmail: currentUser.email, // 用当前客户 email 修正
-              quotationNumber: c.quotationNumber,
-              date: (c.createdAt || '').split('T')[0],
-              expectedDelivery: c.deliveryTime,
-              totalAmount: c.totalAmount,
-              currency: c.currency,
-              status: c.status === 'customer_confirmed' ? 'Awaiting Deposit'
-                : c.status === 'deposit_uploaded' ? 'Payment Proof Uploaded'
-                : c.status === 'deposit_confirmed' ? 'Deposit Received'
-                : c.status === 'cancelled' ? 'cancelled'
-                : 'Pending',
-              progress: 0,
-              products: (c.products || []).map((p: any) => ({
-                name: p.productName,
-                quantity: p.quantity,
-                unitPrice: p.unitPrice,
-                totalPrice: p.quantity * p.unitPrice,
-                specs: p.specification || ''
-              })),
-              paymentStatus: 'Pending',
-              paymentTerms: c.paymentTerms,
-              shippingMethod: c.tradeTerms,
-              deliveryTerms: c.tradeTerms,
-              region: c.region,
-              country: c.customerCountry,
-              deliveryAddress: c.customerAddress,
-              contactPerson: c.contactPerson,
-              phone: c.contactPhone,
-              createdFrom: 'sales_contract',
-              createdAt: c.createdAt,
-              updatedAt: c.updatedAt,
-            } as Order);
-          });
-          if (contractOrders.length > 0) {
-            console.log(`📦 [OrderContext] 从 salesContracts 兜底读取 ${contractOrders.length} 条已发送合同`);
-          }
-        } catch { /* ignore */ }
-
-        // 合并两个来源，去重
-        const combined = [...customerOrders, ...contractOrders];
-        const seen = new Set<string>();
-        const dedupedOrders = combined.filter(o => {
-          const key = o.orderNumber || o.id;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        if (alive) {
-          setOrders(filterNotDeleted('order', dedupedOrders, (order) => getOrderMarkers(order)));
-        }
-      }
+      // Supabase is the only source
     };
 
     loadOrders();

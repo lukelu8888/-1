@@ -12,7 +12,6 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useRe
 import { toast } from 'sonner@2.0.3';
 import { useApproval } from './ApprovalContext'; // 🔥 新增：监听审批状态
 import { useOrders } from './OrderContext'; // 🔥 新增：同步订单到客户端，以及监听客户确认状态
-import { apiFetchJson, getBackendUser } from '../api/backend-auth';
 import { getCurrentUser } from '../utils/dataIsolation';
 import { addTombstones, filterNotDeleted, listTombstones, removeTombstones } from '../lib/erp-core/deletion-tombstone';
 import { salesContractsDb, fromContractRow } from '../lib/supabase-db';
@@ -597,16 +596,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     setContracts(prev => filterDeletedContracts(prev.filter(c => c.id !== id)));
     toast.success('合同已删除！');
 
-    void (async () => {
-      try {
-        await apiFetchJson<{ message?: string }>('/api/sales-contracts/' + encodeURIComponent(id), {
-          method: 'DELETE',
-        });
-      } catch (e: any) {
-        // 后端不通时静默失败（本地已删除，不影响业务流程）
-        console.warn('⚠️ [SalesContractContext] 后端删除失败（已忽略）:', e?.message || e);
-      }
-    })();
+    void contractService.delete(id)
+      .catch(e => console.warn('⚠️ [deleteContract] Supabase 删除失败:', e?.message));
   };
   
   // 🔥 清空所有合同
@@ -663,31 +654,11 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       return contract;
     }));
 
-    // 🔥 落库
-    void (async () => {
-      try {
-        const res = await apiFetchJson<{ contract: SalesContract; message?: string }>(
-          '/api/sales-contracts/' + encodeURIComponent(id) + '/submit-approval',
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ notes: notes || null }),
-          }
-        );
-        if (res?.contract?.id) {
-          setContracts(prev => prev.map(c => (c.id === id ? res.contract : c)));
-        }
-      } catch (e: any) {
-        // 后端不通时静默失败（本地审批状态已更新，不影响业务流程）
-        console.warn('⚠️ [SalesContractContext] 提交审批落库失败（已忽略）:', e?.message || e);
-      }
-    })();
-
-    // 同步到 Supabase（静默）
+    // 持久化到 Supabase
     const submittedContract = contracts.find(c => c.id === id);
     if (submittedContract) {
       void contractService.upsert({ ...submittedContract, status: 'pending_supervisor', submittedAt: new Date().toISOString() })
-        .catch(e => console.warn('⚠️ [submitForApproval] Supabase 同步失败:', e?.message));
+        .catch(e => console.warn('⚠️ [submitForApproval] Supabase upsert 失败:', e?.message));
     }
   };
   
@@ -904,73 +875,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       toast.success('合同已发送给客户！客户可在 My Orders → Active Orders 查看。');
     };
 
-    try {
-      const res = await apiFetchJson<{ message: string; contract: SalesContract }>(
-        `/api/sales-contracts/${encodeURIComponent(contract.contractNumber)}/send-to-customer`,
-        { method: 'PATCH' }
-      );
-      if (res?.contract) {
-        // 后端成功：用服务端数据更新本地
-        const now = new Date().toISOString();
-        setContracts(prev => prev.map(c =>
-          c.id === contract.id
-            ? { ...c, status: 'sent_to_customer' as const, sentToCustomerAt: now, updatedAt: now }
-            : c
-        ));
-        const serverOrderData = {
-          id: res.contract.id,
-          orderNumber: res.contract.contractNumber,
-          customer: res.contract.customerName,
-          customerEmail: res.contract.customerEmail,
-          quotationNumber: res.contract.quotationNumber,
-          date: (res.contract.createdAt || '').split('T')[0],
-          expectedDelivery: res.contract.deliveryTime,
-          totalAmount: res.contract.totalAmount,
-          currency: res.contract.currency,
-          status: 'Pending',
-          progress: 0,
-          products: (res.contract.products || []).map((p: SalesContractProduct) => ({
-            name: p.productName,
-            quantity: p.quantity,
-            unitPrice: p.unitPrice,
-            totalPrice: p.quantity * p.unitPrice,
-            specs: p.specification || ''
-          })),
-          paymentStatus: 'Pending',
-          paymentTerms: res.contract.paymentTerms,
-          shippingMethod: res.contract.tradeTerms,
-          deliveryTerms: res.contract.tradeTerms,
-          region: res.contract.region,
-          country: res.contract.customerCountry,
-          deliveryAddress: res.contract.customerAddress,
-          contactPerson: res.contract.contactPerson,
-          phone: res.contract.contactPhone,
-          createdFrom: 'sales_contract',
-          createdAt: res.contract.createdAt,
-          updatedAt: new Date().toISOString()
-        };
-        // 直接写入客户专属 localStorage
-        try {
-          const customerKey = `orders_${res.contract.customerEmail}`;
-          const existing: any[] = JSON.parse(localStorage.getItem(customerKey) || '[]');
-          if (!existing.some((o: any) => o.orderNumber === serverOrderData.orderNumber)) {
-            existing.unshift(serverOrderData);
-            localStorage.setItem(customerKey, JSON.stringify(existing));
-          }
-        } catch (_e) {}
-        addOrder(serverOrderData);
-        window.dispatchEvent(new CustomEvent('ordersUpdated', {
-          detail: { action: 'add', orderNumber: serverOrderData.orderNumber, customerEmail: res.contract.customerEmail }
-        }));
-        toast.success('合同已发送给客户！客户可在 My Orders → Active Orders 查看。');
-      } else {
-        // 后端返回无效响应，走本地兜底
-        void doLocalSend();
-      }
-    } catch (e: any) {
-      console.warn('⚠️ [sendToCustomer] API 失败，使用本地兜底:', e?.message || e);
-      void doLocalSend();
-    }
+    // 直接走本地逻辑（Supabase-first：doLocalSend 内部查 Supabase 获取 email 并 upsert 合同）
+    void doLocalSend();
   };
   
   // 🔥 客户确认合同
