@@ -112,6 +112,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
           email: session.user.email!,
           name: profile.name,
           type: profile.portal_role === 'admin' ? 'admin'
+              : profile.portal_role === 'staff' ? 'admin'
               : profile.portal_role === 'supplier' ? 'supplier'
               : 'customer',
           role: profile.rbac_role ?? undefined,
@@ -127,6 +128,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
           email: session.user.email!,
           name: meta.name ?? session.user.email!.split('@')[0],
           type: portalRole === 'admin' ? 'admin'
+              : portalRole === 'staff' ? 'admin'
               : portalRole === 'supplier' ? 'supplier'
               : 'customer',
           role: meta.rbac_role ?? undefined,
