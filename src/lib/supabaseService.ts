@@ -1449,23 +1449,32 @@ export const approvalRecordService = {
   async getAll() {
     const { data, error } = await supabase.from('approval_records').select('*').order('created_at', { ascending: false })
     if (error) return handleError(error, 'getAll approval_records')
-    return data || []
+    return (data || []).map(fromApprovalRow)
   },
   async getForApprover(email: string) {
-    const { data, error } = await supabase.from('approval_records').select('*').or(`current_approver.eq.${email},submitted_by.eq.${email}`).order('created_at', { ascending: false })
+    const { data, error } = await supabase
+      .from('approval_records')
+      .select('*')
+      .or(`current_approver.eq.${email},submitted_by.eq.${email},actor_email.eq.${email}`)
+      .order('created_at', { ascending: false })
     if (error) return handleError(error, 'getForApprover approval_records')
-    return data || []
+    return (data || []).map(fromApprovalRow)
   },
   async upsert(record: any) {
+    const docId = record.relatedDocumentId || record.related_document_id || ''
+    const submitter = record.submittedBy || record.submitted_by || ''
+    const submitterRole = record.submittedByRole || record.submitted_by_role || ''
+    const statusVal = record.status || 'pending'
     const row = {
       id: toUUID(record.id),
+      // 新字段（业务流程）
       type: record.type || 'quotation',
-      related_document_id: record.relatedDocumentId || record.related_document_id || '',
+      related_document_id: docId,
       related_document_type: record.relatedDocumentType || record.related_document_type || '',
       related_document: record.relatedDocument || record.related_document || null,
-      submitted_by: record.submittedBy || record.submitted_by || '',
+      submitted_by: submitter,
       submitted_by_name: record.submittedByName || record.submitted_by_name || '',
-      submitted_by_role: record.submittedByRole || record.submitted_by_role || '',
+      submitted_by_role: submitterRole,
       submitted_at: record.submittedAt || record.submitted_at || new Date().toISOString(),
       region: toRegionCode(record.region),
       current_approver: record.currentApprover || record.current_approver || '',
@@ -1473,7 +1482,7 @@ export const approvalRecordService = {
       next_approver: record.nextApprover || record.next_approver || null,
       next_approver_role: record.nextApproverRole || record.next_approver_role || null,
       requires_director_approval: record.requiresDirectorApproval ?? record.requires_director_approval ?? false,
-      status: record.status || 'pending',
+      status: statusVal,
       urgency: record.urgency || 'normal',
       amount: record.amount || 0,
       currency: record.currency || 'USD',
@@ -1482,6 +1491,15 @@ export const approvalRecordService = {
       product_summary: record.productSummary || record.product_summary || '',
       approval_history: record.approvalHistory || record.approval_history || [],
       deadline: record.deadline || null,
+      // 兼容旧字段（DB 原始列，保持同步）
+      entity_type: record.type || 'quotation',
+      entity_id: docId,
+      entity_number: docId,
+      action: statusVal,
+      actor_email: submitter,
+      actor_role: submitterRole,
+      status_before: record.previousStatus || null,
+      status_after: statusVal,
     }
     const { data, error } = await supabase.from('approval_records').upsert(row, { onConflict: 'id' }).select().single()
     if (error) return handleError(error, 'upsert approval_record')
@@ -1499,31 +1517,33 @@ export const approvalRecordService = {
 
 function fromApprovalRow(r: any) {
   if (!r) return null
+  // 兼容新旧两套字段名
   return {
     id: r.id,
-    type: r.type,
-    relatedDocumentId: r.related_document_id,
-    relatedDocumentType: r.related_document_type,
-    relatedDocument: r.related_document,
-    submittedBy: r.submitted_by,
-    submittedByName: r.submitted_by_name,
-    submittedByRole: r.submitted_by_role,
-    submittedAt: r.submitted_at,
-    region: r.region,
-    currentApprover: r.current_approver,
-    currentApproverRole: r.current_approver_role,
-    nextApprover: r.next_approver,
-    nextApproverRole: r.next_approver_role,
-    requiresDirectorApproval: r.requires_director_approval,
-    status: r.status,
-    urgency: r.urgency,
-    amount: r.amount,
-    currency: r.currency,
-    customerName: r.customer_name,
-    customerEmail: r.customer_email,
-    productSummary: r.product_summary,
+    type: r.type || r.entity_type || 'quotation',
+    relatedDocumentId: r.related_document_id || r.entity_id || '',
+    relatedDocumentType: r.related_document_type || r.entity_type || '',
+    relatedDocument: r.related_document || null,
+    submittedBy: r.submitted_by || r.actor_email || '',
+    submittedByName: r.submitted_by_name || '',
+    submittedByRole: r.submitted_by_role || r.actor_role || '',
+    submittedAt: r.submitted_at || r.created_at || '',
+    region: r.region || '',
+    currentApprover: r.current_approver || '',
+    currentApproverRole: r.current_approver_role || '',
+    nextApprover: r.next_approver || null,
+    nextApproverRole: r.next_approver_role || null,
+    requiresDirectorApproval: r.requires_director_approval || false,
+    status: r.status || r.status_after || 'pending',
+    urgency: r.urgency || 'normal',
+    amount: r.amount || 0,
+    currency: r.currency || 'USD',
+    customerName: r.customer_name || '',
+    customerEmail: r.customer_email || '',
+    productSummary: r.product_summary || '',
     approvalHistory: r.approval_history || [],
-    deadline: r.deadline,
+    deadline: r.deadline || '',
+    expiresIn: 0,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
