@@ -138,14 +138,23 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // 页面刷新时主动检查已有 session
+    // 页面刷新时主动检查已有 session（5秒超时保护，防止卡死）
+    const sessionTimeout = setTimeout(() => {
+      console.warn('getSession timeout, treating as logged-out');
+      setUserState(null);
+      setAuthLoading(false);
+    }, 5000);
+
     supabase.auth.getSession()
       .then(({ data: { session } }) => applySession(session))
       .catch((err) => {
         console.error('getSession failed, treating as logged-out:', err);
         setUserState(null);
       })
-      .finally(() => setAuthLoading(false));
+      .finally(() => {
+        clearTimeout(sessionTimeout);
+        setAuthLoading(false);
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {

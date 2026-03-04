@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -17,7 +17,8 @@ import {
   Home,
   ArrowRight,
 } from 'lucide-react';
-import { productCatalog } from '../../data/productData';
+import { MainCategory } from '../../data/productData';
+import { fetchProductCatalog } from '../../lib/services/productCatalogService';
 
 type ViewMode = 'tree-grid' | 'mega-menu' | 'layered-cards';
 
@@ -27,6 +28,11 @@ export function CategoryNavigationDemo() {
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [productCatalog, setProductCatalog] = useState<MainCategory[]>([]);
+
+  useEffect(() => {
+    fetchProductCatalog().then(setProductCatalog).catch(console.error);
+  }, []);
 
   // Calculate product counts
   const getCategoryProductCount = (categoryId: string) => {

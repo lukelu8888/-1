@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -14,7 +14,8 @@ import {
   Eye,
   ShoppingCart,
 } from 'lucide-react';
-import { productCatalog } from '../../data/productData';
+import { MainCategory } from '../../data/productData';
+import { fetchProductCatalog } from '../../lib/services/productCatalogService';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { toast } from 'sonner';
 import { ProductDetailModal } from './ProductDetailModal';
@@ -33,6 +34,11 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
   const [selectedProductCategory, setSelectedProductCategory] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [productCatalog, setProductCatalog] = useState<MainCategory[]>([]);
+
+  useEffect(() => {
+    fetchProductCatalog().then(setProductCatalog).catch(console.error);
+  }, []);
 
   // Toggle sub-category expansion
   const toggleSubCategory = (subCategoryId: string) => {

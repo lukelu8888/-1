@@ -539,98 +539,12 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     console.log('  - 客户邮箱:', newContract.customerEmail);
     console.log('  - 合同总金额:', newContract.totalAmount);
     
-    // 🔥 更新状态
-    setContracts(prev => {
-      const updated = [...prev, newContract];
-      console.log('📦 [SalesContractContext] 更新contracts状态:');
-      console.log('  - 更新前数量:', prev.length);
-      console.log('  - 更新后数量:', updated.length);
-      console.log('  - 所有合同编号:', updated.map(c => c.contractNumber));
-      
-      // 🔥 强制同步保存到localStorage（避免React状态异步更新问题）
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('salesContracts', JSON.stringify(updated));
-          console.log('✅ [SalesContractContext] 已同步保存到localStorage');
-          
-          // 验证保存
-          const saved = localStorage.getItem('salesContracts');
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            console.log('🔍 [SalesContractContext] 验证保存结果:');
-            console.log('  - 保存的合同数量:', parsed.length);
-            console.log('  - 保存的合同编号:', parsed.map((c: any) => c.contractNumber));
-          }
-        } catch (error) {
-          console.error('❌ [SalesContractContext] localStorage保存失败:', error);
-        }
-      }
-      
-      return updated;
-    });
-    
+    setContracts(prev => [...prev, newContract]);
     toast.success(`销售合同 ${newContract.contractNumber} 创建成功！`);
 
-    // 🔥 同步落库（不改变现有createContract同步返回的调用方式）
-    void (async () => {
-      try {
-        const res = await apiFetchJson<{ contract: SalesContract; message?: string }>('/api/sales-contracts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contractUid: newContract.id,
-            contractNumber: newContract.contractNumber,
-            quotationNumber: newContract.quotationNumber,
-            inquiryNumber: newContract.inquiryNumber || null,
-            region: newContract.region,
-            customerName: newContract.customerName,
-            customerEmail: newContract.customerEmail,
-            customerCompany: newContract.customerCompany,
-            customerAddress: newContract.customerAddress || '',
-            customerCountry: newContract.customerCountry || '',
-            contactPerson: newContract.contactPerson || '',
-            contactPhone: newContract.contactPhone || '',
-            supervisor: newContract.supervisor || null,
-            products: (newContract.products || []).map(p => ({
-              productId: p.productId,
-              productName: p.productName,
-              specification: p.specification,
-              hsCode: p.hsCode,
-              quantity: p.quantity,
-              unit: p.unit,
-              unitPrice: p.unitPrice,
-              amount: p.amount,
-              deliveryTime: p.deliveryTime,
-            })),
-            totalAmount: newContract.totalAmount,
-            currency: newContract.currency,
-            tradeTerms: newContract.tradeTerms,
-            paymentTerms: newContract.paymentTerms,
-            depositPercentage: newContract.depositPercentage,
-            depositAmount: newContract.depositAmount,
-            balancePercentage: newContract.balancePercentage,
-            balanceAmount: newContract.balanceAmount,
-            deliveryTime: newContract.deliveryTime,
-            portOfLoading: newContract.portOfLoading,
-            portOfDestination: newContract.portOfDestination || '',
-            packing: newContract.packing,
-            remarks: newContract.remarks || null,
-            attachments: newContract.attachments || [],
-            approvalFlow: newContract.approvalFlow || null,
-            approvalHistory: newContract.approvalHistory || [],
-          }),
-        });
-
-        const serverContract = res?.contract;
-        if (serverContract?.id) {
-          setContracts(prev => prev.map(c => (c.id === newContract.id ? serverContract : c)));
-          console.log('✅ [SalesContractContext] 已同步创建合同到后端:', serverContract.contractNumber);
-        }
-      } catch (e: any) {
-        // 后端不通时静默失败（本地合同已创建，不影响业务流程）
-        console.warn('⚠️ [SalesContractContext] 同步创建合同到后端失败（已忽略）:', e?.message || e);
-      }
-    })();
+    // 持久化到 Supabase
+    void contractService.upsert(newContract)
+      .catch(e => console.warn('⚠️ [createContract] Supabase upsert 失败:', e?.message));
     
     return newContract;
   };
@@ -653,59 +567,16 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         }
         return contract;
       });
-      // 立即同步写 localStorage（不等 useEffect 异步触发）
-      try {
-        if (!clearingRef.current) {
-          localStorage.setItem('salesContracts', JSON.stringify(next));
-          console.log(`✅ [updateContract] localStorage 已同步，id=${id}, status=${(updates as any).status || '未变'}`);
-        }
-      } catch { /* ignore */ }
       return next;
     });
 
     toast.success('合同已更新！');
 
-    // 🔥 同步更新到后端（接口化订单管理列表）
-    void (async () => {
-      try {
-        const payload: any = {};
-        if (Object.prototype.hasOwnProperty.call(updates, 'status')) payload.status = (updates as any).status;
-        if (Object.prototype.hasOwnProperty.call(updates, 'remarks')) payload.remarks = (updates as any).remarks;
-        if (Object.prototype.hasOwnProperty.call(updates, 'approvalFlow')) payload.approvalFlow = (updates as any).approvalFlow;
-        if (Object.prototype.hasOwnProperty.call(updates, 'approvalHistory')) payload.approvalHistory = (updates as any).approvalHistory;
-        if (Object.prototype.hasOwnProperty.call(updates, 'approvalNotes')) payload.approvalNotes = (updates as any).approvalNotes;
-        if (Object.prototype.hasOwnProperty.call(updates, 'rejectionReason')) payload.rejectionReason = (updates as any).rejectionReason;
-        if (Object.prototype.hasOwnProperty.call(updates, 'sentToCustomerAt')) payload.sentToCustomerAt = (updates as any).sentToCustomerAt;
-        if (Object.prototype.hasOwnProperty.call(updates, 'customerConfirmedAt')) payload.customerConfirmedAt = (updates as any).customerConfirmedAt;
-        if (Object.prototype.hasOwnProperty.call(updates, 'purchaseOrderNumbers')) payload.purchaseOrderNumbers = (updates as any).purchaseOrderNumbers;
-        if (Object.prototype.hasOwnProperty.call(updates, 'depositProof')) payload.depositProof = (updates as any).depositProof;
-        if (Object.prototype.hasOwnProperty.call(updates, 'depositConfirmedBy')) payload.depositConfirmedBy = (updates as any).depositConfirmedBy;
-        if (Object.prototype.hasOwnProperty.call(updates, 'depositConfirmedAt')) payload.depositConfirmedAt = (updates as any).depositConfirmedAt;
-        if (Object.prototype.hasOwnProperty.call(updates, 'depositConfirmNotes')) payload.depositConfirmNotes = (updates as any).depositConfirmNotes;
-
-        // 没有可同步字段就不请求
-        if (Object.keys(payload).length === 0) return;
-
-        const res = await apiFetchJson<{ contract: SalesContract }>('/api/sales-contracts/' + encodeURIComponent(id), {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-
-        if (res?.contract?.id) {
-          setContracts(prev => prev.map(c => (c.id === id ? res.contract : c)));
-        }
-      } catch (e: any) {
-        // 后端不通时静默失败（本地状态已更新，不影响业务流程）
-        console.warn('⚠️ [SalesContractContext] 同步更新合同到后端失败（已忽略）:', e?.message || e);
-      }
-    })();
-
-    // 同步到 Supabase（静默）
+    // 持久化到 Supabase
     const targetContract = contracts.find(c => c.id === id);
     if (targetContract) {
       void contractService.upsert({ ...targetContract, ...updates, updatedAt: new Date().toISOString() })
-        .catch(e => console.warn('⚠️ [SalesContractContext] Supabase upsert 失败:', e?.message));
+        .catch(e => console.warn('⚠️ [updateContract] Supabase upsert 失败:', e?.message));
     }
   };
   

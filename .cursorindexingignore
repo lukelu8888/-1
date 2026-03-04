@@ -20,14 +20,16 @@ package-lock.json
 
 # Large demo/config files that cause Cursor memory crashes (>1500 lines each)
 src/components/demo/FullProcessDemoV5.tsx
-src/config/formTemplatesHomeDepotReal.ts
-src/config/formTemplatesAdvanced.ts
+# formTemplatesHomeDepotReal 已拆分至 src/config/homeDepotTemplates/ (各文件 <850 行)
+src/config/homeDepotTemplates/part4-finance.ts
+# formTemplatesAdvanced 已拆分至 src/config/advancedTemplates/ (各文件 <700 行)
+src/config/advancedTemplates/part3-quotation.ts
+# productData 已迁移至 Supabase，本地文件仅保留类型定义
 src/components/supplier/technical/ProductLibrary.tsx
 src/components/dashboard/ProfitAnalyzerPro.tsx
 src/components/dashboard/OrderTracking.tsx
 src/components/admin/SupplierManagement.tsx
 src/components/admin/SeedingCampaignCenterEnhanced.tsx
-src/data/productData.ts
 src/components/supplier/QuotationDocument.tsx
 src/components/admin/SalesForecastingTargetsProMaxEditable.tsx
 src/components/supplier/SupplierOrderManagementCenter.tsx

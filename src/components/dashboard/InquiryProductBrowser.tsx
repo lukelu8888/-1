@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -11,7 +11,8 @@ import {
   Check,
   Plus
 } from 'lucide-react';
-import { productCatalog } from '../../data/productData';
+import { MainCategory } from '../../data/productData';
+import { fetchProductCatalog } from '../../lib/services/productCatalogService';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { toast } from 'sonner';
 
@@ -25,6 +26,11 @@ export function InquiryProductBrowser({ onAddProduct, addedProductIds, onBackToH
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [productCatalog, setProductCatalog] = useState<MainCategory[]>([]);
+
+  useEffect(() => {
+    fetchProductCatalog().then(setProductCatalog).catch(console.error);
+  }, []);
 
   // Flatten all products from all categories
   const allProducts = productCatalog.flatMap(category =>

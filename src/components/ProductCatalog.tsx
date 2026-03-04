@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useRouter } from '../contexts/RouterContext';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card';
@@ -20,7 +20,8 @@ import {
   Ruler,
   ShoppingCart
 } from 'lucide-react';
-import { productCatalog, MainCategory, SubCategory, ProductCategory, ProductSpec } from '../data/productData';
+import { MainCategory, SubCategory, ProductCategory, ProductSpec } from '../data/productData';
+import { fetchProductCatalog } from '../lib/services/productCatalogService';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import { OrderEditingBanner } from './OrderEditingBanner';
 import { useUser } from '../contexts/UserContext';
@@ -37,6 +38,11 @@ export function ProductCatalog() {
   const [selectedLevel3, setSelectedLevel3] = useState<ProductCategory | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<ProductSpec | null>(null);
   const [quantities, setQuantities] = useState<{ [key: string]: number }>({});
+  const [productCatalog, setProductCatalog] = useState<MainCategory[]>([]);
+
+  useEffect(() => {
+    fetchProductCatalog().then(setProductCatalog).catch(console.error);
+  }, []);
 
   const handleReturnToOrder = () => {
     // Navigate back to dashboard with create-order view
