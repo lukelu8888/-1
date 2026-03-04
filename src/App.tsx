@@ -66,7 +66,6 @@ import { PurchaseOrderProvider } from './contexts/PurchaseOrderContext'; // 🔥
 import { XJProvider } from './contexts/XJContext'; // 🔥 采购询价管理（XJ）
 import { QuotationRequestProvider } from './contexts/QuotationRequestContext'; // 🔥 报价请求管理
 import { SalesQuotationProvider } from './contexts/SalesQuotationContext'; // 🔥 销售报价管理（QT）
-import { SalesOrderProvider } from './contexts/SalesOrderContext'; // 🔥 销售订单管理（SO）
 import { SalesContractProvider } from './contexts/SalesContractContext'; // 🔥 销售合同管理（SC）
 import { OrganizationProvider } from './contexts/OrganizationContext'; // 🔥 供应商组织信息管理
 import { AdminOrganizationProvider } from './contexts/AdminOrganizationContext'; // 🔥 Admin主体公司信息管理
@@ -311,13 +310,11 @@ export default function App() {
                                 <XJProvider>
                                   <QuotationRequestProvider>
                                     <SalesQuotationProvider>
-                                      <SalesOrderProvider>
                                         <SalesContractProvider>
                                           <AppErrorBoundary scope="AppContentRoot">
                                             <AppContent />
                                           </AppErrorBoundary>
                                         </SalesContractProvider>
-                                      </SalesOrderProvider>
                                     </SalesQuotationProvider>
                                   </QuotationRequestProvider>
                                 </XJProvider>
