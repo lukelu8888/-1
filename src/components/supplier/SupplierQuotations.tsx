@@ -292,7 +292,7 @@ export default function SupplierQuotations() {
     validUntilDate.setDate(validUntilDate.getDate() + (myQuote.validityDays || 30));
 
     return {
-      quotationNo: rfq.supplierQuotationNo || generateBJNumber(), // 🔥 使用统一的BJ编号生成器
+      quotationNo: rfq.supplierQuotationNo || `BJ-${new Date().toISOString().slice(2,10).replace(/-/g,'')}`, // fallback placeholder
       quotationDate: myQuote.quotedDate,
       validUntil: validUntilDate.toISOString().split('T')[0],
       rfqReference: rfq.supplierXjNo || rfq.xjNumber,

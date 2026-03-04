@@ -14,7 +14,7 @@ import QuoteCreationIntelligent from './QuoteCreationIntelligent'; // 🔥 智�
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
 import { useInquiry } from '../../contexts/InquiryContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：销售报价Context
-import { generateQRNumber, generateQTNumber } from '../../utils/xjNumberGenerator'; // 🔥 新增：生成QT编号
+import { nextQRNumber, nextQTNumber } from '../../utils/xjNumberGenerator'; // 🔥 新增：生成QT/QR编号
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { purchaseRequirementService, salesQuotationService } from '../../lib/supabaseService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
@@ -253,7 +253,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   };
 
   // 🔥 创建采购需求（从INQ）
-  const handleCreateQRFromINQ = (inq: any) => {
+  const handleCreateQRFromINQ = async (inq: any) => {
     console.log('🔍 [创建QR] 原始询价单数据:', inq);
     console.log('  - buyerInfo:', inq.buyerInfo);
     console.log('  - products:', inq.products);
@@ -261,7 +261,9 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     
     const newQR = {
       id: `qr_${Date.now()}`,
-      requirementNo: generateQRNumber(inq.region || 'North America'),
+      requirementNo: await nextQRNumber(
+        inq.region === 'South America' ? 'SA' : inq.region === 'Europe & Africa' ? 'EA' : 'NA'
+      ),
       source: '销售订单',
       sourceInquiryNumber: inq.inquiryNumber || `INQ-${inq.id}`,
       requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -486,7 +488,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       
       // 🔥 自动创建draft状态的业务员销售报价单（QT）
       console.log('5️⃣ 准备生成QT编号...');
-      const qtNumber = generateQTNumber(fullRegion);
+      const regionCode = qr.region === 'South America' ? 'SA' : qr.region === 'Europe & Africa' ? 'EA' : 'NA';
+      const qtNumber = await nextQTNumber(regionCode);
       console.log('6️⃣ QT编号生成成功:', qtNumber);
       
       console.log('📋 准备创建销售报价单:', {

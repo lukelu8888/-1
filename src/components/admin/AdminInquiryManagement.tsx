@@ -17,7 +17,7 @@ import { CreateXJFromInquiryDialog } from './CreateXJFromInquiryDialog'; // 🔥
 import { CreateQuotationRequestDialog } from './CreateQuotationRequestDialog'; // 🔥 导入报价请求对话框
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext'; // 🔥 导入QuotationRequest Context
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
-import { generateQRNumber } from '../../utils/xjNumberGenerator'; // 🔥 导入QR编号生成
+import { nextQRNumber } from '../../utils/xjNumberGenerator'; // 🔥 导入QR编号生成
 import { useUser } from '../../contexts/UserContext'; // 🔥 从 Supabase Auth 读取当前用户
 
 interface AdminInquiryManagementProps {
@@ -53,11 +53,13 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const { user: currentUser } = useUser();
   
   // 🔥 下推成本询报：从INQ创建QR
-  const handlePushToCostInquiry = (inquiry: any) => {
+  const handlePushToCostInquiry = async (inquiry: any) => {
     
     const newQR = {
       id: `qr_${Date.now()}`,
-      requirementNo: generateQRNumber(inquiry.region || 'North America'),
+      requirementNo: await nextQRNumber(
+        inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA'
+      ),
       source: '销售订单',
       sourceInquiryNumber: inquiry.inquiryNumber || inquiry.id,
       requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],

@@ -39,7 +39,7 @@ import { useApproval } from '../../contexts/ApprovalContext'; // 🔥 添加审�
 import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext'; // 🔥 新增：采购订单Context
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
-import { generateCQNumber } from '../../utils/purchaseOrderNumberGenerator';
+import { nextPRNumber } from '../../utils/xjNumberGenerator';
 import { purchaseRequirementService } from '../../lib/supabaseService';
 import { toast } from 'sonner@2.0.3';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog'; // 🔥 新增：Dialog组件
@@ -216,7 +216,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   // 🔥 新增：文档预览状态
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
   const [selectedContract, setSelectedContract] = useState<any>(null);
-  const requestProcurementFromContract = (contract: any) => {
+  const requestProcurementFromContract = async (contract: any) => {
     const livePOs = getLivePurchaseOrdersForContract(contract);
     if (livePOs.length > 0) {
       // 允许业务员“重新激活”已有采购请求，避免按钮长期灰置且请求链路断裂
@@ -234,7 +234,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       return;
     }
 
-    const poNumber = generateCQNumber();
+    const poNumber = await nextPRNumber();
     const items = (contract.products || []).map((product: any, index: number) => ({
       id: String(product?.id || product?.productId || `item-${index + 1}`),
       productName: product?.productName || 'Unknown Product',

@@ -64,6 +64,28 @@ export async function nextCGNumber(): Promise<string> {
   }
 }
 
+export async function nextQTNumber(region = 'NA'): Promise<string> {
+  try {
+    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'QT', p_region_code: region, p_customer_id: null });
+    if (error) throw error;
+    return data as string;
+  } catch (e) {
+    console.error('[xjNumberGenerator] nextQTNumber RPC failed:', e);
+    return localFallback('QT', region);
+  }
+}
+
+export async function nextPRNumber(): Promise<string> {
+  try {
+    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'PR', p_region_code: 'UNKNOWN', p_customer_id: null });
+    if (error) throw error;
+    return data as string;
+  } catch (e) {
+    console.error('[xjNumberGenerator] nextPRNumber RPC failed:', e);
+    return localFallback('PR');
+  }
+}
+
 const DOCUMENT_COUNTER_KEY = 'document_counter_data';
 
 // 🌍 Region code mapping
