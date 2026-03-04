@@ -172,6 +172,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [showXJPreview, setShowRFQPreview] = useState(false);
   const [currentXJData, setCurrentRFQData] = useState<XJData | null>(null);
   const xjDocRef = React.useRef<HTMLDivElement>(null);
+  const rfqDocRef = React.useRef<HTMLDivElement>(null);
   
   // 🔥 询价单编辑状态
   const [showEditXJDialog, setShowEditXJDialog] = useState(false);
