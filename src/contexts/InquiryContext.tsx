@@ -101,10 +101,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
 
       const rbacRole = profile?.rbac_role || '';
       const portalRole = profile?.portal_role || '';
-      const isStaff = ['admin', 'staff', 'owner', 'manager', 'operator', 'finance',
-                       'sales_rep', 'Sales_Rep', 'sales_director', 'Sales_Director',
-                       'regional_manager', 'Regional_Manager', 'procurement'].includes(rbacRole) ||
-                      ['admin', 'staff', 'manager', 'operator', 'finance'].includes(portalRole);
+      const isStaff = portalRole === 'admin' || portalRole === 'staff';
 
       console.log(`📥 [loadFromSupabase] user=${email} rbac=${rbacRole} portal=${portalRole} isStaff=${isStaff}`);
 
