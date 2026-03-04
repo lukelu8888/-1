@@ -199,11 +199,39 @@ ALTER TABLE public.payments              ENABLE ROW LEVEL SECURITY;
 
 -- 管理员/业务员：完全访问（service_role 或 authenticated）
 -- 简单策略：authenticated 用户可读写（后续按角色细化）
-CREATE POLICY IF NOT EXISTS "auth_all_quotation_requests"    ON public.quotation_requests    FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY IF NOT EXISTS "auth_all_supplier_xjs"          ON public.supplier_xjs          FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY IF NOT EXISTS "auth_all_purchase_requirements" ON public.purchase_requirements FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY IF NOT EXISTS "auth_all_purchase_orders"       ON public.purchase_orders       FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY IF NOT EXISTS "auth_all_payments"              ON public.payments              FOR ALL TO authenticated USING (true) WITH CHECK (true);
+DO $$
+DECLARE
+  pol RECORD;
+BEGIN
+  FOR pol IN SELECT unnest(ARRAY[
+    'auth_all_quotation_requests',
+    'auth_all_supplier_xjs',
+    'auth_all_purchase_requirements',
+    'auth_all_purchase_orders',
+    'auth_all_payments'
+  ]) AS pname,
+  unnest(ARRAY[
+    'quotation_requests',
+    'supplier_xjs',
+    'purchase_requirements',
+    'purchase_orders',
+    'payments'
+  ]) AS tname
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename  = pol.tname
+        AND policyname = pol.pname
+    ) THEN
+      EXECUTE format(
+        'CREATE POLICY %I ON public.%I FOR ALL TO authenticated USING (true) WITH CHECK (true)',
+        pol.pname, pol.tname
+      );
+    END IF;
+  END LOOP;
+END;
+$$;
 
 -- ============================================================
 -- 索引（加速常用查询）
