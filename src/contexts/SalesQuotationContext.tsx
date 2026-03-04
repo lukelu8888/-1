@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { getCurrentUser } from '../utils/dataIsolation';
 import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
 import { emitErpEvent } from '../lib/erp-core/event-bus';
-import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
+import { filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
 import { salesQuotationService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 
@@ -124,9 +123,9 @@ export interface SalesQuotation {
 
 interface SalesQuotationContextType {
   quotations: SalesQuotation[];
-  addQuotation: (quotation: SalesQuotation) => void;
-  updateQuotation: (id: string, updates: Partial<SalesQuotation>) => void;
-  deleteQuotation: (id: string) => void;
+  addQuotation: (quotation: SalesQuotation) => Promise<void>;
+  updateQuotation: (id: string, updates: Partial<SalesQuotation>) => Promise<void>;
+  deleteQuotation: (id: string) => Promise<void>;
   getQuotationById: (id: string) => SalesQuotation | undefined;
   getQuotationByNumber: (qtNumber: string) => SalesQuotation | undefined;
   getQuotationsByQR: (qrNumber: string) => SalesQuotation[];
@@ -147,36 +146,20 @@ const emitSalesQuotationEvent = (
   quotation: Partial<SalesQuotation> & { id: string },
   metadata?: Record<string, unknown>,
 ) => {
-  const currentUser = getCurrentUser() as any;
   emitErpEvent({
     id: `evt-sales-quotation-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     key: key as any,
     domain: 'quotation',
     recordId: String(quotation.id),
     internalNo: String(quotation.qtNumber || quotation.id),
-    companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
-    source: currentUser?.type === 'admin' ? 'admin' : 'client',
+    source: 'admin',
     occurredAt: new Date().toISOString(),
     metadata,
   });
 };
 
 export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // 从localStorage加载初始数据（作为 Supabase 加载前的初始值）
-  const [quotations, setQuotations] = useState<SalesQuotation[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('salesQuotations');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          return filterNotDeleted('quotation', parsed, (q) => getSalesQuotationMarkers(q));
-        } catch (e) {
-          console.error('[SalesQuotation] 加载 localStorage 失败:', e);
-        }
-      }
-    }
-    return [];
-  });
+  const [quotations, setQuotations] = useState<SalesQuotation[]>([]);
 
   // 从 Supabase 加载数据
   const loadFromSupabase = async () => {
@@ -186,8 +169,6 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
     if (data && Array.isArray(data)) {
       const filtered = filterNotDeleted('quotation', data as SalesQuotation[], (q) => getSalesQuotationMarkers(q));
       setQuotations(filtered);
-      // 同步更新 localStorage 作为缓存
-      localStorage.setItem('salesQuotations', JSON.stringify(filtered));
     }
   };
 
@@ -222,55 +203,38 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
         const updated = newRow as SalesQuotation;
         setQuotations(prev => {
           const exists = prev.find(q => q.id === updated.id);
-          const newList = exists
+          return exists
             ? prev.map(q => q.id === updated.id ? { ...q, ...updated } : q)
             : [updated, ...prev];
-          localStorage.setItem('salesQuotations', JSON.stringify(newList));
-          return newList;
         });
       } else if (eventType === 'DELETE') {
         const deletedId = (oldRow as any)?.id;
         if (deletedId) {
-          setQuotations(prev => {
-            const newList = prev.filter(q => q.id !== deletedId);
-            localStorage.setItem('salesQuotations', JSON.stringify(newList));
-            return newList;
-          });
+          setQuotations(prev => prev.filter(q => q.id !== deletedId));
         }
       }
     });
     return () => { void supabase.removeChannel(channel); };
   }, []);
 
-  const addQuotation = (quotation: SalesQuotation) => {
-    // 乐观更新本地状态
-    setQuotations(prev => {
-      const newList = [...prev, quotation];
-      localStorage.setItem('salesQuotations', JSON.stringify(newList));
-      return newList;
-    });
-    // 异步写入 Supabase
-    void salesQuotationService.upsert(quotation).catch(err =>
-      console.error('[SalesQuotation] upsert to Supabase failed:', err)
-    );
+  const addQuotation = async (quotation: SalesQuotation) => {
+    const saved = await salesQuotationService.upsert(quotation);
+    if (saved) {
+      setQuotations(prev => [saved as SalesQuotation, ...prev]);
+    } else {
+      setQuotations(prev => [quotation, ...prev]);
+    }
     emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, quotation, {
       approvalStatus: quotation.approvalStatus,
       customerStatus: quotation.customerStatus,
     });
   };
 
-  const updateQuotation = (id: string, updates: Partial<SalesQuotation>) => {
+  const updateQuotation = async (id: string, updates: Partial<SalesQuotation>) => {
     const currentQuotation = quotations.find((qt) => qt.id === id);
     const merged = { ...currentQuotation, ...updates, updatedAt: new Date().toISOString() } as SalesQuotation;
-    setQuotations(prev => {
-      const newList = prev.map(qt => qt.id === id ? merged : qt);
-      localStorage.setItem('salesQuotations', JSON.stringify(newList));
-      return newList;
-    });
-    // 异步写入 Supabase
-    void salesQuotationService.upsert(merged).catch(err =>
-      console.error('[SalesQuotation] upsert update to Supabase failed:', err)
-    );
+    const saved = await salesQuotationService.upsert(merged);
+    setQuotations(prev => prev.map(qt => qt.id === id ? (saved as SalesQuotation || merged) : qt));
     if (updates.customerStatus === 'sent' || updates.customerStatus === 'viewed') {
       emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_SENT, { id, qtNumber: String(currentQuotation?.qtNumber || id) }, { customerStatus: updates.customerStatus });
     }
@@ -279,26 +243,10 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
     }
   };
 
-  const deleteQuotation = (id: string) => {
+  const deleteQuotation = async (id: string) => {
     const currentQuotation = quotations.find((qt) => qt.id === id);
-    const markers = currentQuotation ? getSalesQuotationMarkers(currentQuotation) : [String(id)];
-    addTombstones('quotation', markers, {
-      reason: 'manual_delete',
-      deletedBy: (getCurrentUser() as any)?.email || 'unknown',
-    });
-    setQuotations((prev) => {
-      const newList = filterNotDeleted(
-        'quotation',
-        prev.filter((qt) => qt.id !== id),
-        (q) => getSalesQuotationMarkers(q),
-      );
-      localStorage.setItem('salesQuotations', JSON.stringify(newList));
-      return newList;
-    });
-    // 异步从 Supabase 删除
-    void salesQuotationService.delete(id).catch(err =>
-      console.error('[SalesQuotation] delete from Supabase failed:', err)
-    );
+    await salesQuotationService.delete(id);
+    setQuotations((prev) => prev.filter((qt) => qt.id !== id));
     emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_DELETED, { id, qtNumber: String(currentQuotation?.qtNumber || id) });
   };
 
