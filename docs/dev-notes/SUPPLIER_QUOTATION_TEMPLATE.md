@@ -480,7 +480,7 @@ const convertCurrency = (amount: number, from: string, to: string) => {
 
 ## 相关文档
 
-- [供应商询价单模版](./SupplierRFQDocument.tsx)
+- [采购询价单模版](./SupplierRFQDocument.tsx)
 - [采购订单模版](./PurchaseOrderDocument.tsx)（待开发）
 - [销售合同模版](./SalesContractDocument.tsx)（待开发）
 

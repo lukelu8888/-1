@@ -5,14 +5,14 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class SupplierRfqQuote extends Model
+class SupplierXjQuote extends Model
 {
     protected $table = 'supplier_rfq_quotes';
 
     public $timestamps = false;
 
     protected $fillable = [
-        'supplier_rfq_id',
+        'supplier_xj_id',
         'supplier_code',
         'supplier_name',
         'quoted_date',
@@ -39,6 +39,6 @@ class SupplierRfqQuote extends Model
 
     public function supplierRfq(): BelongsTo
     {
-        return $this->belongsTo(SupplierRfq::class, 'supplier_rfq_id');
+        return $this->belongsTo(SupplierRfq::class, 'supplier_xj_id');
     }
 }

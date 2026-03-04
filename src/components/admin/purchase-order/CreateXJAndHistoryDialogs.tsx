@@ -16,7 +16,7 @@ import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { DatePicker } from '../../ui/date-picker';
 
-type CreateRFQAndHistoryDialogsProps = {
+type CreateXJAndHistoryDialogsProps = {
   showCreateRFQDialog: boolean;
   setShowCreateRFQDialog: React.Dispatch<React.SetStateAction<boolean>>;
   selectedRequirementForRFQ: PurchaseRequirement | null;
@@ -40,7 +40,7 @@ type CreateRFQAndHistoryDialogsProps = {
   setSelectedProductForHistory: React.Dispatch<React.SetStateAction<any>>;
 };
 
-export const CreateRFQAndHistoryDialogs: React.FC<CreateRFQAndHistoryDialogsProps> = ({
+export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps> = ({
   showCreateRFQDialog,
   setShowCreateRFQDialog,
   selectedRequirementForRFQ,
@@ -89,7 +89,7 @@ export const CreateRFQAndHistoryDialogs: React.FC<CreateRFQAndHistoryDialogsProp
       <Dialog open={showCreateRFQDialog} onOpenChange={setShowCreateRFQDialog}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader className="border-b border-gray-200 pb-4">
-            <DialogTitle className="text-base">创建询价单 - 向供应商询价</DialogTitle>
+            <DialogTitle className="text-base">创建询价单 - 采购询价</DialogTitle>
             <DialogDescription className="text-xs">选择供应商并设置询价参数，系统将向每个供应商发送包含所有产品的询价单</DialogDescription>
           </DialogHeader>
 
@@ -156,7 +156,7 @@ export const CreateRFQAndHistoryDialogs: React.FC<CreateRFQAndHistoryDialogsProp
                             <td className="py-1.5 px-2 text-right font-semibold">{item.quantity}</td>
                             <td className="py-1.5 px-2 text-gray-600">{item.unit}</td>
                             <td className="py-1.5 px-2 text-center">
-                              {(item as any).rfqHistory && (item as any).rfqHistory.length > 0 ? (
+                              {(item as any).xjHistory && (item as any).xjHistory.length > 0 ? (
                                 <button
                                   onClick={() => {
                                     setSelectedProductForHistory(item);
@@ -272,9 +272,9 @@ export const CreateRFQAndHistoryDialogs: React.FC<CreateRFQAndHistoryDialogsProp
           </DialogHeader>
 
           <div className="py-4">
-            {selectedProductForHistory?.rfqHistory && selectedProductForHistory.rfqHistory.length > 0 ? (
+            {selectedProductForHistory?.xjHistory && selectedProductForHistory.xjHistory.length > 0 ? (
               <div className="space-y-3">
-                {selectedProductForHistory.rfqHistory.map((history: any, idx: number) => (
+                {selectedProductForHistory.xjHistory.map((history: any, idx: number) => (
                   <div key={idx} className="bg-gray-50 border border-gray-200 rounded p-3">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">

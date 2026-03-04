@@ -1,7 +1,7 @@
 export type EditPOFormState = {
   poNumber: string;
   requirementNo: string;
-  rfqNumber: string;
+  xjNumber: string;
   sourceRef: string;
   supplierName: string;
   supplierCode: string;
@@ -70,7 +70,7 @@ export const createInitialCreateOrderForm = (): CreateOrderFormState => ({
 export const createInitialEditPOForm = (): EditPOFormState => ({
   poNumber: '',
   requirementNo: '',
-  rfqNumber: '',
+  xjNumber: '',
   sourceRef: '',
   supplierName: '',
   supplierCode: '',

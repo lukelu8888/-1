@@ -53,7 +53,7 @@
 │                    localStorage['supplierRFQs']                         │
 │  {                                                                      │
 │    id: "rfq-123456",                                                    │
-│    supplierRfqNo: "XJ-251221-3862",                                     │
+│    supplierXjNo: "XJ-251221-3862",                                     │
 │    supplierEmail: "supplier1@example.com",                              │
 │    sourceQRNumber: "QR-251221-0001",                                    │
 │    products: [...],                                                     │
@@ -62,7 +62,7 @@
 │  }                                                                      │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
-                                    │ 6️⃣ RFQContext自动合并
+                                    │ 6️⃣ RFQContext 自动合并
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                       SUPPLIER PORTAL（供应商端）                          │
@@ -75,14 +75,14 @@
                     │   ┌─────────────────────┐   │
                     │   │ 客户需求池           │   │
                     │   │      5              │   │
-                    │   │   RFQ · 5 待报价    │   │
+                    │   │   XJ · 5 待报价    │   │
                     │   └─────────────────────┘   │
                     └─────────────────────────────┘
                                     │
                                     │ 8️⃣ 点击"客户需求"Tab
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         客户需求池 Tab（RFQ List）                         │
+│                         客户需求池 Tab（XJ List）                         │
 │  ┌───────────────────────────────────────────────────────────────┐      │
 │  │ 序号 │ 询价单号        │ 产品信息       │ 截止日期  │ 操作      │      │
 │  │─────┼────────────────┼───────────────┼──────────┼──────────│      │
@@ -114,7 +114,7 @@
 ## 🔄 数据流转详细图
 
 ```
-┌──────────────┐    创建RFQ     ┌──────────────┐
+┌──────────────┐    创建XJ      ┌──────────────┐
 │  Admin创建   │──────────────▶│ localStorage  │
 │  QR → XJ     │                │  ['rfqs']     │
 └──────────────┘                └──────────────┘
@@ -197,7 +197,7 @@
             │
             └─▶ getRFQsBySupplier(user.email)
                     │
-                    └─▶ 过滤出当前供应商的RFQ
+                    └─▶ 过滤出当前供应商的XJ
                             │
                             └─▶ categorizedRFQs.pending
                                     │
@@ -225,7 +225,7 @@
 │  ┌────────────────────────────────────────┐                │
 │  │ getRFQsBySupplier(user.email)          │                │
 │  │ ↓                                      │                │
-│  │ 只返回匹配的RFQ:                        │                │
+│  │ 只返回匹配的XJ:                         │                │
 │  │ • rfq.supplierEmail === user.email    │                │
 │  │ OR                                     │                │
 │  │ • rfq.supplierCode === user.email     │                │
@@ -328,11 +328,11 @@ Supplier端自动刷新列表
 
 ## 📊 数据结构对比
 
-### Admin端 RFQ (localStorage['rfqs'])
+### Admin端 XJ数据 (localStorage['rfqs'])
 ```json
 {
   "id": "rfq-1234567890",
-  "supplierRfqNo": "XJ-251221-3862",
+  "supplierXjNo": "XJ-251221-3862",
   "requirementNo": "QR-251221-0001",
   "supplierCode": "DG-HX-001",
   "supplierName": "东莞市华星电器有限公司",
@@ -356,12 +356,12 @@ Supplier端自动刷新列表
 }
 ```
 
-### Supplier端 RFQ (localStorage['supplierRFQs'])
+### Supplier端 XJ数据 (localStorage['supplierRFQs'])
 ```json
 {
   "id": "rfq-1234567890",
-  "rfqNumber": "XJ-251221-3862",
-  "supplierRfqNo": "XJ-251221-3862",
+  "xjNumber": "XJ-251221-3862",
+  "supplierXjNo": "XJ-251221-3862",
   "supplierCode": "DG-HX-001",
   "supplierEmail": "supplier1@example.com",
   "sourceQRNumber": "QR-251221-0001",

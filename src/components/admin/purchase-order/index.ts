@@ -16,10 +16,10 @@ export {
 
 export { PurchaseOrderEditDialog } from './PurchaseOrderEditDialog';
 export { PurchaseOrderCreateDialogs } from './PurchaseOrderCreateDialogs';
-export { EditRFQDialog } from './EditRFQDialog';
-export { RFQPreviewDialog } from './RFQPreviewDialog';
+export { EditXJDialog } from './EditXJDialog';
+export { XJPreviewDialog } from './XJPreviewDialog';
 export { SupplierQuotationDialog } from './SupplierQuotationDialog';
-export { CreateRFQAndHistoryDialogs } from './CreateRFQAndHistoryDialogs';
+export { CreateXJAndHistoryDialogs } from './CreateXJAndHistoryDialogs';
 export { PurchaseOrdersTab } from './PurchaseOrdersTab';
 export { ProcurementRequestsTab } from './ProcurementRequestsTab';
 export { SupplierAllocationDialog } from './SupplierAllocationDialog';

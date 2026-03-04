@@ -11,14 +11,14 @@ import { Search, Filter, Eye, Reply, CheckCircle, XCircle, Clock, FileText, Aler
 import { toast } from 'sonner@2.0.3';
 import { CustomerInquiryView } from '../dashboard/CustomerInquiryView';
 import { useInquiry } from '../../contexts/InquiryContext';
-import type { RegionType } from '../../utils/rfqNumberGenerator';
+import type { RegionType } from '../../utils/xjNumberGenerator';
 import { CompactStatCard } from './CompactStatCard';
 import { MultiDimensionFilters } from './MultiDimensionFilters';
-import { CreateRFQFromInquiryDialog } from './CreateRFQFromInquiryDialog';
+import { CreateXJFromInquiryDialog } from './CreateXJFromInquiryDialog';
 import { CreateQuotationRequestDialog } from './CreateQuotationRequestDialog';
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
-import { generateQRNumber } from '../../utils/rfqNumberGenerator';
+import { generateQRNumber } from '../../utils/xjNumberGenerator';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { extractModelNo, extractSpecification } from '../../utils/productDataExtractor';
 import { apiFetchJson } from '../../api/backend-auth';
@@ -38,9 +38,9 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   // 🔥 批量选择和删除状态
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
-  // 🔥 创建供应商RFQ对话框状态
-  const [showRFQDialog, setShowRFQDialog] = useState(false);
-  const [rfqInquiry, setRFQInquiry] = useState<any>(null);
+  // 🔥 创建供应商XJ对话框状态
+  const [showXJDialog, setShowXJDialog] = useState(false);
+  const [xjInquiry, setXJInquiry] = useState<any>(null);
   
   // 🎯 多维度筛选状态 (老板角色专用)
   const [filterRegion, setFilterRegion] = useState('all');
@@ -701,7 +701,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                 const priorityConfig = getPriorityConfig(inquiry.priority);
                 
                 const qrs = getQuotationRequestsByInquiry(inquiry.id);
-                const hasRFQ = qrs.length > 0;
+                const hasXJ = qrs.length > 0;
                 
                 const hasQR = purchaseRequirements.some(qr => 
                   qr.sourceInquiryNumber === (inquiry.inquiryNumber || inquiry.id)
@@ -806,10 +806,10 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
               size="sm"
               className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
               onClick={() => {
-                document.body.classList.add('printing-rfq');
+                document.body.classList.add('printing-inq');
                 window.print();
                 setTimeout(() => {
-                  document.body.classList.remove('printing-rfq');
+                  document.body.classList.remove('printing-inq');
                 }, 1000);
               }}
             >
@@ -850,12 +850,12 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       
       {/* 🔥 报价请求对话框 */}
       <CreateQuotationRequestDialog
-        open={showRFQDialog}
+        open={showXJDialog}
         onClose={() => {
-          setShowRFQDialog(false);
-          setRFQInquiry(null);
+          setShowXJDialog(false);
+          setXJInquiry(null);
         }}
-        inquiry={rfqInquiry}
+        inquiry={xjInquiry}
       />
     </div>
   );

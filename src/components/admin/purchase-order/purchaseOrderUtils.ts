@@ -5,11 +5,11 @@
 
 import { PurchaseOrderData } from '../../documents/templates/PurchaseOrderDocument';
 import { PurchaseRequirementDocumentData } from '../../documents/templates/PurchaseRequirementDocument';
-import { SupplierRFQData } from '../../documents/templates/SupplierRFQDocument';
+import { XJData } from '../../documents/templates/XJDocument';
 import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOrderContext';
 import { PurchaseRequirement } from '../../../contexts/PurchaseRequirementContext';
 import { Supplier } from '../../../data/suppliersData';
-import { generateXJNumber } from '../../../utils/rfqNumberGenerator';
+import { generateXJNumber } from '../../../utils/xjNumberGenerator';
 
 // 🔥 状态配置类型
 type POStatus = 'pending' | 'confirmed' | 'producing' | 'completed' | 'delayed';
@@ -269,15 +269,15 @@ export const convertToPRData = (req: PurchaseRequirement, userRole?: string): Pu
 /**
  * 🔥 生成询价单文档数据
  */
-export const generateRFQDocumentData = (
+export const generateXJDocumentData = (
   supplier: Supplier,
   requirement: PurchaseRequirement,
   deadline: Date,
   remarks: string,
   selectedProductIds: string[],
-  rfqNoOverride?: string
-): SupplierRFQData => {
-  const rfqNo = rfqNoOverride || generateXJNumber();
+  xjNoOverride?: string
+): XJData => {
+  const rfqNo = xjNoOverride || generateXJNumber();
   
   // 只包含选中的产品
   const selectedProducts = requirement.items?.filter(item => selectedProductIds.includes(item.id)) || [];
@@ -304,7 +304,7 @@ export const generateRFQDocumentData = (
   
   return {
     rfqNo: rfqNo,
-    rfqDate: new Date().toISOString().split('T')[0],
+    xjDate: new Date().toISOString().split('T')[0],
     quoteDeadline: deadline.toISOString().split('T')[0],
     requirementNo: requirement.requirementNo,
     

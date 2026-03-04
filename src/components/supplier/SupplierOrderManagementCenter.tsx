@@ -22,11 +22,11 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '../../contexts/UserContext';
-import { useRFQs } from '../../contexts/RFQContext';
-import SupplierRFQDocumentViewer from './SupplierRFQDocumentViewer';
+import { useXJs } from '../../contexts/XJContext';
+import XJDocumentViewer from './XJDocumentViewer';
 import SupplierQuotationDocumentViewer from './SupplierQuotationDocumentViewer';
 import SupplierQuotationEditor from './SupplierQuotationEditor';
-import { createSupplierQuotationFromRFQ, saveSupplierQuotation } from '../../utils/createSupplierQuotationFromRFQ';
+import { createQuotationFromXJ, saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
 
 // 🔥 供应商报价单接口（从localStorage读取）
@@ -88,7 +88,7 @@ interface OrderStats {
 
 export default function SupplierOrderManagementCenter() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier, deleteRFQ, updateRFQ, addQuoteToRFQ, refreshMineFromBackend } = useRFQs();
+  const { rfqs, getRFQsBySupplier, deleteRFQ, updateRFQ, addQuoteToRFQ, refreshMineFromBackend } = useXJs();
   
   // 🔥 获取完整的供应商信息（从suppliersDatabase）
   const supplierInfo = useMemo(() => {
@@ -189,16 +189,16 @@ export default function SupplierOrderManagementCenter() {
   // 🔥 获取当前供应商的询价单
   const myRFQs = useMemo(() => {
     if (!user?.email) {
-      console.log('⚠️ [供应商订单管理中心] 用户未登录，无法获取RFQ');
+      console.log('⚠️ [供应商订单管理中心] 用户未登录，无法获取采购询价');
       return [];
     }
-    console.log('🔍 [供应商订单管理中心] 正在获取RFQ，供应商邮箱:', user.email);
+    console.log('🔍 [供应商订单管理中心] 正在获取采购询价，供应商邮箱:', user.email);
     const result = getRFQsBySupplier(user.email);
-    console.log('📦 [供应商订单管理中心] 获取到的RFQ数量:', result.length);
+    console.log('📦 [供应商订单管理中心] 获取到的采购询价数量:', result.length);
     if (result.length > 0) {
-      console.log('  - RFQ详情:', result.map(r => ({
+      console.log('  - 采购询价详情:', result.map(r => ({
         id: r.id,
-        rfqNo: r.supplierRfqNo,
+        rfqNo: r.supplierXjNo,
         status: r.status,
         supplier: r.supplierName
       })));
@@ -206,18 +206,18 @@ export default function SupplierOrderManagementCenter() {
     return result;
   }, [rfqs, user?.email, getRFQsBySupplier]);
 
-  // 🔥 分类RFQ（客户需求池）
+  // 🔥 分类采购询价（客户需求池）
   const categorizedRFQs = useMemo(() => {
-    console.log('🔍 [分类RFQ] 开始分类，总RFQ数:', myRFQs.length);
+    console.log('🔍 [分类采购询价] 开始分类，总采购询价数:', myRFQs.length);
     
-    // 🔥 修改：客户需求Tab显示所有待处理的RFQ（包括待报价和已下推）
+    // 🔥 修改：客户需求Tab显示所有待处理的采购询价（包括待报价和已下推）
     const pending = myRFQs.filter(rfq => {
       // 接受 'pending'、'sent' 和 'quoted' 状态
       const isPendingOrSent = rfq.status === 'pending' || rfq.status === 'sent' || rfq.status === 'quoted';
       // 排除已接受和已拒绝的
       const result = isPendingOrSent && rfq.status !== 'accepted' && rfq.status !== 'rejected';
       const myQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
-      console.log(`  - RFQ ${rfq.supplierRfqNo}: status=${rfq.status}, hasQuote=${!!myQuote}, 是否在客户需求=${result}`);
+      console.log(`  - 采购询价 ${rfq.supplierXjNo}: status=${rfq.status}, hasQuote=${!!myQuote}, 是否在客户需求=${result}`);
       return result;
     });
     
@@ -241,7 +241,7 @@ export default function SupplierOrderManagementCenter() {
 
   // 🔥 统计数据
   const stats: OrderStats = useMemo(() => {
-    // 待报价的RFQ（未提交报价的）
+    // 待报价的采购询价（未提交报价的）
     const pendingRFQs = categorizedRFQs.pending.length;
 
     // 草稿报价单
@@ -699,7 +699,7 @@ export default function SupplierOrderManagementCenter() {
                     </TableCell>
                     <TableCell>
                       <div>
-                        <p className="text-sm font-medium text-blue-600">{rfq.supplierRfqNo || rfq.rfqNumber}</p>
+                        <p className="text-sm font-medium text-blue-600">{rfq.supplierXjNo || rfq.xjNumber}</p>
                         <p className="text-xs text-slate-500">{rfq.createdDate}</p>
                       </div>
                     </TableCell>
@@ -789,7 +789,7 @@ export default function SupplierOrderManagementCenter() {
                         {(() => {
                           const myQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
                           const existingQuotation = supplierQuotations.find(q => 
-                            q.sourceXJ === (rfq.supplierRfqNo || rfq.rfqNumber) &&
+                            q.sourceXJ === (rfq.supplierXjNo || rfq.xjNumber) &&
                             q.supplierEmail === user?.email
                           );
                           
@@ -818,7 +818,7 @@ export default function SupplierOrderManagementCenter() {
                             try {
                               // 🔥 防止重复创建：检查是否已存在对应的报价单
                               const existingQuotation = supplierQuotations.find(q => 
-                                q.sourceXJ === (rfq.supplierRfqNo || rfq.rfqNumber) &&
+                                q.sourceXJ === (rfq.supplierXjNo || rfq.xjNumber) &&
                                 q.supplierEmail === user?.email
                               );
 
@@ -826,7 +826,7 @@ export default function SupplierOrderManagementCenter() {
                                 toast.warning(
                                   <div className="space-y-1">
                                     <p className="font-semibold">⚠️ 报价单已存在</p>
-                                    <p className="text-sm">询价单: {rfq.supplierRfqNo || rfq.rfqNumber}</p>
+                                    <p className="text-sm">询价单: {rfq.supplierXjNo || rfq.xjNumber}</p>
                                     <p className="text-sm">报价单: {existingQuotation.quotationNo}</p>
                                     <p className="text-xs text-slate-500 mt-1">正在跳转到我的报价...</p>
                                   </div>,
@@ -841,10 +841,10 @@ export default function SupplierOrderManagementCenter() {
                               }
 
                               // 创建报价单（使用默认值）
-                              console.log('🔍 创建报价单 - RFQ数据:', {
+                              console.log('🔍 创建报价单 - 采购询价数据:', {
                                 id: rfq.id,
-                                rfqNumber: rfq.rfqNumber,
-                                supplierRfqNo: rfq.supplierRfqNo,
+                                xjNumber: rfq.xjNumber,
+                                supplierXjNo: rfq.supplierXjNo,
                                 productName: rfq.productName,
                                 quantity: rfq.quantity,
                                 unit: rfq.unit,
@@ -860,7 +860,7 @@ export default function SupplierOrderManagementCenter() {
                                 phone: supplierInfo?.phone
                               });
 
-                              const quotation = createSupplierQuotationFromRFQ(
+                              const quotation = createQuotationFromXJ(
                                 rfq,
                                 supplierInfo, // 🔥 传递完整的供应商信息对象
                                 {
@@ -887,7 +887,7 @@ export default function SupplierOrderManagementCenter() {
                               const updatedQuotations = [...supplierQuotations, quotation];
                               setSupplierQuotations(updatedQuotations);
 
-                              // 🔥 将报价信息添加到RFQ的quotes数组中，标记为"已下推"
+                              // 🔥 将报价信息添加到采购询价的quotes数组中，标记为"已下推"
                               addQuoteToRFQ(rfq.id, {
                                 supplierCode: supplierInfo?.email || user?.email || '',
                                 supplierName: supplierInfo?.name || user?.username || '供应商',
@@ -905,7 +905,7 @@ export default function SupplierOrderManagementCenter() {
                               toast.success(
                                 <div className="space-y-1">
                                   <p className="font-semibold">✅ 报价单创建成功</p>
-                                  <p className="text-sm">询价单: {rfq.supplierRfqNo || rfq.rfqNumber}</p>
+                                  <p className="text-sm">询价单: {rfq.supplierXjNo || rfq.xjNumber}</p>
                                   <p className="text-sm">报价单: {quotation.quotationNo}</p>
                                   <p className="text-xs text-slate-500 mt-1">状态已更新为"已下推"，正在跳转到我的报价...</p>
                                 </div>,
@@ -1441,7 +1441,7 @@ export default function SupplierOrderManagementCenter() {
                     </TableCell>
                     <TableCell>
                       <div>
-                        <p className="text-sm font-medium text-blue-600">{order.rfqNumber}</p>
+                        <p className="text-sm font-medium text-blue-600">{order.xjNumber}</p>
                         <p className="text-xs text-slate-500">{order.createdDate}</p>
                       </div>
                     </TableCell>
@@ -1653,7 +1653,7 @@ export default function SupplierOrderManagementCenter() {
             <FileText className="w-4 h-4" />
             <div className="text-left">
               <p className="text-sm font-medium">客户需求</p>
-              <p className="text-xs opacity-75">RFQ · {stats.pendingRFQs}</p>
+              <p className="text-xs opacity-75">采购询价 · {stats.pendingRFQs}</p>
             </div>
           </TabsTrigger>
           <TabsTrigger value="quotation" className="gap-2 py-2.5 data-[state=active]:bg-white">
@@ -1707,7 +1707,7 @@ export default function SupplierOrderManagementCenter() {
             <DialogTitle>询价单文档</DialogTitle>
             <DialogDescription>完整的询价单文档，包含产品清单、商务条款和技术要求</DialogDescription>
           </DialogHeader>
-          {selectedItem && <SupplierRFQDocumentViewer rfq={selectedItem} />}
+          {selectedItem && <XJDocumentViewer rfq={selectedItem} />}
         </DialogContent>
       </Dialog>
 
@@ -1863,9 +1863,9 @@ export default function SupplierOrderManagementCenter() {
                       // 3. Keep selectedQuotation fresh (for document viewer)
                       setSelectedQuotation(updatedQuotation);
 
-                      // 4. Sync back to the parent RFQ
+                      // 4. Sync back to the parent 采购询价
                       const relatedRFQ = myRFQs.find(r =>
-                        (r.supplierRfqNo || r.rfqNumber) === updatedQuotation.sourceXJ
+                        (r.supplierXjNo || r.xjNumber) === updatedQuotation.sourceXJ
                       );
                       if (relatedRFQ) {
                         const firstItem = updatedQuotation.items?.[0];

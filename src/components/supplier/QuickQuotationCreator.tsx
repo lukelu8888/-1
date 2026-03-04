@@ -8,13 +8,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui
 import { Badge } from '../ui/badge';
 import { FileText, ArrowRight, CheckCircle, Calculator } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { createSupplierQuotationFromRFQ, saveSupplierQuotation } from '../../utils/createSupplierQuotationFromRFQ';
+import { createQuotationFromXJ, saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
 import { useUser } from '../../contexts/UserContext';
-import { useRFQs } from '../../contexts/RFQContext';
+import { useXJs } from '../../contexts/XJContext';
 
 export default function QuickQuotationCreator() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier, updateRFQ } = useRFQs();
+  const { rfqs, getRFQsBySupplier, updateRFQ } = useXJs();
   
   const [xjNumber, setXjNumber] = useState('XJ-251220-7726');
   const [unitPrice, setUnitPrice] = useState('');
@@ -40,17 +40,17 @@ export default function QuickQuotationCreator() {
       return;
     }
 
-    // 查找对应的RFQ
+    // 查找对应的采购询价
     const rfq = rfqs.find(r => 
-      r.supplierRfqNo === xjNumber || 
-      r.rfqNumber === xjNumber
+      r.supplierXjNo === xjNumber || 
+      r.xjNumber === xjNumber
     );
 
     if (!rfq) {
       toast.error(`未找到询价单 ${xjNumber}`);
-      console.log('所有RFQ:', rfqs.map(r => ({ 
-        supplierRfqNo: r.supplierRfqNo, 
-        rfqNumber: r.rfqNumber 
+      console.log('所有采购询价:', rfqs.map(r => ({ 
+        supplierXjNo: r.supplierXjNo, 
+        xjNumber: r.xjNumber 
       })));
       return;
     }
@@ -63,7 +63,7 @@ export default function QuickQuotationCreator() {
 
     try {
       // 创建报价单
-      const quotation = createSupplierQuotationFromRFQ(
+      const quotation = createQuotationFromXJ(
         rfq,
         user.email,
         user.name || user.email,
@@ -81,7 +81,7 @@ export default function QuickQuotationCreator() {
       // 保存到localStorage
       saveSupplierQuotation(quotation);
 
-      // 更新RFQ状态
+      // 更新采购询价状态
       if (status === 'submitted') {
         updateRFQ(rfq.id, {
           supplierQuotationNo: quotation.quotationNo,
@@ -114,10 +114,10 @@ export default function QuickQuotationCreator() {
     }
   };
 
-  // 查找RFQ信息
+  // 查找采购询价信息
   const rfq = rfqs.find(r => 
-    r.supplierRfqNo === xjNumber || 
-    r.rfqNumber === xjNumber
+    r.supplierXjNo === xjNumber || 
+    r.xjNumber === xjNumber
   );
 
   return (
@@ -161,7 +161,7 @@ export default function QuickQuotationCreator() {
             </div>
           </div>
 
-          {/* RFQ详情 */}
+          {/* 采购询价详情 */}
           {rfq && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
               <div className="flex items-center justify-between">

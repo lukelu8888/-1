@@ -2,9 +2,9 @@ import React from 'react';
 import { Download, FileText, Printer } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../ui/dialog';
-import { SupplierRFQDocument, SupplierRFQData } from '../../documents/templates/SupplierRFQDocument';
+import { XJDocument, SupplierRFQData } from '../../documents/templates/XJDocument';
 
-type RFQPreviewDialogProps = {
+type XJPreviewDialogProps = {
   showRFQPreview: boolean;
   setShowRFQPreview: React.Dispatch<React.SetStateAction<boolean>>;
   currentRFQData: SupplierRFQData | null;
@@ -12,7 +12,7 @@ type RFQPreviewDialogProps = {
   handleExportRFQPDF: (download: boolean) => void;
 };
 
-export const RFQPreviewDialog: React.FC<RFQPreviewDialogProps> = ({
+export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
   showRFQPreview,
   setShowRFQPreview,
   currentRFQData,
@@ -25,15 +25,15 @@ export const RFQPreviewDialog: React.FC<RFQPreviewDialogProps> = ({
         <DialogHeader className="px-6 py-4 border-b">
           <DialogTitle className="text-base flex items-center gap-2">
             <FileText className="w-4 h-4" />
-            📋 供应商询价单预览 - {currentRFQData?.rfqNo}
+            📋 采购询价单预览 - {currentRFQData?.rfqNo}
           </DialogTitle>
           <DialogDescription style={{ fontSize: '12px' }}>
-            Supplier RFQ Preview - 可直接发送给供应商的询价单文档
+            Procurement Inquiry Preview - 可直接发送给供应商的询价单文档
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-auto bg-gray-100 p-6">
-          {currentRFQData && <SupplierRFQDocument ref={rfqDocRef} data={currentRFQData} />}
+          {currentRFQData && <XJDocument ref={rfqDocRef} data={currentRFQData} />}
         </div>
 
         <div className="border-t bg-white px-6 py-4 flex items-center justify-between">

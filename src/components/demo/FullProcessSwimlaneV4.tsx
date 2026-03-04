@@ -76,7 +76,7 @@ export function FullProcessSwimlaneV4() {
     { id: 2, role: '业务员', title: '收到询盘', action: '收到客户询盘', outputDoc: '无', sentInfo: '无', time: '12-04 09:15', stageId: 1, stageName: '询价报价', nextStepId: 3 },
     { id: 3, role: '业务员', title: '下推询价', action: '下推生成采购询价单', outputDoc: '采购询价单', sentInfo: '请协助询价', time: '12-04 09:30', stageId: 1, stageName: '询价报价', nextStepId: 4 },
     { id: 4, role: '采购员', title: '收到请求', action: '收到业务员询价请求', outputDoc: '无', sentInfo: '正在处理', time: '12-04 09:45', stageId: 1, stageName: '询价报价', nextStepId: 5 },
-    { id: 5, role: '采购员', title: '向供应商询价', action: '向供应商发出询价请求', outputDoc: '供应商询价单', sentInfo: '请协助报价', time: '12-04 10:00', stageId: 1, stageName: '询价报价', nextStepId: 6 },
+    { id: 5, role: '采购员', title: '发送采购询价', action: '向供应商发出采购询价请求', outputDoc: '采购询价单', sentInfo: '请协助报价', time: '12-04 10:00', stageId: 1, stageName: '询价报价', nextStepId: 6 },
     { id: 6, role: '供应商', title: '收到询价', action: '收到采购员询价请求', outputDoc: '无', sentInfo: '已收到', time: '12-04 10:30', stageId: 1, stageName: '询价报价', nextStepId: 7 },
     { id: 7, role: '供应商', title: '向采购员报价', action: '向采购员报价（$8.50/件）', outputDoc: '供应商报价单', sentInfo: '报价已完成', time: '12-04 14:30', stageId: 1, stageName: '询价报价', nextStepId: 8 },
     { id: 8, role: '采购员', title: '收到报价', action: '收到供应商报价', outputDoc: '无', sentInfo: '报价已收到', time: '12-04 14:45', stageId: 1, stageName: '询价报价', nextStepId: 9 },

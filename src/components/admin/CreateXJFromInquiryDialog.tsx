@@ -15,23 +15,23 @@ import { Badge } from '../ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Search, Building2, Mail, Phone, Star, Send, Package, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { useRFQs } from '../../contexts/RFQContext';
+import { useXJs } from '../../contexts/XJContext';
 
 /**
- * 📋 从客户询价创建供应商RFQ对话框
+ * 📋 从客户询价创建供应商采购询价（XJ）对话框
  * 
  * 业务流程：
  * 1. 客户询价（Inquiry）→ 业务员接收
- * 2. 采购员基于客户询价，向多个供应商询价
- * 3. 每个产品可以向多个供应商询价
- * 4. 即使同一个产品，也要向不同供应商询价以获取最优价格
+ * 2. 采购员基于客户询价，向多个供应商发送采购询价
+ * 3. 每个产品可以向多个供应商发送采购询价
+ * 4. 即使同一个产品，也要向不同供应商发送采购询价以获取最优价格
  * 
  * 例如：
  * - 客户询价单包含：产品A、产品B、产品C
- * - 产品A → 向供应商1、2、3询价（创建3个RFQ）
- * - 产品B → 向供应商4、5、6询价（创建3个RFQ）
- * - 产品C → 向供应商7、8、9询价（创建3个RFQ）
- * - 总共创建9个RFQ
+ * - 产品A → 向供应商1、2、3询价（创建3个XJ）
+ * - 产品B → 向供应商4、5、6询价（创建3个XJ）
+ * - 产品C → 向供应商7、8、9询价（创建3个XJ）
+ * - 总共创建9个XJ
  */
 
 // 🔥 供应商接口
@@ -76,7 +76,7 @@ interface Inquiry {
   assignedTo?: string;
 }
 
-interface CreateRFQFromInquiryDialogProps {
+interface CreateXJFromInquiryDialogProps {
   open: boolean;
   onClose: () => void;
   inquiry: Inquiry | null;
@@ -198,8 +198,8 @@ const mockSuppliers: Supplier[] = [
   }
 ];
 
-export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQFromInquiryDialogProps) {
-  const { addRFQ } = useRFQs();
+export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFromInquiryDialogProps) {
+  const { addRFQ } = useXJs();
   
   // 🔥 每个产品对应的选中供应商
   // 数据结构：{ [productId]: [supplierId1, supplierId2, ...] }
@@ -259,7 +259,7 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
     }
   };
 
-  // 计算总RFQ数量
+  // 计算总采购询价数量
   const totalRFQCount = Object.values(selectedSuppliersByProduct).reduce(
     (sum, suppliers) => sum + suppliers.length,
     0
@@ -284,7 +284,7 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
     try {
       let rfqCount = 0;
 
-      // 🔥 为每个产品的每个供应商创建独立的RFQ
+      // 🔥 为每个产品的每个供应商创建独立的采购询价（XJ）
       inquiry.items.forEach(item => {
         const selectedSuppliers = selectedSuppliersByProduct[item.id] || [];
         
@@ -292,11 +292,11 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
           const supplier = mockSuppliers.find(s => s.id === supplierId);
           if (!supplier) return;
 
-          const rfqNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+          const xjNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
           
           addRFQ({
             id: `rfq_${Date.now()}_${supplierId}_${item.id}`,
-            rfqNumber,
+            xjNumber,
             
             // 🔥 关联客户询价单
             sourceInquiryId: inquiry.id,
@@ -342,7 +342,7 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
       toast.success(
         `✅ 询价单已创建！`,
         {
-          description: `已创建 ${rfqCount} 个供应商询价单（RFQ）`
+          description: `已创建 ${rfqCount} 个采购询价单（XJ）`
         }
       );
 
@@ -354,7 +354,7 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
       
       onClose();
     } catch (error) {
-      console.error('创建RFQ失败:', error);
+      console.error('创建XJ失败:', error);
       toast.error('创建询价单失败，请重试');
     } finally {
       setLoading(false);
@@ -371,10 +371,10 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
         <DialogHeader>
           <DialogTitle className="text-xl flex items-center gap-2">
             <Send className="w-5 h-5 text-orange-600" />
-            创建供应商询价单 - 从客户询价
+            创建采购询价单 - 从客户询价
           </DialogTitle>
           <DialogDescription>
-            为客户询价单的每个产品选择供应商，系统将自动创建对应的RFQ
+            为客户询价单的每个产品选择供应商，系统将自动创建对应的采购询价（XJ）
           </DialogDescription>
         </DialogHeader>
 
@@ -592,7 +592,7 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
               </CardHeader>
               <CardContent>
                 <div className="space-y-2 text-sm">
-                  <p>将创建 <strong className="text-green-700">{totalRFQCount}</strong> 个供应商询价单（RFQ）：</p>
+                  <p>将创建 <strong className="text-green-700">{totalRFQCount}</strong> 个采购询价单（XJ）：</p>
                   <ul className="space-y-1 ml-4">
                     {inquiry.items.map((item, index) => {
                       const count = selectedSuppliersByProduct[item.id]?.length || 0;
@@ -615,7 +615,7 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
           <div className="flex items-center justify-between w-full">
             <div className="text-sm text-slate-600">
               {totalRFQCount > 0 && (
-                <span>共 <strong className="text-orange-600">{totalRFQCount}</strong> 个RFQ</span>
+                <span>共 <strong className="text-orange-600">{totalRFQCount}</strong> 个XJ</span>
               )}
             </div>
             <div className="flex gap-2">
@@ -628,7 +628,7 @@ export function CreateRFQFromInquiryDialog({ open, onClose, inquiry }: CreateRFQ
                 className="bg-orange-600 hover:bg-orange-700"
               >
                 <Send className="w-4 h-4 mr-2" />
-                {loading ? '创建中...' : `创建 ${totalRFQCount} 个RFQ`}
+                {loading ? '创建中...' : `创建 ${totalRFQCount} 个XJ`}
               </Button>
             </div>
           </div>

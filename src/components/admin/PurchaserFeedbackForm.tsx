@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { PurchaseRequirement, PurchaserFeedback, PurchaserFeedbackProduct } from '../../contexts/PurchaseRequirementContext';
-import { useRFQs } from '../../contexts/RFQContext';
+import { useXJs } from '../../contexts/XJContext';
 import { validateFeedback, calculateSuggestedPrice } from '../../utils/autoPopulateFeedback';
 import { performSmartComparison, SmartComparisonResult } from '../../utils/supplierScoring';
 import { SmartSupplierComparisonForm } from './SmartSupplierComparisonForm';
@@ -50,7 +50,7 @@ export function PurchaserFeedbackForm({
   currentUserName
 }: PurchaserFeedbackFormProps) {
   
-  const { rfqs } = useRFQs();
+  const { rfqs } = useXJs();
   
   // 🔥 状态管理
   const [loading, setLoading] = useState(false);
@@ -93,7 +93,7 @@ export function PurchaserFeedbackForm({
       if (relatedXJs.length > 0) {
         console.log('  关联XJ详情:');
         relatedXJs.forEach(xj => {
-          console.log(`    - XJ编号: ${xj.supplierRfqNo}, RFQ编号: ${xj.rfqNumber}, 关联QR: ${xj.requirementNo}`);
+          console.log(`    - XJ编号: ${xj.supplierXjNo}, XJ内部编号: ${xj.xjNumber}, 关联QR: ${xj.requirementNo}`);
         });
       }
       
@@ -126,14 +126,14 @@ export function PurchaserFeedbackForm({
         
         // 匹配XJ编号
         const matched = relatedXJs.some(xj => {
-          const matchBySupplierRfqNo = bj.sourceXJ === xj.supplierRfqNo;
-          const matchByRfqNumber = bj.sourceXJ === xj.rfqNumber;
+          const matchBySupplierRfqNo = bj.sourceXJ === xj.supplierXjNo;
+          const matchByRfqNumber = bj.sourceXJ === xj.xjNumber;
           
           if (matchBySupplierRfqNo || matchByRfqNumber) {
             console.log(`  ✅ BJ ${bj.quotationNo} 匹配成功！`);
             console.log(`    - BJ.sourceXJ: ${bj.sourceXJ}`);
-            console.log(`    - XJ.supplierRfqNo: ${xj.supplierRfqNo}`);
-            console.log(`    - XJ.rfqNumber: ${xj.rfqNumber}`);
+            console.log(`    - XJ.supplierXjNo: ${xj.supplierXjNo}`);
+            console.log(`    - XJ.xjNumber: ${xj.xjNumber}`);
           }
           
           return matchBySupplierRfqNo || matchByRfqNumber;

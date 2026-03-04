@@ -15,9 +15,9 @@ import { Card, CardContent } from '../ui/card';
 import { Checkbox } from '../ui/checkbox';
 import { Search, Building2, Package, Send, CheckCircle2, AlertCircle, Star } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { useRFQs } from '../../contexts/RFQContext';
+import { useXJs } from '../../contexts/XJContext';
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
-import { generateDocumentNumber, type RegionType } from '../../utils/rfqNumberGenerator';
+import { generateDocumentNumber, type RegionType } from '../../utils/xjNumberGenerator';
 
 /**
  * 📋 产品-供应商分发选择器
@@ -26,7 +26,7 @@ import { generateDocumentNumber, type RegionType } from '../../utils/rfqNumberGe
  * 1. 显示QR的所有产品列表（左侧）
  * 2. 显示所有可选供应商列表（右侧）
  * 3. 产品-供应商矩阵勾选（每个产品可选多个供应商）
- * 4. 按供应商维度汇总生成RFQ（一个供应商=一个RFQ，包含多个产品）
+ * 4. 按供应商维度汇总生成XJ(采购询价)（一个供应商=一个XJ，包含多个产品）
  * 
  * 业务场景：
  * - 场景1：产品A→供应商X，产品B→供应商Y（不同产品给不同供应商）
@@ -139,7 +139,7 @@ export function ProductSupplierDistributionDialog({
   onClose,
   quotationRequest
 }: ProductSupplierDistributionDialogProps) {
-  const { addRFQ } = useRFQs();
+  const { addXJ } = useXJs();
   const { updateQuotationRequest } = useQuotationRequests();
   
   // 🔥 产品-供应商分配矩阵：{ productId: [supplierId1, supplierId2, ...] }
@@ -257,26 +257,26 @@ export function ProductSupplierDistributionDialog({
       totalProducts: products.length,
       assignedProducts: assignedProducts.length,
       unassignedProducts: products.length - assignedProducts.length,
-      totalRFQs: Object.keys(supplierGroups).length,
+      totalXJs: Object.keys(supplierGroups).length,
       supplierGroups
     };
   }, [quotationRequest, productSupplierMatrix]);
 
-  // 生成RFQ编号
-  const generateRFQNumber = (region: string): string => {
+  // 生成XJ编号
+  const generateXJNumber = (region: string): string => {
     const safeRegion: RegionType =
       region === 'North America' ? 'North America'
       : region === 'South America' ? 'South America'
       : region === 'Europe & Africa' ? 'Europe & Africa'
       : 'North America';
-    return generateDocumentNumber('RFQ', safeRegion);
+    return generateDocumentNumber('XJ', safeRegion);
   };
 
-  // 提交：按供应商维度创建RFQ
+  // 提交：按供应商维度创建XJ
   const handleSubmit = () => {
     if (!quotationRequest) return;
 
-    if (statistics.totalRFQs === 0) {
+    if (statistics.totalXJs === 0) {
       toast.error('请至少为一个产品分配供应商');
       return;
     }
@@ -291,13 +291,13 @@ export function ProductSupplierDistributionDialog({
     setLoading(true);
 
     try {
-      // 🔥 按供应商维度创建RFQ
+      // 🔥 按供应商维度创建XJ
       Object.entries(statistics.supplierGroups).forEach(([supplierId, group]) => {
-        const rfqNumber = generateRFQNumber(quotationRequest.region);
+        const xjNumber = generateXJNumber(quotationRequest.region);
         
-        addRFQ({
+        addXJ({
           id: `rfq_${Date.now()}_${supplierId}_${Math.random()}`,
-          rfqNumber,
+          xjNumber,
           
           // 🔥 关联原始QR编号
           sourceQRNumber: quotationRequest.requestNumber,
@@ -347,7 +347,7 @@ export function ProductSupplierDistributionDialog({
 
       // 🔥 更新QuotationRequest的rfqCount
       updateQuotationRequest(quotationRequest.id, {
-        rfqCount: statistics.totalRFQs,
+        xjCount: statistics.totalXJs,
         status: 'processing'
       });
 
@@ -355,7 +355,7 @@ export function ProductSupplierDistributionDialog({
         <div className="space-y-1">
           <p className="font-semibold">✅ 询价已成功发送！</p>
           <p className="text-sm">
-            生成 {statistics.totalRFQs} 个RFQ，覆盖 {statistics.assignedProducts} 个产品
+            生成 {statistics.totalXJs} 个采购询价(XJ)，覆盖 {statistics.assignedProducts} 个产品
           </p>
         </div>,
         { duration: 4000 }
@@ -366,7 +366,7 @@ export function ProductSupplierDistributionDialog({
       setSearchTerm('');
       onClose();
     } catch (error) {
-      console.error('创建RFQ失败:', error);
+      console.error('创建XJ失败:', error);
       toast.error('发送询价失败，请重试');
     } finally {
       setLoading(false);
@@ -386,7 +386,7 @@ export function ProductSupplierDistributionDialog({
             产品-供应商分发选择器
           </DialogTitle>
           <DialogDescription>
-            为每个产品选择供应商，系统将按供应商维度生成RFQ
+            为每个产品选择供应商，系统将按供应商维度生成采购询价(XJ)
           </DialogDescription>
         </DialogHeader>
 
@@ -457,8 +457,8 @@ export function ProductSupplierDistributionDialog({
               <CardContent className="pt-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-slate-600 mb-1">将生成RFQ</p>
-                    <p className="text-2xl font-bold text-orange-600">{statistics.totalRFQs}</p>
+                    <p className="text-xs text-slate-600 mb-1">将生成XJ</p>
+                    <p className="text-2xl font-bold text-orange-600">{statistics.totalXJs}</p>
                   </div>
                   <Send className="w-8 h-8 text-orange-500" />
                 </div>
@@ -595,15 +595,15 @@ export function ProductSupplierDistributionDialog({
             </div>
           </div>
 
-          {/* RFQ预览 */}
-          {statistics.totalRFQs > 0 && (
+          {/* XJ预览 */}
+          {statistics.totalXJs > 0 && (
             <Card className="border-green-200 bg-green-50">
               <CardContent className="pt-4">
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 mb-3">
                     <CheckCircle2 className="w-5 h-5 text-green-600" />
                     <h3 className="font-semibold text-green-900">
-                      将生成 {statistics.totalRFQs} 个RFQ
+                      将生成 {statistics.totalXJs} 个采购询价(XJ)
                     </h3>
                   </div>
                   <div className="space-y-2 max-h-60 overflow-y-auto">
@@ -620,7 +620,7 @@ export function ProductSupplierDistributionDialog({
                               {group.products.map(p => p.productName).join('、')}
                             </div>
                           </div>
-                          <Badge className="bg-orange-500">1 RFQ</Badge>
+                          <Badge className="bg-orange-500">1 XJ</Badge>
                         </div>
                       </div>
                     ))}
@@ -634,9 +634,9 @@ export function ProductSupplierDistributionDialog({
         <DialogFooter className="border-t pt-4">
           <div className="flex items-center justify-between w-full">
             <div className="text-sm text-slate-600">
-              {statistics.totalRFQs > 0 ? (
+              {statistics.totalXJs > 0 ? (
                 <span className="text-green-700 font-medium">
-                  ✓ 准备发送 <strong className="text-orange-600">{statistics.totalRFQs}</strong> 个RFQ
+                  ✓ 准备发送 <strong className="text-orange-600">{statistics.totalXJs}</strong> 个采购询价(XJ)
                 </span>
               ) : (
                 <span className="text-slate-500">请至少为一个产品分配供应商</span>
@@ -648,11 +648,11 @@ export function ProductSupplierDistributionDialog({
               </Button>
               <Button
                 onClick={handleSubmit}
-                disabled={statistics.totalRFQs === 0 || loading}
+                disabled={statistics.totalXJs === 0 || loading}
                 className="bg-orange-600 hover:bg-orange-700"
               >
                 <Send className="w-4 h-4 mr-2" />
-                {loading ? '发送中...' : `发送询价 (${statistics.totalRFQs})`}
+                {loading ? '发送中...' : `发送询价 (${statistics.totalXJs})`}
               </Button>
             </div>
           </div>

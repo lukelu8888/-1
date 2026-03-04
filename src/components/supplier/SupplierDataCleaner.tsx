@@ -9,8 +9,8 @@ import { Trash2, RefreshCw } from 'lucide-react';
  */
 export function SupplierDataCleaner() {
   const clearAllRFQData = () => {
-    if (window.confirm('⚠️ 确定要清空所有询价数据吗？\n\n这将删除：\n- 所有询价单（RFQ）\n- 所有报价记录\n- 所有草稿\n\n此操作不可恢复！请确保已备份重要数据。')) {
-      // 清空RFQ数据
+    if (window.confirm('⚠️ 确定要清空所有询价数据吗？\n\n这将删除：\n- 所有采购询价单（XJ）\n- 所有报价记录\n- 所有草稿\n\n此操作不可恢复！请确保已备份重要数据。')) {
+      // 清空采购询价数据
       localStorage.removeItem('rfqs');
       
       toast.success('✅ 所有询价数据已清空', {
@@ -33,7 +33,7 @@ export function SupplierDataCleaner() {
     if (rfqs.length > 0) {
       console.log('  └─ 询价单列表:');
       rfqs.forEach((rfq: any, idx: number) => {
-        console.log(`      ${idx + 1}. ${rfq.supplierRfqNo || rfq.rfqNumber || rfq.id}`);
+        console.log(`      ${idx + 1}. ${rfq.supplierXjNo || rfq.xjNumber || rfq.id}`);
         console.log(`         产品: ${rfq.productName}`);
         console.log(`         供应商: ${rfq.supplierName}`);
         console.log(`         状态: ${rfq.status}`);

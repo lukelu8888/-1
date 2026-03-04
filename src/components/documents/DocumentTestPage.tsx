@@ -4,7 +4,7 @@ import { StatementOfAccountDocument } from './templates/StatementOfAccountDocume
 import { CommercialInvoiceDocument } from './templates/CommercialInvoiceDocument';
 import { PackingListDocument } from './templates/PackingListDocument';
 import { ProformaInvoiceDocument } from './templates/ProformaInvoiceDocument';
-import { SupplierRFQDocument } from './templates/SupplierRFQDocument'; // 🔥 供应商询价单
+import { XJDocument } from './templates/XJDocument'; // 🔥 采购询价单
 import { SupplierQuotationDocument } from './templates/SupplierQuotationDocument'; // 🔥 供应商报价单
 import { PurchaseRequirementDocument } from './templates/PurchaseRequirementDocument'; // 🔥 采购需求单
 import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
@@ -19,7 +19,7 @@ import type { StatementOfAccountData } from './templates/StatementOfAccountDocum
 import type { CommercialInvoiceData } from './templates/CommercialInvoiceDocument';
 import type { PackingListData } from './templates/PackingListDocument';
 import type { ProformaInvoiceData } from './templates/ProformaInvoiceDocument';
-import type { SupplierRFQData } from './templates/SupplierRFQDocument'; // 🔥 供应商询价单类型
+import type { XJData } from './templates/XJDocument'; // 🔥 采购询价单类型
 import type { SupplierQuotationData } from './templates/SupplierQuotationDocument'; // 🔥 供应商报价单类型
 import type { PurchaseRequirementDocumentData } from './templates/PurchaseRequirementDocument'; // 🔥 采购需求单类型
 
@@ -33,7 +33,7 @@ import type { PurchaseRequirementDocumentData } from './templates/PurchaseRequir
  */
 
 export function DocumentTestPage() {
-  const [activeDoc, setActiveDoc] = useState<'inquiry' | 'quotation' | 'sc' | 'po' | 'rfq' | 'supplier-quotation' | 'soa' | 'ci' | 'pl' | 'pi' | 'pr' | null>('sc');
+  const [activeDoc, setActiveDoc] = useState<'inquiry' | 'quotation' | 'sc' | 'po' | 'xj' | 'supplier-quotation' | 'soa' | 'ci' | 'pl' | 'pi' | 'pr' | null>('sc');
 
   // 示例数据：客户询价单
   const sampleInquiryData: CustomerInquiryData = {
@@ -474,10 +474,10 @@ export function DocumentTestPage() {
     }
   };
 
-  // 🔥 示例数据：供应商询价单
-  const sampleRFQData: SupplierRFQData = {
+  // 🔥 示例数据：采购询价单
+  const sampleRFQData: XJData = {
     rfqNo: 'XJ-251218-1001',
-    rfqDate: '2025-12-18',
+    xjDate: '2025-12-18',
     requiredResponseDate: '2025-12-25',
     requiredDeliveryDate: '2026-01-15',
     
@@ -709,7 +709,7 @@ export function DocumentTestPage() {
     
     salesDeptNotes: '这是该客户的首次订单，客户为洛杉矶地区15年经验的分销商。产品质量和准时交货对业务至关重要。客户期待建立长期合作关系，若试订单成功将定期下单。请提供最优价格并确认生产能力。',
     
-    purchaseDeptFeedback: '已向3家供应商询价完成，反馈如下：\n\n供应商A（深圳）：GFCI-001单价USD 1.85，交期25天，MOQ 3000pcs\n供应商B（东莞）：GFCI-001单价USD 1.92，交期20天，MOQ 2000pcs\n供应商C（中山）：GFCI-001单价USD 1.78，交期30天，MOQ 5000pcs\n\n建议选择供应商C，价格最优且MOQ符合订单数量，可接受30天交期。',
+    purchaseDeptFeedback: '已向3家供应商发送采购询价完成，反馈如下：\n\n供应商A（深圳）：GFCI-001单价USD 1.85，交期25天，MOQ 3000pcs\n供应商B（东莞）：GFCI-001单价USD 1.92，交期20天，MOQ 2000pcs\n供应商C（中山）：GFCI-001单价USD 1.78，交期30天，MOQ 5000pcs\n\n建议选择供应商C，价格最优且MOQ符合订单数量，可接受30天交期。',
     
     urgency: 'high',
     createdBy: 'zhangwei@gaoshengdafu.com'
@@ -1052,8 +1052,8 @@ export function DocumentTestPage() {
             {activeDoc === 'po' && (
               <PurchaseOrderDocument data={samplePOData} />
             )}
-            {activeDoc === 'rfq' && (
-              <SupplierRFQDocument data={sampleRFQData} />
+            {activeDoc === 'xj' && (
+              <XJDocument data={sampleRFQData} />
             )}
             {activeDoc === 'supplier-quotation' && (
               <SupplierQuotationDocument data={sampleSupplierQuotationData} />

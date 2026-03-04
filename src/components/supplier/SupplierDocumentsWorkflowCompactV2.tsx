@@ -158,7 +158,7 @@ export default function SupplierDocumentsWorkflowCompactV2() {
       icon: FileText,
       requiresAdminInteraction: false,
       documents: [
-        { id: 1, name: '客户询价单 RFQ-2024-001.pdf', uploadDate: '2024-11-05', uploadedBy: 'COSUN', size: '245 KB' },
+        { id: 1, name: '客户询价单 XJ-2024-001.pdf', uploadDate: '2024-11-05', uploadedBy: 'COSUN', size: '245 KB' },
         { id: 2, name: '初步报价单 Quote-001.pdf', uploadDate: '2024-11-06', uploadedBy: '您', size: '180 KB' },
         { id: 3, name: '技术规格书 Spec-001.pdf', uploadDate: '2024-11-08', uploadedBy: 'COSUN', size: '520 KB' }
       ]
@@ -222,7 +222,7 @@ export default function SupplierDocumentsWorkflowCompactV2() {
         { id: 12, name: '生产通知单 Production-Notice.pdf', uploadDate: '2024-11-19', uploadedBy: '您', size: '220 KB' },
         { id: 13, name: '物料清单 BOM.xlsx', uploadDate: '2024-11-19', uploadedBy: '您', size: '95 KB' },
         { id: 14, name: '技术图纸 Drawing.pdf', uploadDate: '2024-11-20', uploadedBy: '您', size: '2.8 MB' },
-        { id: 15, name: '供应商询价单 Supplier-RFQ.pdf', uploadDate: '2024-11-20', uploadedBy: '您', size: '180 KB' }
+        { id: 15, name: '采购询价单 Procurement-XJ.pdf', uploadDate: '2024-11-20', uploadedBy: '您', size: '180 KB' }
       ]
     },
     {

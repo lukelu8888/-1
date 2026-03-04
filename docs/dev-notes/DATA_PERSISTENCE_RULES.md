@@ -15,7 +15,7 @@
 - ✅ 业务员报价请求单（QR-编号）
 - ✅ 采购需求单
 - ✅ 采购订单（PO-编号）
-- ✅ 供应商询价单（XJ-编号）
+- ✅ 采购询价单（XJ-编号）
 - ✅ 供应商报价单（BJ-编号）
 - ✅ 订单数据
 - ✅ 报价数据
@@ -94,7 +94,7 @@ React.useEffect(() => {
 ### ✅ 完全符合规则的Context：
 1. **RFQContext** (`/contexts/RFQContext.tsx`)
    - Storage Key: `rfqs`
-   - 数据类型: 供应商询价单（XJ-编号）
+   - 数据类型: 采购询价单（XJ-编号）
 
 2. **QuotationRequestContext** (`/contexts/QuotationRequestContext.tsx`)
    - Storage Key: `quotationRequests`

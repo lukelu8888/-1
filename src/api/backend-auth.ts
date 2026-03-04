@@ -24,8 +24,7 @@ const BACKEND_USER_KEY = 'cosun_backend_user';
 
 export function getApiBaseUrl(): string {
   const raw = (import.meta as any)?.env?.VITE_API_BASE_URL as string | undefined;
-  // Default to your server for now (can be overridden by VITE_API_BASE_URL)
-  if (!raw) return 'https://api.cosunchina.com';
+  if (!raw) return '';
   return raw.endsWith('/') ? raw.slice(0, -1) : raw;
 }
 
@@ -128,6 +127,11 @@ export function getAuthHeaders(extra?: Record<string, string>): Record<string, s
 }
 
 export async function apiFetch(pathname: string, init?: RequestInit): Promise<Response> {
+  const base = getApiBaseUrl();
+  if (!base) {
+    throw new Error('Backend API is disabled (no VITE_API_BASE_URL configured)');
+  }
+
   const headers = new Headers(init?.headers || {});
   const url = buildUrl(pathname);
 
@@ -137,24 +141,7 @@ export async function apiFetch(pathname: string, init?: RequestInit): Promise<Re
     if (token) headers.set('Authorization', `Bearer ${token}`);
   }
 
-  // #region agent log
-  const log = (msg: string, data: Record<string, unknown>) => {
-    fetch('http://127.0.0.1:7242/ingest/c889a9af-09f1-4831-ae59-6d542c0c15d9', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'backend-auth.ts:apiFetch', message: msg, data, timestamp: Date.now() }) }).catch(() => {});
-  };
-  log('apiFetch start', { method: init?.method ?? 'GET', url });
-  // #endregion
-  try {
-    const res = await fetch(url, { ...init, headers });
-    // #region agent log
-    log('apiFetch done', { status: res.status, ok: res.ok, url: res.url });
-    // #endregion
-    return res;
-  } catch (e) {
-    // #region agent log
-    log('apiFetch error', { error: String(e) });
-    // #endregion
-    throw e;
-  }
+  return fetch(url, { ...init, headers });
 }
 
 export async function apiFetchJson<T>(pathname: string, init?: RequestInit): Promise<T> {

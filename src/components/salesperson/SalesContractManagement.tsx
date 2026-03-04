@@ -270,7 +270,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       sourceSONumber: contract.contractNumber,
       salesContractNumber: contract.contractNumber,
       quotationNumber: contract.quotationNumber,
-      rfqNumber: contract.inquiryNumber || '',
+      xjNumber: contract.inquiryNumber || '',
       requirementNo: '',
       supplierName: '待采购分配',
       supplierCode: 'TBD',

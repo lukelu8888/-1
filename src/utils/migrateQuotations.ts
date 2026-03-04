@@ -1,29 +1,29 @@
 /**
  * 🔥 报价数据迁移工具
  * 
- * 用途：将RFQ中的quote转换成独立的BJ供应商报价单对象
+ * 用途：将XJ(采购询价)中的quote转换成独立的BJ供应商报价单对象
  * 使用场景：供应商已经提交过报价，但系统还没有创建BJ对象
  */
 
 export function migrateRFQQuotesToBJQuotations() {
   try {
-    console.log('🚀 开始迁移RFQ报价数据到BJ报价单...');
+    console.log('🚀 开始迁移XJ报价数据到BJ报价单...');
     
-    // 1. 读取所有RFQ
+    // 1. 读取所有XJ
     const rfqsData = localStorage.getItem('rfqs');
     if (!rfqsData) {
-      console.log('⚠️ 没有找到RFQ数据');
-      return { success: false, message: '没有找到RFQ数据' };
+      console.log('⚠️ 没有找到XJ数据');
+      return { success: false, message: '没有找到XJ数据' };
     }
     
     const rfqs = JSON.parse(rfqsData);
-    console.log(`📊 找到 ${rfqs.length} 个RFQ`);
+    console.log(`📊 找到 ${rfqs.length} 个XJ`);
     
     // 2. 读取现有的BJ报价单
     const existingBJs = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
     console.log(`📊 现有BJ报价单: ${existingBJs.length} 个`);
     
-    // 3. 遍历所有RFQ，找到有报价的
+    // 3. 遍历所有XJ，找到有报价的
     let migratedCount = 0;
     const newBJs: any[] = [];
     
@@ -36,13 +36,13 @@ export function migrateRFQQuotesToBJQuotations() {
         const bjExists = existingBJs.some((bj: any) => bj.quotationNo === rfq.supplierQuotationNo);
         
         if (!bjExists) {
-          console.log(`  ✅ 迁移: ${rfq.supplierQuotationNo} (XJ: ${rfq.supplierRfqNo})`);
+          console.log(`  ✅ 迁移: ${rfq.supplierQuotationNo} (XJ: ${rfq.supplierXjNo})`);
           
           // 创建BJ报价单对象
           const bjQuotation = {
             id: `bj_migrated_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             quotationNo: rfq.supplierQuotationNo,
-            sourceXJ: rfq.supplierRfqNo, // 关联XJ询价单号
+            sourceXJ: rfq.supplierXjNo, // 关联XJ询价单号
             sourceQR: rfq.requirementNo, // 关联QR采购需求号
             sourceRFQId: rfq.id,
             customerName: rfq.customerName || 'COSUN',
@@ -142,15 +142,15 @@ export function checkMigrationStatus() {
   );
   
   console.log('📊 迁移状态:');
-  console.log(`  - 总RFQ数: ${rfqs.length}`);
-  console.log(`  - 有报价的RFQ: ${rfqsWithQuotes.length}`);
+  console.log(`  - 总XJ数: ${rfqs.length}`);
+  console.log(`  - 有报价的XJ: ${rfqsWithQuotes.length}`);
   console.log(`  - 总BJ报价单: ${bjs.length}`);
-  console.log(`  - 需要迁移的RFQ: ${unmatchedRFQs.length}`);
+  console.log(`  - 需要迁移的XJ: ${unmatchedRFQs.length}`);
   
   if (unmatchedRFQs.length > 0) {
-    console.log('⚠️ 需要迁移的RFQ:');
+    console.log('⚠️ 需要迁移的XJ:');
     unmatchedRFQs.forEach((rfq: any) => {
-      console.log(`  - ${rfq.supplierQuotationNo} (XJ: ${rfq.supplierRfqNo}, QR: ${rfq.requirementNo})`);
+      console.log(`  - ${rfq.supplierQuotationNo} (XJ: ${rfq.supplierXjNo}, QR: ${rfq.requirementNo})`);
     });
   }
   

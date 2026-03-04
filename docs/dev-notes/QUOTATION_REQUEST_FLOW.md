@@ -11,7 +11,7 @@
   ↓
 👨‍💼 采购员收到"报价请求"
   ↓
-🔍 采购员向多个供应商询价(RFQ) ← 这里才选择供应商！
+🔍 采购员向多个采购询价(RFQ) ← 这里才选择供应商！
   - 产品A → 供应商1、2、3
   - 产品B → 供应商4、5、6
   ↓
@@ -129,7 +129,7 @@ export interface QuotationRequest {
 - 显示所有报价请求列表
 - 筛选：状态、业务员、客户、日期
 - 查看报价请求详情
-- 点击"向供应商询价"按钮 → 打开CreateRFQFromQuotationRequestDialog
+- 点击"向采购询价"按钮 → 打开CreateRFQFromQuotationRequestDialog
 
 ### 3. 修改CreateRFQFromInquiryDialog → CreateRFQFromQuotationRequestDialog ⏳
 **重命名并修改：**
@@ -157,7 +157,7 @@ Inquiry (客户询价)
   ↓
 QuotationRequest (业务员的报价请求)
   ↓
-RFQ (采购员向供应商询价)
+RFQ (采购员向采购询价)
   ↓
 Quote (供应商报价)
   ↓

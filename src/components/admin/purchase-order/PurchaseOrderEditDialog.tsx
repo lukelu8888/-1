@@ -91,7 +91,7 @@ export const PurchaseOrderEditDialog: React.FC<PurchaseOrderEditDialogProps> = (
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-gray-700">来源询价</Label>
-                  <Input value={editPOForm.rfqNumber} onChange={(e) => setEditPOForm({ ...editPOForm, rfqNumber: e.target.value })} className="h-8 text-xs" />
+                  <Input value={editPOForm.xjNumber} onChange={(e) => setEditPOForm({ ...editPOForm, xjNumber: e.target.value })} className="h-8 text-xs" />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-gray-700">来源需求</Label>

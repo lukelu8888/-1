@@ -18,9 +18,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '../../contexts/UserContext';
-import { useRFQs } from '../../contexts/RFQContext';
+import { useXJs } from '../../contexts/XJContext';
 import { SimpleQuoteForm } from './SimpleQuoteForm';
-import SupplierRFQDocumentViewer from './SupplierRFQDocumentViewer';
+import XJDocumentViewer from './XJDocumentViewer';
 
 // 🔥 供应商报价单接口
 interface SupplierQuotation {
@@ -41,7 +41,7 @@ interface SupplierQuotation {
 
 export default function SupplierOrderManagementCenterV2() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier, deleteRFQ, updateRFQ, addQuoteToRFQ } = useRFQs();
+  const { rfqs, getRFQsBySupplier, deleteRFQ, updateRFQ, addQuoteToRFQ } = useXJs();
   
   // 主Tab状态
   const [mainTab, setMainTab] = useState<'overview' | 'rfq' | 'quotation' | 'orders' | 'payment'>('overview');

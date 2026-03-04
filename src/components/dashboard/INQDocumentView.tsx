@@ -2,12 +2,12 @@ import React from 'react';
 import { Building2, Package } from 'lucide-react';
 import { useUser } from '../../contexts/UserContext';
 
-interface RFQDocumentViewProps {
+interface INQDocumentViewProps {
   inquiry: any;
   zoom?: number;
 }
 
-export function RFQDocumentView({ inquiry, zoom = 138 }: RFQDocumentViewProps) {
+export function INQDocumentView({ inquiry, zoom = 138 }: INQDocumentViewProps) {
   const { user } = useUser();
 
   // 🔧 Unified data format - Compatible with Customer Portal and Admin Portal
@@ -106,7 +106,7 @@ export function RFQDocumentView({ inquiry, zoom = 138 }: RFQDocumentViewProps) {
 
   return (
     <div className="space-y-6 py-4">
-      {/* 🎨 A4 Professional RFQ Document */}
+      {/* 🎨 A4 Professional INQ Document */}
       <div className="flex justify-center overflow-auto rfq-print-container" style={{ padding: '20px 0' }}>
         <div 
           className="bg-white shadow-lg rfq-document"
@@ -155,7 +155,7 @@ export function RFQDocumentView({ inquiry, zoom = 138 }: RFQDocumentViewProps) {
                 </div>
               </div>
               
-              {/* Right: RFQ Badge */}
+              {/* Right: INQ Badge */}
               <div>
                 <div 
                   className="text-white text-center px-4 py-1.5"
@@ -174,7 +174,7 @@ export function RFQDocumentView({ inquiry, zoom = 138 }: RFQDocumentViewProps) {
                       marginBottom: '2px'
                     }}
                   >
-                    RFQ NUMBER
+                    INQ NUMBER
                   </div>
                   <div 
                     style={{ 
@@ -221,7 +221,7 @@ export function RFQDocumentView({ inquiry, zoom = 138 }: RFQDocumentViewProps) {
                 letterSpacing: '-0.3px'
               }}
             >
-              REQUEST FOR QUOTATION
+              CUSTOMER INQUIRY
             </h1>
             <p className="text-gray-600" style={{ fontSize: '10px' }}>
               We kindly request your best pricing and delivery terms for the following items
@@ -747,7 +747,7 @@ export function RFQDocumentView({ inquiry, zoom = 138 }: RFQDocumentViewProps) {
                   CONTACT FOR QUERIES
                 </div>
                 <div className="text-gray-700">
-                  For any questions regarding this RFQ, please contact us at services@cosunchina.com
+                  For any questions regarding this inquiry, please contact us at services@cosunchina.com
                 </div>
               </div>
             </div>

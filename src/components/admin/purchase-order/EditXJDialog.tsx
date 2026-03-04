@@ -25,27 +25,27 @@ const SUPPLIER_COMPANY_OPTIONS: string[] = Array.from(
   )
 ).sort();
 
-type EditRFQDialogProps = {
-  showEditRFQDialog: boolean;
-  setShowEditRFQDialog: React.Dispatch<React.SetStateAction<boolean>>;
+type EditXJDialogProps = {
+  showEditXJDialog: boolean;
+  setShowEditXJDialog: React.Dispatch<React.SetStateAction<boolean>>;
   editRFQData: any;
   setEditRFQData: React.Dispatch<React.SetStateAction<any>>;
   handleSaveEditRFQ: () => void;
 };
 
-export const EditRFQDialog: React.FC<EditRFQDialogProps> = ({
-  showEditRFQDialog,
-  setShowEditRFQDialog,
+export const EditXJDialog: React.FC<EditXJDialogProps> = ({
+  showEditXJDialog,
+  setShowEditXJDialog,
   editRFQData,
   setEditRFQData,
   handleSaveEditRFQ,
 }) => {
   return (
-    <Dialog open={showEditRFQDialog} onOpenChange={setShowEditRFQDialog}>
+    <Dialog open={showEditXJDialog} onOpenChange={setShowEditXJDialog}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle style={{ fontSize: '16px' }}>✏️ 编辑询价单 - {editRFQData?.rfqNo}</DialogTitle>
-          <DialogDescription style={{ fontSize: '12px' }}>Edit RFQ - All fields are editable</DialogDescription>
+          <DialogDescription style={{ fontSize: '12px' }}>Edit Procurement Inquiry - All fields are editable</DialogDescription>
         </DialogHeader>
 
         {editRFQData && (
@@ -59,7 +59,7 @@ export const EditRFQDialog: React.FC<EditRFQDialogProps> = ({
                 </div>
                 <div>
                   <Label className="text-[10px] text-gray-600">询价日期</Label>
-                  <Input type="date" value={editRFQData.rfqDate || ''} onChange={(e) => setEditRFQData({ ...editRFQData, rfqDate: e.target.value })} className="text-xs h-7" />
+                  <Input type="date" value={editRFQData.xjDate || ''} onChange={(e) => setEditRFQData({ ...editRFQData, xjDate: e.target.value })} className="text-xs h-7" />
                 </div>
                 <div>
                   <Label className="text-[10px] text-gray-600">要求回复日期</Label>
@@ -311,7 +311,7 @@ export const EditRFQDialog: React.FC<EditRFQDialogProps> = ({
           <Button
             variant="outline"
             onClick={() => {
-              setShowEditRFQDialog(false);
+              setShowEditXJDialog(false);
               setEditRFQData(null);
             }}
             className="text-xs"

@@ -6,15 +6,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox';
 import { toast } from 'sonner@2.0.3';
-import { useRFQs } from '../../contexts/RFQContext';
+import { useXJs } from '../../contexts/XJContext';
 import { useUser } from '../../contexts/UserContext';
 import { SimpleQuoteForm } from './SimpleQuoteForm';
-import SupplierRFQDocumentViewer from './SupplierRFQDocumentViewer';
-import { generateBJNumber } from '../../utils/rfqNumberGenerator'; // 🔥 BJ编号生成器
+import XJDocumentViewer from './XJDocumentViewer';
+import { generateBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
 
 export default function SupplierQuotationsSimple() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier, addQuoteToRFQ, deleteRFQ, updateRFQ } = useRFQs();
+  const { rfqs, getRFQsBySupplier, addQuoteToRFQ, deleteRFQ, updateRFQ } = useXJs();
   
   const [activeTab, setActiveTab] = useState('pending');
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
@@ -27,46 +27,46 @@ export default function SupplierQuotationsSimple() {
   // 🔥 批量删除功能的状态管理
   const [selectedRFQIds, setSelectedRFQIds] = useState<string[]>([]);
 
-  // 🔥 获取当前供应商的所有RFQ
-  const supplierRFQs = useMemo(() => {
+  // 🔥 获取当前供应商的所有采购询价
+  const xjs = useMemo(() => {
     if (!user?.email) return [];
     
-    console.log('🔍 [供应商RFQ查询] ==================');
+    console.log('🔍 [供应商采购询价查询] ==================');
     console.log('📧 当前供应商用户email:', user.email);
-    console.log('📊 所有RFQ总数:', rfqs.length);
+    console.log('📊 所有采购询价总数:', rfqs.length);
     
-    // 打印所有RFQ的供应商信息
-    rfqs.forEach(rfq => {
-      console.log(`  - RFQ ${rfq.rfqNumber}:`, {
-        supplierCode: rfq.supplierCode,
-        supplierEmail: rfq.supplierEmail,
-        supplierName: rfq.supplierName
+    // 打印所有采购询价的供应商信息
+    xjs.forEach(xj => {
+      console.log(`  - 采购询价 ${rfq.xjNumber}:`, {
+        supplierCode: xj.supplierCode,
+        supplierEmail: xj.supplierEmail,
+        supplierName: xj.supplierName
       });
     });
     
     const filtered = getRFQsBySupplier(user.email);
-    console.log('✅ 筛选后的RFQ数量:', filtered.length);
+    console.log('✅ 筛选后的采购询价数量:', filtered.length);
     console.log('==================\n');
     
     return filtered;
   }, [rfqs, user?.email, getRFQsBySupplier]);
 
-  // 🔥 分类RFQ
+  // 🔥 分类采购询价
   const categorizedRFQs = useMemo(() => {
-    const pending = supplierRFQs.filter(rfq => {
-      const myQuote = rfq.quotes?.find(q => q.supplierCode === user?.email);
-      return !myQuote && rfq.status === 'pending';
+    const pending = xjs.filter(xj => {
+      const myQuote = xj.quotes?.find(q => q.supplierCode === user?.email);
+      return !myQuote && xj.status === 'pending';
     });
     
-    const quoted = supplierRFQs.filter(rfq => {
-      const myQuote = rfq.quotes?.find(q => q.supplierCode === user?.email);
-      return myQuote && rfq.status !== 'accepted' && rfq.status !== 'rejected';
+    const quoted = xjs.filter(xj => {
+      const myQuote = xj.quotes?.find(q => q.supplierCode === user?.email);
+      return myQuote && xj.status !== 'accepted' && xj.status !== 'rejected';
     });
     
-    const accepted = supplierRFQs.filter(rfq => rfq.status === 'accepted');
+    const accepted = xjs.filter(xj => xj.status === 'accepted');
     
     return { pending, quoted, accepted };
-  }, [supplierRFQs, user?.email]);
+  }, [xjs, user?.email]);
 
   // 🔥 提交报价
   const handleSubmitQuote = (formData: any, type: 'draft' | 'submit') => {
@@ -100,7 +100,7 @@ export default function SupplierQuotationsSimple() {
       const bjQuotation = {
         id: `bj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         quotationNo: supplierQuotationNo,
-        sourceXJ: selectedRFQ.supplierRfqNo, // 关联XJ询价单号
+        sourceXJ: selectedRFQ.supplierXjNo, // 关联XJ询价单号
         sourceQR: selectedRFQ.requirementNo, // 关联QR采购需求号
         sourceRFQId: selectedRFQ.id,
         customerName: selectedRFQ.customerName || 'COSUN',
@@ -154,13 +154,13 @@ export default function SupplierQuotationsSimple() {
       
       console.log('✅ [SupplierQuotationsSimple] 创建BJ报价单:', bjQuotation);
       console.log('  - BJ编号:', supplierQuotationNo);
-      console.log('  - 关联XJ:', selectedRFQ.supplierRfqNo);
+      console.log('  - 关联XJ:', selectedRFQ.supplierXjNo);
       console.log('  - 关联QR:', selectedRFQ.requirementNo);
       
       toast.success(
         <div className="space-y-1">
           <p className="font-semibold">✅ 报价已成功提交！</p>
-          <p className="text-sm">询价单号: {selectedRFQ.supplierRfqNo || 'XJ-未分配'}</p>
+          <p className="text-sm">询价单号: {selectedRFQ.supplierXjNo || 'XJ-未分配'}</p>
           <p className="text-sm">报价单号: {supplierQuotationNo}</p>
           <p className="text-xs text-slate-500">COSUN采购需求: {selectedRFQ.requirementNo}</p>
           <p className="text-xs text-slate-500">报价已发送至COSUN管理员</p>
@@ -174,13 +174,13 @@ export default function SupplierQuotationsSimple() {
   };
 
   // 🔥 删除询价单
-  const handleDeleteRFQ = (rfq: any) => {
-    if (window.confirm(`确定要删除询价单 ${rfq.rfqNumber} 吗？\n\n⚠️ 此操作不可恢复！`)) {
+  const handleDeleteXJ = (rfq: any) => {
+    if (window.confirm(`确定要删除询价单 ${rfq.xjNumber} 吗？\n\n⚠️ 此操作不可恢复！`)) {
       deleteRFQ(rfq.id);
       toast.success(
         <div className="space-y-1">
           <p className="font-semibold">🗑️ 询价单已删除</p>
-          <p className="text-sm">RFQ编号: {rfq.rfqNumber}</p>
+          <p className="text-sm">采购询价编号: {rfq.xjNumber}</p>
         </div>,
         { duration: 3000 }
       );
@@ -241,7 +241,7 @@ export default function SupplierQuotationsSimple() {
       case 'pending': return categorizedRFQs.pending;
       case 'quoted': return categorizedRFQs.quoted;
       case 'accepted': return categorizedRFQs.accepted;
-      default: return supplierRFQs;
+      default: return xjs;
     }
   };
 
@@ -249,7 +249,7 @@ export default function SupplierQuotationsSimple() {
     { id: 'pending', label: '客户需求池', icon: Clock, count: categorizedRFQs.pending.length },
     { id: 'quoted', label: '已报价', icon: Send, count: categorizedRFQs.quoted.length },
     { id: 'accepted', label: '已接受', icon: CheckCircle, count: categorizedRFQs.accepted.length },
-    { id: 'all', label: '全部', icon: FileText, count: supplierRFQs.length },
+    { id: 'all', label: '全部', icon: FileText, count: xjs.length },
   ];
 
   return (
@@ -288,7 +288,7 @@ export default function SupplierQuotationsSimple() {
             <span className="text-gray-600" style={{ fontSize: '14px' }}>总询价单</span>
             <FileText className="w-4 h-4 text-gray-600" />
           </div>
-          <p className="text-2xl font-bold text-gray-900">{supplierRFQs.length}</p>
+          <p className="text-2xl font-bold text-gray-900">{xjs.length}</p>
           <p className="text-gray-500 mt-1" style={{ fontSize: '14px' }}>所有询价记录</p>
         </div>
       </div>
@@ -387,7 +387,7 @@ export default function SupplierQuotationsSimple() {
             <TableBody>
               {getCurrentRFQs().length > 0 ? (
                 getCurrentRFQs().map((rfq) => {
-                  const myQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
+                  const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
                   
                   return (
                     <TableRow key={rfq.id} className="hover:bg-gray-50">
@@ -399,7 +399,7 @@ export default function SupplierQuotationsSimple() {
                       </TableCell>
                       <TableCell className="py-3" style={{ fontSize: '14px' }}>
                         <div>
-                          <p className="font-medium text-blue-600">{rfq.supplierRfqNo || 'XJ-未分配'}</p>
+                          <p className="font-medium text-blue-600">{rfq.supplierXjNo || 'XJ-未分配'}</p>
                           {rfq.supplierQuotationNo && (
                             <p className="text-xs text-green-600 font-medium">报价单: {rfq.supplierQuotationNo}</p>
                           )}
@@ -464,13 +464,13 @@ export default function SupplierQuotationsSimple() {
                       )}
                       <TableCell className="py-3">
                         <Badge className={`h-5 px-2 text-xs border ${
-                          rfq.status === 'pending' 
+                          xj.status === 'pending' 
                             ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
-                            : rfq.status === 'quoted'
+                            : xj.status === 'quoted'
                             ? 'bg-blue-100 text-blue-800 border-blue-300'
                             : 'bg-green-100 text-green-800 border-green-300'
                         }`}>
-                          {rfq.status === 'pending' ? '待报价' : rfq.status === 'quoted' ? '已报价' : '已接受'}
+                          {xj.status === 'pending' ? '待报价' : xj.status === 'quoted' ? '已报价' : '已接受'}
                         </Badge>
                       </TableCell>
                       <TableCell className="py-3">
@@ -531,7 +531,7 @@ export default function SupplierQuotationsSimple() {
                             size="sm"
                             variant="ghost"
                             className="h-7 px-2 text-xs text-red-600"
-                            onClick={() => handleDeleteRFQ(rfq)}
+                            onClick={() => handleDeleteXJ(rfq)}
                           >
                             <Trash2 className="w-3 h-3 mr-1" />
                             删除
@@ -565,7 +565,7 @@ export default function SupplierQuotationsSimple() {
       <Dialog open={quoteDialogOpen} onOpenChange={setQuoteDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>提交报价 - {selectedRFQ?.rfqNumber}</DialogTitle>
+            <DialogTitle>提交报价 - {selectedRFQ?.xjNumber}</DialogTitle>
             <DialogDescription>
               请填写您的报价信息并提交给COSUN管理员
             </DialogDescription>
@@ -585,7 +585,7 @@ export default function SupplierQuotationsSimple() {
       <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>询价单详情 - {detailRFQ?.rfqNumber}</DialogTitle>
+            <DialogTitle>询价单详情 - {detailRFQ?.xjNumber}</DialogTitle>
             <DialogDescription>详细信息如下</DialogDescription>
           </DialogHeader>
           
@@ -594,7 +594,7 @@ export default function SupplierQuotationsSimple() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-gray-600">询价单号</p>
-                  <p className="text-sm font-medium">{detailRFQ.rfqNumber}</p>
+                  <p className="text-sm font-medium">{detailRFQ.xjNumber}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-600">创建日期</p>
@@ -729,14 +729,14 @@ export default function SupplierQuotationsSimple() {
       <Dialog open={documentViewerOpen} onOpenChange={setDocumentViewerOpen}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>询价单文档 - {documentRFQ?.rfqNumber}</DialogTitle>
+            <DialogTitle>询价单文档 - {documentRFQ?.xjNumber}</DialogTitle>
             <DialogDescription>
               完整的询价单文档，包含产品清单、商务条款和技术要求
             </DialogDescription>
           </DialogHeader>
           
           {documentRFQ && (
-            <SupplierRFQDocumentViewer rfq={documentRFQ} />
+            <XJDocumentViewer rfq={documentRFQ} />
           )}
         </DialogContent>
       </Dialog>

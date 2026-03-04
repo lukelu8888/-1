@@ -1,4 +1,4 @@
-# 📋 供应商询价单流程说明
+# 📋 采购询价单流程说明
 
 ## 🎯 系统架构
 
@@ -204,7 +204,7 @@ const handleSubmitRFQ = () => {
       const rfq: RFQ = {
         id: `rfq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         rfqNumber: `RFQ-${dateStr}-${random}`, // 采购员内部编号
-        supplierRfqNo,                          // 供应商询价单号（共享）
+        supplierRfqNo,                          // 采购询价单号（共享）
         
         // 产品信息
         productName: item.productName,
@@ -310,7 +310,7 @@ myRFQs.forEach(rfq => {
 
 ### 1. 在文档测试页面预览
 - 进入 Admin Portal → 文档中心
-- 点击"供应商询价单"标签
+- 点击"采购询价单"标签
 - 查看示例询价单
 - 测试下载PDF和打印功能
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useCart } from '../contexts/CartContext';
 import { useInquiry } from '../contexts/InquiryContext';
-import { useRegion } from '../contexts/RegionContext'; // 🔥 导入 RegionContext
+import { useRegion } from '../contexts/RegionContext';
 import { useRouter } from '../contexts/RouterContext';
 import { Building2, Mail, Phone, Globe, User, CheckCircle2, Download, Printer, HardDrive, Cloud } from 'lucide-react';
 import { Button } from './ui/button';
@@ -10,9 +10,9 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Progress } from './ui/progress';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel } from './ui/alert-dialog';
-import { apiFetchJson } from '../api/backend-auth';
+import { nextInquiryNumber } from '../lib/supabaseService';
 
 interface InquiryPreviewDialogProps {
   cartItems: any[];
@@ -121,7 +121,7 @@ export function InquiryPreviewDialog({
     if (isOpen) {
       const previewNumber = peekInquiryNumber(selectedRegion?.code || 'NA');
       setInquiryNumber(previewNumber);
-      console.log('🔢 预览 RFQ 编号:', previewNumber);
+      console.log('🔢 预览 INQ 编号:', previewNumber);
     }
   }, [isOpen, peekInquiryNumber, selectedRegion?.code]);
 
@@ -139,7 +139,7 @@ export function InquiryPreviewDialog({
       const { jsPDF } = await import('jspdf');
 
       if (!rfqContentRef.current) {
-        toast.error('RFQ content not found');
+        toast.error('Inquiry content not found');
         setIsDownloading(false);
         return;
       }
@@ -188,7 +188,7 @@ export function InquiryPreviewDialog({
         heightLeft -= pageHeight;
       }
 
-      const filename = `RFQ_${inquiryNumber}_${formData.companyName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+      const filename = `INQ_${inquiryNumber}_${formData.companyName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
       pdf.save(filename);
       
       toast.success('PDF downloaded successfully!');
@@ -215,18 +215,30 @@ export function InquiryPreviewDialog({
     setIsSubmitting(true);
     
     try {
-      const finalInquiryNumber = generateInquiryNumber(selectedRegion?.code || 'NA');
-      console.log('保存 RFQ 编号:', finalInquiryNumber);
+      const regionCode = selectedRegion?.code || 'NA';
+
+      // Generate number from Supabase DB (atomic, concurrency-safe)
+      let finalInquiryNumber: string;
+      try {
+        finalInquiryNumber = await nextInquiryNumber(regionCode);
+      } catch (numErr) {
+        console.error('[Submit] Failed to generate inquiry number:', numErr);
+        toast.error('Failed to generate inquiry number. Please try again.');
+        setIsSubmitting(false);
+        return;
+      }
+      console.log('✅ [Submit] DB-generated INQ number:', finalInquiryNumber);
 
       const date = new Date();
-      const inquiryId = finalInquiryNumber;
-
       const customerInquiry = {
-        id: inquiryId,
+        id: finalInquiryNumber,
+        inquiryNumber: finalInquiryNumber,
         date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
-        userEmail: formData.email,
+        userEmail: user?.email || formData.email,
         products: cartItems,
         status: 'pending' as const,
+        isSubmitted: true,
+        submittedAt: Date.now(),
         totalPrice: getTotalPrice(),
         buyerInfo: {
           companyName: formData.companyName,
@@ -243,70 +255,14 @@ export function InquiryPreviewDialog({
           recommendedContainer: planningMode === 'automatic' ? recommendedContainer : undefined,
           customContainers: planningMode === 'custom' ? customContainers : undefined,
         },
-        createdAt: Date.now()
+        region: regionCode,
+        createdAt: Date.now(),
       };
 
-      const adminInquiry = {
-        id: inquiryId,
-        inquiryNumber: finalInquiryNumber,
-        customerName: formData.companyName,
-        customerEmail: formData.email,
-        customerPhone: formData.phone,
-        region: '北美',
-        buyerInfo: {
-          companyName: formData.companyName,
-          contactPerson: formData.contactPerson,
-          email: formData.email,
-          phone: formData.phone,
-          address: formData.address,
-          website: formData.website || '',
-          businessType: formData.businessType || 'Retailer'
-        },
-        products: cartItems.map(item => ({
-          name: item.productName || item.name,
-          quantity: item.quantity,
-          specs: `${item.specification || item.specifications || ''} | Color: ${item.color} | FOB: $${(item.unitPrice || item.price || 0).toFixed(2)}`,
-          productName: item.productName || item.name,
-          sku: item.sku || item.productCode || 'N/A',
-          image: item.image || '',
-          material: item.material || '',
-          color: item.color || '',
-          specification: item.specification || item.specifications || '',
-          unitPrice: item.unitPrice || item.price || 0
-        })),
-        message: `Container: ${planningMode === 'automatic' ? recommendedContainer : 'Custom'} | Total CBM: ${totalShipping.cbm} | Cartons: ${totalShipping.cartons} | Net Weight: ${totalShipping.totalNetWeight}kg | Gross Weight: ${totalShipping.totalGrossWeight}kg`,
-        inquiryDate: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
-        status: 'pending' as const,
-        priority: 'medium' as const,
-        source: 'customer' as const,
-        createdAt: new Date().toISOString(),
-        quotationCreated: false
-      };
+      // Save directly to Supabase (Supabase-first)
+      await addInquiry(customerInquiry);
+      console.log('✅ [Submit] Inquiry saved to Supabase:', customerInquiry.id);
 
-      // ✅ Submit inquiry to backend (keep payload same as frontend object)
-      const res = await apiFetchJson<{ inquiry: any }>('/api/inquiries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...customerInquiry,
-          inquiryNumber: finalInquiryNumber,
-          isSubmitted: true,
-          submittedAt: Date.now(),
-          region: selectedRegion?.code || undefined,
-        }),
-      });
-
-      // Update InquiryContext with backend response
-      await addInquiry(res.inquiry);
-
-      // Keep admin localStorage list for now (frontend depends on it)
-      const adminInquiries = JSON.parse(localStorage.getItem('admin_inquiries') || '[]');
-      adminInquiries.unshift(adminInquiry);
-      localStorage.setItem('admin_inquiries', JSON.stringify(adminInquiries));
-
-      // Notify listeners
-      window.dispatchEvent(new Event('inquiriesUpdated'));
-      
       toast.success(`Inquiry ${finalInquiryNumber} submitted successfully!`, {
         description: 'We will review your inquiry and get back to you soon.',
         duration: 4000
@@ -458,7 +414,7 @@ export function InquiryPreviewDialog({
   return (
     <>
       <div className="space-y-6 py-4">
-        {/* 🎨 A4 Format RFQ Document - Home Depot Style - Scaled for better viewing */}
+        {/* 🎨 A4 Format Inquiry Document - Home Depot Style - Scaled for better viewing */}
         <div className="flex justify-center overflow-auto">
           <div 
             ref={rfqContentRef} 
@@ -494,10 +450,10 @@ export function InquiryPreviewDialog({
                   </div>
                 </div>
                 
-                {/* RFQ Number Badge */}
+                {/* INQ Number Badge */}
                 <div className="text-right">
                   <div className="bg-orange-600 text-white px-6 py-3 rounded-lg shadow-lg mb-2">
-                    <p className="text-xs uppercase tracking-wide opacity-90">RFQ Number</p>
+                    <p className="text-xs uppercase tracking-wide opacity-90">INQ Number</p>
                     <p className="text-xl tracking-wider font-bold">{inquiryNumber}</p>
                   </div>
                   <p className="text-xs text-gray-500">
@@ -797,7 +753,7 @@ export function InquiryPreviewDialog({
               
               <div className="mt-6 text-center">
                 <p className="text-xs text-gray-400">
-                  This RFQ is generated automatically by COSUN B2B Platform | Document ID: {inquiryNumber}
+                  This inquiry is generated automatically by COSUN B2B Platform | Document ID: {inquiryNumber}
                 </p>
               </div>
             </div>
@@ -836,7 +792,7 @@ export function InquiryPreviewDialog({
               <div>
                 <AlertDialogTitle>Inquiry Submitted Successfully!</AlertDialogTitle>
                 <AlertDialogDescription>
-                  RFQ #{inquiryNumber} has been sent to our team.
+                  Inquiry #{inquiryNumber} has been sent to our team.
                 </AlertDialogDescription>
               </div>
             </div>

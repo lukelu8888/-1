@@ -40,7 +40,7 @@
 - **Storage Key**: `rfqs`
 - **初始化**: 从localStorage加载，初始值为 `[]`
 - **自动保存**: 使用 `useEffect` 监听数据变化
-- **数据类型**: 供应商询价单（XJ-编号）
+- **数据类型**: 采购询价单（XJ-编号）
 - **状态**: ✅ 完全符合规则
 
 ### 2. ✅ QuotationRequestContext

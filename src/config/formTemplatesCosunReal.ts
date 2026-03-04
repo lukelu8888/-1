@@ -7,11 +7,11 @@ import { FormTemplate } from './formTemplates';
 const cosunRealTemplates: FormTemplate[] = [
   // ==================== 客户端文档 (Customer Documents) ====================
   
-  // 1. 客户询价单 (Request for Quotation - RFQ)
+  // 1. 客户询价单 (Customer Inquiry)
   {
     id: 'cosun_customer_rfq_real',
     name: '客户询价单',
-    name_en: 'REQUEST FOR QUOTATION (RFQ)',
+    name_en: 'CUSTOMER INQUIRY (INQ)',
     type: 'inquiry',
     owner: 'customer',
     version: '1.0',
@@ -53,10 +53,10 @@ const cosunRealTemplates: FormTemplate[] = [
                   </div>
                   <div style="text-align: right;">
                     <div style="font-size: 28px; font-weight: 900; color: #1E3A8A; margin-bottom: 4px;">
-                      RFQ
+                      INQ
                     </div>
                     <div style="font-size: 11px; color: #666; font-weight: bold;">
-                      REQUEST FOR QUOTATION
+                      CUSTOMER INQUIRY
                     </div>
                   </div>
                 </div>
@@ -66,26 +66,26 @@ const cosunRealTemplates: FormTemplate[] = [
         ]
       },
 
-      // RFQ Information
+      // Inquiry Information
       {
         id: 'rfq_info',
         name: 'rfq_info',
-        title: 'RFQ INFORMATION',
+        title: 'INQUIRY INFORMATION',
         layout: 'triple',
         backgroundColor: '#F0F4F8',
         fields: [
           {
-            id: 'rfq_number',
-            label: 'RFQ NUMBER',
+            id: 'xj_number',
+            label: 'INQ NUMBER',
             type: 'text',
             required: true,
             width: '33%',
-            defaultValue: 'RFQ-2024-0001',
+            defaultValue: 'INQ-2024-0001',
             fontWeight: 'bold'
           },
           {
             id: 'rfq_date',
-            label: 'RFQ DATE',
+            label: 'INQUIRY DATE',
             type: 'date',
             required: true,
             width: '33%'
@@ -354,8 +354,8 @@ const cosunRealTemplates: FormTemplate[] = [
             customHtml: `
               <div style="font-size: 8px; color: #666; line-height: 1.6; padding: 12px; border: 2px solid #1E3A8A; background: #F0F4F8;">
                 <strong style="color: #1E3A8A; text-decoration: underline;">IMPORTANT NOTICE:</strong><br/>
-                • This RFQ is for quotation purposes only and does not constitute a purchase order.<br/>
-                • Please provide your quotation within 7 business days from the date of this RFQ.<br/>
+                • This inquiry is for quotation purposes only and does not constitute a purchase order.<br/>
+                • Please provide your quotation within 7 business days from the date of this inquiry.<br/>
                 • Quotation should include: unit price, MOQ, lead time, payment terms, and warranty period.<br/>
                 • Samples may be required before placing formal order.<br/>
                 • All prices should be quoted in the specified currency.<br/>
@@ -481,7 +481,7 @@ const cosunRealTemplates: FormTemplate[] = [
           },
           {
             id: 'rfq_reference',
-            label: 'RFQ REFERENCE',
+            label: 'INQUIRY REFERENCE',
             type: 'text',
             required: false,
             width: '33%',

@@ -36,26 +36,26 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { toast } from 'sonner@2.0.3';
 import { PurchaseOrderDocument, PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument'; // 🔥 文档中心采购订单模板
-import { SupplierRFQData } from '../documents/templates/SupplierRFQDocument'; // 🔥 供应商询价单模板
+import { XJData } from '../documents/templates/XJDocument'; // 🔥 采购询价单(XJ)模板
 import QuoteCreationIntelligent from './QuoteCreationIntelligent'; // 🔥 智能报价创建页面
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport'; // 🔥 PDF导出工具
 import { usePurchaseRequirements, PurchaseRequirement, PurchaserFeedback } from '../../contexts/PurchaseRequirementContext'; // 🔥 采购需求Context
 import { usePurchaseOrders, PurchaseOrder as PurchaseOrderType, PurchaseOrderItem } from '../../contexts/PurchaseOrderContext'; // 🔥 采购订单Context
-import { useRFQs, RFQ, RFQProduct } from '../../contexts/RFQContext'; // 🔥 RFQ Context
+import { useXJs, XJ, XJProduct } from '../../contexts/XJContext'; // 🔥 XJ Context
 import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 报价Context（用于保存业务员报价）
 import { PurchaserFeedbackForm } from './PurchaserFeedbackForm'; // 🔥 智能采购反馈表单
 import { useUser } from '../../contexts/UserContext'; // 🔥 用户Context
 import { useApproval } from '../../contexts/ApprovalContext';
-import { generateXJNumber } from '../../utils/rfqNumberGenerator'; // 🔥 XJ编号生成器
+import { generateXJNumber } from '../../utils/xjNumberGenerator'; // 🔥 XJ编号生成器
 import { generateCGNumber, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
 import { apiFetchJson } from '../../api/backend-auth';
 import { TERMS_OPTIONS } from './purchase-order/purchaseOrderConstants'; // 🔥 从常量文件导入
 import { PurchaseOrderEditDialog } from './purchase-order/PurchaseOrderEditDialog';
 import { PurchaseOrderCreateDialogs } from './purchase-order/PurchaseOrderCreateDialogs';
-import { EditRFQDialog } from './purchase-order/EditRFQDialog';
-import { RFQPreviewDialog } from './purchase-order/RFQPreviewDialog';
+import { EditXJDialog } from './purchase-order/EditXJDialog';
+import { XJPreviewDialog } from './purchase-order/XJPreviewDialog';
 import { SupplierQuotationDialog } from './purchase-order/SupplierQuotationDialog';
-import { CreateRFQAndHistoryDialogs } from './purchase-order/CreateRFQAndHistoryDialogs';
+import { CreateXJAndHistoryDialogs } from './purchase-order/CreateXJAndHistoryDialogs';
 import { PurchaseOrdersTab } from './purchase-order/PurchaseOrdersTab';
 import { ProcurementRequestsTab } from './purchase-order/ProcurementRequestsTab';
 import { SupplierAllocationDialog } from './purchase-order/SupplierAllocationDialog';
@@ -75,7 +75,7 @@ import {
   convertToPOData,
   convertToPRData,
   desensitizeFeedback,
-  generateRFQDocumentData
+  generateXJDocumentData
 } from './purchase-order/purchaseOrderUtils'; // 🔥 从工具函数文件导入
 import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 
@@ -94,8 +94,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const { requirements, updateRequirement, deleteRequirement } = usePurchaseRequirements();
   // 🔥 使用采购订单Context
   const { purchaseOrders, addPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder } = usePurchaseOrders();
-  // 🔥 使用RFQ Context - 获取rfqs列表用于计算状态
-  const { rfqs, addRFQ, updateRFQ, deleteRFQ } = useRFQs();
+  // 🔥 使用XJ Context - 获取rfqs列表用于计算状态
+  const { xjs, addXJ, updateXJ, deleteXJ } = useXJs();
   // 🔥 使用报价Context - 用于保存业务员创建的报价单
   const { addQuotation } = useQuotations();
   // 🔥 用户Context - 获取当前用户信息
@@ -162,32 +162,32 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const poPDFRef = React.useRef<HTMLDivElement>(null);
   const hiddenPDFRef = React.useRef<HTMLDivElement>(null); // 🔥 隐藏的PDF导出专用ref
   
-  // 🔥 创建RFQ对话框状态
-  const [showCreateRFQDialog, setShowCreateRFQDialog] = useState(false);
-  const [selectedRequirementForRFQ, setSelectedRequirementForRFQ] = useState<PurchaseRequirement | null>(null);
+  // 🔥 创建XJ对话框状态
+  const [showCreateXJDialog, setShowCreateRFQDialog] = useState(false);
+  const [selectedRequirementForXJ, setSelectedRequirementForRFQ] = useState<PurchaseRequirement | null>(null);
   const [selectedSuppliers, setSelectedSuppliers] = useState<Supplier[]>([]);
-  const [rfqDeadline, setRFQDeadline] = useState<Date | undefined>(undefined);
-  const [rfqRemarks, setRFQRemarks] = useState('');
+  const [xjDeadline, setRFQDeadline] = useState<Date | undefined>(undefined);
+  const [xjRemarks, setRFQRemarks] = useState('');
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]); // 🔥 选中的产品ID（统一用 string）
-  const [submittingRFQ, setSubmittingRFQ] = useState(false);
+  const [submittingXJ, setSubmittingRFQ] = useState(false);
   
   // 🔥 询价历史弹窗状态
-  const [showRFQHistoryDialog, setShowRFQHistoryDialog] = useState(false);
+  const [showXJHistoryDialog, setShowRFQHistoryDialog] = useState(false);
   const [selectedProductForHistory, setSelectedProductForHistory] = useState<any>(null);
   
   // 🔥 询价单预览状态
-  const [showRFQPreview, setShowRFQPreview] = useState(false);
-  const [currentRFQData, setCurrentRFQData] = useState<SupplierRFQData | null>(null);
-  const rfqDocRef = React.useRef<HTMLDivElement>(null);
+  const [showXJPreview, setShowRFQPreview] = useState(false);
+  const [currentXJData, setCurrentRFQData] = useState<XJData | null>(null);
+  const xjDocRef = React.useRef<HTMLDivElement>(null);
   
   // 🔥 询价单编辑状态
-  const [showEditRFQDialog, setShowEditRFQDialog] = useState(false);
-  const [editingRFQ, setEditingRFQ] = useState<RFQ | null>(null);
-  const [editRFQData, setEditRFQData] = useState<any>(null); // 完整的documentData
+  const [showEditXJDialog, setShowEditXJDialog] = useState(false);
+  const [editingXJ, setEditingXJ] = useState<XJ | null>(null);
+  const [editXJData, setEditRFQData] = useState<any>(null); // 完整的documentData
   
   // 🔥 询价管理 - 搜索和批量删除状态
-  const [rfqSearchTerm, setRFQSearchTerm] = useState('');
-  const [selectedRFQIds, setSelectedRFQIds] = useState<string[]>([]);
+  const [xjSearchTerm, setRFQSearchTerm] = useState('');
+  const [selectedXJIds, setSelectedRFQIds] = useState<string[]>([]);
 
   // 🔥 采购需求池 - 搜索和批量删除状态
   const [requirementSearchTerm, setRequirementSearchTerm] = useState('');
@@ -259,29 +259,29 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   
   // 🔥 动态计算采购需求的状态
   const calculateRequirementStatus = (req: PurchaseRequirement): 'pending' | 'partial' | 'processing' | 'completed' => {
-    // 获取该采购需求相关的所有RFQ（询价单）
-    const relatedRFQs = rfqs.filter(rfq => 
-      rfq.requirementNo === req.requirementNo || 
-      rfq.rfqNumber === req.requirementNo ||
+    // 获取该采购需求相关的所有XJ（询价单）
+    const relatedXJs = xjs.filter(xj => 
+      xj.requirementNo === req.requirementNo || 
+      xj.xjNumber === req.requirementNo ||
       rfq.sourceQRNumber === req.requirementNo
     );
     
-    if (relatedRFQs.length === 0) {
+    if (relatedXJs.length === 0) {
       // 还未创建任何询价单
       return 'pending';
     }
     
     // 统计已经创建了询价单的产品
-    const rfqProductIds = new Set<string>();
-    relatedRFQs.forEach(rfq => {
+    const xjProductIds = new Set<string>();
+    relatedXJs.forEach(rfq => {
       rfq.products?.forEach((p: any) => {
-        rfqProductIds.add(p.id || p.modelNo);
+        xjProductIds.add(p.id || p.modelNo);
       });
     });
     
     // 采购需求的产品总数
     const totalProducts = req.items?.length || 0;
-    const submittedProducts = rfqProductIds.size;
+    const submittedProducts = xjProductIds.size;
     
     if (submittedProducts === 0) {
       return 'pending';
@@ -379,7 +379,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       const merged = filterNotDeleted(
         'quotation',
         [...apiList.filter((q: any) => !deletedIds.has(String(q.id))), ...localOnly],
-        (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.rfqNumber || '')],
+        (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.xjNumber || '')],
       );
       setSupplierQuotations(merged);
       // Do NOT overwrite localStorage here — supplier's local records must be preserved
@@ -388,7 +388,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       const visibleQuotations = filterNotDeleted(
         'quotation',
         localVisible,
-        (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.rfqNumber || '')],
+        (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.xjNumber || '')],
       );
       setSupplierQuotations(visibleQuotations);
     }
@@ -484,22 +484,22 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const highUrgency = purchaseRequirements.filter(r => r.urgency === 'high').length;
 
     return { total, pending, partial, processing, highUrgency };
-  }, [purchaseRequirements, rfqs]);
+  }, [purchaseRequirements, xjs]);
 
   // 🔥 旧的筛选订单逻辑已删除，使用下面新的 filteredOrders
 
   // 🔥 筛选询价单 - 根据询价单号、供应商、关联需求
-  const filteredRFQs = useMemo(() => {
-    if (!rfqSearchTerm) return rfqs;
+  const filteredXJs = useMemo(() => {
+    if (!xjSearchTerm) return xjs;
     
-    const lowerSearchTerm = rfqSearchTerm.toLowerCase();
-    return rfqs.filter(rfq => 
-      rfq.supplierRfqNo?.toLowerCase().includes(lowerSearchTerm) ||
+    const lowerSearchTerm = xjSearchTerm.toLowerCase();
+    return xjs.filter(xj => 
+      rfq.supplierXjNo?.toLowerCase().includes(lowerSearchTerm) ||
       rfq.supplierName?.toLowerCase().includes(lowerSearchTerm) ||
-      rfq.requirementNo?.toLowerCase().includes(lowerSearchTerm) ||
+      xj.requirementNo?.toLowerCase().includes(lowerSearchTerm) ||
       rfq.supplierCode?.toLowerCase().includes(lowerSearchTerm)
     );
-  }, [rfqs, rfqSearchTerm]);
+  }, [xjs, xjSearchTerm]);
 
   // 🔥 筛选采购需求 - 根据需求编号、来源单号、区域
   const filteredRequirements = useMemo(() => {
@@ -535,7 +535,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
     return requests.filter((order) =>
       order.poNumber?.toLowerCase().includes(keyword) ||
-      String((order as any).rfqNumber || '').toLowerCase().includes(keyword) ||
+      String((order as any).xjNumber || '').toLowerCase().includes(keyword) ||
       String(order.sourceRef || '').toLowerCase().includes(keyword) ||
       String(order.requirementNo || (order as any).requirementNumber || '').toLowerCase().includes(keyword) ||
       order.supplierName?.toLowerCase().includes(keyword) ||
@@ -662,7 +662,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         sourceRef: inferredRfq || String(req.sourceRef || '').trim(),
         sourceSONumber: String((req as any).salesOrderNo || req.sourceRef || '').trim(),
         salesContractNumber: String((req as any).sourceRef || '').trim(),
-          rfqNumber: inferredRfq,
+          xjNumber: inferredRfq,
           supplierName: '待采购分配',
           supplierCode: 'TBD',
           region: String((req as any).region || 'NA'),
@@ -754,13 +754,13 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     });
   };
 
-  const getRFQNumberByRequirementNo = (requirementNo: string): string => {
+  const getXJNumberByRequirementNo = (requirementNo: string): string => {
     if (!requirementNo) return '';
-    const matchedRFQ = rfqs.find((rfq) => String(rfq.requirementNo || '').trim() === requirementNo);
+    const matchedXJ = xjs.find((xj) => String(xj.requirementNo || '').trim() === requirementNo);
     const candidate = String(
-      (matchedRFQ as any)?.sourceInquiryNumber ||
-      matchedRFQ?.sourceInquiryNumber ||
-      matchedRFQ?.rfqNumber ||
+      (matchedXJ as any)?.sourceInquiryNumber ||
+      matchedXJ?.sourceInquiryNumber ||
+      matchedXJ?.xjNumber ||
       '',
     ).trim();
     return candidate.startsWith('RFQ-') || candidate.startsWith('INQ-') ? candidate : '';
@@ -788,20 +788,20 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const resolveInquirySourceRef = (po: PurchaseOrderType): string => {
     const requirementNo = getRequirementNoFromPO(po);
     const matchedRequirement = findRequirementForPO(po);
-    const rfqFromRequirement = requirementNo ? getRFQNumberByRequirementNo(requirementNo) : '';
-    const poRfqRef = String((po as any).rfqNumber || '').trim();
+    const xjFromRequirement = requirementNo ? getXJNumberByRequirementNo(requirementNo) : '';
+    const poRfqRef = String((po as any).xjNumber || '').trim();
     const poSourceRef = String(po.sourceRef || '').trim();
-    const rfqFromPO = poRfqRef.startsWith('RFQ-') || poRfqRef.startsWith('INQ-')
+    const xjFromPO = poRfqRef.startsWith('RFQ-') || poRfqRef.startsWith('INQ-')
       ? poRfqRef
       : (poSourceRef.startsWith('RFQ-') || poSourceRef.startsWith('INQ-') ? poSourceRef : '');
     const legacyFromRequirement = String(matchedRequirement?.sourceRef || '').trim();
     const sourceInquiryNumber = String(matchedRequirement?.sourceInquiryNumber || '').trim();
     const inquiryFromContract = getInquiryByContractRef(po);
-    // 规则：来源统一显示 RFQ/INQ 客户询价编号；不显示 CG/SC/XJ
+    // 规则：来源统一显示 INQ 客户询价编号；不显示 CG/SC/XJ
     if (sourceInquiryNumber.startsWith('RFQ-') || sourceInquiryNumber.startsWith('INQ-')) return sourceInquiryNumber;
-    if (rfqFromRequirement) return rfqFromRequirement;
+    if (xjFromRequirement) return xjFromRequirement;
     if (inquiryFromContract) return inquiryFromContract;
-    if (rfqFromPO) return rfqFromPO;
+    if (xjFromPO) return xjFromPO;
     if (legacyFromRequirement.startsWith('RFQ-') || legacyFromRequirement.startsWith('INQ-')) return legacyFromRequirement;
     return '';
   };
@@ -813,7 +813,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       if (s) refs.add(s);
     };
     addRef(resolveInquirySourceRef(po));
-    addRef((po as any).rfqNumber);
+    addRef((po as any).xjNumber);
     addRef(po.sourceRef);
     addRef(getRequirementNoFromPO(po));
     addRef((po as any).requirementNumber);
@@ -838,14 +838,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         }
         const qRefs = [
           q?.sourceQR,
-          q?.rfqNumber,
+          q?.xjNumber,
           q?.rfqNo,
           q?.sourceXJ,
           q?.requirementNo,
           q?.sourceRFQId,
           q?.quoteData?.sourceQR,
           q?.quoteData?.rfqNo,
-          q?.quoteData?.rfqNumber,
+          q?.quoteData?.xjNumber,
         ]
           .map((v) => String(v || '').trim().toUpperCase())
           .filter(Boolean);
@@ -928,19 +928,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     [resolveQuotedItemPricing]
   );
 
-  // 自动反查回填：为缺失来源的采购单回填 RFQ/INQ（持久化到 purchase order）
+  // 自动反查回填：为缺失来源的采购单回填 INQ（持久化到 purchase order）
   useEffect(() => {
     if (!purchaseOrders.length) return;
     purchaseOrders.forEach((po) => {
-      const existing = String((po as any).rfqNumber || '').trim();
+      const existing = String((po as any).xjNumber || '').trim();
       if (existing.startsWith('RFQ-') || existing.startsWith('INQ-')) return;
       const inferred = resolveInquirySourceRef(po);
       if (!inferred) return;
       if (inferred === existing) return;
-      updatePurchaseOrder(po.id, { rfqNumber: inferred });
+      updatePurchaseOrder(po.id, { xjNumber: inferred });
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [purchaseOrders, salesContractsLite, rfqs, purchaseRequirements]);
+  }, [purchaseOrders, salesContractsLite, xjs, purchaseRequirements]);
 
   // 审批联动：老板审批采购请求后，自动更新采购单可下推状态
   useEffect(() => {
@@ -1188,7 +1188,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setEditPOForm({
       poNumber: String(po.poNumber || ''),
       requirementNo: String(po.requirementNo || ''),
-      rfqNumber: String((po as any).rfqNumber || ''),
+      xjNumber: String((po as any).xjNumber || ''),
       sourceRef: normalizedSourceRef,
       supplierName: String(po.supplierName || ''),
       supplierCode: String(po.supplierCode || ''),
@@ -1341,7 +1341,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     updatePurchaseOrder(editingPO.id, {
       poNumber: String(editPOForm.poNumber || '').trim(),
       requirementNo: String(editPOForm.requirementNo || '').trim(),
-      rfqNumber: String(editPOForm.rfqNumber || '').trim(),
+      xjNumber: String(editPOForm.xjNumber || '').trim(),
       sourceRef: normalizedSourceRef,
       sourceSONumber: normalizedSourceRef,
       salesContractNumber: normalizedSourceRef,
@@ -1396,7 +1396,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setEditingPO(null);
   };
 
-  // 🔥 处理创建RFQ - 从采购需求创建，向多个供应商询价
+  // 🔥 处理创建XJ - 从采购需求创建，向多个供应商发送采购询价
   const handleCreateRFQFromRequirement = (req: PurchaseRequirement) => {
     setSelectedRequirementForRFQ(req);
     setSelectedSuppliers([]);
@@ -1409,8 +1409,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 预览询价单 - 单个供应商
-  const handlePreviewRFQ = (supplier: Supplier) => {
-    if (!selectedRequirementForRFQ || !rfqDeadline) {
+  const handlePreviewXJ = (supplier: Supplier) => {
+    if (!selectedRequirementForXJ || !xjDeadline) {
       toast.error('请填写完整的询价信息');
       return;
     }
@@ -1420,16 +1420,16 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       return;
     }
     
-    const rfqData = generateRFQDocumentData(supplier, selectedRequirementForRFQ, rfqDeadline, rfqRemarks, selectedProductIds);
-    setCurrentRFQData(rfqData);
+    const xjData = generateXJDocumentData(supplier, selectedRequirementForXJ, xjDeadline, xjRemarks, selectedProductIds);
+    setCurrentXJData(xjData);
     setShowRFQPreview(true);
   };
 
   // 🔥 导出询价单为PDF
   const handleExportRFQPDF = async (download: boolean = true) => {
-    if (!currentRFQData || !rfqDocRef.current) return;
+    if (!currentXJData || !rfqDocRef.current) return;
     
-    const filename = generatePDFFilename('供应商询价单', currentRFQData.rfqNo);
+    const filename = generatePDFFilename('采购询价单', currentXJData.rfqNo);
     
     if (download) {
       await exportToPDF(rfqDocRef.current, filename);
@@ -1439,16 +1439,16 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
   };
 
-  // 🔥 提交RFQ - 向多个供应商发送询价
-  const handleSubmitRFQ = async () => {
-    if (!selectedRequirementForRFQ) return;
+  // 🔥 提交XJ - 向多个供应商发送询价
+  const handleSubmitXJ = async () => {
+    if (!selectedRequirementForXJ) return;
     
     if (selectedSuppliers.length === 0) {
       toast.error('请至少选择一个供应商');
       return;
     }
     
-    if (!rfqDeadline) {
+    if (!xjDeadline) {
       toast.error('请设置报价截止日期');
       return;
     }
@@ -1466,26 +1466,26 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       const currentUser = JSON.parse(localStorage.getItem('cosun_current_user') || '{}');
       const createdBy = currentUser.name || '采购员';
 
-      const requirementItems = selectedRequirementForRFQ.items || [];
+      const requirementItems = selectedRequirementForXJ.items || [];
       if (requirementItems.length === 0) {
         toast.error('创建失败：采购需求没有产品明细(items)');
         return;
       }
 
       // 🔥 为每个供应商创建一份完整的询价单（包含所有选中产品），并落库到后端
-      const createdRfqs: RFQ[] = [];
+      const createdXJs: XJ[] = [];
       await Promise.all(selectedSuppliers.map(async (supplier) => {
         // 🔥 生成供应商专属询价单号（XJ开头，从0001开始递增）
-        const supplierRfqNo = generateXJNumber();
+        const supplierXjNo = generateXJNumber();
 
         // 🔥 生成完整的询价单文档数据
-        const rfqDocumentData = generateRFQDocumentData(
+        const xjDocumentData = generateXJDocumentData(
           supplier,
-          selectedRequirementForRFQ,
-          rfqDeadline,
-          rfqRemarks,
+          selectedRequirementForXJ,
+          xjDeadline,
+          xjRemarks,
           selectedProductIds,
-          supplierRfqNo
+          supplierXjNo
         );
 
         // 🔥 只包含选中的产品（ID统一 string 匹配）
@@ -1497,8 +1497,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           throw new Error('选中的产品为空：请检查产品ID类型/字段是否一致');
         }
 
-        // 🔥 将产品转换为RFQProduct格式
-        const rfqProducts: RFQProduct[] = selectedProducts.map(item => ({
+        // 🔥 将产品转换为XJ产品格式
+        const xjProducts: XJProduct[] = selectedProducts.map(item => ({
           id: String(item.id),
           productName: item.productName,
           modelNo: item.modelNo,
@@ -1512,14 +1512,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         // 🔥 使用第一个产品作为主产品（兼容旧字段）
         const mainProduct = selectedProducts[0];
 
-        const rfq: RFQ = {
+        const xj: XJ = {
           id: `rfq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          rfqNumber: selectedRequirementForRFQ.requirementNo, // 🔥 使用QR采购需求编号（不是RFQ！）
-          supplierRfqNo, // 🔥 供应商询价单号 XJ-xxx
-          requirementNo: selectedRequirementForRFQ.requirementNo, // 🔥 采购需求编号 QR-xxx
-          sourceRef: selectedRequirementForRFQ.sourceRef,
-          customerName: (selectedRequirementForRFQ as any).customerName,
-          customerRegion: selectedRequirementForRFQ.region, // 🔥 客户来源区域
+          xjNumber: selectedRequirementForXJ.requirementNo, // 🔥 使用QR采购需求编号
+          supplierXjNo, // 🔥 采购询价单号 XJ-xxx
+          requirementNo: selectedRequirementForXJ.requirementNo, // 🔥 采购需求编号 QR-xxx
+          sourceRef: selectedRequirementForXJ.sourceRef,
+          customerName: (selectedRequirementForXJ as any).customerName,
+          customerRegion: selectedRequirementForXJ.region, // 🔥 客户来源区域
 
           // 🔥 多产品数组（新字段）
           products: rfqProducts,
@@ -1538,12 +1538,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           supplierContact: (supplier as any).contactPerson || (supplier as any).contact || '',
           supplierEmail: supplier.email,
 
-          expectedDate: selectedRequirementForRFQ.requiredDate,
-          quotationDeadline: rfqDeadline ? rfqDeadline.toISOString().split('T')[0] : '',
+          expectedDate: selectedRequirementForXJ.requiredDate,
+          quotationDeadline: xjDeadline ? xjDeadline.toISOString().split('T')[0] : '',
 
           status: 'pending' as any, // ✅ 直接提交给供应商（供应商端 /mine 可见，后端会过滤 draft）
 
-          remarks: rfqRemarks,
+          remarks: xjRemarks,
           createdBy,
           createdDate: new Date().toISOString().split('T')[0],
 
@@ -1552,7 +1552,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         };
 
         // ✅ 后端落库（让你能在 Network 看到请求 + DB 持久化）
-        const res = await apiFetchJson<{ rfq: RFQ }>('/api/supplier-rfqs', {
+        const res = await apiFetchJson<{ xj: XJ }>('/api/supplier-xjs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1564,17 +1564,17 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         });
 
         const saved = (res as any)?.rfq || rfq;
-        createdRfqs.push(saved);
-        addRFQ(saved);
+        createdXJs.push(saved);
+        addXJ(saved);
       }));
 
       // 🔥 更新产品的询价历史
       const updatedItems = requirementItems.map(item => {
       // 只更新被选中发送询价的产品
       if (selectedProductIds.includes(String(item.id))) {
-        const rfqHistory = (item as any).rfqHistory || [];
+        const xjHistory = (item as any).xjHistory || [];
         const newHistoryEntry = {
-          batchNo: rfqHistory.length + 1,
+          batchNo: xjHistory.length + 1,
           sentDate: new Date().toISOString().split('T')[0],
           supplierCount: selectedSuppliers.length,
           suppliers: selectedSuppliers.map(s => ({
@@ -1582,13 +1582,13 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             name: s.name,
             level: s.level
           })),
-          deadline: rfqDeadline ? rfqDeadline.toISOString().split('T')[0] : '',
-          remarks: rfqRemarks
+          deadline: xjDeadline ? xjDeadline.toISOString().split('T')[0] : '',
+          remarks: xjRemarks
         };
         
         return {
           ...item,
-          rfqHistory: [...rfqHistory, newHistoryEntry]
+          xjHistory: [...xjHistory, newHistoryEntry]
         };
       }
       return item;
@@ -1598,8 +1598,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     // - 如果所有产品都已发送询价 → 'processing'
     // - 如果只有部分产品发送询价 → 'partial' 
     // - 如果没有产品发送询价 → 'pending'
-    const allProductsSent = updatedItems.every(item => (item as any).rfqHistory && (item as any).rfqHistory.length > 0);
-    const someProductsSent = updatedItems.some(item => (item as any).rfqHistory && (item as any).rfqHistory.length > 0);
+    const allProductsSent = updatedItems.every(item => (item as any).xjHistory && (item as any).xjHistory.length > 0);
+    const someProductsSent = updatedItems.some(item => (item as any).xjHistory && (item as any).xjHistory.length > 0);
     
     let newStatus: 'pending' | 'partial' | 'processing' | 'completed' = 'pending';
     if (allProductsSent) {
@@ -1609,7 +1609,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
     
     // 更新采购需求状态和产品询价历史
-    updateRequirement(selectedRequirementForRFQ.id, { 
+    updateRequirement(selectedRequirementForXJ.id, { 
       status: newStatus,
       items: updatedItems
     });
@@ -1618,7 +1618,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       <div className="space-y-1">
         <p className="font-semibold">✅ 询价单创建成功</p>
           <p className="text-sm">已为 {selectedSuppliers.length} 个供应商创建并提交询价单</p>
-        <p className="text-xs text-slate-600">需求编号: {selectedRequirementForRFQ.requirementNo}</p>
+        <p className="text-xs text-slate-600">需求编号: {selectedRequirementForXJ.requirementNo}</p>
         <p className="text-xs text-slate-600">产品数量: {selectedProductIds.length} 个</p>
           <p className="text-xs text-blue-600 mt-1">👉 供应商可在 Portal【客户需求池】中看到该询价</p>
       </div>,
@@ -1642,19 +1642,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 批量删除询价单
   const handleBatchDeleteRFQs = () => {
-    if (selectedRFQIds.length === 0) {
+    if (selectedXJIds.length === 0) {
       toast.error('请先选择要删除的询价单');
       return;
     }
     
-    const confirmMessage = `确定要删除选中的 ${selectedRFQIds.length} 个询价单吗？\n\n⚠️ 此操作不可恢复！`;
+    const confirmMessage = `确定要删除选中的 ${selectedXJIds.length} 个询价单吗？\n\n⚠️ 此操作不可恢复！`;
     
     if (window.confirm(confirmMessage)) {
-      selectedRFQIds.forEach(id => {
+      selectedXJIds.forEach(id => {
         deleteRFQ(id);
       });
       
-      toast.success(`已删除 ${selectedRFQIds.length} 个询价单`, {
+      toast.success(`已删除 ${selectedXJIds.length} 个询价单`, {
         duration: 3000
       });
       
@@ -1766,28 +1766,28 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 编辑询价单
-  const handleEditRFQ = (rfq: RFQ) => {
-    setEditingRFQ(rfq);
+  const handleEditXJ = (xj: XJ) => {
+    setEditingXJ(rfq);
     // 深拷贝documentData，确保编辑不影响原数据，并与列表XJ单号强制对齐
     const cloned = JSON.parse(JSON.stringify(rfq.documentData || {}));
-    cloned.rfqNo = rfq.supplierRfqNo || cloned.rfqNo || '';
+    cloned.rfqNo = rfq.supplierXjNo || cloned.rfqNo || '';
     setEditRFQData(cloned);
-    setShowEditRFQDialog(true);
+    setShowEditXJDialog(true);
   };
 
   // 🔥 保存编辑的询价单
-  const handleSaveEditRFQ = () => {
-    if (!editingRFQ || !editRFQData) return;
-    const normalizedRfqNo = String(editingRFQ.supplierRfqNo || editRFQData?.rfqNo || '').trim();
+  const handleSaveEditXJ = () => {
+    if (!editingXJ || !editXJData) return;
+    const normalizedRfqNo = String(editingXJ.supplierXjNo || editXJData?.rfqNo || '').trim();
     const normalizedDocumentData = {
-      ...editRFQData,
-      rfqNo: normalizedRfqNo || editRFQData?.rfqNo || '',
+      ...editXJData,
+      rfqNo: normalizedRfqNo || editXJData?.rfqNo || '',
     };
     
-    // 更新RFQ，包括完整的documentData
-    updateRFQ(editingRFQ.id, {
+    // 更新XJ，包括完整的documentData
+    updateRFQ(editingXJ.id, {
       documentData: normalizedDocumentData,
-      supplierRfqNo: normalizedRfqNo || editingRFQ.supplierRfqNo,
+      supplierXjNo: normalizedRfqNo || editingXJ.supplierXjNo,
       // 同步更新关键字段
       quotationDeadline: normalizedDocumentData.requiredResponseDate,
       expectedDate: normalizedDocumentData.requiredDeliveryDate,
@@ -1807,19 +1807,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       duration: 3000
     });
     
-    setShowEditRFQDialog(false);
-    setEditingRFQ(null);
+    setShowEditXJDialog(false);
+    setEditingXJ(null);
     setEditRFQData(null);
   };
 
   // 🔥 提交询价单给供应商 - 从草稿状态提交
-  const handleSubmitRFQToSupplier = async (rfq: RFQ) => {
-    // 🔥 检查是否已经提交过（以供应商询价单号优先，避免id误判）
-    const existingSupplierRFQs = JSON.parse(localStorage.getItem('supplierRFQs') || '[]');
-    const supplierRfqNo = String(rfq.supplierRfqNo || '').trim();
-    const alreadySubmitted = existingSupplierRFQs.some((item: any) => {
-      const itemNo = String(item?.supplierRfqNo || item?.rfqNumber || '').trim();
-      const sameNo = !!supplierRfqNo && itemNo !== '' && itemNo === supplierRfqNo;
+  const handleSubmitXJToSupplier = async (xj: XJ) => {
+    // 🔥 检查是否已经提交过（以采购询价单号优先，避免id误判）
+    const existingSupplierXJs = JSON.parse(localStorage.getItem('supplierXJs') || '[]');
+    const supplierXjNo = String(rfq.supplierXjNo || '').trim();
+    const alreadySubmitted = existingSupplierXJs.some((item: any) => {
+      const itemNo = String(item?.supplierXjNo || item?.xjNumber || '').trim();
+      const sameNo = !!supplierXjNo && itemNo !== '' && itemNo === supplierXjNo;
       const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(rfq.id || '').trim();
       return sameNo || sameId;
     });
@@ -1834,10 +1834,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       return;
     }
 
-    // ✅ 同步到后端：将 RFQ 从 draft 提交为 pending（供应商端可见）
+    // ✅ 同步到后端：将 XJ 从 draft 提交为 pending（供应商端可见）
     // 后端失败时降级走本地 localStorage 流程，不阻断操作
     try {
-      await apiFetchJson<{ rfq: any }>(`/api/supplier-rfqs/${encodeURIComponent(rfq.id)}`, {
+      await apiFetchJson<{ xj: any }>(`/api/supplier-xjs/${encodeURIComponent(xj.id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'pending' }),
@@ -1848,29 +1848,29 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
     
     // 🔥 将状态从draft改为sent
-    const updatedRFQ = {
+    const updatedXJ = {
       ...rfq,
       status: 'sent' as any, // 🔥 已发送给供应商
       sentDate: new Date().toISOString().split('T')[0]
     };
     
-    // 🔥 更新RFQ Context中的状态
+    // 🔥 更新XJ Context中的状态
     updateRFQ(rfq.id, {
       status: 'sent' as any,
       sentDate: new Date().toISOString().split('T')[0]
     });
     
-    // 🔥 将询价单推送到供应商Portal（保存到supplierRFQs）
+    // 🔥 将询价单推送到供应商Portal（保存到supplierXJs）
     const supplierRFQData = {
       id: rfq.id,
-      rfqNumber: rfq.supplierRfqNo || '', // XJ-xxx
-      supplierRfqNo: rfq.supplierRfqNo,
+      xjNumber: rfq.supplierXjNo || '', // XJ-xxx
+      supplierXjNo: rfq.supplierXjNo,
       supplierCode: rfq.supplierCode,
       supplierName: rfq.supplierName,
       supplierEmail: rfq.supplierEmail,
       
       // 关联COSUN采购需求
-      sourceQRNumber: rfq.requirementNo, // QR-xxx
+      sourceQRNumber: xj.requirementNo, // QR-xxx
       
       // 产品信息（支持多产品）
       products: rfq.products || [{
@@ -1910,41 +1910,41 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       buyerEmail: rfq.documentData?.buyer?.email || 'purchasing@gosundafu.com'
     };
     
-    // 保存到localStorage的supplierRFQs
-    const updatedSupplierRFQs = [
-      ...existingSupplierRFQs.filter((item: any) => {
-        const itemNo = String(item?.supplierRfqNo || item?.rfqNumber || '').trim();
-        const sameNo = supplierRfqNo !== '' && itemNo === supplierRfqNo;
+    // 保存到localStorage的supplierXJs
+    const updatedSupplierXJs = [
+      ...existingSupplierXJs.filter((item: any) => {
+        const itemNo = String(item?.supplierXjNo || item?.xjNumber || '').trim();
+        const sameNo = supplierXjNo !== '' && itemNo === supplierXjNo;
         const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(rfq.id || '').trim();
         return !(sameNo || sameId);
       }),
       supplierRFQData,
     ];
-    localStorage.setItem('supplierRFQs', JSON.stringify(updatedSupplierRFQs));
+    localStorage.setItem('supplierXJs', JSON.stringify(updatedSupplierXJs));
     
     // 🔥 触发storage事件（跨标签页）
     window.dispatchEvent(new Event('storage'));
     
     // 🔥 触发自定义事件（同标签页内）- 让供应商Portal能立即接收到
-    window.dispatchEvent(new CustomEvent('supplierRFQsUpdated', {
-      detail: { rfqNumber: rfq.supplierRfqNo, supplierName: rfq.supplierName }
+    window.dispatchEvent(new CustomEvent('supplierXJsUpdated', {
+      detail: { xjNumber: rfq.supplierXjNo, supplierName: rfq.supplierName }
     }));
     
     // 🔥 记录提交日志
     console.log('📤 [提交询价单] 已成功提交给供应商');
-    console.log('  - 询价单号:', rfq.supplierRfqNo);
+    console.log('  - 询价单号:', rfq.supplierXjNo);
     console.log('  - 供应商:', rfq.supplierName);
     console.log('  - 供应商邮箱:', rfq.supplierEmail);
     console.log('  - 供应商代码:', rfq.supplierCode);
     console.log('  - 产品数量:', rfq.products?.length || 1);
     console.log('  - 报价截止:', rfq.quotationDeadline);
-    console.log('  - 已保存到supplierRFQs，总数:', updatedSupplierRFQs.length);
-    console.log('  - 已触发supplierRFQsUpdated事件');
+    console.log('  - 已保存到supplierXJs，总数:', updatedSupplierXJs.length);
+    console.log('  - 已触发supplierXJsUpdated事件');
     
     toast.success(
       <div className="space-y-1">
         <p className="font-semibold">✅ 已下推供应商</p>
-        <p className="text-sm">询价单号: {rfq.supplierRfqNo}</p>
+        <p className="text-sm">询价单号: {rfq.supplierXjNo}</p>
         <p className="text-sm">供应商: {rfq.supplierName}</p>
         <p className="text-xs text-slate-600 mt-1">✓ 供应商将在Portal【客户需求池】中收到询价通知</p>
       </div>,
@@ -2317,7 +2317,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       id: `PO-${Date.now()}`,
       poNumber: newPONumber,
       requirementNo: selectedRequirement.requirementNo, // 🔥 关联采购需求编号
-      sourceRef: getRFQNumberByRequirementNo(selectedRequirement.requirementNo) || selectedRequirement.sourceInquiryNumber || selectedRequirement.sourceRef,
+      sourceRef: getXJNumberByRequirementNo(selectedRequirement.requirementNo) || selectedRequirement.sourceInquiryNumber || selectedRequirement.sourceRef,
       
       // 供应商信息
       supplierName: createOrderForm.supplierName,
@@ -2905,23 +2905,23 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
               <div className="grid grid-cols-5 gap-2">
                 <div className="text-center">
                   <p className="text-[14px] text-gray-500">总询价</p>
-                  <p className="text-base font-bold text-gray-900">{rfqs.length}</p>
+                  <p className="text-base font-bold text-gray-900">{xjs.length}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-[14px] text-gray-500">草稿</p>
-                  <p className="text-base font-bold text-gray-600">{rfqs.filter(r => (r.status as any) === 'draft').length}</p>
+                  <p className="text-base font-bold text-gray-600">{xjs.filter(r => (r.status as any) === 'draft').length}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-[14px] text-gray-500">已发送</p>
-                  <p className="text-base font-bold text-blue-600">{rfqs.filter(r => (r.status as any) === 'sent').length}</p>
+                  <p className="text-base font-bold text-blue-600">{xjs.filter(r => (r.status as any) === 'sent').length}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-[14px] text-gray-500">等待报价</p>
-                  <p className="text-base font-bold text-orange-600">{rfqs.filter(r => r.status === 'pending').length}</p>
+                  <p className="text-base font-bold text-orange-600">{xjs.filter(r => r.status === 'pending').length}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-[14px] text-gray-500">已回复</p>
-                  <p className="text-base font-bold text-green-600">{rfqs.filter(r => r.status === 'quoted').length}</p>
+                  <p className="text-base font-bold text-green-600">{xjs.filter(r => r.status === 'quoted').length}</p>
                 </div>
               </div>
             </div>
@@ -2935,12 +2935,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                     <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <Input
                       placeholder="搜索询价单号、供应商、需求编号..."
-                      value={rfqSearchTerm}
+                      value={xjSearchTerm}
                       onChange={(e) => setRFQSearchTerm(e.target.value)}
                       className="pl-8 h-8 text-xs w-80"
                     />
                   </div>
-                  {selectedRFQIds.length > 0 && (
+                  {selectedXJIds.length > 0 && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -2948,14 +2948,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                       className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
                     >
                       <Trash2 className="w-3.5 h-3.5 mr-1" />
-                      批量删除 ({selectedRFQIds.length})
+                      批量删除 ({selectedXJIds.length})
                     </Button>
                   )}
                 </div>
-                <p className="text-[14px] text-gray-600">共 {filteredRFQs.length} 条询价单</p>
+                <p className="text-[14px] text-gray-600">共 {filteredXJs.length} 条询价单</p>
               </div>
               
-              {filteredRFQs.length === 0 ? (
+              {filteredXJs.length === 0 ? (
                 <div className="text-center py-12 border border-gray-200 rounded">
                   <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                   <p className="text-gray-500">暂无询价单</p>
@@ -2970,10 +2970,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                           <input 
                             type="checkbox" 
                             className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                            checked={selectedRFQIds.length === filteredRFQs.length && filteredRFQs.length > 0}
+                            checked={selectedXJIds.length === filteredXJs.length && filteredXJs.length > 0}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setSelectedRFQIds(filteredRFQs.map(r => r.id));
+                                setSelectedRFQIds(filteredXJs.map(r => r.id));
                               } else {
                                 setSelectedRFQIds([]);
                               }
@@ -2992,10 +2992,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredRFQs.map((rfq, idx) => {
-                        const rfqStatus = (rfq.status as any);
-                        const isDraft = rfqStatus === 'draft';
-                        const isSent = rfqStatus === 'sent';
+                      {filteredXJs.map((rfq, idx) => {
+                        const xjStatus = (xj.status as any);
+                        const isDraft = xjStatus === 'draft';
+                        const isSent = xjStatus === 'sent';
                         
                         return (
                           <tr key={rfq.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
@@ -3003,12 +3003,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                               <input 
                                 type="checkbox" 
                                 className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                                checked={selectedRFQIds.includes(rfq.id)}
+                                checked={selectedXJIds.includes(rfq.id)}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedRFQIds([...selectedRFQIds, rfq.id]);
+                                    setSelectedRFQIds([...selectedXJIds, rfq.id]);
                                   } else {
-                                    setSelectedRFQIds(selectedRFQIds.filter(id => id !== rfq.id));
+                                    setSelectedRFQIds(selectedXJIds.filter(id => id !== rfq.id));
                                   }
                                 }}
                               />
@@ -3024,7 +3024,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 }}
                                 className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
                               >
-                                {rfq.supplierRfqNo}
+                                {rfq.supplierXjNo}
                               </button>
                               <div className="text-[12px] text-gray-500">{rfq.createdDate}</div>
                             </td>
@@ -3033,7 +3033,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                               <div className="text-[12px] text-gray-500">{rfq.supplierCode}</div>
                             </td>
                             <td className="py-2 px-2">
-                              <div className="text-gray-900 font-mono">{rfq.requirementNo}</div>
+                              <div className="text-gray-900 font-mono">{xj.requirementNo}</div>
                               {rfq.sourceRef && <div className="text-[12px] text-gray-500">{rfq.sourceRef}</div>}
                             </td>
                             <td className="py-2 px-2 text-center">
@@ -3079,7 +3079,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleEditRFQ(rfq)}
+                                  onClick={() => handleEditXJ(rfq)}
                                   className="h-6 text-[12px] px-2 border-gray-300 text-gray-600 hover:bg-gray-50"
                                 >
                                   <Edit className="w-3 h-3 mr-1" />
@@ -3088,7 +3088,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 <Button
                                   size="sm"
                                   onClick={() => {
-                                    handleSubmitRFQToSupplier(rfq);
+                                    handleSubmitXJToSupplier(rfq);
                                   }}
                                   className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
                                 >
@@ -3498,10 +3498,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         allSuppliers={allSuppliers}
       />
 
-      <CreateRFQAndHistoryDialogs
-        showCreateRFQDialog={showCreateRFQDialog}
+      <CreateXJAndHistoryDialogs
+        showCreateXJDialog={showCreateXJDialog}
         setShowCreateRFQDialog={setShowCreateRFQDialog}
-        selectedRequirementForRFQ={selectedRequirementForRFQ}
+        selectedRequirementForXJ={selectedRequirementForXJ}
         selectedProductIds={selectedProductIds}
         setSelectedProductIds={setSelectedProductIds}
         selectedSuppliers={selectedSuppliers}
@@ -3509,23 +3509,23 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         supplierSearchTerm={supplierSearchTerm}
         setSupplierSearchTerm={setSupplierSearchTerm}
         allSuppliers={allSuppliers}
-        handlePreviewRFQ={handlePreviewRFQ}
-        rfqDeadline={rfqDeadline}
+        handlePreviewXJ={handlePreviewXJ}
+        xjDeadline={xjDeadline}
         setRFQDeadline={setRFQDeadline}
-        rfqRemarks={rfqRemarks}
+        xjRemarks={xjRemarks}
         setRFQRemarks={setRFQRemarks}
-        handleSubmitRFQ={handleSubmitRFQ}
-        submittingRFQ={submittingRFQ}
-        showRFQHistoryDialog={showRFQHistoryDialog}
+        handleSubmitXJ={handleSubmitXJ}
+        submittingXJ={submittingXJ}
+        showXJHistoryDialog={showXJHistoryDialog}
         setShowRFQHistoryDialog={setShowRFQHistoryDialog}
         selectedProductForHistory={selectedProductForHistory}
         setSelectedProductForHistory={setSelectedProductForHistory}
       />
       
-      <RFQPreviewDialog
-        showRFQPreview={showRFQPreview}
+      <XJPreviewDialog
+        showXJPreview={showXJPreview}
         setShowRFQPreview={setShowRFQPreview}
-        currentRFQData={currentRFQData}
+        currentXJData={currentXJData}
         rfqDocRef={rfqDocRef}
         handleExportRFQPDF={handleExportRFQPDF}
       />
@@ -3538,12 +3538,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         onReject={handleRejectSupplierQuotation}
       />
 
-      <EditRFQDialog
-        showEditRFQDialog={showEditRFQDialog}
-        setShowEditRFQDialog={setShowEditRFQDialog}
-        editRFQData={editRFQData}
+      <EditXJDialog
+        showEditXJDialog={showEditXJDialog}
+        setShowEditXJDialog={setShowEditXJDialog}
+        editXJData={editXJData}
         setEditRFQData={setEditRFQData}
-        handleSaveEditRFQ={handleSaveEditRFQ}
+        handleSaveEditXJ={handleSaveEditXJ}
       />
 
       {/* 🔥 智能采购反馈表单 */}

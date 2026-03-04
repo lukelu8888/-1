@@ -87,13 +87,13 @@ export function checkDataStatus(customerEmail: string = 'customer@example.com') 
   
   console.log('\n👤 Customer Portal Data:');
   console.log(`  - Orders: ${customerOrders.length} 条`);
-  console.log(`  - RFQs: ${customerRFQs.length} 条`);
+  console.log(`  - Inquiries (INQ): ${customerRFQs.length} 条`);
   console.log(`  - Quotations: ${customerQuotations.length} 条`);
   console.log(`  - Notifications: ${customerNotifications.length} 条`);
   
   console.log('\n🔧 Admin Portal Data:');
   console.log(`  - Orders: ${adminOrders.length} 条`);
-  console.log(`  - RFQs: ${adminRFQs.length} 条`);
+  console.log(`  - Inquiries (INQ): ${adminRFQs.length} 条`);
   console.log(`  - Quotations: ${adminQuotations.length} 条`);
   console.log(`  - Notifications: ${adminNotifications.length} 条`);
   

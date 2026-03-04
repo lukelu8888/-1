@@ -205,7 +205,7 @@ const SOURCE_PATHS = {
         value: 'alibaba_inquiry',
         label: 'Alibaba询盘',
         icon: Building2,
-        tracking: ['RFQ', 'Message Center', 'Product询价'],
+        tracking: ['INQ', 'Message Center', 'Product询价'],
         followUp: 'Alibaba Message + 邮件'
       },
       {
@@ -219,7 +219,7 @@ const SOURCE_PATHS = {
         value: 'made_in_china',
         label: 'Made-in-China',
         icon: Building2,
-        tracking: ['产品询价', 'RFQ', '店铺访问'],
+        tracking: ['产品询价', 'INQ', '店铺访问'],
         followUp: '平台消息'
       }
     ]

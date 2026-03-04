@@ -1,4 +1,4 @@
-# 🔧 供应商询价单显示问题修复
+# 🔧 采购询价单显示问题修复
 
 ## 问题描述
 
@@ -238,7 +238,7 @@ const firstItem = rfq.items?.[0];
 
 ## 相关文件
 
-- `/components/supplier/SupplierQuotationsSimple.tsx` - 供应商询价报价管理
+- `/components/supplier/SupplierQuotationsSimple.tsx` - 采购询价报价管理
 - `/contexts/RFQContext.tsx` - RFQ数据Context
 - `/data/authorizedUsers.ts` - 供应商账号数据
 - `/data/suppliersData.ts` - 供应商信息数据
@@ -247,7 +247,7 @@ const firstItem = rfq.items?.[0];
 ## 后续优化建议
 
 1. **批量询价**: 支持一次向多个供应商发送同一产品的询价
-2. **询价单模板**: 显示完整的供应商询价单PDF文档
+2. **询价单模板**: 显示完整的采购询价单PDF文档
 3. **报价对比**: 在Admin端对比不同供应商的报价
 4. **邮件通知**: 发送询价单时自动邮件通知供应商
 5. **在线协商**: 支持供应商和采购员在线沟通询价细节

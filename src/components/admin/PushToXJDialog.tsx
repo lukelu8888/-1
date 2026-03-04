@@ -16,13 +16,13 @@ import { Badge } from '../ui/badge';
 import { Card, CardContent } from '../ui/card';
 import { Search, Building2, Mail, Phone, MapPin, Star, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { useRFQs } from '../../contexts/RFQContext';
+import { useXJs } from '../../contexts/XJContext';
 
 /**
- * 📋 下推询价对话框
+ * 📋 下推采购询价（XJ）对话框
  * 
  * 功能：
- * 1. 从采购需求创建RFQ
+ * 1. 从采购需求创建XJ（采购询价）
  * 2. 选择多个供应商
  * 3. 设置目标价格、期望交期等
  * 4. 一键推送给所有选中的供应商
@@ -54,7 +54,7 @@ interface Supplier {
   isPreferred: boolean;
 }
 
-interface PushToRFQDialogProps {
+interface PushToXJDialogProps {
   open: boolean;
   onClose: () => void;
   requirement: PurchaseRequirement | null;
@@ -134,8 +134,8 @@ const mockSuppliers: Supplier[] = [
   }
 ];
 
-export function PushToRFQDialog({ open, onClose, requirement }: PushToRFQDialogProps) {
-  const { addRFQ } = useRFQs();
+export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogProps) {
+  const { addRFQ } = useXJs();
   
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -176,7 +176,7 @@ export function PushToRFQDialog({ open, onClose, requirement }: PushToRFQDialogP
     }
   };
 
-  // 提交创建RFQ
+  // 提交创建XJ(采购询价)
   const handleSubmit = () => {
     if (!requirement) return;
     
@@ -188,16 +188,16 @@ export function PushToRFQDialog({ open, onClose, requirement }: PushToRFQDialogP
     setLoading(true);
 
     try {
-      // 为每个选中的供应商创建RFQ
+      // 为每个选中的供应商创建XJ(采购询价)
       selectedSuppliers.forEach(supplierId => {
         const supplier = mockSuppliers.find(s => s.id === supplierId);
         if (!supplier) return;
 
-        const rfqNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+        const xjNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
         
         addRFQ({
           id: `rfq_${Date.now()}_${supplierId}`,
-          rfqNumber,
+          xjNumber,
           
           // 🔥 产品信息（来自采购需求）
           productName: requirement.productName,
@@ -249,7 +249,7 @@ export function PushToRFQDialog({ open, onClose, requirement }: PushToRFQDialogP
       
       onClose();
     } catch (error) {
-      console.error('创建RFQ失败:', error);
+      console.error('创建XJ失败:', error);
       toast.error('发送询价失败，请重试');
     } finally {
       setLoading(false);

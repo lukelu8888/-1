@@ -13,10 +13,11 @@ import { Checkbox } from '../ui/checkbox';
 import { useInquiry } from '../../contexts/InquiryContext';
 import { useUser } from '../../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
-import { generateRFQNumber, type RegionType } from '../../utils/rfqNumberGenerator';
+import { REGION_CODES, type RegionType } from '../../utils/xjNumberGenerator';
+import { nextInquiryNumber } from '../../lib/supabaseService';
 import { getCurrentUser } from '../../data/authorizedUsers';
 import { getCustomerProfile } from './CustomerProfile';
-import { RFQDocumentView } from './RFQDocumentView';
+import { INQDocumentView } from './INQDocumentView';
 import { CustomerInquiryView } from './CustomerInquiryView'; // 📋 使用文档中心的专业模板
 import { UnifiedInquiryDialog } from './UnifiedInquiryDialog';
 import { ContainerLoadPlanner } from './ContainerLoadPlanner';
@@ -88,7 +89,7 @@ export function InquiryManagement() {
   console.log('🔍 InquiryManagement - 当前用户:', user?.email);
   console.log('🔍 InquiryManagement - 公司ID:', companyId);
   console.log('🔍 InquiryManagement - 公司询价列表:', inquiries);
-  console.log('🔍 InquiryManagement - localStorage 数据:', localStorage.getItem('cosun_inquiries'));
+  console.log('🔍 InquiryManagement - inquiries count:', inquiries.length);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -124,35 +125,28 @@ export function InquiryManagement() {
     return matchesSearch && matchesFilter;
   });
 
-  const handleCreateInquiry = (products: any[], additionalInfo?: any) => {
-    console.log('🚀 handleCreateInquiry 被调用');
-    console.log('📦 产品数据:', products);
-    console.log('📋 附加信息:', additionalInfo);
-    console.log('👤 当前用户:', user);
-    
+  const handleCreateInquiry = async (products: any[], additionalInfo?: any) => {
     if (!user) {
       toast.error('Please log in to create inquiry');
       return;
     }
 
-    // 🌍 Get user's region from logged-in user data
     const currentUser = getCurrentUser();
     const userRegion: RegionType = currentUser?.region || 'North America';
-
-    // 📋 Get buyer info from Customer Profile
+    const regionCode = REGION_CODES[userRegion] || 'NA';
     const customerProfile = getCustomerProfile();
-    
-    // 🆕 Generate unified RFQ number with new format: RFQ-{REGION}-YYMMDD-XXXX
-    const rfqNumber = generateRFQNumber(userRegion);
-    
+
+    const inquiryNumber = await nextInquiryNumber(regionCode);
+
     const newInquiry = {
-      id: rfqNumber,
-      date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }),
+      id: crypto.randomUUID(),
+      inquiryNumber,
+      date: new Date().toISOString().split('T')[0],
       userEmail: user.email,
-      companyId: currentUser?.companyId || 'unknown', // 🆕 Add company ID
-      region: userRegion, // 🌍 Add region to inquiry
-      status: 'draft' as const, // 🔥 未提交时status为draft
-      isSubmitted: false, // 🚀 Default to draft (not submitted)
+      companyId: currentUser?.companyId || null,
+      region: regionCode,
+      status: 'draft' as const,
+      isSubmitted: false,
       products: products,
       totalPrice: products.reduce((sum, p) => sum + ((p.targetPrice || 0) * (p.quantity || 0)), 0),
       shippingInfo: {
@@ -163,7 +157,6 @@ export function InquiryManagement() {
       },
       message: additionalInfo?.notes || '',
       createdAt: Date.now(),
-      // 🆕 Use Customer Profile data for buyer info
       buyerInfo: customerProfile ? {
         companyName: customerProfile.companyName || 'N/A',
         contactPerson: customerProfile.contactPerson || 'N/A',
@@ -183,14 +176,14 @@ export function InquiryManagement() {
       },
     };
 
-    console.log('✅ 新建的询价对象 (使用新RFQ编号格式):', newInquiry);
-    
-    addInquiry(newInquiry);
-    
-    console.log('💾 addInquiry 调用完成');
-    
-    toast.success(`Inquiry ${rfqNumber} created successfully!`);
-    setIsNewInquiryOpen(false);
+    try {
+      await addInquiry(newInquiry);
+      toast.success(`Inquiry ${inquiryNumber} created successfully!`);
+      setIsNewInquiryOpen(false);
+    } catch (err) {
+      console.error('❌ handleCreateInquiry failed:', err);
+      toast.error('Failed to create inquiry — check console for details');
+    }
   };
 
   // 🔥 批量删除功能
@@ -501,10 +494,10 @@ export function InquiryManagement() {
               size="sm"
               className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
               onClick={() => {
-                document.body.classList.add('printing-rfq');
+                document.body.classList.add('printing-inq');
                 window.print();
                 setTimeout(() => {
-                  document.body.classList.remove('printing-rfq');
+                  document.body.classList.remove('printing-inq');
                 }, 1000);
               }}
             >
@@ -535,7 +528,7 @@ export function InquiryManagement() {
             </svg>
           </button>
 
-          {/* RFQ Document - 仅展示询价单，无Tab、无工作流 */}
+          {/* INQ Document - 仅展示询价单，无Tab、无工作流 */}
           <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
             {selectedInquiry && (
               <CustomerInquiryView inquiry={selectedInquiry} />
@@ -655,10 +648,9 @@ export function InquiryManagement() {
                 setIsSaveLocationDialogOpen(false);
                 
                 try {
-                  // Get the RFQ content
                   const rfqContent = document.querySelector('[data-rfq-content]');
                   if (!rfqContent) {
-                    throw new Error('RFQ content not found');
+                    throw new Error('Inquiry content not found');
                   }
                   
                   // Create a print-optimized clone
@@ -699,7 +691,7 @@ export function InquiryManagement() {
                     <html>
                       <head>
                         <meta charset="UTF-8">
-                        <title>RFQ-${selectedInquiry.id}</title>
+                        <title>${selectedInquiry.id}</title>
                         <style>
                           ${styles}
                           

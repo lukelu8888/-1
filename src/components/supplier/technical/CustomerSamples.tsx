@@ -87,35 +87,35 @@ export default function CustomerSamples() {
   // 🔥 模拟询价单数据（实际应从后端获取）
   const [availableRFQs, setAvailableRFQs] = useState([
     {
-      id: 'RFQ-2024-045',
+      id: 'XJ-2024-045',
       customer: '福建高盛达富建材有限公司',
       productName: '马赛克瓷砖',
       date: '2024-11-20',
       status: 'processing'
     },
     {
-      id: 'RFQ-2024-058',
+      id: 'XJ-2024-058',
       customer: '福建高盛达富建材有限公司',
       productName: '抛光砖',
       date: '2024-12-10',
       status: 'processing'
     },
     {
-      id: 'RFQ-2024-062',
+      id: 'XJ-2024-062',
       customer: '福建高盛达富建材有限公司',
       productName: '大理石瓷砖',
       date: '2024-12-15',
       status: 'quoted'
     },
     {
-      id: 'RFQ-2024-071',
+      id: 'XJ-2024-071',
       customer: '福建高盛达富建材有限公司',
       productName: '钢制门框',
       date: '2024-12-18',
       status: 'processing'
     },
     {
-      id: 'RFQ-2024-075',
+      id: 'XJ-2024-075',
       customer: '福建高盛达富建材有限公司',
       productName: '不锈钢水槽',
       date: '2024-12-18',
@@ -142,7 +142,7 @@ export default function CustomerSamples() {
         analysis: '已完成'
       },
       
-      relatedRFQ: 'RFQ-2024-045',
+      relatedRFQ: 'XJ-2024-045',
       relatedPreSample: 'PPS-2024-005',
       relatedProduct: 'PROD-2024-004',
       
@@ -176,7 +176,7 @@ export default function CustomerSamples() {
         analysis: '进行中'
       },
       
-      relatedRFQ: 'RFQ-2024-058',
+      relatedRFQ: 'XJ-2024-058',
       relatedPreSample: null,
       relatedProduct: null,
       
@@ -210,7 +210,7 @@ export default function CustomerSamples() {
         analysis: '待分析'
       },
       
-      relatedRFQ: 'RFQ-2024-062',
+      relatedRFQ: 'XJ-2024-062',
       relatedPreSample: null,
       relatedProduct: null,
       

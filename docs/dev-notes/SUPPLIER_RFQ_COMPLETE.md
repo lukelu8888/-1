@@ -31,7 +31,7 @@
 - 支持保存草稿和提交报价
 
 ### 3. **SupplierQuotationsSimple** (`/components/supplier/SupplierQuotationsSimple.tsx`)
-✅ 供应商询价报价管理页面
+✅ 采购询价报价管理页面
 - **统计卡片**: 待报价、已报价、已接受、总数
 - **Tab分类**: 
   - 待报价（需要操作）

@@ -62,7 +62,7 @@ Supplier端【客户需求池】
    ```typescript
    const supplierRFQData = {
      id: rfq.id,
-     supplierRfqNo: rfq.supplierRfqNo,  // XJ-YYMMDD-XXXX
+     supplierXjNo: rfq.supplierXjNo,  // XJ-YYMMDD-XXXX
      supplierCode: rfq.supplierCode,
      supplierEmail: rfq.supplierEmail,
      sourceQRNumber: rfq.requirementNo, // 关联QR号
@@ -137,7 +137,7 @@ const categorizedRFQs = useMemo(() => {
 
 | Admin端字段 | Supplier端字段 | 说明 |
 |------------|---------------|------|
-| `rfq.supplierRfqNo` | `rfqNumber` | XJ-YYMMDD-XXXX |
+| `rfq.supplierXjNo` | `xjNumber` | XJ-YYMMDD-XXXX |
 | `rfq.requirementNo` | `sourceQRNumber` | 关联的QR需求单号 |
 | `rfq.supplierCode` | `supplierCode` | 供应商编码（过滤依据） |
 | `rfq.supplierEmail` | `supplierEmail` | 供应商邮箱（过滤依据） |
@@ -149,7 +149,7 @@ const categorizedRFQs = useMemo(() => {
 
 1. **供应商邮箱匹配**: 通过`getRFQsBySupplier(user.email)`过滤
 2. **数据源隔离**: Admin草稿（rfqs）和已提交（supplierRFQs）分开存储
-3. **状态控制**: 只有draft状态的RFQ才显示"提交"按钮
+3. **状态控制**: 只有draft状态的XJ询价单才显示"提交"按钮
 4. **防重复提交**: 提交前检查supplierRFQs中是否已存在
 
 ## 🚀 流转特点
@@ -184,7 +184,7 @@ JSON.parse(localStorage.getItem('rfqs'))
 JSON.parse(localStorage.getItem('supplierRFQs'))
 ```
 
-### 清空供应商询价池（测试用）
+### 清空采购询价池（测试用）
 ```javascript
 localStorage.removeItem('supplierRFQs');
 ```
@@ -222,9 +222,9 @@ localStorage.removeItem('supplierRFQs');
 ## 📌 注意事项
 
 1. **不要清空数据**: 按照用户要求，所有表单不会被自动清空删除
-2. **保持ID一致**: Admin端和Supplier端的RFQ使用同一个ID
+2. **保持ID一致**: Admin端和Supplier端的XJ询价单使用同一个ID
 3. **状态同步**: Admin端更新状态后会触发Supplier端刷新
-4. **邮箱匹配**: 确保供应商登录邮箱与RFQ中的supplierEmail一致
+4. **邮箱匹配**: 确保供应商登录邮箱与XJ询价单中的supplierEmail一致
 
 ---
 

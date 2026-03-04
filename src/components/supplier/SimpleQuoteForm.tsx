@@ -84,7 +84,7 @@ export function SimpleQuoteForm({ rfq, initialData, onSubmit, onCancel }: Simple
 
   return (
     <div className="space-y-6">
-      {/* RFQ基本信息 */}
+      {/* 采购询价基本信息 */}
       <Card className="border-blue-200 bg-blue-50">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm flex items-center gap-2">
@@ -96,7 +96,7 @@ export function SimpleQuoteForm({ rfq, initialData, onSubmit, onCancel }: Simple
           <div className="grid grid-cols-2 gap-4">
             <div>
               <span className="text-slate-600">询价单号：</span>
-              <span className="font-semibold">{rfq.rfqNumber}</span>
+              <span className="font-semibold">{rfq.xjNumber}</span>
             </div>
             <div>
               <span className="text-slate-600">截止日期：</span>

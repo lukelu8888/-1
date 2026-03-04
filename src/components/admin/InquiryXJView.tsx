@@ -1,11 +1,11 @@
 import React from 'react';
 import { Progress } from '../ui/progress';
 
-interface InquiryRFQViewProps {
+interface InquiryXJViewProps {
   inquiry: any;
 }
 
-export function InquiryRFQView({ inquiry }: InquiryRFQViewProps) {
+export function InquiryXJView({ inquiry }: InquiryXJViewProps) {
   // Helper function to calculate container utilization
   const calculateUtilization = (spec: any, totalCbm: number, totalWeight: number) => {
     const spaceUtilization = (totalCbm / spec.volume) * 100;
@@ -76,16 +76,16 @@ export function InquiryRFQView({ inquiry }: InquiryRFQViewProps) {
 
   return (
     <div className="space-y-6 py-4">
-      {/* RFQ Header */}
+      {/* Inquiry Header */}
       <div className="border-b-2 border-gray-800 pb-4">
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h1 className="text-3xl mb-2">REQUEST FOR QUOTATION</h1>
+            <h1 className="text-3xl mb-2">INQUIRY</h1>
             <p className="text-sm text-gray-600">Fujian Gaoshengda Fu Building Materials Co., Ltd.</p>
           </div>
           <div className="text-right">
             <div className="bg-red-600 text-white px-4 py-2 rounded-lg mb-2">
-              <p className="text-xs">RFQ No.</p>
+              <p className="text-xs">INQ No.</p>
               <p className="text-lg">{inquiry.inquiryNumber || inquiry.id}</p>
             </div>
             <p className="text-xs text-gray-600">
@@ -292,7 +292,7 @@ export function InquiryRFQView({ inquiry }: InquiryRFQViewProps) {
         <h2 className="text-lg mb-3 bg-gray-100 px-3 py-2 rounded">TERMS & CONDITIONS</h2>
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <ul className="text-xs space-y-2 text-gray-700">
-            <li>• This RFQ is valid for 30 days from the date of issue.</li>
+            <li>• This inquiry is valid for 30 days from the date of issue.</li>
             <li>• All prices are estimated FOB values and subject to confirmation.</li>
             <li>• Final pricing, shipping costs, payment terms, and delivery schedule will be negotiated separately.</li>
             <li>• Lead time will be confirmed upon order confirmation.</li>

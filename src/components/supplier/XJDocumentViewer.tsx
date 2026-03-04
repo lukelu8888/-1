@@ -2,13 +2,13 @@ import React, { useRef } from 'react';
 import { Button } from '../ui/button';
 import { Download, Printer, FileText } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { SupplierRFQDocument, SupplierRFQData } from '../documents/templates/SupplierRFQDocument';
+import { XJDocument, XJData } from '../documents/templates/XJDocument';
 
-interface SupplierRFQDocumentViewerProps {
-  rfq: any; // RFQ对象，包含documentData字段
+interface XJDocumentViewerProps {
+  rfq: any; // 采购询价对象，包含documentData字段
 }
 
-export default function SupplierRFQDocumentViewer({ rfq }: SupplierRFQDocumentViewerProps) {
+export default function XJDocumentViewer({ rfq }: XJDocumentViewerProps) {
   const documentRef = useRef<HTMLDivElement>(null);
 
   // 🔥 打印/导出PDF功能
@@ -42,7 +42,7 @@ export default function SupplierRFQDocumentViewer({ rfq }: SupplierRFQDocumentVi
     );
   }
 
-  const documentData: SupplierRFQData = rfq.documentData;
+  const documentData: XJData = rfq.documentData;
 
   return (
     <div className="space-y-4">
@@ -51,7 +51,7 @@ export default function SupplierRFQDocumentViewer({ rfq }: SupplierRFQDocumentVi
         <div>
           <h4 className="font-semibold text-gray-900">询价单文档</h4>
           <p className="text-xs text-gray-500 mt-1">
-            编号: {documentData.rfqNo} | 日期: {documentData.rfqDate}
+            编号: {documentData.rfqNo} | 日期: {documentData.xjDate}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -83,7 +83,7 @@ export default function SupplierRFQDocumentViewer({ rfq }: SupplierRFQDocumentVi
       {/* 🔥 文档预览区域 */}
       <div className="bg-white border border-gray-300 rounded-lg overflow-hidden">
         <div className="max-h-[600px] overflow-y-auto">
-          <SupplierRFQDocument ref={documentRef} data={documentData} />
+          <XJDocument ref={documentRef} data={documentData} />
         </div>
       </div>
 

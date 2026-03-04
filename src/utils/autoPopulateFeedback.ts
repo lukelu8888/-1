@@ -6,7 +6,7 @@
  */
 
 import { PurchaseRequirement, PurchaserFeedback, PurchaserFeedbackProduct } from '../contexts/PurchaseRequirementContext';
-import { RFQ } from '../contexts/RFQContext';
+import { RFQ } from '../contexts/XJContext';
 
 interface SupplierQuotation {
   id: string;
@@ -49,7 +49,7 @@ interface SupplierQuotation {
  */
 export function autoPopulateFeedbackFromBJ(
   qr: PurchaseRequirement,
-  rfqs: RFQ[],
+  rfqs: XJ[],
   supplierQuotations: any[],
   currentUserName: string
 ): PurchaserFeedback | null {
@@ -72,15 +72,15 @@ export function autoPopulateFeedbackFromBJ(
   }
   
   // 🔥 步骤2：找到关联的BJ（供应商报价单）
-  // 通过 XJ 的 supplierRfqNo 匹配 BJ 的 sourceXJ
+  // 通过 XJ 的 supplierXjNo 匹配 BJ 的 sourceXJ
   const relatedBJs = supplierQuotations.filter(bj => {
     // BJ状态必须是已提交
     if (bj.status !== 'submitted') return false;
     
     // 匹配XJ编号
     return relatedXJs.some(xj => 
-      bj.sourceXJ === xj.supplierRfqNo || 
-      bj.sourceXJ === xj.rfqNumber
+      bj.sourceXJ === xj.supplierXjNo || 
+      bj.sourceXJ === xj.xjNumber
     );
   });
   
@@ -106,7 +106,7 @@ export function autoPopulateFeedbackFromBJ(
     // 🔥 关联信息（仅采购员可见）
     linkedBJ: selectedBJ.quotationNo,
     linkedSupplier: selectedBJ.supplierName || selectedBJ.supplierCompany || '供应商',
-    linkedXJ: selectedBJ.sourceXJ || relatedXJs[0]?.supplierRfqNo,
+    linkedXJ: selectedBJ.sourceXJ || relatedXJs[0]?.supplierXjNo,
     
     // 🔥 产品成本信息（自动提取）
     products: selectedBJ.items.map((bjItem: any) => {

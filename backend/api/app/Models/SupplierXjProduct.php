@@ -5,14 +5,14 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class SupplierRfqProduct extends Model
+class SupplierXjProduct extends Model
 {
     protected $table = 'supplier_rfq_products';
 
     public $timestamps = false;
 
     protected $fillable = [
-        'supplier_rfq_id',
+        'supplier_xj_id',
         'product_uid',
         'product_name',
         'model_no',
@@ -33,7 +33,7 @@ class SupplierRfqProduct extends Model
 
     public function rfq(): BelongsTo
     {
-        return $this->belongsTo(SupplierRfq::class, 'supplier_rfq_id');
+        return $this->belongsTo(SupplierRfq::class, 'supplier_xj_id');
     }
 }
 

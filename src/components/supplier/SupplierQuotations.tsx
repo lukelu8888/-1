@@ -7,7 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { toast } from 'sonner@2.0.3';
 import QuotationDocument from './QuotationDocument';
-import { useRFQs } from '../../contexts/RFQContext'; // 🔥 导入RFQ Context
+import { useXJs } from '../../contexts/XJContext'; // 🔥 导入采购询价 Context
 import { useUser } from '../../contexts/UserContext'; // 🔥 获取当前供应商信息（我方）
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -19,17 +19,17 @@ import { SupplierQuotationDocument, SupplierQuotationData } from '../documents/t
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
-import { generateBJNumber } from '../../utils/rfqNumberGenerator'; // 🔥 BJ编号生成器
+import { generateBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
 
 /**
  * 🔥 供应商视角：询价报价管理
  * - COSUN（福建高盛达富建材）= 我们的客户（买方）
  * - 供应商 = 我方（卖方）
- * - 收到客户COSUN的询价单（RFQ），我方提交报价
+ * - 收到客户COSUN的采购询价单（XJ），我方提交报价
  */
 export default function SupplierQuotations() {
   const { user } = useUser(); // 🔥 当前登录的供应商（我方）
-  const { rfqs, getRFQsBySupplier, addQuoteToRFQ, updateRFQ } = useRFQs(); // 🔥 使用RFQ Context
+  const { rfqs, getRFQsBySupplier, addQuoteToRFQ, updateRFQ } = useXJs(); // 🔥 使用采购询价 Context
   
   // 🔥 获取完整的供应商信息（从suppliersDatabase）
   const supplierInfo = useMemo(() => {
@@ -78,34 +78,34 @@ export default function SupplierQuotations() {
     remarks: ''
   });
 
-  // 🔥 获取当前供应商的所有RFQ
+  // 🔥 获取当前供应商的所有采购询价
   const supplierRFQs = useMemo(() => {
     if (!user?.email) {
       console.log('❌ [SupplierQuotations] 供应商未登录，user.email 为空');
       return [];
     }
     
-    console.log('🔍 [SupplierQuotations] 查询RFQ...');
+    console.log('🔍 [SupplierQuotations] 查询采购询价...');
     console.log('  - 当前供应商Email:', user.email);
-    console.log('  - 总RFQ数量:', rfqs.length);
+    console.log('  - 总采购询价数量:', rfqs.length);
     
     const result = getRFQsBySupplier(user.email);
-    console.log('  - 匹配到的RFQ数量:', result.length);
+    console.log('  - 匹配到的采购询价数量:', result.length);
     
     if (result.length > 0) {
-      console.log('✅ [SupplierQuotations] 找到RFQ:');
+      console.log('✅ [SupplierQuotations] 找到采购询价:');
       result.forEach((rfq, idx) => {
-        console.log(`  ${idx + 1}. 供应商询价单号: ${rfq.supplierRfqNo || '未生成'} (内部: ${rfq.rfqNumber})`);
+        console.log(`  ${idx + 1}. 采购询价单号: ${rfq.supplierXjNo || '未生成'} (内部: ${rfq.xjNumber})`);
         console.log(`      产品: ${rfq.productName} - 供应商: ${rfq.supplierName}`);
         if (rfq.supplierQuotationNo) {
           console.log(`      报价单号: ${rfq.supplierQuotationNo}`);
         }
       });
     } else {
-      console.log('⚠️ [SupplierQuotations] 未找到RFQ');
-      console.log('  - 请检查供应商Email是否与RFQ中的supplierEmail匹配');
+      console.log('⚠️ [SupplierQuotations] 未找到采购询价');
+      console.log('  - 请检查供应商Email是否与采购询价中的supplierEmail匹配');
       if (rfqs.length > 0) {
-        console.log('  - 现有RFQ的供应商Email列表:');
+        console.log('  - 现有采购询价的供应商Email列表:');
         const uniqueEmails = [...new Set(rfqs.map(r => r.supplierEmail))];
         uniqueEmails.forEach(email => {
           console.log(`    * ${email}`);
@@ -116,7 +116,7 @@ export default function SupplierQuotations() {
     return result;
   }, [rfqs, user?.email]);
 
-  // 🔥 分类RFQ
+  // 🔥 分类采购询价
   const categorizedRFQs = useMemo(() => {
     const pending = supplierRFQs.filter(rfq => {
       const myQuote = rfq.quotes?.find(q => q.supplierCode === user?.email);
@@ -150,7 +150,7 @@ export default function SupplierQuotations() {
       const newDraft = {
         id: draftId,
         rfqId: selectedRFQ.id,
-        rfqNumber: selectedRFQ.rfqNumber,
+        xjNumber: selectedRFQ.xjNumber,
         productName: selectedRFQ.items[0]?.productName,
         ...quoteForm,
         savedDate: new Date().toISOString().split('T')[0],
@@ -196,16 +196,16 @@ export default function SupplierQuotations() {
       remarks: pendingQuoteData.remarks
     };
     
-    // 🔥 添加报价到RFQ
+    // 🔥 添加报价到采购询价
     addQuoteToRFQ(selectedRFQ.id, quote);
     
-    // 🔥 更新RFQ，添加供应商报价单号
+    // 🔥 更新采购询价，添加供应商报价单号
     updateRFQ(selectedRFQ.id, { supplierQuotationNo });
     
     toast.success(
       <div className="space-y-1">
         <p className="font-semibold">✅ 报价已成功提交！</p>
-        <p className="text-sm">询价单号: {selectedRFQ.supplierRfqNo || selectedRFQ.rfqNumber}</p>
+        <p className="text-sm">询价单号: {selectedRFQ.supplierXjNo || selectedRFQ.xjNumber}</p>
         <p className="text-sm">报价单号: {supplierQuotationNo}</p>
         <p className="text-xs text-slate-500">报价已发送至COSUN管理员审核</p>
       </div>,
@@ -295,7 +295,7 @@ export default function SupplierQuotations() {
       quotationNo: rfq.supplierQuotationNo || generateBJNumber(), // 🔥 使用统一的BJ编号生成器
       quotationDate: myQuote.quotedDate,
       validUntil: validUntilDate.toISOString().split('T')[0],
-      rfqReference: rfq.supplierRfqNo || rfq.rfqNumber,
+      rfqReference: rfq.supplierXjNo || rfq.xjNumber,
       
       supplier: {
         companyName: supplierInfo?.name || supplierInfo?.company || user?.company || '供应商公司名称',
@@ -577,8 +577,8 @@ export default function SupplierQuotations() {
                         <div>
                           <p className="font-medium text-blue-600">
                             {isDraft 
-                              ? item.rfqNumber || item.rfqId 
-                              : item.supplierRfqNo || item.rfqNumber || item.id}
+                              ? item.xjNumber || item.rfqId 
+                              : item.supplierXjNo || item.xjNumber || item.id}
                           </p>
                           <p className="text-xs text-gray-500">{isDraft ? item.savedDate : item.createdDate}</p>
                         </div>
@@ -679,7 +679,7 @@ export default function SupplierQuotations() {
                                 </Button>
                                 <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
                                   <DialogHeader>
-                                    <DialogTitle>提交报价 - {item.supplierRfqNo || item.rfqNumber || item.id}</DialogTitle>
+                                    <DialogTitle>提交报价 - {item.supplierXjNo || item.xjNumber || item.id}</DialogTitle>
                                     <DialogDescription>
                                       为 {item.productName || item.product} 提供详细报价（含价格梯度）
                                     </DialogDescription>
@@ -799,7 +799,7 @@ export default function SupplierQuotations() {
               <div className="grid grid-cols-2 gap-3 p-3 bg-gray-50 rounded-lg border">
                 <div>
                   <p className="text-xs text-gray-600">询价单号</p>
-                  <p className="text-sm font-medium font-mono text-blue-600">{selectedRFQ?.supplierRfqNo || selectedRFQ?.rfqNumber || selectedRFQ?.id}</p>
+                  <p className="text-sm font-medium font-mono text-blue-600">{selectedRFQ?.supplierXjNo || selectedRFQ?.xjNumber || selectedRFQ?.id}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-600">产品名称</p>

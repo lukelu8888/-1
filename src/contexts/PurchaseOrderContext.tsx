@@ -36,9 +36,9 @@ export interface PurchaseOrder {
   groupTotalOrders?: number; // 订单组中总PO数量
   groupNote?: string; // 订单组备注（例如："同一客户订单拆分"）
   
-  // 🔥 RFQ关联信息（如果PO是基于供应商报价创建的）
-  rfqId?: string; // 关联的RFQ ID
-  rfqNumber?: string; // 关联的RFQ编号
+  // 🔥 XJ关联信息（如果PO是基于供应商报价创建的）
+  rfqId?: string; // 关联的XJ ID
+  xjNumber?: string; // 关联的XJ编号
   selectedQuote?: { // 选中的供应商报价信息
     supplierCode: string;
     supplierName: string;
@@ -140,7 +140,7 @@ const mergePurchaseOrders = (localOrders: PurchaseOrder[], serverOrders: Purchas
 };
 
 export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // 修复历史误删：过去把 SC/RFQ 等来源号错误写入 order tombstone，导致订单列表被误隐藏
+  // 修复历史误删：过去把 SC/XJ 等来源号错误写入 order tombstone，导致订单列表被误隐藏
   useEffect(() => {
     const removedLegacy = removeTombstones((t) => {
       if (t.domain !== 'order') return false;
@@ -213,7 +213,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
           sourceRef: seed.sourceRef,
           sourceSONumber: seed.sourceSONumber,
           rfqId: seed.rfqId,
-          rfqNumber: seed.rfqNumber,
+          xjNumber: seed.xjNumber,
           supplierName: '待分配供应商',
           supplierCode: 'TBD',
           region: seed.region || 'NA',
@@ -298,7 +298,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
           sourceRef: String(req?.sourceInquiryNumber || req?.sourceRef || '').trim(),
           sourceSONumber: String(req?.salesOrderNo || req?.sourceRef || '').trim(),
           salesContractNumber: String(req?.sourceRef || '').trim(),
-          rfqNumber: String(req?.sourceInquiryNumber || '').trim(),
+          xjNumber: String(req?.sourceInquiryNumber || '').trim(),
           supplierName: '待采购分配',
           supplierCode: 'TBD',
           region: String(req?.region || 'NA'),

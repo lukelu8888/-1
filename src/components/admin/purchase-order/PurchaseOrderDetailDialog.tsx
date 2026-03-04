@@ -50,10 +50,10 @@ export const PurchaseOrderDetailDialog: React.FC<PurchaseOrderDetailDialogProps>
                     <span className="ml-2">{viewOrder.requirementNo}</span>
                   </div>
                 )}
-                {viewOrder.rfqNumber && (
+                {viewOrder.xjNumber && (
                   <div>
                     <span className="text-gray-600">关联询价：</span>
-                    <span className="ml-2">{viewOrder.rfqNumber}</span>
+                    <span className="ml-2">{viewOrder.xjNumber}</span>
                   </div>
                 )}
                 <div>

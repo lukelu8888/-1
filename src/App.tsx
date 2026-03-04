@@ -63,7 +63,7 @@ import { PaymentProvider } from './contexts/PaymentContext';
 import { ApprovalProvider } from './contexts/ApprovalContext'; // 🔥 审批工作流
 import { PurchaseRequirementProvider } from './contexts/PurchaseRequirementContext'; // 🔥 采购需求管理
 import { PurchaseOrderProvider } from './contexts/PurchaseOrderContext'; // 🔥 采购订单管理
-import { RFQProvider } from './contexts/RFQContext'; // 🔥 询价管理
+import { XJProvider } from './contexts/XJContext'; // 🔥 采购询价管理（XJ）
 import { QuotationRequestProvider } from './contexts/QuotationRequestContext'; // 🔥 报价请求管理
 import { SalesQuotationProvider } from './contexts/SalesQuotationContext'; // 🔥 销售报价管理（QT）
 import { SalesOrderProvider } from './contexts/SalesOrderContext'; // 🔥 销售订单管理（SO）
@@ -308,7 +308,7 @@ export default function App() {
                           <ApprovalProvider>
                             <PurchaseRequirementProvider>
                               <PurchaseOrderProvider>
-                                <RFQProvider>
+                                <XJProvider>
                                   <QuotationRequestProvider>
                                     <SalesQuotationProvider>
                                       <SalesOrderProvider>
@@ -320,7 +320,7 @@ export default function App() {
                                       </SalesOrderProvider>
                                     </SalesQuotationProvider>
                                   </QuotationRequestProvider>
-                                </RFQProvider>
+                                </XJProvider>
                               </PurchaseOrderProvider>
                             </PurchaseRequirementProvider>
                           </ApprovalProvider>

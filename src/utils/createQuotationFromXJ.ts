@@ -1,9 +1,9 @@
 /**
- * 从RFQ创建供应商报价单
+ * 从采购询价(XJ)创建供应商报价单
  */
-import { generateBJNumber } from './rfqNumberGenerator'; // 🔥 导入BJ编号生成器
+import { generateBJNumber } from './xjNumberGenerator'; // 🔥 导入BJ编号生成器
 
-export function createSupplierQuotationFromRFQ(
+export function createQuotationFromXJ(
   rfq: any,
   supplierUser: any, // 🔥 改为接收完整的用户对象
   options: {
@@ -39,7 +39,7 @@ export function createSupplierQuotationFromRFQ(
   
   // 优先使用 products 数组（多产品）
   if (rfq.products && Array.isArray(rfq.products) && rfq.products.length > 0) {
-    console.log(`🔍 从 RFQ.products 提取 ${rfq.products.length} 个产品`);
+    console.log(`🔍 从 XJ.products 提取 ${rfq.products.length} 个产品`);
     items = rfq.products.map((product: any, index: number) => ({
       id: `item-${Date.now()}-${index}`,
       productName: product.productName || '产品名称',
@@ -78,7 +78,7 @@ export function createSupplierQuotationFromRFQ(
   const quotation: SupplierQuotation = {
     id: `quotation-${Date.now()}`,
     quotationNo,
-    sourceXJ: rfq.supplierRfqNo || rfq.rfqNumber, // 关联XJ号
+    sourceXJ: rfq.supplierXjNo || rfq.xjNumber, // 关联XJ号
     sourceQR: rfq.requirementNo, // 关联QR号
     sourceRFQId: rfq.id,
     customerName: 'COSUN采购', // 买方是COSUN
@@ -105,7 +105,7 @@ export function createSupplierQuotationFromRFQ(
     version: 1
   };
 
-  // 🔥 提取原始询价说明（从RFQ的documentData中获取）
+  // 🔥 提取原始询价说明（从XJ的documentData中获取）
   const originalInquiryDescription = rfq.documentData?.inquiryDescription || '';
   
   // 🔥 从完整的询价说明中提取【特殊要求】/【客户要求】部分
@@ -131,7 +131,7 @@ export function createSupplierQuotationFromRFQ(
     quotationNo,
     quotationDate,
     validUntil,
-    rfqReference: rfq.supplierRfqNo || rfq.rfqNumber,
+    rfqReference: rfq.supplierXjNo || rfq.xjNumber,
     inquiryReference: customerRequirements, // 🔥 只保存客户要求部分
     
     supplier: {

@@ -105,7 +105,7 @@ location.reload();
 
 **预期结果**:
 - ✓ "客户需求"数量 ≥ 1
-- ✓ 显示"RFQ · X"（X为待报价数量）
+- ✓ 显示"XJ · X"（X为待报价数量）
 
 #### 步骤 3.3: 进入客户需求池
 1. 点击【客户需求】Tab
@@ -136,7 +136,7 @@ location.reload();
 **预期结果**:
 - ✓ 成功创建BJ报价单
 - ✓ 报价单关联到XJ询价单
-- ✓ RFQ状态变为"已报价"
+- ✓ XJ询价单状态变为"已报价"
 - ✓ 从"客户需求池"移动到"已报价"Tab
 
 ---
@@ -147,15 +147,15 @@ location.reload();
 
 #### 检查 localStorage 数据
 ```javascript
-// 1. 检查Admin端RFQ数据
+// 1. 检查Admin端XJ询价数据
 const adminRFQs = JSON.parse(localStorage.getItem('rfqs') || '[]');
 console.log('Admin RFQs:', adminRFQs);
-// 应该看到status为'sent'的RFQ
+// 应该看到status为'sent'的XJ询价单
 
-// 2. 检查Supplier端RFQ数据
+// 2. 检查Supplier端XJ询价数据
 const supplierRFQs = JSON.parse(localStorage.getItem('supplierRFQs') || '[]');
-console.log('Supplier RFQs:', supplierRFQs);
-// 应该看到推送给供应商的RFQ数据
+console.log('Procurement Inquiry XJs:', supplierRFQs);
+// 应该看到推送给供应商的XJ询价数据
 
 // 3. 验证数据一致性
 const adminRFQ = adminRFQs.find(r => r.status === 'sent');
@@ -169,7 +169,7 @@ console.log('数据一致性:', adminRFQ?.id === supplierRFQ?.id);
 | Admin端字段 | Supplier端字段 | 验证方法 |
 |------------|---------------|---------|
 | `rfq.id` | `supplierRFQ.id` | 两者应相同 |
-| `rfq.supplierRfqNo` | `supplierRFQ.rfqNumber` | XJ-YYMMDD-XXXX格式 |
+| `rfq.supplierXjNo` | `supplierRFQ.xjNumber` | XJ-YYMMDD-XXXX格式 |
 | `rfq.requirementNo` | `supplierRFQ.sourceQRNumber` | QR-YYMMDD-XXXX格式 |
 | `rfq.supplierEmail` | `supplierRFQ.supplierEmail` | 应匹配登录邮箱 |
 | `rfq.products` | `supplierRFQ.products` | 产品数组应相同 |
@@ -205,7 +205,7 @@ console.log('数据一致性:', adminRFQ?.id === supplierRFQ?.id);
 2. 检查supplierRFQs存储
    ```javascript
    const data = JSON.parse(localStorage.getItem('supplierRFQs') || '[]');
-   console.log('供应商RFQ数量:', data.length);
+   console.log('供应商XJ询价数量:', data.length);
    console.log('供应商邮箱列表:', data.map(r => r.supplierEmail));
    ```
 

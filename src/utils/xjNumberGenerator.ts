@@ -1,6 +1,6 @@
 /**
  * Document Number Generator for B2B Trade System
- * Supports: RFQ, QUO, SC, CI, PL, YS, SK, INQ, QR, XJ, BJ, QT, SO, PO
+ * Supports: INQ, QUO, SC, CI, PL, YS, SK, QR, XJ, BJ, QT, SO, PO
  * Format: {TYPE}-{REGION}-YYMMDD-XXXX
  * 
  * Important: Sequence numbers are cumulative and NEVER reset daily.
@@ -24,11 +24,11 @@ export const REGION_CODES: Record<RegionType, string> = {
 };
 
 // 📋 Document types
-export type DocumentType = 'RFQ' | 'QUO' | 'SC' | 'CI' | 'PL' | 'YS' | 'SK' | 'INQ' | 'QR' | 'XJ' | 'BJ' | 'QT' | 'SO' | 'PO';
+export type DocumentType = 'XJ' | 'QUO' | 'SC' | 'CI' | 'PL' | 'YS' | 'SK' | 'INQ' | 'QR' | 'XJ' | 'BJ' | 'QT' | 'SO' | 'PO';
 
 interface DocumentCounterData {
   counters: {
-    [key: string]: number; // Key format: "{TYPE}-{REGION}" (e.g., "RFQ-NA", "QT-EA", "PO-SA")
+    [key: string]: number; // Key format: "{TYPE}-{REGION}" (e.g., "INQ-NA", "QT-EA", "PO-SA")
     // Each counter is cumulative and never resets
   };
 }
@@ -43,7 +43,7 @@ function getCurrentDateString(): string {
   const month = (now.getMonth() + 1).toString().padStart(2, '0');
   const day = now.getDate().toString().padStart(2, '0');
   const result = `${year}${month}${day}`;
-  console.log(`📅 [rfqNumberGenerator] getCurrentDateString → ${result} (local: ${now.toLocaleString()}, UTC: ${now.toUTCString()})`);
+  console.log(`📅 [documentNumberGenerator] getCurrentDateString → ${result} (local: ${now.toLocaleString()}, UTC: ${now.toUTCString()})`);
   return result;
 }
 
@@ -81,7 +81,7 @@ function saveCounterData(data: DocumentCounterData): void {
 /**
  * Generate next document number
  * Format: {TYPE}-{REGION}-YYMMDD-XXXX
- * @param type Document type (e.g., "RFQ", "QT", "PO")
+ * @param type Document type (e.g., "INQ", "QT", "PO")
  * @param region Region type (e.g., "North America")
  * @returns {string} Generated document number
  */
@@ -116,7 +116,7 @@ export function generateDocumentNumber(type: DocumentType, region: RegionType): 
 
 /**
  * Parse document number to extract type, region, date and sequence
- * @param documentNumber Document number string (e.g., "RFQ-NA-251120-0001")
+ * @param documentNumber Document number string (e.g., "INQ-NA-251120-0001")
  * @returns Parsed data or null if invalid
  */
 export function parseDocumentNumber(documentNumber: string): { type: string; region: string; date: string; sequence: number } | null {
@@ -172,11 +172,12 @@ export function resetDocumentCounter(): void {
 // ========== Convenience Functions ==========
 
 /**
- * Generate RFQ (Request for Quotation) number
- * Format: RFQ-{REGION}-YYMMDD-XXXX
+ * Generate INQ (Customer Inquiry) number
+ * Format: INQ-{REGION}-YYMMDD-XXXX
+ * @deprecated Use generateINQNumber instead
  */
 export function generateRFQNumber(region: RegionType): string {
-  return generateDocumentNumber('RFQ', region);
+  return generateDocumentNumber('XJ', region);
 }
 
 /**
@@ -239,12 +240,12 @@ export function generatePONumber(region: RegionType): string {
 // ========== Backward Compatibility ==========
 
 /**
- * Parse RFQ number (backward compatible)
+ * Parse INQ number (backward compatible, handles legacy RFQ- prefix)
  * @deprecated Use parseDocumentNumber instead
  */
-export function parseRFQNumber(rfqNumber: string): { region: string; date: string; sequence: number } | null {
-  const parsed = parseDocumentNumber(rfqNumber);
-  if (parsed && parsed.type === 'RFQ') {
+export function parseRFQNumber(xjNumber: string): { region: string; date: string; sequence: number } | null {
+  const parsed = parseDocumentNumber(xjNumber);
+  if (parsed && parsed.type === 'XJ') {
     return {
       region: parsed.region,
       date: parsed.date,
@@ -252,8 +253,8 @@ export function parseRFQNumber(rfqNumber: string): { region: string; date: strin
     };
   }
   
-  // Fallback to old format: RFQ-YYMMDD-XXXX (for backward compatibility)
-  const oldFormatMatch = rfqNumber.match(/^RFQ-(\d{6})-(\d{4})$/);
+  // Fallback to old format: handles legacy RFQ-YYMMDD-XXXX (for backward compatibility)
+  const oldFormatMatch = xjNumber.match(/^RFQ-(\d{6})-(\d{4})$/);
   if (oldFormatMatch) {
     return {
       region: 'N/A',
@@ -266,7 +267,7 @@ export function parseRFQNumber(rfqNumber: string): { region: string; date: strin
 }
 
 /**
- * Format RFQ date (backward compatible)
+ * Format document date (backward compatible)
  * @deprecated Use formatDocumentDate instead
  */
 export function formatRFQDate(dateString: string): string {
@@ -274,7 +275,7 @@ export function formatRFQDate(dateString: string): string {
 }
 
 /**
- * Reset RFQ counter (backward compatible)
+ * Reset document counter (backward compatible)
  * @deprecated Use resetDocumentCounter instead
  */
 export function resetRFQCounter(): void {
@@ -300,7 +301,7 @@ export function generateQRNumber(region: RegionType): string {
 }
 
 /**
- * Generate XJ (RFQ to Supplier) number
+ * Generate XJ (Procurement Inquiry to Supplier) number
  * Format: XJ-YYMMDD-XXXX (no region, admin generates it)
  */
 export function generateXJNumber(): string {

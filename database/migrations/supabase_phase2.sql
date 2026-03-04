@@ -94,11 +94,11 @@ create trigger update_inquiries_updated_at before update on public.inquiries
   for each row execute function update_updated_at();
 
 -- ============================================================
--- 4. 新增 rfq 表（供应商询价单 RFQ）
+-- 4. 新增 rfq 表（采购询价单 RFQ）
 -- ============================================================
-create table if not exists public.rfq_records (
+create table if not exists public.xj_records (
   id text primary key,
-  rfq_number text unique,
+  xj_number text unique,
   inquiry_number text,
   sales_quotation_number text,
   supplier_email text not null,
@@ -113,16 +113,16 @@ create table if not exists public.rfq_records (
   updated_at timestamptz default now()
 );
 
-alter table public.rfq_records enable row level security;
-create policy "authenticated can read rfq" on public.rfq_records
+alter table public.xj_records enable row level security;
+create policy "authenticated can read rfq" on public.xj_records
   for select to authenticated using (true);
-create policy "authenticated can write rfq" on public.rfq_records
+create policy "authenticated can write rfq" on public.xj_records
   for all to authenticated using (true) with check (true);
 
-create index if not exists idx_rfq_supplier_email on public.rfq_records(supplier_email);
-create index if not exists idx_rfq_status on public.rfq_records(status);
+create index if not exists idx_xj_supplier_email on public.xj_records(supplier_email);
+create index if not exists idx_xj_status on public.xj_records(status);
 
-create trigger update_rfq_updated_at before update on public.rfq_records
+create trigger update_xj_updated_at before update on public.xj_records
   for each row execute function update_updated_at();
 
 -- ============================================================
@@ -139,9 +139,9 @@ begin
 
   if not exists (
     select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime' and tablename = 'rfq_records'
+    where pubname = 'supabase_realtime' and tablename = 'xj_records'
   ) then
-    alter publication supabase_realtime add table public.rfq_records;
+    alter publication supabase_realtime add table public.xj_records;
   end if;
 end $$;
 

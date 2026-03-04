@@ -1,19 +1,19 @@
 import React, { useRef } from 'react';
-import { SupplierRFQDocument, SupplierRFQData } from './templates/SupplierRFQDocument';
+import { XJDocument, XJData } from './templates/XJDocument';
 import { Button } from '../ui/button';
 import { Download, Printer } from 'lucide-react';
 import { exportToPDF, exportToPDFPrint } from '../../utils/pdfExport';
 import { toast } from 'sonner@2.0.3';
 
 /**
- * 📋 供应商询价单预览页面
+ * 📋 采购询价单预览页面
  * 用于测试和展示询价单模板
  */
 
 // 示例数据
-const sampleRFQData: SupplierRFQData = {
+const sampleRFQData: XJData = {
   rfqNo: 'XJ-251218-1001',
-  rfqDate: '2025-12-18',
+  xjDate: '2025-12-18',
   requiredResponseDate: '2025-12-25',
   requiredDeliveryDate: '2026-01-15',
   
@@ -93,14 +93,14 @@ const sampleRFQData: SupplierRFQData = {
   }
 };
 
-export function SupplierRFQPreview() {
+export function XJPreview() {
   const docRef = useRef<HTMLDivElement>(null);
 
   const handleExportPDF = async () => {
     if (!docRef.current) return;
     
     try {
-      await exportToPDF(docRef.current, `供应商询价单_${sampleRFQData.rfqNo}_${sampleRFQData.supplier.companyName}.pdf`);
+      await exportToPDF(docRef.current, `采购询价单_${sampleRFQData.rfqNo}_${sampleRFQData.supplier.companyName}.pdf`);
       toast.success('询价单已下载为PDF');
     } catch (error) {
       toast.error('导出PDF失败');
@@ -125,8 +125,8 @@ export function SupplierRFQPreview() {
       <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-10 shadow-sm">
         <div className="max-w-[210mm] mx-auto flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold text-gray-900">供应商询价单预览</h1>
-            <p className="text-xs text-gray-500 mt-1">Supplier RFQ Document Preview</p>
+            <h1 className="text-lg font-bold text-gray-900">采购询价单预览</h1>
+            <p className="text-xs text-gray-500 mt-1">Procurement Inquiry Document Preview</p>
           </div>
           <div className="flex gap-2">
             <Button
@@ -152,7 +152,7 @@ export function SupplierRFQPreview() {
 
       {/* 文档预览区域 */}
       <div className="py-8">
-        <SupplierRFQDocument ref={docRef} data={sampleRFQData} />
+        <XJDocument ref={docRef} data={sampleRFQData} />
       </div>
 
       {/* 底部说明 */}
@@ -160,7 +160,7 @@ export function SupplierRFQPreview() {
         <div className="max-w-[210mm] mx-auto">
           <h3 className="text-sm font-semibold text-gray-900 mb-2">📋 询价单说明</h3>
           <div className="text-xs text-gray-600 space-y-1">
-            <p>• 本询价单用于向供应商询价，不包含供应商收款信息和正式采购合同条款</p>
+            <p>• 本询价单用于采购询价，不包含供应商收款信息和正式采购合同条款</p>
             <p>• 包含产品质量、交货时间、验收标准、付款方式、包装唛头、验货技术文件、知识产权、保密条款等核心要求</p>
             <p>• 询价单编号格式：XJ-YYMMDD-XXXX（XJ = 询价，后续为日期和流水号）</p>
             <p>• 供应商应在要求的回复截止日期前提交正式报价单</p>

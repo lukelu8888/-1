@@ -460,7 +460,7 @@ async function createBusinessFlowData() {
   console.log('📋 创建完整业务流程数据...');
   
   // 🔄 业务流程示例：
-  // 1. 客户ABC发起询价 → 2. 业务员Maria接收 → 3. 采购向供应商询价 → 
+  // 1. 客户ABC发起询价 → 2. 业务员Maria接收 → 3. 采购询价 → 
   // 4. 供应商报价 → 5. 财务核价 → 6. Maria向客户报价 → 
   // 7. 客户下单 → 8. 采购下单给供应商 → 9. 供应商发货
   
@@ -681,7 +681,7 @@ async function createBusinessFlowData() {
   });
   
   console.log('✅ 完整业务流程数据创建完成');
-  console.log('   1️⃣ 客户询价 → 2️⃣ 业务员接收 → 3️⃣ 采购向供应商询价');
+  console.log('   1️⃣ 客户询价 → 2️⃣ 业务员接收 → 3️⃣ 采购询价');
   console.log('   4️⃣ 供应商报价 → 5️⃣ 财务核价 → 6️⃣ 向客户报价');
   console.log('   ✨ 完整的三Portal业务闭环测试数据已就绪！');
 }

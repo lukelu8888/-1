@@ -1538,7 +1538,7 @@ export default function QuotationDocument({ rfq, initialData, onSubmit, preview 
             </td>
           </tr>
           <tr>
-            <td className="border border-gray-400 px-2 py-1 bg-gray-100 font-medium">询价单号 RFQ No:</td>
+            <td className="border border-gray-400 px-2 py-1 bg-gray-100 font-medium">采购询价编号 Inquiry No:</td>
             <td className="border border-gray-400 px-2 py-1">
               <input
                 type="text"

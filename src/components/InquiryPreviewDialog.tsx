@@ -2,7 +2,8 @@ import React from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useCart } from '../contexts/CartContext';
 import { useInquiry } from '../contexts/InquiryContext';
-import { useRegion } from '../contexts/RegionContext'; // 🔥 导入 RegionContext
+import { useRegion } from '../contexts/RegionContext';
+import { nextInquiryNumber } from '../lib/supabaseService';
 import { Building2, Mail, Phone, Globe, User, CheckCircle2, Download, Printer, HardDrive, Cloud } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -232,7 +233,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
         },
         body: JSON.stringify({
           access_key: accessKey,
-          subject: `New RFQ ${inquiryNumber} from ${formData.companyName}`,
+          subject: `New INQ ${inquiryNumber} from ${formData.companyName}`,
           from_name: formData.companyName,
           email: formData.email,
           to_email: 'gousllc0604@gmail.com',
@@ -273,7 +274,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
   };
 
   // 🔥 Preview inquiry number (without incrementing counter)
-  // 🌍 Use current user's region for RFQ number
+  // 🌍 Use current user's region for INQ number
   const [inquiryNumber, setInquiryNumber] = React.useState(() => {
     const regionCode = currentUserRegion === 'North America' ? 'NA' : 
                       currentUserRegion === 'South America' ? 'SA' : 'EA';
@@ -287,7 +288,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
                         currentUserRegion === 'South America' ? 'SA' : 'EA';
       const previewNumber = peekInquiryNumber(regionCode);
       setInquiryNumber(previewNumber);
-      console.log('🔢 预览 RFQ 编号:', previewNumber, '用户区域:', currentUserRegion);
+      console.log('🔢 预览 INQ 编号:', previewNumber, '用户区域:', currentUserRegion);
     }
   }, [isOpen, peekInquiryNumber, currentUserRegion]);
 
@@ -296,7 +297,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
   const rfqContentRef = React.useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = React.useState(false);
 
-  // Download RFQ as PDF using html2canvas and jsPDF
+  // Download inquiry as PDF using html2canvas and jsPDF
   const downloadPDF = async () => {
     setIsDownloading(true);
     toast.info('Generating PDF...');
@@ -307,7 +308,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
       const { jsPDF } = await import('jspdf');
 
       if (!rfqContentRef.current) {
-        toast.error('RFQ content not found');
+        toast.error('Inquiry content not found');
         setIsDownloading(false);
         return;
       }
@@ -402,7 +403,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
       }
 
       // Generate filename
-      const filename = `RFQ_${inquiryNumber}_${formData.companyName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+      const filename = `INQ_${inquiryNumber}_${formData.companyName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
       
       // Download the PDF
       pdf.save(filename);
@@ -550,18 +551,18 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
 
   return (
     <div className="space-y-6 py-4">
-      {/* RFQ Content - This will be printed/exported */}
+      {/* Inquiry Content - This will be printed/exported */}
       <div ref={rfqContentRef}>
-      {/* RFQ Header */}
+      {/* Inquiry Header */}
       <div className="border-b-2 border-gray-800 pb-4">
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h1 className="text-3xl mb-2">REQUEST FOR QUOTATION</h1>
+            <h1 className="text-3xl mb-2">CUSTOMER INQUIRY</h1>
             <p className="text-sm text-gray-600">Fujian Gaoshengda Fu Building Materials Co., Ltd.</p>
           </div>
           <div className="text-right">
             <div className="bg-red-600 text-white px-4 py-2 rounded-lg mb-2">
-              <p className="text-xs">RFQ No.</p>
+              <p className="text-xs">INQ No.</p>
               <p className="text-lg">{inquiryNumber}</p>
             </div>
             <p className="text-xs text-gray-600">
@@ -833,7 +834,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
         <h2 className="text-lg mb-3 bg-gray-100 px-3 py-2 rounded">TERMS & CONDITIONS</h2>
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <ul className="text-xs space-y-2 text-gray-700">
-            <li>• This RFQ is valid for 30 days from the date of issue.</li>
+            <li>• This inquiry is valid for 30 days from the date of issue.</li>
             <li>• All prices are estimated FOB values and subject to confirmation.</li>
             <li>• Final pricing, shipping costs, payment terms, and delivery schedule will be negotiated separately.</li>
             <li>• Lead time will be confirmed upon order confirmation.</li>
@@ -861,7 +862,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
             className="px-8"
           >
             <Printer className="h-4 w-4 mr-2" />
-            Print RFQ
+            Print Inquiry
           </Button>
           <Button
             variant="outline"
@@ -871,7 +872,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
             className="px-8 border-green-600 text-green-600 hover:bg-green-50"
           >
             <Download className="h-4 w-4 mr-2" />
-            {isDownloading ? 'Generating...' : 'Save RFQ'}
+            {isDownloading ? 'Generating...' : 'Save Inquiry'}
           </Button>
           <Button
             size="lg"
@@ -885,96 +886,62 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
               console.log('📧 [Preview] 用户邮箱:', formData.email);
               
               try {
-                // Send email first
-                const emailSent = await sendInquiryEmail();
-                
-                if (emailSent) {
-                  // 🔥 NOW generate and save the real inquiry number (increment counter)
-                  // 🌍 Use current user's region instead of selected region
-                  const regionCode = currentUserRegion === 'North America' ? 'NA' : 
-                                    currentUserRegion === 'South America' ? 'SA' : 'EA';
-                  const finalInquiryNumber = generateInquiryNumber(regionCode);
-                  console.log('✅ [Submit] 真正生成并保存 RFQ 编号:', finalInquiryNumber);
-                  console.log('🌍 [Submit] 使用用户区域:', currentUserRegion, '区域代码:', regionCode);
-                  
-                  const date = new Date();
-                  const inquiryId = finalInquiryNumber;
-                  
-                  // 🔥 Create inquiry object matching Inquiry interface
-                  const customerInquiry = {
-                    id: inquiryId,
-                    date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
-                    userEmail: user?.email || formData.email,
-                    products: cartItems,
-                    status: 'pending' as const, // 🔥 已提交给admin，状态为pending
-                    isSubmitted: true, // 🔥 已提交
-                    totalPrice: getTotalPrice(),
-                    shippingInfo: totalShipping,
-                    containerInfo: {
-                      planningMode,
-                      recommendedContainer: planningMode === 'automatic' ? recommendedContainer?.name : undefined,
-                      customContainers: planningMode === 'custom' ? customContainers : undefined,
-                    },
-                    buyerInfo: {
-                      companyName: formData.companyName,
-                      contactPerson: formData.contactPerson,
-                      email: formData.email,
-                      phone: formData.phone,
-                      mobile: formData.mobile || '',
-                      address: formData.address,
-                      website: formData.website || '',
-                      businessType: formData.businessType || ''
-                    },
-                    region: currentUserRegion, // 🔥 使用用户账号的region字段
-                    message: `Container: ${planningMode === 'automatic' ? recommendedContainer?.name : 'Custom'} | Total CBM: ${totalShipping.cbm} | Cartons: ${totalShipping.cartons}`,
-                    createdAt: Date.now(),
-                    submittedAt: Date.now() // 🔥 提交时间
-                  };
-                  
-                  console.log('📦 [Preview] 创建的客户询价对象:', customerInquiry);
-                  
-                  // 🔥 Add inquiry to customer's history
-                  console.log('🔵 [Preview] 准备调用 addInquiry...');
-                  addInquiry(customerInquiry);
-                  console.log('✅ [Preview] addInquiry 已调用');
-                  
-                  // 🔥 Also save to Admin inquiries (for admin portal)
-                  const adminInquiry = {
-                    id: inquiryId,
-                    inquiryNumber: finalInquiryNumber,
-                    customerName: formData.companyName,
-                    customerEmail: formData.email,
-                    customerPhone: formData.phone,
-                    region: '北美',
-                    products: cartItems.map(item => ({
-                      name: item.productName || item.name,
-                      quantity: item.quantity,
-                      specs: `${item.specification || item.specifications || ''} | Color: ${item.color} | FOB: $${(item.unitPrice || item.price || 0).toFixed(2)}`
-                    })),
-                    message: `Container: ${planningMode === 'automatic' ? recommendedContainer?.name : 'Custom'} | Total CBM: ${totalShipping.cbm} | Cartons: ${totalShipping.cartons} | Net Weight: ${totalShipping.totalNetWeight}kg | Gross Weight: ${totalShipping.totalGrossWeight}kg`,
-                    inquiryDate: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
-                    status: 'pending' as const,
-                    priority: 'medium' as const,
-                    source: 'customer' as const,
-                    createdAt: new Date().toISOString(),
-                    quotationCreated: false
-                  };
-                  
-                  const adminInquiries = JSON.parse(localStorage.getItem('admin_inquiries') || '[]');
-                  adminInquiries.unshift(adminInquiry);
-                  localStorage.setItem('admin_inquiries', JSON.stringify(adminInquiries));
-                  
-                  console.log('✅ [Preview] 询价已提交到 Admin 询价管理:', adminInquiry);
-                  console.log('💾 [Preview] 检查 cosun_inquiries 存储:', localStorage.getItem('cosun_inquiries'));
-                  
-                  // Clear cart
-                  clearCart();
-                  // Show success dialog
-                  setShowSuccessDialog(true);
-                  toast.success('Inquiry submitted successfully!');
-                } else {
-                  toast.error('Failed to send inquiry email. Please try again.');
+                // 🔥 Generate inquiry number from Supabase DB (atomic, concurrency-safe)
+                const regionCode = currentUserRegion === 'North America' ? 'NA' :
+                                  currentUserRegion === 'South America' ? 'SA' : 'EA';
+                let finalInquiryNumber: string;
+                try {
+                  finalInquiryNumber = await nextInquiryNumber(regionCode);
+                } catch (numErr) {
+                  console.error('[Submit] Failed to generate inquiry number:', numErr);
+                  toast.error('Failed to generate inquiry number. Please try again.');
+                  setIsSubmitting(false);
+                  return;
                 }
+                console.log('✅ [Submit] DB-generated INQ number:', finalInquiryNumber, 'region:', regionCode);
+
+                // Send email (non-blocking — don't gate inquiry creation on email)
+                sendInquiryEmail().catch(e => console.warn('[Submit] Email send failed (non-critical):', e));
+
+                const date = new Date();
+                const customerInquiry = {
+                  id: finalInquiryNumber,
+                  inquiryNumber: finalInquiryNumber,
+                  date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+                  userEmail: user?.email || formData.email,
+                  products: cartItems,
+                  status: 'pending' as const,
+                  isSubmitted: true,
+                  totalPrice: getTotalPrice(),
+                  shippingInfo: totalShipping,
+                  containerInfo: {
+                    planningMode,
+                    recommendedContainer: planningMode === 'automatic' ? recommendedContainer?.name : undefined,
+                    customContainers: planningMode === 'custom' ? customContainers : undefined,
+                  },
+                  buyerInfo: {
+                    companyName: formData.companyName,
+                    contactPerson: formData.contactPerson,
+                    email: formData.email,
+                    phone: formData.phone,
+                    mobile: formData.mobile || '',
+                    address: formData.address,
+                    website: formData.website || '',
+                    businessType: formData.businessType || ''
+                  },
+                  region: regionCode,
+                  message: `Container: ${planningMode === 'automatic' ? recommendedContainer?.name : 'Custom'} | Total CBM: ${totalShipping.cbm} | Cartons: ${totalShipping.cartons}`,
+                  createdAt: Date.now(),
+                  submittedAt: Date.now(),
+                };
+
+                // Save to Supabase (awaited — failure surfaces to user)
+                await addInquiry(customerInquiry);
+                console.log('✅ [Preview] Inquiry saved to Supabase:', customerInquiry.id);
+
+                clearCart();
+                setShowSuccessDialog(true);
+                toast.success(`Inquiry ${finalInquiryNumber} submitted successfully!`);
               } catch (error) {
                 console.error('Error submitting inquiry:', error);
                 toast.error('An error occurred while submitting your inquiry.');
@@ -987,7 +954,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
           </Button>
         </div>
         <p className="text-center text-xs text-gray-500 mt-3">
-          By submitting this RFQ, you agree to our terms and conditions.
+          By submitting this inquiry, you agree to our terms and conditions.
         </p>
       </div>
 
@@ -1049,7 +1016,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
             <AlertDialogDescription asChild>
               <div className="space-y-4 py-4">
                 <p className="text-center text-sm text-gray-600">
-                  Where would you like to save your RFQ document?
+                  Where would you like to save your inquiry document?
                 </p>
                 
                 {/* Save Options */}
@@ -1130,7 +1097,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
             <AlertDialogDescription asChild>
               <div className="text-center space-y-3">
                 <div className="text-base">
-                  Your RFQ document <span className="font-semibold text-orange-600">{downloadedFileName}</span> has been successfully downloaded to your local computer.
+                  Your inquiry document <span className="font-semibold text-orange-600">{downloadedFileName}</span> has been successfully downloaded to your local computer.
                 </div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-left">
                   <div className="text-gray-900 mb-2">💾 <strong>File Details:</strong></div>
@@ -1166,7 +1133,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
             <AlertDialogDescription asChild>
               <div className="space-y-4 py-4">
                 <p className="text-center text-sm text-gray-600">
-                  Choose a cloud service to save your RFQ document.
+                  Choose a cloud service to save your inquiry document.
                 </p>
                 
                 {/* Cloud Service Options */}
@@ -1262,12 +1229,12 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
               </div>
             </div>
             <AlertDialogTitle className="text-center text-xl">
-              Uploading RFQ
+              Uploading Inquiry
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="text-center space-y-3">
                 <div className="text-base">
-                  Your RFQ document is being uploaded to {selectedCloudService?.charAt(0).toUpperCase() + selectedCloudService?.slice(1)}.
+                  Your inquiry document is being uploaded to {selectedCloudService?.charAt(0).toUpperCase() + selectedCloudService?.slice(1)}.
                 </div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-left">
                   <div className="text-gray-900 mb-2">🔄 <strong>Progress:</strong></div>
@@ -1305,7 +1272,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
             <AlertDialogDescription asChild>
               <div className="text-center space-y-3">
                 <div className="text-base">
-                  Your RFQ document <span className="font-semibold text-orange-600">{downloadedFileName}</span> has been successfully uploaded to {selectedCloudService?.charAt(0).toUpperCase() + selectedCloudService?.slice(1)}.
+                  Your inquiry document <span className="font-semibold text-orange-600">{downloadedFileName}</span> has been successfully uploaded to {selectedCloudService?.charAt(0).toUpperCase() + selectedCloudService?.slice(1)}.
                 </div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-left">
                   <div className="text-gray-900 mb-2">💾 <strong>File Details:</strong></div>

@@ -17,7 +17,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
   const testRFQs = [
     {
       id: 'rfq-001',
-      rfqNumber: 'RFQ-NA-251119-0001',
+      xjNumber: 'INQ-NA-251119-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
       region: 'NA',
@@ -30,11 +30,11 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
         }
       ],
       status: 'quoted',
-      notes: 'Sample RFQ for testing'
+      notes: 'Sample inquiry for testing'
     },
     {
       id: 'rfq-002',
-      rfqNumber: 'RFQ-NA-251120-0001',
+      xjNumber: 'INQ-NA-251120-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
       region: 'NA',
@@ -47,14 +47,14 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
         }
       ],
       status: 'quoted',
-      notes: 'Sample RFQ for testing'
+      notes: 'Sample inquiry for testing'
     }
   ];
   
   const existingRFQs = JSON.parse(localStorage.getItem(`rfqs_${customerEmail}`) || '[]');
   const mergedRFQs = [...existingRFQs];
   testRFQs.forEach(rfq => {
-    const exists = mergedRFQs.find(r => r.rfqNumber === rfq.rfqNumber);
+    const exists = mergedRFQs.find(r => r.xjNumber === rfq.xjNumber);
     if (!exists) {
       mergedRFQs.push(rfq);
     }
@@ -68,7 +68,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     {
       id: 'quo-001',
       quotationNumber: 'QUO-NA-251120-0001',
-      rfqNumber: 'RFQ-NA-251119-0001',
+      xjNumber: 'INQ-NA-251119-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
       region: 'NA',
@@ -93,7 +93,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     {
       id: 'quo-002',
       quotationNumber: 'QUO-NA-251119-0001',
-      rfqNumber: 'RFQ-NA-251120-0001',
+      xjNumber: 'INQ-NA-251120-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
       region: 'NA',

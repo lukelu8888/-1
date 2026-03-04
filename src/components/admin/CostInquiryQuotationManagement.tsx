@@ -14,7 +14,7 @@ import QuoteCreationIntelligent from './QuoteCreationIntelligent'; // 🔥 智�
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
 import { useInquiry } from '../../contexts/InquiryContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：销售报价Context
-import { generateQRNumber, generateQTNumber } from '../../utils/rfqNumberGenerator'; // 🔥 新增：生成QT编号
+import { generateQRNumber, generateQTNumber } from '../../utils/xjNumberGenerator'; // 🔥 新增：生成QT编号
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { apiFetchJson } from '../../api/backend-auth';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
@@ -78,7 +78,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           // 可能是 RFQ-NA-251220-0001 或 INQ-NA-251220-0001
           let sourceINQ = inquiries.find(inq => inq.inquiryNumber === targetQR.sourceInquiryNumber);
           
-          // 如果没找到，试替换 RFQ -> INQ
+          // 兼容旧 RFQ- 前缀：尝试替换为 INQ-
           if (!sourceINQ && targetQR.sourceInquiryNumber?.startsWith('RFQ-')) {
             const inqNumber = targetQR.sourceInquiryNumber.replace('RFQ-', 'INQ-');
             sourceINQ = inquiries.find(inq => inq.inquiryNumber === inqNumber);
@@ -934,7 +934,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                           <div className="space-y-2 p-1">
                             <p className="font-semibold text-sm">📋 采购需求单（QR）定义：</p>
                             <p className="text-xs leading-relaxed">
-                              采购需求单是从客户询价单（INQ/RFQ）下推生成的内部采购询价单据，用于向采购部门提交成本询价需求。
+                              采购需求单是从客户询价单（INQ）下推生成的内部采购询价单据，用于向采购部门提交成本询价需求。
                             </p>
                             <div className="text-xs space-y-1 pt-2 border-t border-gray-200">
                               <p><span className="font-medium">• 作用：</span>获取供应商成本价格，为销售报价提供依据</p>

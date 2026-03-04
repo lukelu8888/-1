@@ -72,7 +72,7 @@ recoverAllData('customer@example.com')
 resetDocumentCounter()
 ```
 
-**功能：** 重置所有文档编号计数器（RFQ/QUO/ORD/YS/SK）
+**功能：** 重置所有文档编号计数器（XJ/QUO/ORD/YS/SK）
 
 **影响范围：**
 - ✅ 重置询价单编号计数器
@@ -151,7 +151,7 @@ location.reload()
 ```
 
 **结果：**
-- ✅ 下一个询价单将是：RFQ-NA-YYMMDD-0001
+- ✅ 下一个询价单将是：XJ-NA-YYMMDD-0001
 - ✅ 下一个报价单将是：QUO-NA-YYMMDD-0001
 - ✅ 下一个订单将是：ORD-NA-YYMMDD-0001
 - ✅ 历史数据保留

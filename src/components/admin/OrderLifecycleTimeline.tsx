@@ -46,7 +46,7 @@ export default function OrderLifecycleTimeline() {
   const mockOrderLifecycles: OrderLifecycle[] = [
     {
       customerName: 'ABC Trading Ltd.',
-      orderReference: 'RFQ-251201-0001',
+      orderReference: 'INQ-251201-0001',
       region: 'NA',
       totalAmount: 125000,
       currency: 'USD',
@@ -59,7 +59,7 @@ export default function OrderLifecycleTimeline() {
           icon: FileText,
           status: 'completed',
           date: '2024-12-01',
-          documentId: 'RFQ-251201-0001',
+          documentId: 'INQ-251201-0001',
           color: 'blue',
           details: '客户提交询价单，5个产品项'
         },
@@ -115,7 +115,7 @@ export default function OrderLifecycleTimeline() {
     },
     {
       customerName: 'Global Parts Ltd.',
-      orderReference: 'RFQ-251115-0012',
+      orderReference: 'INQ-251115-0012',
       region: 'NA',
       totalAmount: 85000,
       currency: 'USD',
@@ -127,7 +127,7 @@ export default function OrderLifecycleTimeline() {
           icon: FileText,
           status: 'completed',
           date: '2024-11-15',
-          documentId: 'RFQ-251115-0012',
+          documentId: 'INQ-251115-0012',
           color: 'blue'
         },
         {
@@ -180,7 +180,7 @@ export default function OrderLifecycleTimeline() {
     },
     {
       customerName: 'Euro Building Materials',
-      orderReference: 'RFQ-251125-0018',
+      orderReference: 'INQ-251125-0018',
       region: 'EA',
       totalAmount: 210000,
       currency: 'EUR',
@@ -192,7 +192,7 @@ export default function OrderLifecycleTimeline() {
           icon: FileText,
           status: 'completed',
           date: '2024-11-25',
-          documentId: 'RFQ-251125-0018',
+          documentId: 'INQ-251125-0018',
           color: 'blue'
         },
         {

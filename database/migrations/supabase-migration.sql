@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS public.accounts_receivable (
 CREATE TABLE IF NOT EXISTS public.supplier_quotations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   rfq_id TEXT,
-  rfq_number TEXT,
+  xj_number TEXT,
   supplier_email TEXT NOT NULL,
   supplier_name TEXT,
   products JSONB NOT NULL DEFAULT '[]',

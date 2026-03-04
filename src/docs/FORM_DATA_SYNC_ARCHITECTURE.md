@@ -165,7 +165,7 @@ export interface FormTemplate {
 // /config/formTemplatesCosunReal.ts
 export const inquiryFormTemplate: FormTemplate = {
   id: 'inquiry-rfq-v1',
-  name: '询价单（RFQ）',
+  name: '询价单（INQ）',
   nameEn: 'Request for Quotation',
   category: 'inquiry',
   sections: [
@@ -367,7 +367,7 @@ export function AdminInquiryManagement() {
 
 | Context名称 | 管理的表单类型 | 文件位置 | 主要功能 |
 |------------|---------------|---------|---------|
-| `InquiryContext` | 询价单（RFQ） | `/contexts/InquiryContext.tsx` | 管理询价单的创建、更新、状态变更 |
+| `InquiryContext` | 询价单（INQ） | `/contexts/InquiryContext.tsx` | 管理询价单的创建、更新、状态变更 |
 | `QuotationContext` | 报价单（Quotation） | `/contexts/QuotationContext.tsx` | 管理报价单的生成、修改、发送 |
 | `OrderContext` | 订单（Order）、销售合同（SC） | `/contexts/OrderContext.tsx` | 管理订单全生命周期 |
 | `PaymentContext` | 付款记录、应收账款 | `/contexts/PaymentContext.tsx` | 管理付款状态与财务流转 |
@@ -664,7 +664,7 @@ export function AdminQuotationList() {
 │                          COSUN B2B 全流程数据流转                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-📝 询价单 (RFQ - Request for Quotation)
+📝 询价单 (INQ - Customer Inquiry)
 ┌────────────────────────────────────────────────────────────────┐
 │ ID: INQ-2025-0001                                              │
 │ Status: Draft → Submitted → Under Review → Quoted             │

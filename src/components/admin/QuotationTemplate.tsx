@@ -90,7 +90,7 @@ const QuotationTemplate = forwardRef<HTMLDivElement, QuotationTemplateProps>(
                 <tr className="border-b border-gray-300">
                   <td className="bg-gray-100 px-3 py-1.5 w-32">
                     <div>詢價單號碼</div>
-                    <div className="text-[10px] text-gray-500">RFQ No.</div>
+                    <div className="text-[10px] text-gray-500">INQ No.</div>
                   </td>
                   <td className="px-3 py-1.5">{quotation.inquiryNumber}</td>
                 </tr>

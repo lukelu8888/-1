@@ -188,7 +188,7 @@ const documentTypeConfig: Record<string, {
   category: 'sales' | 'procurement' | 'logistics' | 'customs' | 'finance';
   description: string;
 }> = {
-  'RFQ': { prefix: 'RFQ', name: '客户询价单', nameEn: 'Request for Quotation', color: '#8B5CF6', icon: '📝', category: 'sales', description: '客户通过Portal提交的产品询价' },
+  'INQ': { prefix: 'INQ', name: '客户询价单', nameEn: 'Customer Inquiry', color: '#8B5CF6', icon: '📝', category: 'sales', description: '客户通过Portal提交的产品询价' },
   'QT': { prefix: 'QT', name: '报价单', nameEn: 'Quotation', color: '#10B981', icon: '💰', category: 'sales', description: '业务员向客户提供的正式报价' },
   'PI': { prefix: 'PI', name: '形式发票', nameEn: 'Proforma Invoice', color: '#06B6D4', icon: '📄', category: 'sales', description: '用于客户预付款的形式发票' },
   'SC': { prefix: 'SC', name: '销售合同', nameEn: 'Sales Contract', color: '#3B82F6', icon: '📋', category: 'sales', description: '与客户签订的外贸销售合同' },
@@ -219,7 +219,7 @@ const regionCodeMap: Record<string, string> = {
  * 
  * 逻辑说明：
  * 1. 类型前缀（2-3位）：标识单据类型，符合国际惯例
- *    - RFQ/QT/SC：销售类单据
+ *    - INQ/QT/SC：销售类单据
  *    - CG：采购合同类单据
  *    - PO：采购订单
  *    - CI/PL/BL：物流类单据
@@ -238,7 +238,7 @@ const regionCodeMap: Record<string, string> = {
  *    - 0001-9999：支持每年每月每区域9999笔业务
  * 
  * 示例：
- * - RFQ-NA-2512-0001：2025年12月北美区域第1笔客户询价
+ * - INQ-NA-2512-0001：2025年12月北美区域第1笔客户询价
  * - SC-NA-2512-0016：2025年12月北美区域第16笔销售合同
  * - CG-DOM-2512-0026：2025年12月国内采购第26笔采购合同
  * - CD-XMN-2512-0083：2025年12月厦门港第83笔报关单
@@ -405,8 +405,8 @@ export const getAllSteps = (statusConfig: Record<string, StepStatus>): Step[] =>
     // 阶段1：询价报价（1-16）
     { 
       id: 1, role: '客户', stageId: 1, stageName: '询价报价', title: '发起询盘', action: '在后台发起询盘', time: '12-04 09:00', nextStepId: 2,
-      documentType: 'RFQ',
-      documentNo: 'RFQ-NA-2512-0001',
+      documentType: 'INQ',
+      documentNo: 'INQ-NA-2512-0001',
       status: statusConfig.completed,
       statusDetails: { 
         operator: 'ABC Building Supplies', 
@@ -493,7 +493,7 @@ export const getAllSteps = (statusConfig: Record<string, StepStatus>): Step[] =>
           { label: '下一步', value: '生成采购询价单（XJ）', icon: '📝' }
         ],
         notification: {
-          message: '已接收成本询报QR-NA-2512-0001，准备生成采购询价单向供应商询价',
+          message: '已接收成本询报QR-NA-2512-0001，准备生成采购询价单',
           notifier: '采购员刘刚'
         }
       }
@@ -507,7 +507,7 @@ export const getAllSteps = (statusConfig: Record<string, StepStatus>): Step[] =>
         operator: '刘刚', 
         completedTime: '2025-12-04 10:00', 
         quantity: '5000件', 
-        remarks: '已向3家供应商询价',
+        remarks: '已向3家供应商发送采购询价',
         fields: [
           { label: '采购询价单号', labelEn: 'Purchase Inquiry No.', value: 'XJ-NA-2512-0001', valueEn: 'XJ-NA-2512-0001', icon: '📄' },
           { label: '关联成本询报', value: 'QR-NA-2512-0001', icon: '🔗' },
@@ -655,7 +655,7 @@ export const getAllSteps = (statusConfig: Record<string, StepStatus>): Step[] =>
         quantity: '5000件', 
         remarks: '加价47%利润率，待销售总监审核',
         fields: [
-          // 🔥 报价单产品明细（标准格式，与RFQ对应）
+          // 🔥 报价单产品明细（标准格式，与INQ对应）
           { label: '序号', labelEn: 'Seq.#', value: '1', valueEn: '1', icon: '🔢' },
           { label: '型号', labelEn: 'Model No.', value: 'ES-2024', valueEn: 'ES-2024', icon: '🔖' },
           { label: '产品名称', labelEn: 'Item Name', value: '电气配件', valueEn: 'Electrical Accessories', icon: '🔌' },
@@ -811,7 +811,7 @@ export const getAllSteps = (statusConfig: Record<string, StepStatus>): Step[] =>
         quantity: '5000件',
         remarks: '已生成销售合同，待销售总监审核',
         fields: [
-          // 🔥 销售合同产品明细（标准格式，与RFQ、QT对应）
+          // 🔥 销售合同产品明细（标准格式，与INQ、QT对应）
           { label: '序号', labelEn: 'Seq.#', value: '1', valueEn: '1', icon: '🔢' },
           { label: '型号', labelEn: 'Model No.', value: 'ES-2024', valueEn: 'ES-2024', icon: '🔖' },
           { label: '产品名称', labelEn: 'Item Name', value: '电气配件', valueEn: 'Electrical Accessories', icon: '🔌' },

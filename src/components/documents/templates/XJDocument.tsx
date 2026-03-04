@@ -2,18 +2,18 @@ import React, { forwardRef } from 'react';
 import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
 
 /**
- * 📋 供应商询价单（Request for Quotation - RFQ）
+ * 📋 采购询价单（Procurement Inquiry - XJ）
  * 
- * 用途：向供应商询价，获取产品报价和供应能力
+ * 用途：采购询价，获取产品报价和供应能力
  * 场景：采购需求池 → 发送询价给供应商 → 收集报价
  * 不包含：供应商收款信息、采购合同条款
  * 包含：产品质量、交货时间、验收标准、付款方式、包装唛头、验货技术文件、知识产权、保密条款
  */
 
-export interface SupplierRFQData {
+export interface XJData {
   // 询价单基本信息
-  rfqNo: string;                    // RFQ-20251218-001
-  rfqDate: string;                  // 2025-12-18
+  rfqNo: string;                    // XJ-20251218-001
+  xjDate: string;                  // 2025-12-18
   requiredResponseDate: string;     // 要求回复日期
   requiredDeliveryDate: string;     // 要求交货日期
   inquiryDescription?: string;      // 询价说明（可选）
@@ -85,11 +85,11 @@ export interface SupplierRFQData {
   };
 }
 
-interface SupplierRFQDocumentProps {
-  data: SupplierRFQData;
+interface XJDocumentProps {
+  data: XJData;
 }
 
-export const SupplierRFQDocument = forwardRef<HTMLDivElement, SupplierRFQDocumentProps>(
+export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
   ({ data }, ref) => {
     
     return (
@@ -213,7 +213,7 @@ export const SupplierRFQDocument = forwardRef<HTMLDivElement, SupplierRFQDocumen
                     <h1 className="text-3xl font-bold tracking-wider text-black">
                       询价单
                     </h1>
-                    <p className="text-sm text-gray-600 mt-1">Request for Quotation</p>
+                    <p className="text-sm text-gray-600 mt-1">Procurement Inquiry</p>
                   </div>
                 </div>
                 
@@ -228,7 +228,7 @@ export const SupplierRFQDocument = forwardRef<HTMLDivElement, SupplierRFQDocumen
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">询价日期</td>
                         <td className="border border-gray-400 px-1.5 py-0.5">
-                          {new Date(data.rfqDate).toLocaleDateString('zh-CN', { 
+                          {new Date(data.xjDate).toLocaleDateString('zh-CN', { 
                             year: 'numeric', 
                             month: '2-digit', 
                             day: '2-digit' 
@@ -604,4 +604,4 @@ export const SupplierRFQDocument = forwardRef<HTMLDivElement, SupplierRFQDocumen
   }
 );
 
-SupplierRFQDocument.displayName = 'SupplierRFQDocument';
+XJDocument.displayName = 'XJDocument';

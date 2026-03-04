@@ -20,11 +20,11 @@ export async function downloadRFQAsPDF(inquiryId: string): Promise<void> {
     throw new Error('Unable to access iframe document');
   }
 
-  // Get the RFQ content
+  // Get the inquiry content
   const rfqContent = document.querySelector('[data-rfq-content]');
   if (!rfqContent) {
     document.body.removeChild(iframe);
-    throw new Error('RFQ content not found');
+    throw new Error('Inquiry content not found');
   }
 
   // Clone the content
@@ -51,7 +51,7 @@ export async function downloadRFQAsPDF(inquiryId: string): Promise<void> {
     <html>
       <head>
         <meta charset="UTF-8">
-        <title>RFQ-${inquiryId}</title>
+        <title>INQ-${inquiryId}</title>
         <style>
           ${stylesheets}
           
@@ -127,10 +127,10 @@ export async function downloadRFQAsPDFAdvanced(inquiryId: string): Promise<void>
     // Dynamic import of html2pdf library
     const html2pdf = await import('html2pdf.js@0.10.2');
     
-    // Get the RFQ content element
+    // Get the inquiry content element
     const element = document.querySelector('[data-rfq-content]');
     if (!element) {
-      throw new Error('RFQ content not found');
+      throw new Error('Inquiry content not found');
     }
 
     // Clone the element to avoid modifying the original
@@ -149,7 +149,7 @@ export async function downloadRFQAsPDFAdvanced(inquiryId: string): Promise<void>
     // PDF options
     const opt = {
       margin: [15, 15, 15, 15], // 15mm margins
-      filename: `RFQ-${inquiryId}.pdf`,
+      filename: `INQ-${inquiryId}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { 
         scale: 2,

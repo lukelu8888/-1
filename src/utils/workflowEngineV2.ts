@@ -256,13 +256,13 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
             type: "notification",
             recipients: ["sales_rep"],
             message: "财务已向供应商发送询价: {inquiry_number} - 预计响应: {response_deadline}",
-            title: "✅ 供应商询价已发送"
+            title: "✅ 采购询价已发送"
           },
           {
             type: "status_change",
             target: "inquiry",
             new_status: "supplier_inquiry_sent",
-            display: "供应商询价中"
+            display: "采购询价中"
           }
         ],
         next_steps: ["supplier_feedback_inquiry"]

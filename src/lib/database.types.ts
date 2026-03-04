@@ -227,7 +227,7 @@ export interface Database {
         Row: {
           id: string;
           rfq_id: string | null;
-          rfq_number: string | null;
+          xj_number: string | null;
           supplier_email: string;
           supplier_name: string | null;
           products: Json;

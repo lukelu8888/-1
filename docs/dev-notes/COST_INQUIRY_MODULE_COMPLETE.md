@@ -122,7 +122,7 @@ QT.selectedBJ = QR.selectedSupplier.bjNumber
    status = 'submitted'
    ↓
 【采购员 - 采购需求】看到QR（不显示客户名）
-   ↓ 向3个供应商询价
+   ↓ 向3个采购询价
    status = 'processing'
    创建 XJ-1, XJ-2, XJ-3
    ↓
@@ -221,7 +221,7 @@ completed（已完成）
 - ✅ 可见：自己创建的QR
 - ✅ 可见：采购反馈的成本
 - ❌ 不可见：供应商联系方式
-- ❌ 不可见：采购员向哪些供应商询价
+- ❌ 不可见：采购员向哪些采购询价
 
 ### **采购员端 - 采购需求模块**
 - ✅ 可见：所有业务员提交的QR

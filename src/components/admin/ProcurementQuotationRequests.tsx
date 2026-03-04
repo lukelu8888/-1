@@ -11,7 +11,7 @@ import { ProductSupplierDistributionDialog } from './ProductSupplierDistribution
  * 业务流程：
  * 1. 业务员从客户询价单推送报价请求到采购部
  * 2. 采购员在此查看所有待处理的报价请求
- * 3. 采购员可以接受请求，然后向供应商发起RFQ
+ * 3. 采购员可以接受请求，然后向供应商发起采购询价（XJ）
  * 
  * 权限隔离：
  * - 采购员看不到客户信息（customerName已匿名化为"客户A/B/C"）
@@ -293,7 +293,7 @@ export function ProcurementQuotationRequests() {
                             setIsDistributionDialogOpen(true);
                           }}
                         >
-                          创建RFQ
+                          创建XJ
                         </Button>
                       )}
                       {request.status === 'quoted' && (

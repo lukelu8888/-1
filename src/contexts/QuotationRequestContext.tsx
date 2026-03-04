@@ -6,7 +6,7 @@ import React, { createContext, useContext, useState, ReactNode } from 'react';
  * 业务流程：
  * 1. 业务员收到客户询价(Customer Inquiry)
  * 2. 业务员向采购员发起"报价请求"(Quotation Request)
- * 3. 采购员收到报价请求后，向多个供应商询价(RFQ)
+ * 3. 采购员收到报价请求后，向多个供应商发送采购询价(XJ)
  * 4. 供应商报价
  * 5. 采购员选择最优报价，创建PO
  * 6. 业务员基于成本给客户报价
@@ -58,9 +58,9 @@ export interface QuotationRequest {
   assignedToName?: string; // 采购员姓名
   assignedDate?: string;
   
-  // 关联的RFQ（采购员创建的）
+  // 关联的XJ（采购员创建的采购询价）
   rfqIds?: string[];
-  rfqCount?: number; // RFQ数量
+  rfqCount?: number; // XJ数量
   
   // 报价信息（采购员完成后）
   quotedPrice?: number;

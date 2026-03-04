@@ -27,7 +27,8 @@ import { useInquiry } from '../../contexts/InquiryContext';
 import { InquiryPreviewDialog } from '../InquiryPreviewDialog';
 import { InquiryProductBrowser } from './InquiryProductBrowser';
 import { InquiryProductHome } from './InquiryProductHome';
-import { generateRFQNumber, type RegionType } from '../../utils/rfqNumberGenerator';
+import { REGION_CODES, type RegionType } from '../../utils/xjNumberGenerator';
+import { nextInquiryNumber } from '../../lib/supabaseService';
 import { getCurrentUser } from '../../data/authorizedUsers';
 
 interface ProductItem {
@@ -164,7 +165,7 @@ export function CreateInquiryPage({
     onClose();
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!user) {
       toast.error('Please log in to submit an inquiry');
       return;
@@ -175,18 +176,28 @@ export function CreateInquiryPage({
       return;
     }
 
-    // 🌍 Get user's region from logged-in user data
     const currentUser = getCurrentUser();
     const userRegion: RegionType = currentUser?.region || 'North America';
+    const regionCode = REGION_CODES[userRegion] || 'NA';
+
+    let inquiryNumber: string;
+    try {
+      inquiryNumber = await nextInquiryNumber(regionCode);
+    } catch (err) {
+      console.error('Failed to generate inquiry number:', err);
+      toast.error('Failed to generate inquiry number');
+      return;
+    }
 
     const now = Date.now();
     const totalPrice = products.reduce((sum, p) => sum + (p.targetPrice || 0) * p.quantity, 0);
 
     const newInquiry = {
-      id: generateRFQNumber(userRegion), // 🌍 Generate RFQ number with region code
+      id: crypto.randomUUID(),
+      inquiryNumber,
       date: new Date().toISOString().split('T')[0],
       userEmail: user.email,
-      region: userRegion, // 🌍 Add region to inquiry
+      region: regionCode, // 存区域代码 NA/SA/EA，不存全名
       products: products.map(p => ({
         id: p.id,
         productName: p.productName,
@@ -219,12 +230,16 @@ export function CreateInquiryPage({
     };
 
     console.log('🔵 提交新询价:', newInquiry);
-    addInquiry(newInquiry);
-    
-    // Clear draft
+    try {
+      await addInquiry(newInquiry);
+    } catch (saveErr) {
+      console.error('Failed to save inquiry:', saveErr);
+      toast.error('Failed to save inquiry. Please try again.');
+      return;
+    }
+
     localStorage.removeItem('inquiry_draft');
-    
-    toast.success('Inquiry submitted successfully!');
+    toast.success(`Inquiry ${inquiryNumber} created successfully!`);
     setProducts([]);
     onClose();
   };

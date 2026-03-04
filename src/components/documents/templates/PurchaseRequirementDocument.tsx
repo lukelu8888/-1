@@ -5,7 +5,7 @@ import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png'
  * 📋 采购需求单（Purchase Requirement - QR）
  * 
  * 用途：内部采购询价单，从客户询价单（INQ）下推生成，用于向采购部门提交成本询价需求
- * 场景：客户询价（INQ）→ 采购需求（QR）→ 供应商询价（XJ）→ 供应商报价（BJ）
+ * 场景：客户询价（INQ）→ 采购需求（QR）→ 采购询价（XJ）→ 供应商报价（BJ）
  * 包含：客户信息、产品信息、客户需求要素、采购要求
  */
 
@@ -456,7 +456,7 @@ export const PurchaseRequirementDocument = forwardRef<HTMLDivElement, PurchaseRe
                   <div className="whitespace-pre-wrap">{data.salesDeptNotes}</div>
                 ) : (
                   <>
-                    <p>✓ 请根据产品清单向合适的供应商询价，获取最优成本价格</p>
+                    <p>✓ 请根据产品清单向合适的供应商发送采购询价，获取最优成本价格</p>
                     <p>✓ 供应商报价需包括：单价、总价、交货期、付款方式、MOQ等信息</p>
                     <p>✓ 如有质量认证要求，请要求供应商提供相关证书和检测报告</p>
                     <p>✓ 请在回复截止日期前完成询价，并将成本反馈给业务员</p>

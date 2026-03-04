@@ -60,7 +60,7 @@ export default function SupplierMessages() {
       name: '报价回复',
       templates: [
         '已收到询价单，预计{hours}小时内提供详细报价。',
-        '关于RFQ-{rfq_id}，我们可以提供有竞争力的报价，详细报价已在报价模块提交。',
+        '关于XJ-{rfq_id}，我们可以提供有竞争力的报价，详细报价已在报价模块提交。',
         '该产品我们有现成的生产线，可以给予{discount}%的价格优惠。',
       ]
     },
@@ -100,7 +100,7 @@ export default function SupplierMessages() {
     },
     {
       id: 'conv-3',
-      orderId: 'RFQ-2024-088',
+      orderId: 'XJ-2024-088',
       participant: 'COSUN管理员',
       department: '采购部',
       lastMessage: '有新的询价单，请查看并提供报价。',
@@ -171,7 +171,7 @@ export default function SupplierMessages() {
         sender: 'COSUN管理员',
         senderType: 'admin',
         department: '采购部',
-        message: '有新的询价单RFQ-2024-088，产品：LED面板灯 1200x300mm，数量：8000件。请在24小时内提供报价。',
+        message: '有新的询价单XJ-2024-088，产品：LED面板灯 1200x300mm，数量：8000件。请在24小时内提供报价。',
         timestamp: '2024-11-16 11:00',
         note: '客户项目紧急，希望尽快报价'
       },

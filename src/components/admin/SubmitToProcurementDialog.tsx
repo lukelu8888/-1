@@ -366,7 +366,7 @@ export function SubmitToProcurementDialog({
                           </div>
                         </div>
                         <p className="text-xs text-gray-500">
-                          采购员需在此日期前完成供应商询价
+                          采购员需在此日期前完成采购询价
                         </p>
                       </div>
 

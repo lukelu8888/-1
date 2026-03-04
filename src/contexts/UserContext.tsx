@@ -100,7 +100,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const applySession = async (session: any) => {
       if (!session?.user) { setUserState(null); return; }
-      const profile = await fetchProfile(session.user.id);
+      let profile: any = null;
+      try {
+        profile = await fetchProfile(session.user.id);
+      } catch (err) {
+        console.warn('fetchProfile failed, falling back to user_metadata:', err);
+      }
       if (profile) {
         setUserState({
           id: session.user.id,
@@ -132,9 +137,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
     };
 
     // 页面刷新时主动检查已有 session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      void applySession(session).finally(() => setAuthLoading(false));
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => applySession(session))
+      .catch((err) => {
+        console.error('getSession failed, treating as logged-out:', err);
+        setUserState(null);
+      })
+      .finally(() => setAuthLoading(false));
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
@@ -209,10 +218,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(counterKey, String(counter));
       
       const sequence = String(counter).padStart(4, '0');
-      return `RFQ-${region}-${dateStr}-${sequence}`; // 🔥 RFQ instead of INQ
+      return `INQ-${region}-${dateStr}-${sequence}`;
     }
     
-    return `RFQ-${region}-${dateStr}-0001`;
+    return `INQ-${region}-${dateStr}-0001`;
   };
 
   const peekInquiryNumber = (region: string) => {
@@ -232,10 +241,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
       
       const sequence = String(counter).padStart(4, '0');
-      return `RFQ-${region}-${dateStr}-${sequence}`; // 🔥 RFQ instead of INQ
+      return `INQ-${region}-${dateStr}-${sequence}`;
     }
     
-    return `RFQ-${region}-${dateStr}-0001`;
+    return `INQ-${region}-${dateStr}-0001`;
   };
 
   return (

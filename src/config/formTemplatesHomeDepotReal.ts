@@ -3383,16 +3383,16 @@ const homeDepotRealTemplates: FormTemplate[] = [
     }
   },
 
-  // 11. 客户询价单 (Request for Quotation - RFQ)
+  // 11. 客户询价单 (Customer Inquiry)
   {
     id: 'hd_rfq_customer',
     name: '客户询价单',
-    name_en: 'REQUEST FOR QUOTATION (RFQ)',
+    name_en: 'CUSTOMER INQUIRY (INQ)',
     type: 'rfq',
     owner: 'customer',
     version: '1.0',
     lastModified: '2024-01-15',
-    description: '客户询价单（Home Depot向供应商询价）',
+    description: '客户询价单（Home Depot客户询价）',
 
     layout: {
       pageSize: 'Letter',
@@ -3401,7 +3401,7 @@ const homeDepotRealTemplates: FormTemplate[] = [
     },
 
     sections: [
-      // RFQ Header
+      // Inquiry Header
       {
         id: 'rfq_header',
         name: 'rfq_header',
@@ -3429,10 +3429,10 @@ const homeDepotRealTemplates: FormTemplate[] = [
                   </div>
                   <div style="text-align: right;">
                     <div style="font-size: 24px; font-weight: 900; color: #000; margin-bottom: 4px;">
-                      REQUEST FOR
+                      CUSTOMER
                     </div>
                     <div style="font-size: 24px; font-weight: 900; color: #F96302;">
-                      QUOTATION
+                      INQUIRY
                     </div>
                   </div>
                 </div>
@@ -3442,29 +3442,29 @@ const homeDepotRealTemplates: FormTemplate[] = [
         ]
       },
 
-      // RFQ Details
+      // Inquiry Details
       {
         id: 'rfq_details',
         name: 'rfq_details',
-        title: 'RFQ DETAILS',
+        title: 'INQUIRY DETAILS',
         layout: 'triple',
         backgroundColor: '#F5F5F5',
         border: true,
         fields: [
           {
-            id: 'rfq_number',
-            label: 'RFQ NUMBER',
+            id: 'xj_number',
+            label: 'INQ NUMBER',
             type: 'text',
             required: true,
             width: '33%',
-            defaultValue: 'RFQ-HD-2024-0001',
+            defaultValue: 'INQ-HD-2024-0001',
             fontWeight: 'bold',
             fontSize: 11,
             backgroundColor: '#FFF8F0'
           },
           {
             id: 'rfq_date',
-            label: 'RFQ DATE',
+            label: 'INQUIRY DATE',
             type: 'date',
             required: true,
             width: '33%'
@@ -3541,7 +3541,7 @@ const homeDepotRealTemplates: FormTemplate[] = [
       {
         id: 'items_requested',
         name: 'items_requested',
-        title: 'ITEMS REQUESTED FOR QUOTATION',
+        title: 'ITEMS REQUESTED FOR INQUIRY',
         layout: 'table',
         fields: [
           {
@@ -3699,7 +3699,7 @@ const homeDepotRealTemplates: FormTemplate[] = [
                 • Certifications and compliance documents<br/><br/>
                 
                 <strong>2. SUBMISSION METHOD:</strong><br/>
-                Please submit your quotation via email to the buyer contact listed above, referencing the RFQ number in the subject line.<br/><br/>
+                Please submit your quotation via email to the buyer contact listed above, referencing the inquiry number in the subject line.<br/><br/>
                 
                 <strong>3. EVALUATION CRITERIA:</strong><br/>
                 Quotes will be evaluated based on price, quality, delivery time, payment terms, vendor capabilities, and past performance.<br/><br/>
@@ -3707,7 +3707,7 @@ const homeDepotRealTemplates: FormTemplate[] = [
                 <strong>4. IMPORTANT NOTES:</strong><br/>
                 • Late submissions will not be considered<br/>
                 • Home Depot reserves the right to accept or reject any or all quotes<br/>
-                • This RFQ does not constitute a purchase order or commitment to buy
+                • This inquiry does not constitute a purchase order or commitment to buy
               </div>
             `
           }
@@ -3716,7 +3716,7 @@ const homeDepotRealTemplates: FormTemplate[] = [
     ],
 
     footer: {
-      text: '© 2024 The Home Depot, Inc. This RFQ is confidential and intended only for the recipient vendor.',
+      text: '© 2024 The Home Depot, Inc. This inquiry is confidential and intended only for the recipient vendor.',
       signatureLines: {
         enabled: true,
         parties: [

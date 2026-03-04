@@ -33,7 +33,7 @@ import { QuotationDocument, QuotationData } from './templates/QuotationDocument'
 import { SalesContractDocument, SalesContractData } from './templates/SalesContractDocument';
 import { PurchaseOrderDocument, PurchaseOrderData } from './templates/PurchaseOrderDocument';
 import { ProformaInvoiceDocument, ProformaInvoiceData } from './templates/ProformaInvoiceDocument';
-import { SupplierRFQDocument, SupplierRFQData } from './templates/SupplierRFQDocument';
+import { XJDocument, XJData } from './templates/XJDocument';
 import { SupplierQuotationDocument, SupplierQuotationData } from './templates/SupplierQuotationDocument';
 import { PurchaseRequirementDocument, PurchaseRequirementDocumentData } from './templates/PurchaseRequirementDocument';
 import { StatementOfAccountDocument, StatementOfAccountData } from './templates/StatementOfAccountDocument';
@@ -58,7 +58,7 @@ type DocumentType =
   | 'sales-contract'    // 销售合同
   | 'purchase-order'    // 采购订单
   | 'proforma-invoice'  // 形式发票
-  | 'supplier-rfq'      // 供应商询价单
+  | 'supplier-rfq'      // 采购询价单
   | 'supplier-quotation' // 供应商报价单
   | 'purchase-requirement' // 采购需求单
   | 'statement'         // 对账单
@@ -71,7 +71,7 @@ type DocumentData =
   | SalesContractData 
   | PurchaseOrderData 
   | ProformaInvoiceData
-  | SupplierRFQData
+  | XJData
   | SupplierQuotationData
   | PurchaseRequirementDocumentData
   | StatementOfAccountData
@@ -103,7 +103,7 @@ export function DocumentEditor() {
     { value: 'sales-contract', label: '📄 销售合同', color: 'purple' },
     { value: 'purchase-order', label: '🛒 采购订单', color: 'orange' },
     { value: 'proforma-invoice', label: '📜 形式发票', color: 'indigo' },
-    { value: 'supplier-rfq', label: '📨 供应商询价单', color: 'cyan' },
+    { value: 'supplier-xj', label: '📨 采购询价单', color: 'cyan' },
     { value: 'supplier-quotation', label: '💵 供应商报价单', color: 'teal' },
     { value: 'purchase-requirement', label: '📋 采购需求单', color: 'amber' },
     { value: 'statement', label: '📊 对账单', color: 'pink' },
@@ -274,8 +274,8 @@ export function DocumentEditor() {
         return <PurchaseOrderDocument ref={documentRef} data={documentData as PurchaseOrderData} />;
       case 'proforma-invoice':
         return <ProformaInvoiceDocument ref={documentRef} data={documentData as ProformaInvoiceData} />;
-      case 'supplier-rfq':
-        return <SupplierRFQDocument ref={documentRef} data={documentData as SupplierRFQData} />;
+      case 'supplier-xj':
+        return <XJDocument ref={documentRef} data={documentData as XJData} />;
       case 'supplier-quotation':
         return <SupplierQuotationDocument ref={documentRef} data={documentData as SupplierQuotationData} />;
       case 'purchase-requirement':
@@ -652,7 +652,7 @@ function renderBasicFields(type: DocumentType, data: any, updateField: (path: st
     'sales-contract': 'contractNo',
     'purchase-order': 'poNo',
     'proforma-invoice': 'piNo',
-    'supplier-rfq': 'rfqNo',
+    'supplier-xj': 'xjNo',
     'supplier-quotation': 'quotationNo',
     'purchase-requirement': 'requirementNo',
   };
@@ -769,7 +769,7 @@ function getDocTypeName(type: DocumentType): string {
     'sales-contract': '销售合同',
     'purchase-order': '采购订单',
     'proforma-invoice': '形式发票',
-    'supplier-rfq': '供应商询价单',
+    'supplier-xj': '采购询价单',
     'supplier-quotation': '供应商报价单',
     'purchase-requirement': '采购需求单',
     'statement': '对账单',

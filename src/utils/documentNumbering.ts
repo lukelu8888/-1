@@ -23,7 +23,7 @@ export const DOCUMENT_LEVELS: Record<string, DocumentLevel> = {
     enName: 'Customer Inquiry',
     color: 'blue'
   },
-  'RFQ': {
+  'XJ': {
     level: 1,
     code: 'INQ',
     name: '客户询价',
@@ -41,7 +41,7 @@ export const DOCUMENT_LEVELS: Record<string, DocumentLevel> = {
     level: 3,
     code: 'XJ',
     name: '询价比价',
-    enName: 'RFQ Comparison',
+    enName: 'Procurement Inquiry Comparison',
     color: 'orange'
   },
   'BJ': {
@@ -76,7 +76,7 @@ export const DOCUMENT_LEVELS: Record<string, DocumentLevel> = {
 
 /**
  * 从单据编号中提取单据类型代码
- * @param documentNumber 单据编号，如 "QR-NA-251225-0001" 或 "RFQ-NA-251225-0001"
+ * @param documentNumber 单据编号，如 "QR-NA-251225-0001" 或 "INQ-NA-251225-0001"
  * @returns 单据类型代码，如 "QR" 或 "INQ"
  */
 export function extractDocumentCode(documentNumber: string): string {
@@ -84,7 +84,7 @@ export function extractDocumentCode(documentNumber: string): string {
   
   // 处理 RFQ 开头的情况（映射到 INQ）
   if (documentNumber.startsWith('RFQ-')) {
-    return 'RFQ';
+    return 'XJ';
   }
   
   // 提取第一个 "-" 之前的部分

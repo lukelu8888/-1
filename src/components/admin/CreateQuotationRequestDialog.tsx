@@ -4,7 +4,7 @@ import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
 import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 导入获取当前用户工具
 import { getSession } from '../../data/authorizedUsers'; // 🔥 导入获取用户session工具
-import { generateQRNumber, type RegionType } from '../../utils/rfqNumberGenerator';
+import { generateQRNumber, type RegionType } from '../../utils/xjNumberGenerator';
 import { Calendar } from 'lucide-react';
 import {
   Dialog,
@@ -222,7 +222,7 @@ export function CreateQuotationRequestDialog({
         id: `pr_${Date.now()}_${random}`,
         requirementNo: requestNumber, // 使用相同的编号
         source: '报价请求', // 来源是报价请求
-        sourceRef: inquiry.id, // 🔥 修复：关联原始RFQ编号（业务员询价单号）
+        sourceRef: inquiry.id, // 🔥 修复：关联原始INQ编号（业务员询价单号）
         requiredDate: deliveryDate, // 期望交
         urgency: 'medium' as const,
         status: 'pending' as const,
@@ -256,7 +256,7 @@ export function CreateQuotationRequestDialog({
 
       console.log('📤 [CreateQuotationRequestDialog] 同时创建采购需求:', purchaseRequirement);
       console.log('🔍 数据流转说明:');
-      console.log(`  ├─ 业务员询价单号: ${inquiry.id} (RFQ)`);
+      console.log(`  ├─ 业务员询价单号: ${inquiry.id} (INQ)`);
       console.log(`  ├─ 采购需求编号: ${requestNumber} (QR)`);
       console.log(`  ├─ 来源单号: ${inquiry.id} (追溯业务源头)`);
       console.log(`  └─ 区域: ${inquiry.region || '未设置'}`);
@@ -506,7 +506,7 @@ export function CreateQuotationRequestDialog({
                           </div>
                         </div>
                         <p className="text-xs text-gray-500">
-                          采购员需在此日期前完成供应商询价
+                          采购员需在此日期前完成采购询价
                         </p>
                       </div>
 

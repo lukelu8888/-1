@@ -3,14 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\SupplierRfq;
-use App\Models\SupplierRfqProduct;
-use App\Models\SupplierRfqQuote;
+use App\Models\SupplierXj;
+use App\Models\SupplierXjProduct;
+use App\Models\SupplierXjQuote;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-class SupplierRfqController extends Controller
+class SupplierXjController extends Controller
 {
     private function canManageProcurementRfqs(Request $request): bool
     {
@@ -24,7 +24,7 @@ class SupplierRfqController extends Controller
         return in_array($rbacRole, ['Procurement', 'Admin', 'CEO', 'CFO', 'Finance'], true);
     }
 
-    private function toRfqDto(SupplierRfq $rfq): array
+    private function toXjDto(SupplierXj $xj): array
     {
         $sentDate = null;
         if ($rfq->updated_date) {
@@ -33,9 +33,9 @@ class SupplierRfqController extends Controller
         }
 
         return [
-            'id' => $rfq->rfq_uid,
-            'rfqNumber' => $rfq->rfq_number,
-            'supplierRfqNo' => $rfq->supplier_rfq_no,
+            'id' => $xj->xj_uid,
+            'xjNumber' => $rfq->xj_number,
+            'supplierXjNo' => $rfq->supplier_xj_no,
             'supplierQuotationNo' => $rfq->supplier_quotation_no,
             'requirementNo' => $rfq->requirement_no,
             'sourceInquiryId' => $rfq->source_inquiry_id,
@@ -81,8 +81,8 @@ class SupplierRfqController extends Controller
 
         $validated = $request->validate([
             'id' => ['nullable', 'string', 'max:128'],
-            'rfqNumber' => ['required', 'string', 'max:128'],
-            'supplierRfqNo' => ['nullable', 'string', 'max:128'],
+            'xjNumber' => ['required', 'string', 'max:128'],
+            'supplierXjNo' => ['nullable', 'string', 'max:128'],
             'supplierQuotationNo' => ['nullable', 'string', 'max:128'],
             'requirementNo' => ['nullable', 'string', 'max:128'],
             'sourceInquiryId' => ['nullable', 'string', 'max:128'],
@@ -114,14 +114,14 @@ class SupplierRfqController extends Controller
         ]);
 
         // Use provided app id if present; otherwise generate a UUID-like string.
-        $rfqUid = $validated['id'] ?? Str::uuid()->toString();
+        $xjUid = $validated['id'] ?? Str::uuid()->toString();
 
-        $rfq = DB::transaction(function () use ($validated, $rfqUid, $user) {
-            /** @var SupplierRfq $created */
-            $created = SupplierRfq::query()->create([
-                'rfq_uid' => $rfqUid,
-                'rfq_number' => $validated['rfqNumber'],
-                'supplier_rfq_no' => $validated['supplierRfqNo'] ?? null,
+        $rfq = DB::transaction(function () use ($validated, $xjUid, $user) {
+            /** @var SupplierXj $created */
+            $created = SupplierXj::query()->create([
+                'xj_uid' => $xjUid,
+                'xj_number' => $validated['xjNumber'],
+                'supplier_xj_no' => $validated['supplierXjNo'] ?? null,
                 'supplier_quotation_no' => $validated['supplierQuotationNo'] ?? null,
                 'requirement_no' => $validated['requirementNo'] ?? null,
                 'source_inquiry_id' => $validated['sourceInquiryId'] ?? null,
@@ -145,7 +145,7 @@ class SupplierRfqController extends Controller
             $rows = [];
             foreach ($validated['products'] as $p) {
                 $rows[] = [
-                    'supplier_rfq_id' => $created->id,
+                    'supplier_xj_id' => $created->id,
                     'product_uid' => $p['id'],
                     'product_name' => $p['productName'],
                     'model_no' => isset($p['modelNo']) && trim((string) $p['modelNo']) !== '' ? $p['modelNo'] : '-',
@@ -161,7 +161,7 @@ class SupplierRfqController extends Controller
             return $created->fresh(['products']);
         });
 
-        return response()->json(['rfq' => $this->toRfqDto($rfq)], 201);
+        return response()->json(['xj' => $this->toXjDto($rfq)], 201);
     }
 
     /**
@@ -177,10 +177,10 @@ class SupplierRfqController extends Controller
 
         $email = (string) ($user->email ?? '');
         if ($email === '') {
-            return response()->json(['rfqs' => []]);
+            return response()->json(['xjs' => []]);
         }
 
-        $rfqs = SupplierRfq::query()
+        $rfqs = SupplierXj::query()
             ->with('products')
             ->where('supplier_email', $email)
             ->where('status', '!=', 'draft')
@@ -189,7 +189,7 @@ class SupplierRfqController extends Controller
             ->get();
 
         return response()->json([
-            'rfqs' => $rfqs->map(fn (SupplierRfq $r) => $this->toRfqDto($r))->values(),
+            'xjs' => $rfqs->map(fn (SupplierXj $r) => $this->toXjDto($r))->values(),
         ]);
     }
 
@@ -197,16 +197,16 @@ class SupplierRfqController extends Controller
      * Procurement/Admin: update RFQ status / metadata (e.g. submit to supplier).
      * PATCH /api/supplier-rfqs/{rfqUid}
      */
-    public function update(Request $request, string $rfqUid)
+    public function update(Request $request, string $xjUid)
     {
         if (!$this->canManageProcurementRfqs($request)) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
         /** @var SupplierRfq|null $rfq */
-        $rfq = SupplierRfq::query()->where('rfq_uid', $rfqUid)->with('products')->first();
+        $rfq = SupplierXj::query()->where('xj_uid', $xjUid)->with('products')->first();
         if (!$rfq) {
-            return response()->json(['message' => 'RFQ not found'], 404);
+            return response()->json(['message' => 'XJ not found'], 404);
         }
 
         $validated = $request->validate([
@@ -230,7 +230,7 @@ class SupplierRfqController extends Controller
             $rfq->save();
         }
 
-        return response()->json(['rfq' => $this->toRfqDto($rfq->fresh(['products']))]);
+        return response()->json(['xj' => $this->toXjDto($rfq->fresh(['products']))]);
     }
 
     /**
@@ -249,16 +249,16 @@ class SupplierRfqController extends Controller
             return response()->json(['message' => 'User email required'], 400);
         }
 
-        $rfqIds = SupplierRfq::query()
+        $rfqIds = SupplierXj::query()
             ->where('supplier_email', $email)
             ->pluck('id')
             ->values();
 
         if ($rfqIds->isEmpty()) {
             return response()->json([
-                'message' => 'No supplier RFQ data to clear',
+                'message' => 'No supplier XJ data to clear',
                 'cleared' => [
-                    'rfqs' => 0,
+                    'xjs' => 0,
                     'products' => 0,
                     'quotes' => 0,
                 ],
@@ -267,27 +267,27 @@ class SupplierRfqController extends Controller
 
         $result = DB::transaction(function () use ($rfqIds) {
             $quotesCount = SupplierRfqQuote::query()
-                ->whereIn('supplier_rfq_id', $rfqIds->all())
+                ->whereIn('supplier_xj_id', $rfqIds->all())
                 ->count();
             $productsCount = SupplierRfqProduct::query()
-                ->whereIn('supplier_rfq_id', $rfqIds->all())
+                ->whereIn('supplier_xj_id', $rfqIds->all())
                 ->count();
-            $rfqCount = SupplierRfq::query()
+            $rfqCount = SupplierXj::query()
                 ->whereIn('id', $rfqIds->all())
                 ->count();
 
             SupplierRfqQuote::query()
-                ->whereIn('supplier_rfq_id', $rfqIds->all())
+                ->whereIn('supplier_xj_id', $rfqIds->all())
                 ->delete();
             SupplierRfqProduct::query()
-                ->whereIn('supplier_rfq_id', $rfqIds->all())
+                ->whereIn('supplier_xj_id', $rfqIds->all())
                 ->delete();
-            SupplierRfq::query()
+            SupplierXj::query()
                 ->whereIn('id', $rfqIds->all())
                 ->delete();
 
             return [
-                'rfqs' => $rfqCount,
+                'xjs' => $rfqCount,
                 'products' => $productsCount,
                 'quotes' => $quotesCount,
             ];

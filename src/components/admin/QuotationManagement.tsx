@@ -266,7 +266,7 @@ export default function QuotationManagement({
     }
 
     // 从询价编号提取区域代码
-    const region = inquiry.id.split('-')[1] || 'NA'; // e.g., "RFQ-NA-251130-0001" -> "NA"
+    const region = inquiry.id.split('-')[1] || 'NA'; // e.g., "INQ-NA-251130-0001" -> "NA"
     console.log('🌍 从询价单号提取的区域代码:', region);
     
     // 检查是否已经为这个询价创建过报价（草稿或已发送状态）

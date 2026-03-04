@@ -4,18 +4,18 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use App\Models\SupplierRfqQuote;
+use App\Models\SupplierXjQuote;
 
-class SupplierRfq extends Model
+class SupplierXj extends Model
 {
-    protected $table = 'supplier_rfqs';
+    protected $table = 'supplier_xjs';
 
     public $timestamps = false;
 
     protected $fillable = [
-        'rfq_uid',
-        'rfq_number',
-        'supplier_rfq_no',
+        'xj_uid',
+        'xj_number',
+        'supplier_xj_no',
         'supplier_quotation_no',
         'requirement_no',
         'source_inquiry_id',
@@ -49,12 +49,12 @@ class SupplierRfq extends Model
 
     public function products(): HasMany
     {
-        return $this->hasMany(SupplierRfqProduct::class, 'supplier_rfq_id');
+        return $this->hasMany(SupplierXjProduct::class, 'supplier_xj_id');
     }
 
     public function quotes(): HasMany
     {
-        return $this->hasMany(SupplierRfqQuote::class, 'supplier_rfq_id');
+        return $this->hasMany(SupplierXjQuote::class, 'supplier_xj_id');
     }
 }
 

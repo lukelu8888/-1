@@ -2,7 +2,7 @@
 
 ## 功能概述
 
-已成功创建供应商报价单模版（Quotation Template），格式与供应商询价单保持一致，采用A4标准格式和台湾大厂专业风格设计。
+已成功创建供应商报价单模版（Quotation Template），格式与采购询价单保持一致，采用A4标准格式和台湾大厂专业风格设计。
 
 ## 核心特性
 
@@ -604,7 +604,7 @@ const saveQuotation = (quotationData) => {
 
 ## 相关文档
 
-- [供应商询价单模版](./SupplierRFQDocument.tsx)
+- [采购询价单模版](./SupplierRFQDocument.tsx)
 - [报价单使用说明](./SUPPLIER_QUOTATION_TEMPLATE.md)
 - [供应商Portal开发文档](./SUPPLIER_PORTAL.md)
 

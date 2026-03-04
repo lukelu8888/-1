@@ -1,20 +1,20 @@
-// 🔥 供应商RFQ数据流转调试工具
+// 🔥 供应商采购询价数据流转调试工具
 import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Bug, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
 import { useUser } from '../../contexts/UserContext';
-import { useRFQs } from '../../contexts/RFQContext';
+import { useXJs } from '../../contexts/XJContext';
 
-export function SupplierRFQDebugger() {
+export function XJDebugger() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier } = useRFQs();
+  const { rfqs, getRFQsBySupplier } = useXJs();
   const [debugData, setDebugData] = useState<any>(null);
   const [isOpen, setIsOpen] = useState(false);
 
   const runDiagnostics = () => {
-    console.log('🔍 ==================== 供应商RFQ诊断开始 ====================');
+    console.log('🔍 ==================== 供应商采购询价诊断开始 ====================');
     
     // 1. 检查当前登录用户
     console.log('📌 步骤1: 检查当前登录用户');
@@ -38,9 +38,9 @@ export function SupplierRFQDebugger() {
         if (supplierRFQs.length > 0) {
           console.log('  - supplierRFQs详细信息:');
           supplierRFQs.forEach((rfq: any, idx: number) => {
-            console.log(`    ${idx + 1}. RFQ ID: ${rfq.id}`);
-            console.log(`       - rfqNumber: ${rfq.rfqNumber}`);
-            console.log(`       - supplierRfqNo: ${rfq.supplierRfqNo}`);
+            console.log(`    ${idx + 1}. 采购询价ID: ${rfq.id}`);
+            console.log(`       - xjNumber: ${rfq.xjNumber}`);
+            console.log(`       - supplierXjNo: ${rfq.supplierXjNo}`);
             console.log(`       - supplierCode: ${rfq.supplierCode}`);
             console.log(`       - supplierEmail: ${rfq.supplierEmail}`);
             console.log(`       - supplierName: ${rfq.supplierName}`);
@@ -52,29 +52,29 @@ export function SupplierRFQDebugger() {
         console.error('  ❌ supplierRFQs解析失败:', e);
       }
     } else {
-      console.log('  ⚠️ localStorage中没有supplierRFQs数据');
+      console.log('  ⚠️ localStorage中没有supplierRFQs（采购询价）数据');
     }
     
-    // 3. 检查RFQContext中的所有rfqs
-    console.log('\n📌 步骤3: 检查RFQContext中的所有rfqs');
+    // 3. 检查XJContext中的所有采购询价
+    console.log('\n📌 步骤3: 检查XJContext中的所有采购询价');
     console.log('  - rfqs总数:', rfqs.length);
     if (rfqs.length > 0) {
       console.log('  - rfqs详细信息:');
       rfqs.forEach((rfq: any, idx: number) => {
-        console.log(`    ${idx + 1}. RFQ ID: ${rfq.id}`);
-        console.log(`       - rfqNumber: ${rfq.rfqNumber}`);
-        console.log(`       - supplierRfqNo: ${rfq.supplierRfqNo}`);
+        console.log(`    ${idx + 1}. 采购询价ID: ${rfq.id}`);
+        console.log(`       - xjNumber: ${rfq.xjNumber}`);
+        console.log(`       - supplierXjNo: ${rfq.supplierXjNo}`);
         console.log(`       - supplierCode: ${rfq.supplierCode}`);
         console.log(`       - supplierEmail: ${rfq.supplierEmail}`);
         console.log(`       - supplierName: ${rfq.supplierName}`);
         console.log(`       - status: ${rfq.status}`);
       });
     } else {
-      console.log('  ⚠️ RFQContext中没有rfqs数据');
+      console.log('  ⚠️ XJContext中没有采购询价数据');
     }
     
-    // 4. 测试getRFQsBySupplier函数
-    console.log('\n📌 步骤4: 测试getRFQsBySupplier函数');
+    // 4. 测试getRFQsBySupplier（获取供应商采购询价）函数
+    console.log('\n📌 步骤4: 测试getRFQsBySupplier（获取供应商采购询价）函数');
     if (user?.email) {
       console.log('  - 查询参数:', user.email);
       const myRFQs = getRFQsBySupplier(user.email);
@@ -98,7 +98,7 @@ export function SupplierRFQDebugger() {
         supplierRFQs.forEach((rfq: any, idx: number) => {
           const codeMatch = rfq.supplierCode === user.email;
           const emailMatch = rfq.supplierEmail === user.email;
-          console.log(`    RFQ ${idx + 1}:`);
+          console.log(`    采购询价 ${idx + 1}:`);
           console.log(`      - supplierCode匹配: ${codeMatch} (${rfq.supplierCode} === ${user.email})`);
           console.log(`      - supplierEmail匹配: ${emailMatch} (${rfq.supplierEmail} === ${user.email})`);
         });
@@ -124,7 +124,7 @@ export function SupplierRFQDebugger() {
         console.log('  ❌ 问题确认: 数据存在但无法正确过滤');
         console.log('  - 建议: 检查supplierEmail和supplierCode字段是否与登录用户email匹配');
       } else if (myRFQs.length > 0) {
-        console.log('  ✅ 数据正常: 成功获取到', myRFQs.length, '个RFQ');
+        console.log('  ✅ 数据正常: 成功获取到', myRFQs.length, '个采购询价');
       } else {
         console.log('  ⚠️ 没有数据: supplierRFQs为空或未提交任何询价单');
       }
@@ -151,7 +151,7 @@ export function SupplierRFQDebugger() {
         className="fixed bottom-4 right-4 z-50 gap-2 bg-orange-50 border-orange-300 text-orange-700 hover:bg-orange-100"
       >
         <Bug className="w-4 h-4" />
-        RFQ调试工具
+        采购询价调试工具
       </Button>
     );
   }
@@ -163,7 +163,7 @@ export function SupplierRFQDebugger() {
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-orange-900">
               <Bug className="w-5 h-5" />
-              供应商RFQ数据流转诊断工具
+              供应商采购询价数据流转诊断工具
             </CardTitle>
             <div className="flex gap-2">
               <Button
@@ -221,7 +221,7 @@ export function SupplierRFQDebugger() {
                           <div key={idx} className="bg-white border rounded p-2 text-xs font-mono">
                             <div className="grid grid-cols-2 gap-1">
                               <div><span className="text-slate-600">ID:</span> {rfq.id}</div>
-                              <div><span className="text-slate-600">询价单号:</span> {rfq.supplierRfqNo || rfq.rfqNumber}</div>
+                              <div><span className="text-slate-600">询价单号:</span> {rfq.supplierXjNo || rfq.xjNumber}</div>
                               <div><span className="text-slate-600">supplierEmail:</span> {rfq.supplierEmail}</div>
                               <div><span className="text-slate-600">supplierCode:</span> {rfq.supplierCode}</div>
                               <div className="col-span-2"><span className="text-slate-600">supplierName:</span> {rfq.supplierName}</div>
@@ -240,11 +240,11 @@ export function SupplierRFQDebugger() {
             </div>
           </div>
 
-          {/* RFQContext中的rfqs */}
+          {/* XJContext中的rfqs */}
           <div>
             <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-              RFQContext.rfqs
+              XJContext.rfqs
             </h3>
             <div className="bg-slate-50 rounded p-3 text-sm">
               <Badge variant="outline" className="mb-2">
@@ -255,7 +255,7 @@ export function SupplierRFQDebugger() {
                   <div key={idx} className="bg-white border rounded p-2 text-xs font-mono">
                     <div className="grid grid-cols-2 gap-1">
                       <div><span className="text-slate-600">ID:</span> {rfq.id}</div>
-                      <div><span className="text-slate-600">询价单号:</span> {rfq.supplierRfqNo || rfq.rfqNumber}</div>
+                      <div><span className="text-slate-600">询价单号:</span> {rfq.supplierXjNo || rfq.xjNumber}</div>
                       <div><span className="text-slate-600">supplierEmail:</span> {rfq.supplierEmail}</div>
                       <div><span className="text-slate-600">supplierCode:</span> {rfq.supplierCode}</div>
                       <div className="col-span-2"><span className="text-slate-600">supplierName:</span> {rfq.supplierName}</div>
@@ -288,7 +288,7 @@ export function SupplierRFQDebugger() {
                           <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5" />
                           <div className="text-xs text-red-900">
                             <p className="font-semibold mb-1">⚠️ 数据匹配失败</p>
-                            <p>RFQContext中有 {rfqs.length} 条RFQ，但过滤结果为0</p>
+                            <p>XJ Context中有 {rfqs.length} 条采购询价，但过滤结果为0</p>
                             <p className="mt-1">可能原因：supplierEmail/supplierCode 与登录用户email不匹配</p>
                           </div>
                         </div>
@@ -299,7 +299,7 @@ export function SupplierRFQDebugger() {
                         <div key={idx} className="bg-white border rounded p-2 text-xs font-mono">
                           <div className="grid grid-cols-2 gap-1">
                             <div><span className="text-slate-600">ID:</span> {rfq.id}</div>
-                            <div><span className="text-slate-600">询价单号:</span> {rfq.supplierRfqNo || rfq.rfqNumber}</div>
+                            <div><span className="text-slate-600">询价单号:</span> {rfq.supplierXjNo || rfq.xjNumber}</div>
                             <div className="col-span-2"><span className="text-slate-600">产品:</span> {rfq.productName}</div>
                           </div>
                         </div>

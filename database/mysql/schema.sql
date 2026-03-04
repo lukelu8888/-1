@@ -590,7 +590,7 @@ CREATE TABLE IF NOT EXISTS purchase_requirement_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ========== Supplier RFQ (RFQContext) ==========
-CREATE TABLE IF NOT EXISTS supplier_rfqs (
+CREATE TABLE IF NOT EXISTS supplier_xjs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   rfq_uid VARCHAR(128) NOT NULL,       -- RFQ.id in app
   rfq_number VARCHAR(128) NOT NULL,    -- RFQ.rfqNumber (compat)
@@ -614,15 +614,15 @@ CREATE TABLE IF NOT EXISTS supplier_rfqs (
   updated_date DATETIME(3) NULL,
   document_data JSON NULL,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_supplier_rfqs_uid (rfq_uid),
-  KEY idx_supplier_rfqs_supplier (supplier_code),
-  KEY idx_supplier_rfqs_status (status),
-  KEY idx_supplier_rfqs_requirement (requirement_no)
+  UNIQUE KEY uq_supplier_xjs_uid (rfq_uid),
+  KEY idx_supplier_xjs_supplier (supplier_code),
+  KEY idx_supplier_xjs_status (status),
+  KEY idx_supplier_xjs_requirement (requirement_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS supplier_rfq_products (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  supplier_rfq_id BIGINT UNSIGNED NOT NULL,
+  supplier_xj_id BIGINT UNSIGNED NOT NULL,
   product_uid VARCHAR(128) NOT NULL, -- RFQProduct.id
   product_name VARCHAR(255) NOT NULL,
   model_no VARCHAR(128) NOT NULL,
@@ -634,15 +634,15 @@ CREATE TABLE IF NOT EXISTS supplier_rfq_products (
   PRIMARY KEY (id),
   -- Allow the same product_uid to appear in different RFQs (different suppliers),
   -- but prevent duplicates within the same RFQ.
-  UNIQUE KEY uq_supplier_rfq_product_uid (supplier_rfq_id, product_uid),
-  KEY idx_supplier_rfq_products_rfq (supplier_rfq_id),
-  CONSTRAINT fk_supplier_rfq_products_rfq FOREIGN KEY (supplier_rfq_id) REFERENCES supplier_rfqs(id)
+  UNIQUE KEY uq_supplier_rfq_product_uid (supplier_xj_id, product_uid),
+  KEY idx_supplier_rfq_products_rfq (supplier_xj_id),
+  CONSTRAINT fk_supplier_rfq_products_rfq FOREIGN KEY (supplier_xj_id) REFERENCES supplier_xjs(id)
     ON UPDATE RESTRICT ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS supplier_rfq_quotes (
+CREATE TABLE IF NOT EXISTS supplier_xj_quotes (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  supplier_rfq_id BIGINT UNSIGNED NOT NULL,
+  supplier_xj_id BIGINT UNSIGNED NOT NULL,
   supplier_code VARCHAR(64) NOT NULL,
   supplier_name VARCHAR(255) NOT NULL,
   quoted_date DATE NOT NULL,
@@ -656,9 +656,9 @@ CREATE TABLE IF NOT EXISTS supplier_rfq_quotes (
   quotation_no VARCHAR(128) NULL,
   quote_data JSON NULL,
   PRIMARY KEY (id),
-  KEY idx_supplier_rfq_quotes_rfq (supplier_rfq_id),
-  KEY idx_supplier_rfq_quotes_quotation_no (quotation_no),
-  CONSTRAINT fk_supplier_rfq_quotes_rfq FOREIGN KEY (supplier_rfq_id) REFERENCES supplier_rfqs(id)
+  KEY idx_supplier_xj_quotes_rfq (supplier_xj_id),
+  KEY idx_supplier_xj_quotes_quotation_no (quotation_no),
+  CONSTRAINT fk_supplier_xj_quotes_rfq FOREIGN KEY (supplier_xj_id) REFERENCES supplier_xjs(id)
     ON UPDATE RESTRICT ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

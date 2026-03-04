@@ -441,6 +441,20 @@ export const notificationSupabaseService = {
 }
 
 // ============================================================
+// 编号生成（DB 原子递增，并发安全）
+// ============================================================
+export async function nextInquiryNumber(regionCode: string = 'NA'): Promise<string> {
+  const { data, error } = await supabase.rpc('next_inquiry_number', {
+    p_region_code: regionCode,
+  })
+  if (error) {
+    console.error('[Supabase] next_inquiry_number RPC failed:', error.message)
+    throw new Error(`Failed to generate inquiry number: ${error.message}`)
+  }
+  return data as string
+}
+
+// ============================================================
 // 询价单（Inquiries）
 // ============================================================
 export const inquiryService = {
@@ -475,23 +489,45 @@ export const inquiryService = {
 
   async upsert(inquiry: any) {
     const row = toInquiryRow(inquiry)
-    // 先尝试按 id upsert
+
     const { data, error } = await supabase
       .from('inquiries')
       .upsert(row, { onConflict: 'id', ignoreDuplicates: false })
       .select()
       .single()
     if (!error) return fromInquiryRow(data)
-    // inquiry_number unique 冲突：改为按 inquiry_number 更新
+
     if (error.code === '23505') {
-      const { data: updated, error: err2 } = await supabase
+      console.warn('[Supabase] inquiry_number conflict, generating next available number...')
+      const prefix = (row.inquiry_number || row.id || '').replace(/-\d{4}$/, '')
+      if (!prefix) return handleError(error, 'upsert inquiry (no prefix)')
+
+      const { data: existing } = await supabase
         .from('inquiries')
-        .update({ ...row, updated_at: new Date().toISOString() })
-        .eq('inquiry_number', row.inquiry_number)
+        .select('inquiry_number')
+        .like('inquiry_number', `${prefix}-%`)
+        .order('inquiry_number', { ascending: false })
+        .limit(1)
+
+      let nextSeq = 1
+      if (existing && existing.length > 0) {
+        const lastNum = existing[0].inquiry_number
+        const seqMatch = lastNum.match(/-(\d{4})$/)
+        if (seqMatch) nextSeq = parseInt(seqMatch[1], 10) + 1
+      }
+
+      const newNumber = `${prefix}-${String(nextSeq).padStart(4, '0')}`
+      const newId = newNumber
+      console.log('[Supabase] Retrying with new number:', newNumber)
+
+      const retryRow = { ...row, id: newId, inquiry_number: newNumber }
+      const { data: d2, error: e2 } = await supabase
+        .from('inquiries')
+        .insert(retryRow)
         .select()
         .single()
-      if (err2) return handleError(err2, 'upsert inquiry (by inquiry_number)')
-      return fromInquiryRow(updated)
+      if (e2) return handleError(e2, 'upsert inquiry (retry)')
+      return fromInquiryRow(d2)
     }
     return handleError(error, 'upsert inquiry')
   },
@@ -834,6 +870,16 @@ function fromNotificationRow(r: any) {
 }
 
 // Inquiry 转换
+// 将前端 region 全名映射为 Supabase 存储的区域代码
+const REGION_NAME_TO_CODE: Record<string, string> = {
+  'North America': 'NA',
+  'South America': 'SA',
+  'Europe & Africa': 'EA',
+  'NA': 'NA',
+  'SA': 'SA',
+  'EA': 'EA',
+};
+
 function toInquiryRow(i: any) {
   // createdAt 可能是毫秒数字或 ISO 字符串，统一转为 ISO 字符串
   const toIso = (v: any) => {
@@ -841,13 +887,29 @@ function toInquiryRow(i: any) {
     if (typeof v === 'number') return new Date(v).toISOString();
     return String(v);
   };
+  // date 统一转为 ISO 日期格式 YYYY-MM-DD（兼容 toLocaleDateString 输出）
+  const toIsoDate = (v: any) => {
+    if (!v) return new Date().toISOString().split('T')[0];
+    // 处理美式格式 MM/DD/YYYY
+    if (typeof v === 'string' && v.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+      const [m, d, y] = v.split('/');
+      return `${y}-${m}-${d}`;
+    }
+    return v.split('T')[0];
+  };
+  // region 存代码（NA/SA/EA），不存全名
+  const regionCode = REGION_NAME_TO_CODE[i.region] || i.region || null;
+  // id：如果前端传的是询价编号（INQ-格式），生成新 UUID；否则直接用
+  const id = (i.id && i.id.startsWith('INQ-'))
+    ? crypto.randomUUID()
+    : (i.id || crypto.randomUUID());
   return {
-    id: i.id,
+    id,
     inquiry_number: i.inquiryNumber || i.id,
-    date: i.date || new Date().toISOString().split('T')[0],
+    date: toIsoDate(i.date),
     user_email: i.userEmail || '',
     company_id: i.companyId || null,
-    region: i.region || null,
+    region: regionCode,
     status: i.status || 'draft',
     is_submitted: i.isSubmitted || false,
     total_price: i.totalPrice || 0,

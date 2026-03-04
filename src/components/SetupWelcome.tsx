@@ -83,7 +83,7 @@ export default function SetupWelcome({ onStartSetup }: SetupWelcomeProps) {
                 <div className="flex items-start gap-3">
                   <span className="flex-shrink-0 w-6 h-6 bg-orange-600 text-white rounded-full flex items-center justify-center text-xs font-bold">2</span>
                   <div>
-                    <p className="font-semibold text-orange-900 text-sm">采购向供应商询价</p>
+                    <p className="font-semibold text-orange-900 text-sm">采购询价</p>
                     <p className="text-xs text-orange-700">Admin Portal → Supplier Portal</p>
                   </div>
                 </div>

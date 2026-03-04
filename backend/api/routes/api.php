@@ -6,7 +6,7 @@ use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\PurchaseRequirementController;
 use App\Http\Controllers\Api\PurchaseOrderController;
 use App\Http\Controllers\Api\SupplierController;
-use App\Http\Controllers\Api\SupplierRfqController;
+use App\Http\Controllers\Api\SupplierXjController;
 use App\Http\Controllers\Api\SupplierQuotationController;
 use App\Http\Controllers\Api\SalesQuotationController;
 use App\Http\Controllers\Api\SalesContractController;
@@ -55,10 +55,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('suppliers', [SupplierController::class, 'index']);
 
     // Supplier RFQs (XJ) - procurement creates and submits to suppliers
-    Route::post('supplier-rfqs', [SupplierRfqController::class, 'store']);
-    Route::get('supplier-rfqs/mine', [SupplierRfqController::class, 'mine']);
-    Route::delete('supplier-rfqs/mine', [SupplierRfqController::class, 'clearMine']);
-    Route::patch('supplier-rfqs/{rfqUid}', [SupplierRfqController::class, 'update']);
+    Route::post('supplier-xjs', [SupplierXjController::class, 'store']);
+    Route::get('supplier-xjs/mine', [SupplierXjController::class, 'mine']);
+    Route::delete('supplier-xjs/mine', [SupplierXjController::class, 'clearMine']);
+    Route::patch('supplier-xjs/{xjUid}', [SupplierXjController::class, 'update']);
 
     // 供应商报价（BJ）：采购员列表 + 供应商提交
     Route::get('supplier-quotations', [SupplierQuotationController::class, 'index']);

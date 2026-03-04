@@ -1063,7 +1063,7 @@ export function SalesQuotationManagement({
 
       const sc = createContract({
         quotationNumber: qt.qtNumber,
-        inquiryNumber: qt.inqNumber || qt.rfqNumber || '',
+        inquiryNumber: qt.inqNumber || qt.xjNumber || '',
         customerName: qt.customerName || qt.customerCompany || '',
         customerEmail: qt.customerEmail || '',
         customerCompany: qt.customerCompany || '',

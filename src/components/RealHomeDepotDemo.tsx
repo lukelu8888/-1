@@ -204,7 +204,7 @@ export default function RealHomeDepotDemo({ onClose }: { onClose?: () => void })
             </p>
             <p>
               <strong style={{ color: homeDepotBrandColors.primary }}>✓ 完整的业务流程：</strong>
-              包含采购订单(PO)、供应商发票、装箱单、提单、对账单、付款通知、收货确认单、询价单(RFQ)等全套单据。覆盖采购、物流、财务全流程。
+              包含采购订单(PO)、供应商发票、装箱单、提单、对账单、付款通知、收货确认单、询价单(INQ)等全套单据。覆盖采购、物流、财务全流程。
             </p>
             <p>
               <strong style={{ color: homeDepotBrandColors.secondary }}>✓ 符合北美标准：</strong>

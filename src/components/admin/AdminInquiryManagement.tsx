@@ -10,14 +10,14 @@ import { Search, Filter, Eye, Reply, CheckCircle, XCircle, Clock, FileText, Aler
 import { toast } from 'sonner@2.0.3';
 import { CustomerInquiryView } from '../dashboard/CustomerInquiryView'; // 📋 使用文档中心的专业模板
 import { useInquiry } from '../../contexts/InquiryContext'; // 🚀 Use unified context
-import { generateDocumentNumber, type RegionType } from '../../utils/rfqNumberGenerator';
+import { generateDocumentNumber, type RegionType } from '../../utils/xjNumberGenerator';
 import { CompactStatCard } from './CompactStatCard'; // 🎨 导入紧凑型统计卡片
 import { MultiDimensionFilters } from './MultiDimensionFilters'; // 🎯 多维度筛选组件
-import { CreateRFQFromInquiryDialog } from './CreateRFQFromInquiryDialog'; // 🔥 导入创建RFQ对话框
+import { CreateXJFromInquiryDialog } from './CreateXJFromInquiryDialog'; // 🔥 导入创建XJ对话框
 import { CreateQuotationRequestDialog } from './CreateQuotationRequestDialog'; // 🔥 导入报价请求对话框
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext'; // 🔥 导入QuotationRequest Context
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
-import { generateQRNumber } from '../../utils/rfqNumberGenerator'; // 🔥 导入QR编号生成
+import { generateQRNumber } from '../../utils/xjNumberGenerator'; // 🔥 导入QR编号生成
 import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 导入当前用户工具
 
 interface AdminInquiryManagementProps {
@@ -31,9 +31,9 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const [selectedInquiry, setSelectedInquiry] = useState<any>(null);
   const [replyMessage, setReplyMessage] = useState('');
   
-  // 🔥 创建供应商RFQ对话框状态
-  const [showRFQDialog, setShowRFQDialog] = useState(false);
-  const [rfqInquiry, setRFQInquiry] = useState<any>(null);
+  // 🔥 创建供应商XJ对话框状态
+  const [showXJDialog, setShowXJDialog] = useState(false);
+  const [xjInquiry, setXJInquiry] = useState<any>(null);
   
   // 🎯 多维度筛选状态 (老板角色专用)
   const [filterRegion, setFilterRegion] = useState('all');
@@ -175,10 +175,10 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   // 🧪 Create Test Inquiry Function
   const createTestInquiry = (region: RegionType, customerEmail: string, companyName: string) => {
     const regionCode = region === 'North America' ? 'NA' : region === 'South America' ? 'SA' : 'EA';
-    const rfqId = generateDocumentNumber('XJ', region);
+    const xjId = generateDocumentNumber('XJ', region);
 
     const inquiry = {
-      id: rfqId,
+      id: xjId,
       date: new Date().toISOString().split('T')[0],
       userEmail: customerEmail,
       companyId: `company_${regionCode}_001`,
@@ -219,7 +219,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     };
 
     addInquiry(inquiry);
-    return rfqId;
+    return xjId;
   };
 
   // 🌍 Filter inquiries by user region (for Sales_Rep AND Regional_Manager roles)
@@ -243,10 +243,10 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
 
   // Use real inquiries (no fallback sample data needed)
   const displayInquiries = regionFilteredInquiries
-    // 🧹 Filter out old format inquiries (RFQ-YYMMDD-XXXX without region)
+    // 🧹 Filter out old format inquiries (INQ-YYMMDD-XXXX without region)
     .filter(inq => {
-      // New format: RFQ-{REGION}-YYMMDD-XXXX
-      // Old format: RFQ-YYMMDD-XXXX (should be filtered out)
+      // New format: INQ-{REGION}-YYMMDD-XXXX
+      // Old format: INQ-YYMMDD-XXXX (should be filtered out)
       const parts = inq.id.split('-');
       return parts.length >= 4; // New format has at least 4 parts
     })
@@ -538,7 +538,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                 
                 // 🔥 检查该询价是否已下推到QR（创建了报价请求单）
                 const qrs = getQuotationRequestsByInquiry(inquiry.id);
-                const hasRFQ = qrs.length > 0; // 只要存在QR，就表示已下推
+                const hasXJ = qrs.length > 0; // 只要存在QR，就表示已下推
                 
                 // 🔥 检查是否已创建采购需求（成本询报）
                 const hasQR = purchaseRequirements.some(qr => 
@@ -572,10 +572,10 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                               size="sm"
                               className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
                               onClick={() => {
-                                document.body.classList.add('printing-rfq');
+                                document.body.classList.add('printing-inq');
                                 window.print();
                                 setTimeout(() => {
-                                  document.body.classList.remove('printing-rfq');
+                                  document.body.classList.remove('printing-inq');
                                 }, 1000);
                               }}
                             >
@@ -607,7 +607,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                             </button>
                           </DialogClose>
 
-                          {/* RFQ Document - Full Screen - 仅展示询价单，无管理操作 */}
+                          {/* INQ Document - Full Screen - 仅展示询价单，无管理操作 */}
                           <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
                             {selectedInquiry && (
                               <CustomerInquiryView inquiry={selectedInquiry} />
@@ -666,10 +666,10 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                                 size="sm"
                                 className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
                                 onClick={() => {
-                                  document.body.classList.add('printing-rfq');
+                                  document.body.classList.add('printing-inq');
                                   window.print();
                                   setTimeout(() => {
-                                    document.body.classList.remove('printing-rfq');
+                                    document.body.classList.remove('printing-inq');
                                   }, 1000);
                                 }}
                               >
@@ -701,7 +701,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                               </button>
                             </DialogClose>
 
-                            {/* RFQ Document - Full Screen - 仅展示询价单 */}
+                            {/* INQ Document - Full Screen - 仅展示询价单 */}
                             <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
                               {selectedInquiry && (
                                 <CustomerInquiryView inquiry={selectedInquiry} />
@@ -742,12 +742,12 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       
       {/* 🔥 报价请求对话框 */}
       <CreateQuotationRequestDialog
-        open={showRFQDialog}
+        open={showXJDialog}
         onClose={() => {
-          setShowRFQDialog(false);
-          setRFQInquiry(null);
+          setShowXJDialog(false);
+          setXJInquiry(null);
         }}
-        inquiry={rfqInquiry}
+        inquiry={xjInquiry}
       />
     </div>
   );

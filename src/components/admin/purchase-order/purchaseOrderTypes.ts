@@ -15,9 +15,9 @@ export type {
 } from '../../../contexts/PurchaseRequirementContext';
 
 export type { 
-  RFQ, 
-  RFQProduct 
-} from '../../../contexts/RFQContext';
+  XJ, 
+  XJProduct 
+} from '../../../contexts/XJContext';
 
 export type { 
   Supplier 
@@ -56,11 +56,11 @@ export interface DialogState {
   createPO: boolean;
   editPO: boolean;
   viewDetail: boolean;
-  sendRFQ: boolean;
+  sendXJ: boolean;
   feedback: boolean;
   viewQuotation: boolean;
   intelligentQuote: boolean;
 }
 
 // Tab类型
-export type TabType = 'requirements' | 'rfqs' | 'orders';
+export type TabType = 'requirements' | 'xjs' | 'orders';
