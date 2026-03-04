@@ -7,7 +7,7 @@ import { Label } from '../ui/label';
 import { Upload, DollarSign, Hash, FileText, X } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { useFinance } from '../../contexts/FinanceContext';
-import { apiFetchJson } from '../../api/backend-auth';
+import { orderService } from '../../lib/supabaseService';
 import { paymentProofStorage, isDataUrl, dataUrlToFile } from '../../lib/storageService';
 
 interface UploadPaymentProofDialogProps {
@@ -100,54 +100,23 @@ export function UploadPaymentProofDialog({
           fileName = result.fileName;
           storagePath = result.path;
         } catch (storageErr: any) {
-          console.warn('⚠️ [UploadPaymentProof] Supabase Storage 上传失败，尝试后端API:', storageErr?.message);
-          // Fallback: 尝试后端 API
-          try {
-            const formData = new FormData();
-            formData.append('file', fileToUpload);
-            const uploadRes = await apiFetchJson<{ fileUrl: string; fileName: string }>(
-              '/api/upload-payment-proof-file',
-              { method: 'POST', body: formData }
-            );
-            fileUrl = uploadRes.fileUrl;
-            fileName = uploadRes.fileName || defaultFileName;
-          } catch {
-            // 最终 fallback：使用临时 blob URL（本次会话有效）
-            fileUrl = URL.createObjectURL(fileToUpload);
-            fileName = fileToUpload.name;
-          }
+          console.warn('⚠️ [UploadPaymentProof] Supabase Storage 上传失败，使用 blob URL:', storageErr?.message);
+          fileUrl = URL.createObjectURL(fileToUpload);
+          fileName = fileToUpload.name;
         }
       } else {
         fileUrl = paymentFile;
       }
 
-      // 尝试同步到后端（失败时静默，本地照常处理）
+      // 同步到 Supabase
       try {
-        const res = await apiFetchJson<{ message: string; order: any }>(
-          `/api/orders/${encodeURIComponent(orderUid)}/upload-payment-proof`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: paymentType,
-              amount: parseFloat(paymentAmount),
-              transactionId: paymentReference,
-              notes: paymentNotes || undefined,
-              fileUrl,
-              fileName,
-            }),
-          }
-        );
-        if (res.order) {
-          updateOrder(orderUid, {
-            status: res.order.status,
-            paymentStatus: res.order.paymentStatus,
-            depositPaymentProof: res.order.depositPaymentProof,
-            balancePaymentProof: res.order.balancePaymentProof,
-          });
-        }
+        const proofField = paymentType === 'deposit' ? 'deposit_payment_proof' : 'balance_payment_proof';
+        await orderService.upsert({
+          id: orderUid,
+          [proofField]: { fileUrl, fileName, storagePath, amount: parseFloat(paymentAmount), transactionId: paymentReference, notes: paymentNotes || null, uploadedAt: new Date().toISOString() },
+        });
       } catch (apiErr: any) {
-        console.warn('⚠️ [UploadPaymentProof] 后端同步失败（本地继续处理）:', apiErr?.message);
+        console.warn('⚠️ [UploadPaymentProof] Supabase 同步失败（本地继续处理）:', apiErr?.message);
       }
 
       // 本地立即更新合同状态为 deposit_uploaded

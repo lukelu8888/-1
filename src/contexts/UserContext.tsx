@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { apiLogout, clearBackendUser } from '../api/backend-auth';
 import { supabase } from '../lib/supabase';
 import { fetchProfile } from '../hooks/useSupabaseAuth';
 
@@ -181,7 +180,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     // 清理 API token / mock session / RBAC 用户
     try {
       localStorage.removeItem('cosun_api_token');
-      clearBackendUser();
+      localStorage.removeItem('backend_user');
       localStorage.removeItem('cosun_user_session');
       localStorage.removeItem('cosun_session_expiry');
       localStorage.removeItem('cosun_current_user');
@@ -192,9 +191,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    try {
-      await apiLogout();
-    } catch { /* 静默 */ }
     try {
       await supabase.auth.signOut();
     } catch { /* 静默 */ }

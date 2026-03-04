@@ -11,7 +11,7 @@ import { useUser } from '../../contexts/UserContext';
 import QuotationDetailView from './QuotationDetailView';
 import { Quotation } from '../admin/QuotationManagement';
 import { toast } from 'sonner';
-import { apiFetchJson } from '../../api/backend-auth';
+import { salesQuotationService } from '../../lib/supabaseService';
 import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { canDeleteQuotation } from '../../lib/erp-core/delete-guard';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
@@ -100,10 +100,9 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
       setLastError(null);
       try {
         // 🔥 强制客户视图 + 禁用缓存（方便你在Network里明确看到请求）
-        const url = `/api/sales-quotations?view=customer&t=${Date.now()}`;
-        const res = await apiFetchJson<{ quotations: any[] }>(url, { cache: 'no-store' as any });
+        const rows = await salesQuotationService.getByCustomerEmail(user.email!);
         if (!alive) return;
-        const apiList = Array.isArray(res?.quotations) ? res.quotations : [];
+        const apiList = Array.isArray(rows) ? rows : [];
         setServerQuotations(mergeWithBridge(apiList, user.email!));
         setLastFetchedAt(new Date().toISOString());
       } catch (e: any) {
@@ -412,23 +411,11 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
       const apiFailedIds: string[] = [];
       for (const id of selectedIds) {
         try {
-          await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(String(id))}`, {
-            method: 'DELETE',
-          });
+          await salesQuotationService.delete(String(id));
           deletedIds.push(id);
         } catch (e: any) {
-          const msg = String(e?.message || '');
-          if (msg.includes('QUOTATION_ALREADY_PROGRESSED')) {
-            toast.error('Quotation already progressed to next workflow. Delete it from final workflow stage.');
-          } else if (
-            msg.includes('DELETE method is not supported') ||
-            msg.includes('Supported methods: OPTIONS')
-          ) {
-            apiFailedIds.push(id);
-          } else {
-            apiFailedIds.push(id);
-            toast.error(`Delete failed for ${id}: ${msg || 'Unknown error'}`);
-          }
+          apiFailedIds.push(id);
+          console.warn(`⚠️ Delete quotation ${id} failed:`, (e as any)?.message);
         }
       }
 

@@ -9,7 +9,7 @@ import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // �
 import { sendNotificationToUser } from '../../utils/notificationUtils';
 import { useUser } from '../../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
-import { apiFetchJson } from '../../api/backend-auth';
+import { salesQuotationService } from '../../lib/supabaseService';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -66,13 +66,9 @@ export default function QuotationDetailView({
 
     // ✅ 落库：客户接受报价
     try {
-      await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(String(quotation.id))}/customer-response`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'accepted',
-          comment: 'Customer accepted the quotation',
-        }),
+      await salesQuotationService.updateStatus(String(quotation.id), 'accepted', {
+        customer_status: 'accepted',
+        customer_response: { status: 'accepted', comment: 'Customer accepted the quotation', respondedAt: new Date().toISOString() },
       });
 
       // 🔥 同步本地状态（兼容现有组件/统计）
@@ -150,13 +146,9 @@ export default function QuotationDetailView({
 
     // ✅ 落库：客户协商/拒绝
     try {
-      await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(String(quotation.id))}/customer-response`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: newCustomerStatus, // negotiating | rejected
-          comment: feedbackMessage,
-        }),
+      await salesQuotationService.updateStatus(String(quotation.id), newCustomerStatus, {
+        customer_status: newCustomerStatus,
+        customer_response: { status: feedbackType, comment: feedbackMessage, respondedAt: new Date().toISOString() },
       });
 
       // 🔥 同步本地状态（兼容现有组件/统计）

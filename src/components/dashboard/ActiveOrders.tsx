@@ -35,7 +35,7 @@ import { Checkbox } from '../ui/checkbox'; // 🔥 新增
 import { useOrders } from '../../contexts/OrderContext';
 import { useUser } from '../../contexts/UserContext';
 import { sendNotificationToUser } from '../../utils/notificationUtils';
-import { apiFetchJson } from '../../api/backend-auth';
+import { contractService } from '../../lib/supabaseService';
 import { useFinance } from '../../contexts/FinanceContext';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument'; // 🔥 使用文档中心模板
 import { adaptOrderToSalesContract } from '../../utils/documentDataAdapters'; // 🔥 使用数据适配器
@@ -1087,19 +1087,11 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                 try {
                   // 🔥 先落库：客户确认/协商/取消 写入后端（失败时静默，本地照常处理）
                   try {
-                    await apiFetchJson<{ message: string; order: any }>(
-                      `/api/orders/${encodeURIComponent(orderId)}/customer-response`,
-                      {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          response: responseType,
-                          message: responseMessage.trim() || undefined,
-                        }),
-                      }
-                    );
+                    await contractService.updateStatus(orderId, responseType === 'accept' ? 'customer_confirmed' : responseType === 'reject' ? 'cancelled' : 'sent_to_customer', {
+                      customer_feedback: { type: responseType, message: responseMessage.trim(), submittedAt: new Date().toISOString() },
+                    });
                   } catch (apiErr: any) {
-                    console.warn('⚠️ [ActiveOrders] customer-response API 失败（本地继续处理）:', apiErr?.message);
+                    console.warn('⚠️ [ActiveOrders] Supabase 更新失败（本地继续处理）:', apiErr?.message);
                   }
                   // 本地立即更新合同状态（不依赖后端）
                   const now = new Date().toISOString();

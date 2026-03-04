@@ -43,7 +43,8 @@ import {
 import { useOrders } from '../../contexts/OrderContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
-import { apiFetchJson, resolveBackendPublicUrl } from '../../api/backend-auth';
+import { orderService } from '../../lib/supabaseService';
+import { paymentProofStorage } from '../../lib/storageService';
 
 export function AccountsReceivableList() {
   const { orders, updateOrder } = useOrders();
@@ -209,50 +210,33 @@ export function AccountsReceivableList() {
       let fileUrl = receiptData.fileUrl;
       let fileName = receiptData.fileName;
 
-      // 可选：先上传文件，拿到可访问 URL
-      if (selectedReceiptFile) {
-        const formData = new FormData();
-        formData.append('file', selectedReceiptFile);
-        const uploadRes = await apiFetchJson<{ fileUrl: string; fileName: string }>(
-          '/api/upload-payment-proof-file',
-          {
-            method: 'POST',
-            body: formData,
-          }
-        );
-        fileUrl = resolveBackendPublicUrl(uploadRes.fileUrl);
-        fileName = uploadRes.fileName || selectedReceiptFile.name;
-      }
-
       const orderUid = selectedOrder.id || selectedOrder.orderNumber;
       const type = proofType === 'depositReceipt' ? 'deposit' : 'balance';
-      const res = await apiFetchJson<{ message: string; order: any }>(
-        `/api/orders/${encodeURIComponent(orderUid)}/upload-receipt-proof`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type,
-            actualAmount: receiptData.actualAmount,
-            receiptDate: receiptData.receiptDate,
-            bankReference: receiptData.bankReference,
-            notes: receiptData.notes || undefined,
-            fileUrl: fileUrl || undefined,
-            fileName: fileName || undefined,
-          }),
-        }
-      );
 
-      if (res.order) {
-        updateOrder(orderUid, {
-          paymentStatus: res.order.paymentStatus,
-          status: res.order.status,
-          depositPaymentProof: res.order.depositPaymentProof,
-          balancePaymentProof: res.order.balancePaymentProof,
-          depositReceiptProof: res.order.depositReceiptProof,
-          balanceReceiptProof: res.order.balanceReceiptProof,
-        });
+      // 上传文件到 Supabase Storage
+      if (selectedReceiptFile) {
+        const uploaded = await paymentProofStorage.upload(
+          selectedReceiptFile,
+          selectedOrder.orderNumber || orderUid,
+          type,
+          'admin',
+        );
+        fileUrl = uploaded.url;
+        fileName = uploaded.fileName;
       }
+
+      const proofData = {
+        actualAmount: receiptData.actualAmount,
+        receiptDate: receiptData.receiptDate,
+        bankReference: receiptData.bankReference,
+        notes: receiptData.notes || null,
+        fileUrl: fileUrl || null,
+        fileName: fileName || null,
+        uploadedAt: new Date().toISOString(),
+      };
+      const proofField = type === 'deposit' ? 'deposit_receipt_proof' : 'balance_receipt_proof';
+      await orderService.upsert({ id: orderUid, [proofField]: proofData });
+      updateOrder(orderUid, { [`${type}ReceiptProof`]: proofData });
       window.dispatchEvent(new CustomEvent('ordersUpdated'));
 
       toast.success(`${proofType === 'depositReceipt' ? '定金' : '余款'}收款凭证已上传！`, {

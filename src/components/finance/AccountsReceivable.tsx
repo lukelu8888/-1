@@ -38,7 +38,7 @@ import { useOrders } from '../../contexts/OrderContext';
 import { useFinance } from '../../contexts/FinanceContext'; // 🔥 新增：导入财务Context
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
-import { apiFetchJson } from '../../api/backend-auth';
+import { orderService } from '../../lib/supabaseService';
 
 export function AccountsReceivable() {
   const { orders, updateOrder, deleteOrder } = useOrders();
@@ -213,33 +213,22 @@ export function AccountsReceivable() {
     try {
       const orderUid = selectedOrder.id || selectedOrder.orderNumber;
       const type = proofType === 'depositReceipt' ? 'deposit' : 'balance';
-      const res = await apiFetchJson<{ message: string; order: any }>(
-        `/api/orders/${encodeURIComponent(orderUid)}/upload-receipt-proof`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type,
-            actualAmount: receiptData.actualAmount,
-            receiptDate: receiptData.receiptDate,
-            bankReference: receiptData.bankReference,
-            notes: receiptData.notes || undefined,
-            fileUrl: receiptData.fileUrl || undefined,
-            fileName: receiptData.fileName || undefined,
-          }),
-        }
-      );
-
-      if (res.order) {
-        updateOrder(orderUid, {
-          paymentStatus: res.order.paymentStatus,
-          status: res.order.status,
-          depositPaymentProof: res.order.depositPaymentProof,
-          balancePaymentProof: res.order.balancePaymentProof,
-          depositReceiptProof: res.order.depositReceiptProof,
-          balanceReceiptProof: res.order.balanceReceiptProof,
-        });
-      }
+      const proofField = type === 'deposit' ? 'deposit_receipt_proof' : 'balance_receipt_proof';
+      await orderService.upsert({
+        id: orderUid,
+        [proofField]: {
+          actualAmount: receiptData.actualAmount,
+          receiptDate: receiptData.receiptDate,
+          bankReference: receiptData.bankReference,
+          notes: receiptData.notes || null,
+          fileUrl: receiptData.fileUrl || null,
+          fileName: receiptData.fileName || null,
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+      updateOrder(orderUid, {
+        [`${type}ReceiptProof`]: { ...receiptData, uploadedAt: new Date().toISOString() },
+      });
       window.dispatchEvent(new CustomEvent('ordersUpdated'));
 
       toast.success(`${proofType === 'depositReceipt' ? '定金' : '余款'}收款凭证已上传！`, {
