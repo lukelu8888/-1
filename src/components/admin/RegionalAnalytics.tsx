@@ -39,7 +39,7 @@ export default function RegionalAnalytics({ canViewSensitive, userRole, userRegi
   // 区域配置 - 必须在所有状态之前定义
   const regionConfig: Record<string, { name: string; icon: string; countries: string[] }> = {
     'NA': { name: '北美市场', icon: '🇺🇸', countries: ['美国', '加拿大', '墨西哥'] },
-    'EMEA': { name: '欧非市场', icon: '🇪🇺', countries: ['德国', '英国', '法国', '西班牙', '南非'] },
+    'EA': { name: '欧非市场', icon: '🇪🇺', countries: ['德国', '英国', '法国', '西班牙', '南非'] },
     'SA': { name: '南美市场', icon: '🇧🇷', countries: ['巴西', '阿根廷', '智利', '哥伦比亚'] },
     'all': { name: '全球市场', icon: '🌐', countries: [] }
   };

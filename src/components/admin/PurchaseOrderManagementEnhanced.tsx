@@ -1047,7 +1047,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const managerByRegion: Record<string, string> = {
       NA: 'ceo@cosun.com',
       SA: 'ceo@cosun.com',
-      EMEA: 'ceo@cosun.com',
+      EA: 'ceo@cosun.com',
     };
     const currentApproverEmail = managerByRegion[po.region || 'NA'] || 'ceo@cosun.com';
     const requestId = `PRQ-${mainPoNo || currentPoNo}`;

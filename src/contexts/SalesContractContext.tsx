@@ -80,7 +80,7 @@ export interface SalesContract {
   salesPerson: string;                 // 业务员邮箱
   salesPersonName: string;             // 业务员姓名
   supervisor?: string;                 // 主管邮箱
-  region: 'NA' | 'SA' | 'EMEA';       // 区域
+  region: 'NA' | 'SA' | 'EA';       // 区域
   
   // 产品信息
   products: SalesContractProduct[];

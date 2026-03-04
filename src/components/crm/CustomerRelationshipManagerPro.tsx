@@ -83,7 +83,7 @@ const MOCK_CUSTOMERS_WITH_SOCIAL: CustomerWithSocial[] = [
   {
     id: 'C003', companyName: 'DEF进出口贸易', companyNameEn: 'DEF Import Export',
     stage: 'pool', type: 'agency_seeker', businessType: ['agent'], source: 'instagram',
-    region: 'EMEA', rating: 'UNRATED', priority: 'medium',
+    region: 'EA', rating: 'UNRATED', priority: 'medium',
     contacts: [{ id: 'CT003', name: 'Mohammed Al-Rashid', position: 'CEO', email: 'mohammed@def.com', isPrimary: true }],
     country: 'UAE', totalOrders: 0, totalRevenue: 0, averageOrderValue: 0, followUpHistory: [],
     tags: ['Instagram来源', '寻找中国代理', '中东市场'], notes: 'Instagram DM主动联系，寻求长期采购代理',
@@ -113,7 +113,7 @@ const MOCK_CUSTOMERS_WITH_SOCIAL: CustomerWithSocial[] = [
   {
     id: 'C005', companyName: 'JKL建筑工程', companyNameEn: 'JKL Construction',
     stage: 'prospect', type: 'project_contractor', businessType: ['project'], source: 'live_streaming',
-    region: 'EMEA', rating: 'BBB', priority: 'high',
+    region: 'EA', rating: 'BBB', priority: 'high',
     contacts: [{ id: 'CT005', name: 'Hans Mueller', position: 'Procurement Director', email: 'hans@jkl.com', phone: '+49-30-1234567', isPrimary: true }],
     country: 'Germany', assignedTo: 'sales.maria', assignedBy: 'marketing.ai', assignedAt: new Date('2024-11-22'),
     totalOrders: 0, totalRevenue: 0, averageOrderValue: 0, followUpHistory: [],
@@ -157,7 +157,7 @@ const MOCK_CUSTOMERS_WITH_SOCIAL: CustomerWithSocial[] = [
   {
     id: 'C008', companyName: 'STU进口公司', companyNameEn: 'STU Import Co',
     stage: 'prospect', type: 'inspection_seeker', businessType: ['inspection'], source: 'google',
-    region: 'EMEA', rating: 'BBB', priority: 'medium',
+    region: 'EA', rating: 'BBB', priority: 'medium',
     contacts: [{ id: 'CT008', name: 'Laura White', position: 'Sourcing Manager', email: 'laura@stu.com', phone: '+44-20-1234-5678', isPrimary: true }],
     country: 'UK', assignedTo: 'sales.maria', assignedBy: 'marketing.ai', assignedAt: new Date('2024-11-15'),
     totalOrders: 0, totalRevenue: 0, averageOrderValue: 0, followUpHistory: [],

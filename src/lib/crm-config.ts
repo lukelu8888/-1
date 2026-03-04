@@ -509,7 +509,7 @@ export const CUSTOMER_PRIORITIES = {
 // ========================================
 // 7️⃣ 客户地区
 // ========================================
-export type CustomerRegion = 'NA' | 'SA' | 'EMEA';
+export type CustomerRegion = 'NA' | 'SA' | 'EA';
 
 export const CUSTOMER_REGIONS = {
   NA: {
@@ -528,8 +528,8 @@ export const CUSTOMER_REGIONS = {
     color: 'green',
     countries: ['Brazil', 'Argentina', 'Chile', 'Colombia', 'Peru'],
   },
-  EMEA: {
-    id: 'EMEA' as CustomerRegion,
+  EA: {
+    id: 'EA' as CustomerRegion,
     name: '欧非',
     nameEn: 'Europe, Middle East & Africa',
     icon: '🇪🇺',

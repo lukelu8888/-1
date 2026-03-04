@@ -64,7 +64,7 @@ export type PermissionAction =
 // ========================================
 export type DataScope =
   | 'all'          // 🌐 全部数据
-  | 'region'       // 🌎 区域数据（NA/SA/EMEA）
+  | 'region'       // 🌎 区域数据（NA/SA/EA）
   | 'department'   // 🏢 部门数据
   | 'subordinate'  // 👥 个人+下属数据
   | 'own';         // 👤 个人数据
@@ -749,7 +749,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  region?: 'NA' | 'SA' | 'EMEA' | 'all';
+  region?: 'NA' | 'SA' | 'EA' | 'all';
   department: string;
   avatar: string;
 }
@@ -852,7 +852,7 @@ export const DEMO_USERS: User[] = [
     name: 'Sophie Müller',
     email: 'sophie.muller@cosun.com',
     role: 'regional_manager_emea',
-    region: 'EMEA',
+    region: 'EA',
     department: '销售部（欧非）',
     avatar: '🇪🇺'
   },
@@ -885,7 +885,7 @@ export const DEMO_USERS: User[] = [
     name: 'Emma Wilson',
     email: 'emma.wilson@cosun.com',
     role: 'sales_rep_emma',
-    region: 'EMEA',
+    region: 'EA',
     department: '销售部（欧非）',
     avatar: '👩‍💼'
   },

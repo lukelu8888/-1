@@ -44,7 +44,7 @@ export default function UserRoleSwitcher() {
             <p className="text-xs text-gray-500">
               {currentUser.region === 'NA' ? '负责北美区' : 
                currentUser.region === 'SA' ? '负责南美区' : 
-               currentUser.region === 'EMEA' ? '负责欧非区' : 
+               currentUser.region === 'EA' ? '负责欧非区' : 
                `${currentUser.region}区`}
             </p>
           )}
@@ -74,9 +74,9 @@ export default function UserRoleSwitcher() {
               const regionNames = {
                 'NA': '北美',
                 'SA': '南美',
-                'EMEA': '欧非'
+                'EA': '欧非'
               };
-              regionTag = ` [${regionNames[user.region as 'NA' | 'SA' | 'EMEA']}]`;
+              regionTag = ` [${regionNames[user.region as 'NA' | 'SA' | 'EA']}]`;
             }
             
             // 🔥 为区域主管添加区域标识
@@ -84,9 +84,9 @@ export default function UserRoleSwitcher() {
               const regionNames = {
                 'NA': '北美',
                 'SA': '南美',
-                'EMEA': '欧非'
+                'EA': '欧非'
               };
-              regionTag = ` [${regionNames[user.region as 'NA' | 'SA' | 'EMEA']}区]`;
+              regionTag = ` [${regionNames[user.region as 'NA' | 'SA' | 'EA']}区]`;
             }
             
             const displayText = `${user.avatar} ${user.name} - ${roleLabel}${regionTag}`;

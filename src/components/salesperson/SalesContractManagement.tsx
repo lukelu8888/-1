@@ -349,7 +349,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       const managers: Record<string, string> = {
         'NA': 'john.smith@cosun.com',          // 北美区主管：刘建国
         'SA': 'carlos.silva@cosun.com',        // 南美区主管：陈明华
-        'EMEA': 'hans.mueller@cosun.com',      // 欧非区主管：赵国强
+        'EA': 'hans.mueller@cosun.com',      // 欧非区主管：赵国强
       };
       return managers[region] || managers['NA'];
     };

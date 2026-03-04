@@ -63,7 +63,7 @@ export default function CFOAnalytics({ canViewSensitive }: CFOAnalyticsProps) {
     },
     {
       region: '欧非',
-      code: 'EMEA',
+      code: 'EA',
       revenue: 4285000,
       cost: 2571000,
       grossProfit: 1714000,
@@ -97,18 +97,18 @@ export default function CFOAnalytics({ canViewSensitive }: CFOAnalyticsProps) {
 
   // 🔥 月度财务趋势（12个月）
   const baseMonthlyFinanceTrend = [
-    { month: '1月', revenue: 985000, cost: 591000, grossProfit: 394000, netProfit: 280000, cashFlow: 92000, receivable: 185000, payable: 105000, trading: 445000, inspection: 124000, agency: 280000, project: 136000, NA: 435000, EMEA: 330000, SA: 220000 },
-    { month: '2月', revenue: 1048000, cost: 629000, grossProfit: 419000, netProfit: 298000, cashFlow: 98000, receivable: 195000, payable: 112000, trading: 475000, inspection: 132000, agency: 298000, project: 143000, NA: 463000, EMEA: 351000, SA: 234000 },
-    { month: '3月', revenue: 1012000, cost: 607000, grossProfit: 405000, netProfit: 287000, cashFlow: 95000, receivable: 188000, payable: 108000, trading: 458000, inspection: 127000, agency: 288000, project: 139000, NA: 447000, EMEA: 339000, SA: 226000 },
-    { month: '4月', revenue: 1125000, cost: 675000, grossProfit: 450000, netProfit: 320000, cashFlow: 105000, receivable: 208000, payable: 118000, trading: 510000, inspection: 141000, agency: 320000, project: 154000, NA: 497000, EMEA: 377000, SA: 251000 },
-    { month: '5月', revenue: 1095000, cost: 657000, grossProfit: 438000, netProfit: 311000, cashFlow: 102000, receivable: 202000, payable: 115000, trading: 496000, inspection: 138000, agency: 311000, project: 150000, NA: 483000, EMEA: 367000, SA: 245000 },
-    { month: '6月', revenue: 1248000, cost: 749000, grossProfit: 499000, netProfit: 355000, cashFlow: 118000, receivable: 230000, payable: 130000, trading: 565000, inspection: 157000, agency: 355000, project: 171000, NA: 551000, EMEA: 418000, SA: 279000 },
-    { month: '7月', revenue: 1325000, cost: 795000, grossProfit: 530000, netProfit: 376000, cashFlow: 125000, receivable: 245000, payable: 138000, trading: 600000, inspection: 167000, agency: 377000, project: 181000, NA: 585000, EMEA: 444000, SA: 296000 },
-    { month: '8月', revenue: 1285000, cost: 771000, grossProfit: 514000, netProfit: 365000, cashFlow: 121000, receivable: 238000, payable: 134000, trading: 582000, inspection: 162000, agency: 366000, project: 175000, NA: 567000, EMEA: 431000, SA: 287000 },
-    { month: '9月', revenue: 1428000, cost: 857000, grossProfit: 571000, netProfit: 406000, cashFlow: 135000, receivable: 265000, payable: 149000, trading: 647000, inspection: 180000, agency: 407000, project: 194000, NA: 631000, EMEA: 479000, SA: 318000 },
-    { month: '10月', revenue: 1545000, cost: 927000, grossProfit: 618000, netProfit: 439000, cashFlow: 146000, receivable: 285000, payable: 161000, trading: 700000, inspection: 195000, agency: 440000, project: 210000, NA: 682000, EMEA: 518000, SA: 345000 },
-    { month: '11月', revenue: 1398000, cost: 839000, grossProfit: 559000, netProfit: 397000, cashFlow: 132000, receivable: 258000, payable: 146000, trading: 633000, inspection: 176000, agency: 398000, project: 191000, NA: 617000, EMEA: 469000, SA: 312000 },
-    { month: '12月', revenue: 1356000, cost: 814000, grossProfit: 542000, netProfit: 385000, cashFlow: 128000, receivable: 250000, payable: 141000, trading: 614000, inspection: 171000, agency: 386000, project: 185000, NA: 599000, EMEA: 455000, SA: 302000 },
+    { month: '1月', revenue: 985000, cost: 591000, grossProfit: 394000, netProfit: 280000, cashFlow: 92000, receivable: 185000, payable: 105000, trading: 445000, inspection: 124000, agency: 280000, project: 136000, NA: 435000, EA: 330000, SA: 220000 },
+    { month: '2月', revenue: 1048000, cost: 629000, grossProfit: 419000, netProfit: 298000, cashFlow: 98000, receivable: 195000, payable: 112000, trading: 475000, inspection: 132000, agency: 298000, project: 143000, NA: 463000, EA: 351000, SA: 234000 },
+    { month: '3月', revenue: 1012000, cost: 607000, grossProfit: 405000, netProfit: 287000, cashFlow: 95000, receivable: 188000, payable: 108000, trading: 458000, inspection: 127000, agency: 288000, project: 139000, NA: 447000, EA: 339000, SA: 226000 },
+    { month: '4月', revenue: 1125000, cost: 675000, grossProfit: 450000, netProfit: 320000, cashFlow: 105000, receivable: 208000, payable: 118000, trading: 510000, inspection: 141000, agency: 320000, project: 154000, NA: 497000, EA: 377000, SA: 251000 },
+    { month: '5月', revenue: 1095000, cost: 657000, grossProfit: 438000, netProfit: 311000, cashFlow: 102000, receivable: 202000, payable: 115000, trading: 496000, inspection: 138000, agency: 311000, project: 150000, NA: 483000, EA: 367000, SA: 245000 },
+    { month: '6月', revenue: 1248000, cost: 749000, grossProfit: 499000, netProfit: 355000, cashFlow: 118000, receivable: 230000, payable: 130000, trading: 565000, inspection: 157000, agency: 355000, project: 171000, NA: 551000, EA: 418000, SA: 279000 },
+    { month: '7月', revenue: 1325000, cost: 795000, grossProfit: 530000, netProfit: 376000, cashFlow: 125000, receivable: 245000, payable: 138000, trading: 600000, inspection: 167000, agency: 377000, project: 181000, NA: 585000, EA: 444000, SA: 296000 },
+    { month: '8月', revenue: 1285000, cost: 771000, grossProfit: 514000, netProfit: 365000, cashFlow: 121000, receivable: 238000, payable: 134000, trading: 582000, inspection: 162000, agency: 366000, project: 175000, NA: 567000, EA: 431000, SA: 287000 },
+    { month: '9月', revenue: 1428000, cost: 857000, grossProfit: 571000, netProfit: 406000, cashFlow: 135000, receivable: 265000, payable: 149000, trading: 647000, inspection: 180000, agency: 407000, project: 194000, NA: 631000, EA: 479000, SA: 318000 },
+    { month: '10月', revenue: 1545000, cost: 927000, grossProfit: 618000, netProfit: 439000, cashFlow: 146000, receivable: 285000, payable: 161000, trading: 700000, inspection: 195000, agency: 440000, project: 210000, NA: 682000, EA: 518000, SA: 345000 },
+    { month: '11月', revenue: 1398000, cost: 839000, grossProfit: 559000, netProfit: 397000, cashFlow: 132000, receivable: 258000, payable: 146000, trading: 633000, inspection: 176000, agency: 398000, project: 191000, NA: 617000, EA: 469000, SA: 312000 },
+    { month: '12月', revenue: 1356000, cost: 814000, grossProfit: 542000, netProfit: 385000, cashFlow: 128000, receivable: 250000, payable: 141000, trading: 614000, inspection: 171000, agency: 386000, project: 185000, NA: 599000, EA: 455000, SA: 302000 },
   ];
 
   // 🔥 筛选后的月度数据
@@ -551,7 +551,7 @@ export default function CFOAnalytics({ canViewSensitive }: CFOAnalyticsProps) {
               <SelectContent>
                 <SelectItem value="all" className="text-xs">全球</SelectItem>
                 <SelectItem value="NA" className="text-xs">北美</SelectItem>
-                <SelectItem value="EMEA" className="text-xs">欧非</SelectItem>
+                <SelectItem value="EA" className="text-xs">欧非</SelectItem>
                 <SelectItem value="SA" className="text-xs">南美</SelectItem>
               </SelectContent>
             </Select>

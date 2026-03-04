@@ -31,7 +31,7 @@ interface SalesRepDashboardExpertProps {
 }
 
 // 📊 生成业务员个人数据
-function getSalesRepData(userId: string, region: 'NA' | 'SA' | 'EMEA') {
+function getSalesRepData(userId: string, region: 'NA' | 'SA' | 'EA') {
   // 🔥 支持maria账号（与sales1是同一个人）
   if (userId === 'maria') userId = 'sales1';
   
@@ -84,7 +84,7 @@ function getSalesRepData(userId: string, region: 'NA' | 'SA' | 'EMEA') {
       ],
     },
     'sales3': {
-      name: 'Emma Thompson', region: 'EMEA', avatar: '👩‍💼', revenue: 268000, target: 280000,
+      name: 'Emma Thompson', region: 'EA', avatar: '👩‍💼', revenue: 268000, target: 280000,
       orders: 20, customers: 16, newCustomers: 3, conversion: 28.8, commission: 13400,
       commissionRate: 5, rank: 1, teamSize: 6,
       developmentData: {
@@ -843,7 +843,7 @@ function getCustomerTypeMetrics(userId: string) {
 }
 
 export function SalesRepDashboardExpert({ user }: SalesRepDashboardExpertProps) {
-  const region = user.region as 'NA' | 'SA' | 'EMEA';
+  const region = user.region as 'NA' | 'SA' | 'EA';
   const repData = getSalesRepData(user.id, region);
   const sourceData = getCustomerSources(user.id);
   const ddData = getCustomerDueDiligence(user.id);
@@ -855,7 +855,7 @@ export function SalesRepDashboardExpert({ user }: SalesRepDashboardExpertProps) 
   // 🎯 筛选状态
   const [searchTerm, setSearchTerm] = useState('');
   const [timeRange, setTimeRange] = useState('month'); // today, week, month, quarter, year, custom
-  const [regionFilter, setRegionFilter] = useState('all'); // all, NA, SA, EMEA
+  const [regionFilter, setRegionFilter] = useState('all'); // all, NA, SA, EA
   const [customerTypeFilter, setCustomerTypeFilter] = useState('all'); // all, Retailer, Importer, etc.
   const [sourceFilter, setSourceFilter] = useState('all'); // all, 社交媒体, 老客户, etc.
   const [stageFilter, setStageFilter] = useState('all'); // all, 潜在客户, 背调中, 已认证, 成交客户
@@ -1006,7 +1006,7 @@ export function SalesRepDashboardExpert({ user }: SalesRepDashboardExpertProps) 
                 <SelectItem value="all" className="text-xs">全部区域</SelectItem>
                 <SelectItem value="NA" className="text-xs">北美</SelectItem>
                 <SelectItem value="SA" className="text-xs">南美</SelectItem>
-                <SelectItem value="EMEA" className="text-xs">欧非</SelectItem>
+                <SelectItem value="EA" className="text-xs">欧非</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -337,7 +337,7 @@ export const authorizedUsers: AuthorizedUser[] = [
     hasOrders: true,
     orderCount: 0,
     activeShipments: [],
-    region: 'EMEA',
+    region: 'EA',
     country: 'United Kingdom',
     currency: 'GBP'
   },

@@ -1145,15 +1145,15 @@ export function SalesQuotationManagement({
   };
   
   // 🔥 标准化区域代码
-  const normalizeRegionCode = (region: string): 'NA' | 'SA' | 'EMEA' => {
-    const regionMap: Record<string, 'NA' | 'SA' | 'EMEA'> = {
+  const normalizeRegionCode = (region: string): 'NA' | 'SA' | 'EA' => {
+    const regionMap: Record<string, 'NA' | 'SA' | 'EA'> = {
       'NA': 'NA',
       'North America': 'NA',
       'SA': 'SA',
       'South America': 'SA',
-      'EMEA': 'EMEA',
-      'EA': 'EMEA',
-      'Europe & Africa': 'EMEA',
+      'EMEA': 'EA',
+      'EA': 'EA',
+      'Europe & Africa': 'EA',
       'Other': 'NA'
     };
     
@@ -1173,7 +1173,7 @@ export function SalesQuotationManagement({
       'North America': 'john.smith@cosun.com',
       'SA': 'carlos.silva@cosun.com',        // 南美区主管：陈明华
       'South America': 'carlos.silva@cosun.com',
-      'EMEA': 'hans.mueller@cosun.com',      // 欧非区主管：赵国强
+      'EA': 'hans.mueller@cosun.com',      // 欧非区主管：赵国强
       'EA': 'hans.mueller@cosun.com',
       'Europe & Africa': 'hans.mueller@cosun.com',
       'Other': 'john.smith@cosun.com',       // 默认使用北美主管

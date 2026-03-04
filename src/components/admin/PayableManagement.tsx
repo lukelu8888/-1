@@ -37,7 +37,7 @@ interface PayableAccount {
   lastPaymentDate?: string; // 最后付款日期
   
   // 其他
-  region: 'NA' | 'SA' | 'EMEA';
+  region: 'NA' | 'SA' | 'EA';
   notes?: string;
   paymentCount: number; // 付款次数
 }
@@ -101,7 +101,7 @@ const mockPayables: PayableAccount[] = [
     dueDate: '2025-02-10',
     createdDate: '2025-01-19',
     lastPaymentDate: '2025-01-21',
-    region: 'EMEA',
+    region: 'EA',
     notes: '报关费用，已结清',
     paymentCount: 1
   },
@@ -364,7 +364,7 @@ export default function PayableManagement() {
             <option value="all">全部区域</option>
             <option value="NA">北美</option>
             <option value="SA">南美</option>
-            <option value="EMEA">欧非</option>
+            <option value="EA">欧非</option>
           </select>
 
           <button className="flex items-center gap-2 px-3 py-2 text-xs bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">

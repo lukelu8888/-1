@@ -45,7 +45,7 @@ export interface Order {
   confirmedAt?: string; // 确认时间
   confirmedBy?: string; // 确认人
   confirmedDate?: string; // 确认日期
-  region?: 'NA' | 'SA' | 'EU' | 'EMEA'; // 🔥 区域信息
+  region?: 'NA' | 'SA' | 'EA'; // 🔥 区域信息
   country?: string; // 🔥 国家
   deliveryAddress?: string; // 🔥 交货地址
   contactPerson?: string; // 🔥 联系人

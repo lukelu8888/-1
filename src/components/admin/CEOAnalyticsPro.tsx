@@ -116,7 +116,7 @@ export default function CEOAnalyticsPro({ canViewSensitive }: CEOAnalyticsProPro
                   <SelectContent>
                     <SelectItem value="all">全球</SelectItem>
                     <SelectItem value="NA">北美</SelectItem>
-                    <SelectItem value="EMEA">欧非</SelectItem>
+                    <SelectItem value="EA">欧非</SelectItem>
                     <SelectItem value="SA">南美</SelectItem>
                   </SelectContent>
                 </Select>

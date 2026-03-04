@@ -53,7 +53,7 @@ const REGION_CONFIG = {
     currency: 'USD',
     timezone: 'BRT'
   },
-  EMEA: {
+  EA: {
     name: '欧非市场',
     enName: 'Europe & Africa',
     icon: '🇩🇪',
@@ -69,7 +69,7 @@ interface RegionalManagerDashboardProps {
 }
 
 // 📊 生成区域数据
-function getRegionData(region: 'NA' | 'SA' | 'EMEA') {
+function getRegionData(region: 'NA' | 'SA' | 'EA') {
   const baseData = {
     NA: {
       revenue: 980000,
@@ -109,7 +109,7 @@ function getRegionData(region: 'NA' | 'SA' | 'EMEA') {
         { month: '6月', revenue: 110000, target: 111000, orders: 8 },
       ]
     },
-    EMEA: {
+    EA: {
       revenue: 850000,
       target: 850000,
       orders: 62,
@@ -134,7 +134,7 @@ function getRegionData(region: 'NA' | 'SA' | 'EMEA') {
 }
 
 // 🎯 生成产品线数据
-function getProductData(region: 'NA' | 'SA' | 'EMEA') {
+function getProductData(region: 'NA' | 'SA' | 'EA') {
   const baseProducts = {
     NA: [
       { category: '电气产品', revenue: 380000, orders: 29, growth: 15.2, margin: 28.5, share: 38.8 },
@@ -148,7 +148,7 @@ function getProductData(region: 'NA' | 'SA' | 'EMEA') {
       { category: '门窗配件', revenue: 140000, orders: 11, growth: 5.5, margin: 24.2, share: 22.6 },
       { category: '劳保用品', revenue: 60000, orders: 5, growth: 15.2, margin: 17.9, share: 9.7 },
     ],
-    EMEA: [
+    EA: [
       { category: '电气产品', revenue: 360000, orders: 29, growth: 18.5, margin: 29.5, share: 42.4 },
       { category: '卫浴产品', revenue: 220000, orders: 16, growth: 14.8, margin: 33.8, share: 25.9 },
       { category: '门窗配件', revenue: 160000, orders: 10, growth: 10.2, margin: 26.2, share: 18.8 },
@@ -160,7 +160,7 @@ function getProductData(region: 'NA' | 'SA' | 'EMEA') {
 }
 
 // 👥 生成团队数据
-function getTeamData(region: 'NA' | 'SA' | 'EMEA') {
+function getTeamData(region: 'NA' | 'SA' | 'EA') {
   const teams = {
     NA: [
       { name: 'John Smith', role: '区域主管', revenue: 0, orders: 76, conversion: 31.2, customers: 128, rank: 0, isManager: true },
@@ -177,7 +177,7 @@ function getTeamData(region: 'NA' | 'SA' | 'EMEA') {
       { name: 'Pedro Costa', role: '业务员', revenue: 142000, orders: 11, conversion: 24.8, customers: 10, rank: 3 },
       { name: 'Maria Lopez', role: '初级业务员', revenue: 55000, orders: 5, conversion: 20.5, customers: 6, rank: 4 },
     ],
-    EMEA: [
+    EA: [
       { name: 'Hans Mueller', role: '区域主管', revenue: 0, orders: 62, conversion: 29.3, customers: 128, rank: 0, isManager: true },
       { name: '刘洋', role: '高级业务员', revenue: 268000, orders: 20, conversion: 28.8, customers: 16, rank: 1 },
       { name: '周萍', role: '业务员', revenue: 225000, orders: 17, conversion: 29.3, customers: 13, rank: 2 },
@@ -190,7 +190,7 @@ function getTeamData(region: 'NA' | 'SA' | 'EMEA') {
 }
 
 // 🏆 生成客户数据
-function getCustomerData(region: 'NA' | 'SA' | 'EMEA') {
+function getCustomerData(region: 'NA' | 'SA' | 'EA') {
   const customers = {
     NA: {
       total: 128,
@@ -220,7 +220,7 @@ function getCustomerData(region: 'NA' | 'SA' | 'EMEA') {
         { name: 'Chile Building Supply', revenue: 55000, orders: 5, health: 72, type: '普通' },
       ]
     },
-    EMEA: {
+    EA: {
       total: 128,
       strategic: 10,
       key: 32,
@@ -240,7 +240,7 @@ function getCustomerData(region: 'NA' | 'SA' | 'EMEA') {
 }
 
 // 📈 生成销售漏斗数据
-function getFunnelData(region: 'NA' | 'SA' | 'EMEA') {
+function getFunnelData(region: 'NA' | 'SA' | 'EA') {
   const funnels = {
     NA: [
       { stage: '询价', count: 185, value: 2380000, conversion: 100 },
@@ -256,7 +256,7 @@ function getFunnelData(region: 'NA' | 'SA' | 'EMEA') {
       { stage: '签约', count: 33, value: 495000, conversion: 26.4 },
       { stage: '收款', count: 28, value: 420000, conversion: 22.4 },
     ],
-    EMEA: [
+    EA: [
       { stage: '询价', count: 140, value: 1820000, conversion: 100 },
       { stage: '报价', count: 90, value: 1260000, conversion: 64.3 },
       { stage: '谈判', count: 72, value: 1008000, conversion: 51.4 },
@@ -269,7 +269,7 @@ function getFunnelData(region: 'NA' | 'SA' | 'EMEA') {
 }
 
 // 🎯 生成市场分析数据
-function getMarketData(region: 'NA' | 'SA' | 'EMEA') {
+function getMarketData(region: 'NA' | 'SA' | 'EA') {
   const markets = {
     NA: {
       marketSize: 25000000,
@@ -297,7 +297,7 @@ function getMarketData(region: 'NA' | 'SA' | 'EMEA') {
         { competitor: '本地批发商', strength: 65, weakness: '质量不稳定' },
       ]
     },
-    EMEA: {
+    EA: {
       marketSize: 35000000,
       ourShare: 2.43,
       growthRate: 6.8,
@@ -316,7 +316,7 @@ function getMarketData(region: 'NA' | 'SA' | 'EMEA') {
 }
 
 export function RegionalManagerDashboard({ user }: RegionalManagerDashboardProps) {
-  const region = user.region as 'NA' | 'SA' | 'EMEA';
+  const region = user.region as 'NA' | 'SA' | 'EA';
   const regionConfig = REGION_CONFIG[region];
   const regionData = getRegionData(region);
   const productData = getProductData(region);

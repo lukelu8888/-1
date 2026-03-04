@@ -39,7 +39,7 @@ interface PaymentRecord {
   status: 'pending' | 'completed' | 'failed'; // 待确认、已完成、失败
   
   // 其他
-  region: 'NA' | 'SA' | 'EMEA';
+  region: 'NA' | 'SA' | 'EA';
   notes?: string;
   attachments?: string[]; // 付款凭证附件
   operator: string; // 操作人
@@ -86,7 +86,7 @@ const mockPaymentRecords: PaymentRecord[] = [
     paymentDate: '2025-01-21',
     createdDate: '2025-01-21',
     status: 'completed',
-    region: 'EMEA',
+    region: 'EA',
     notes: '报关费用全额支付',
     operator: 'Admin'
   },
@@ -380,7 +380,7 @@ export default function PaymentRecordManagement() {
             <option value="all">全部区域</option>
             <option value="NA">北美</option>
             <option value="SA">南美</option>
-            <option value="EMEA">欧非</option>
+            <option value="EA">欧非</option>
           </select>
         </div>
       </div>

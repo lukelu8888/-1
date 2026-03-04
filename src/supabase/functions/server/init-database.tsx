@@ -110,7 +110,7 @@ async function createInternalUsers() {
       name: 'Hans Mueller',
       email: 'hans.mueller@cosun.com',
       role: 'Sales_Manager',
-      region: 'EMEA', // 欧非区域主管
+      region: 'EA', // 欧非区域主管
       department: '销售部-欧非',
       status: 'active',
       type: 'admin'
@@ -146,7 +146,7 @@ async function createInternalUsers() {
       name: '王芳',  // 🔥 修改为中文名
       email: 'wangfang@cosun.com',  // 🔥 修改邮箱
       role: 'Sales_Rep',
-      region: 'EMEA', // 欧非业务员
+      region: 'EA', // 欧非业务员
       department: '销售部-欧非',
       status: 'active',
       type: 'admin'
@@ -261,7 +261,7 @@ async function createCustomerUsers() {
       email: 'info@europa-trading.de',
       companyName: 'Europa Trading GmbH',
       country: 'Germany',
-      region: 'EMEA',
+      region: 'EA',
       contactPerson: 'Klaus Schmidt',
       phone: '+49-30-1234-5678',
       type: 'customer',
@@ -382,7 +382,7 @@ async function createCustomerData() {
       id: 'customer_europa',
       companyName: 'Europa Trading GmbH',
       country: 'Germany',
-      region: 'EMEA',
+      region: 'EA',
       industry: 'Distribution',
       contactPerson: 'Klaus Schmidt',
       email: 'info@europa-trading.de',

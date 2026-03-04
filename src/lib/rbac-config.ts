@@ -67,7 +67,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  region?: 'NA' | 'SA' | 'EMEA' | 'all';  // 负责区域
+  region?: 'NA' | 'SA' | 'EA' | 'all';  // 负责区域
   department?: string;
   avatar?: string;
 }
@@ -322,7 +322,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   // ========================================
   // 分为两类：
   // 1. 销售总监（region='all'）- 管理全球销售
-  // 2. 区域主管（region='NA'/'SA'/'EMEA'）- 管理单个区域
+  // 2. 区域主管（region='NA'/'SA'/'EA'）- 管理单个区域
   // 
   // 职责：销售团队管理、客户管理、报价审批、合同审批
   // 特点：前台业务全权限、不能访问供应商、能看毛利
@@ -651,9 +651,9 @@ export function getUserRoleLabel(user: User): { zh: string; en: string; color: s
       const regionNames = {
         'NA': { zh: '北美主管', en: 'NA Regional Manager' },
         'SA': { zh: '南美主管', en: 'SA Regional Manager' },
-        'EMEA': { zh: '欧非主管', en: 'EMEA Regional Manager' }
+        'EA': { zh: '欧非主管', en: 'EMEA Regional Manager' }
       };
-      const regionLabel = regionNames[user.region as 'NA' | 'SA' | 'EMEA'];
+      const regionLabel = regionNames[user.region as 'NA' | 'SA' | 'EA'];
       if (regionLabel) {
         return { ...regionLabel, color: 'green' };
       }
@@ -811,7 +811,7 @@ export const DEMO_USERS: User[] = [
     name: '赵国强',
     email: 'hans.mueller@cosun.com',
     role: 'Sales_Manager',
-    region: 'EMEA',
+    region: 'EA',
     department: '销售部-欧非',
     avatar: '👨‍💼'
   },
@@ -838,7 +838,7 @@ export const DEMO_USERS: User[] = [
     name: '王芳',
     email: 'wangfang@cosun.com',  // 🔥 修改为中文名对应的拼音邮箱
     role: 'Sales_Rep',
-    region: 'EMEA',
+    region: 'EA',
     department: '销售部-欧非',
     avatar: '👩‍💼'
   },

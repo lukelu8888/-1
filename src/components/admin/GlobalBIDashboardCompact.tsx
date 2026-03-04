@@ -56,7 +56,7 @@ interface GlobalBIDashboardCompactProps {
 
 export default function GlobalBIDashboardCompact({ userRole = 'CEO', userRegion = 'all' }: GlobalBIDashboardCompactProps) {
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month' | 'quarter'>('month');
-  const [selectedRegion, setSelectedRegion] = useState<'all' | 'NA' | 'SA' | 'EMEA'>(userRegion as any);
+  const [selectedRegion, setSelectedRegion] = useState<'all' | 'NA' | 'SA' | 'EA'>(userRegion as any);
   const [lastRefresh, setLastRefresh] = useState(new Date());
 
   // 🔥 实时业务KPI数据
@@ -194,7 +194,7 @@ export default function GlobalBIDashboardCompact({ userRole = 'CEO', userRegion 
 
           {/* 区域筛选 - 紧凑 */}
           <div className="flex items-center gap-1 bg-white/10 rounded-lg p-0.5">
-            {(['all', 'NA', 'SA', 'EMEA'] as const).map((region) => (
+            {(['all', 'NA', 'SA', 'EA'] as const).map((region) => (
               <button
                 key={region}
                 onClick={() => setSelectedRegion(region)}
@@ -207,7 +207,7 @@ export default function GlobalBIDashboardCompact({ userRole = 'CEO', userRegion 
                 {region === 'all' && '全球'}
                 {region === 'NA' && '北美'}
                 {region === 'SA' && '南美'}
-                {region === 'EMEA' && '欧非'}
+                {region === 'EA' && '欧非'}
               </button>
             ))}
           </div>

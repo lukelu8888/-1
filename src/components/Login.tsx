@@ -816,7 +816,7 @@ export function Login() {
                         onClick={() => handleTestLogin('hans.mueller', 'cosun2024')}
                         className="px-2 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-[10px] transition-colors border border-sky-200 font-medium leading-tight"
                       >
-                        🇪🇺 EMEA
+                        🇪🇺 EA
                       </button>
                     </div>
                   </div>

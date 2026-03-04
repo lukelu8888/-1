@@ -76,7 +76,7 @@ interface Quotation {
   containerType?: '20GP' | '40GP' | '40HQ';
   contractGenerated?: boolean;
   contractNo?: string;
-  region?: 'NA' | 'SA' | 'EMEA';
+  region?: 'NA' | 'SA' | 'EA';
   currency?: 'USD' | 'EUR' | 'GBP';
   shippingMethod?: 'Sea' | 'Air' | 'Express';
   remarks?: string;
@@ -283,7 +283,7 @@ export default function OrderManagementCenterPro() {
         validUntil: '2025-11-23',
         totalAmount: 94800,
         status: 'Negotiating',
-        region: 'EMEA',
+        region: 'EA',
         currency: 'EUR',
         paymentTerms: '50% deposit, 50% before shipment',
         deliveryTerms: 'FOB Ningbo',
@@ -463,7 +463,7 @@ export default function OrderManagementCenterPro() {
     switch (region) {
       case 'NA': return '北美';
       case 'SA': return '南美';
-      case 'EMEA': return '欧非';
+      case 'EA': return '欧非';
       default: return '未知';
     }
   };
@@ -903,7 +903,7 @@ export default function OrderManagementCenterPro() {
                   contractNo: selectedQuotation.contractNo || `SC-${selectedQuotation.id}`,
                   contractDate: selectedQuotation.date,
                   quotationNo: selectedQuotation.id,
-                  region: selectedQuotation.region === 'EMEA' ? 'EU' : selectedQuotation.region || 'NA',
+                  region: selectedQuotation.region === 'EA' ? 'EA' : selectedQuotation.region || 'NA',
                   
                   // 卖方（公司）信息
                   seller: {

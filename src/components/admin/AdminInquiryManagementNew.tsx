@@ -219,7 +219,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       'NA': 'North America',
       'SA': 'South America',
       'EA': 'Europe & Africa',
-      'EMEA': 'Europe & Africa',
+      'EA': 'Europe & Africa',
       'north_america': 'North America',
       'south_america': 'South America',
       'europe_africa': 'Europe & Africa',

@@ -223,7 +223,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
       .replace(/North\s*America/gi, 'NA')
       .replace(/South\s*America/gi, 'SA')
       .replace(/Europe/gi, 'EU')
-      .replace(/EMEA/gi, 'EMEA');
+      ;
 
   const sanitizeDisplayText = (value: unknown): string => {
     if (value === null || value === undefined) return '';

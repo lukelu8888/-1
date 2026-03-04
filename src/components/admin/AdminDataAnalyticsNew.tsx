@@ -39,7 +39,7 @@ const REGION_CONFIG = {
     currency: 'USD',
     categories: ['Bathroom Fixtures', 'Door Accessories', 'Window Fittings', 'Safety Equipment']
   },
-  'EMEA': {
+  'EA': {
     name: 'Europe & Africa',
     label: '欧非',
     countries: ['Germany', 'UK', 'France', 'Spain', 'South Africa'],
@@ -55,15 +55,15 @@ const SALES_REPS = [
   { id: 'maria', name: 'Maria Garcia', region: 'NA' },
   { id: 'carlos', name: 'Carlos Rodriguez', region: 'SA' },
   { id: 'ana', name: 'Ana Silva', region: 'SA' },
-  { id: 'hans', name: 'Hans Mueller', region: 'EMEA' },
-  { id: 'pierre', name: 'Pierre Dubois', region: 'EMEA' },
+  { id: 'hans', name: 'Hans Mueller', region: 'EA' },
+  { id: 'pierre', name: 'Pierre Dubois', region: 'EA' },
 ];
 
 // 🔥 客户数据（按区域分类）
 const CUSTOMERS_BY_REGION = {
   'NA': ['ABC Trading Ltd.', 'HomeStyle Inc.', 'BuildMart Co.', 'Elite Supplies'],
   'SA': ['Brasil Imports SA', 'ArgentCo Trading', 'Chilean Builders', 'Colombia Supplies'],
-  'EMEA': ['European Hardware GmbH', 'UK Building Supplies', 'French Trading Co.', 'African Imports Ltd.']
+  'EA': ['European Hardware GmbH', 'UK Building Supplies', 'French Trading Co.', 'African Imports Ltd.']
 };
 
 // 🔥 供应商数据

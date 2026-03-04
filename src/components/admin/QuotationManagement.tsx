@@ -151,7 +151,7 @@ export default function QuotationManagement({
       'NA': 'North America',
       'SA': 'South America',
       'EA': 'Europe & Africa',
-      'EMEA': 'Europe & Africa', // 兼容旧数据
+      'EA': 'Europe & Africa', // 兼容旧数据
       'all': 'all'
     };
     return mapping[code] || code;
@@ -557,7 +557,7 @@ export default function QuotationManagement({
       'NA': 'North America',
       'SA': 'South America',
       'EA': 'Europe & Africa',
-      'EMEA': 'Europe & Africa'
+      'EA': 'Europe & Africa'
     };
     const fullRegionName = regionMapping[region] || quotation.region || 'Other';
     

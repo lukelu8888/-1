@@ -120,7 +120,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       'NA': 'North America',
       'SA': 'South America',
       'EA': 'Europe & Africa',  // ✅ 修正：EA而不是EMEA
-      'EMEA': 'Europe & Africa', // 兼容旧数据
+      'EA': 'Europe & Africa', // 兼容旧数据
       'all': 'all'
     };
     return mapping[code] || code; // Return original if no mapping found

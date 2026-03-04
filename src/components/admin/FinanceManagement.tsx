@@ -137,7 +137,7 @@ export default function FinanceManagement() {
 
   // 🔥🔥🔥 新增：筛选状态
   const [timeRange, setTimeRange] = useState('ytd'); // q1, q2, q3, q4, ytd, year
-  const [selectedRegion, setSelectedRegion] = useState('all'); // all, NA, EMEA, SA
+  const [selectedRegion, setSelectedRegion] = useState('all'); // all, NA, EA, SA
   const [selectedBusinessType, setSelectedBusinessType] = useState('all'); // all, trading, inspection, agency, project
   const [selectedCurrency, setSelectedCurrency] = useState('all'); // all, USD, EUR, GBP
 
@@ -481,7 +481,7 @@ export default function FinanceManagement() {
             <SelectContent>
               <SelectItem value="all" className="text-xs">全部区域</SelectItem>
               <SelectItem value="NA" className="text-xs">🇺🇸 北美</SelectItem>
-              <SelectItem value="EMEA" className="text-xs">🇪🇺 欧非</SelectItem>
+              <SelectItem value="EA" className="text-xs">🇪🇺 欧非</SelectItem>
               <SelectItem value="SA" className="text-xs">🇧🇷 南美</SelectItem>
             </SelectContent>
           </Select>

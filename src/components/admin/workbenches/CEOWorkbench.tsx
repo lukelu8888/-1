@@ -149,7 +149,7 @@ export function CEOWorkbench({ user, onNavigate }: CEOWorkbenchProps) {
     const regions = [
       { code: 'NA', name: '北美市场', color: '#3B82F6' },
       { code: 'SA', name: '南美市场', color: '#10B981' },
-      { code: 'EMEA', name: '欧非市场', color: '#F59E0B' }
+      { code: 'EA', name: '欧非市场', color: '#F59E0B' }
     ];
     
     return regions.map(region => {
