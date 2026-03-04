@@ -38,7 +38,7 @@ import { QuotationDocument, QuotationData } from '../documents/templates/Quotati
 import { SalesContractDocument, SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 导入销售合同文档
 import { PurchaseOrderDocument } from '../documents/templates/PurchaseOrderDocument';
 import { useSalesContracts } from '../../contexts/SalesContractContext'; // 🔥 导入销售合同Context
-import { apiFetchJson } from '../../api/backend-auth';
+import { salesQuotationService, contractService } from '../../lib/supabaseService';
 import { addTombstones, filterNotDeleted, isDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { emitErpEvent } from '../../lib/erp-core/event-bus';
 import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
@@ -271,28 +271,14 @@ export function ApprovalCenter() {
     } catch {}
 
     setLoading(true);
-    Promise.all([
-      apiFetchJson<{
-        pending: ApprovalRequest[];
-        approved: ApprovalRequest[];
-        rejected: ApprovalRequest[];
-        submitted: ApprovalRequest[];
-      }>(`/api/approval-center/quotation-requests?asEmail=${encodeURIComponent(currentUserEmail)}`),
-      apiFetchJson<{
-        pending: ApprovalRequest[];
-        approved: ApprovalRequest[];
-        rejected: ApprovalRequest[];
-        submitted: ApprovalRequest[];
-      }>(`/api/approval-center/contract-requests?asEmail=${encodeURIComponent(currentUserEmail)}`),
-    ])
-      .then(([qtRes, scRes]) => {
-        // 合并策略：服务器数据 > cache/bridge 数据 > Context 本地数据
-        // base=本地, extra=服务器（extra 覆盖 base 中同 key 的项目）
+    Promise.resolve()
+      .then(() => {
+        // 使用 bridge/cache 作为主数据源（Supabase approval_records 在后续迭代接入）
         const latestCache = readApprovalCenterCache(currentUserEmail);
-        const serverPending = [...(qtRes.pending || []), ...(scRes.pending || [])];
-        const serverApproved = [...(qtRes.approved || []), ...(scRes.approved || [])];
-        const serverRejected = [...(qtRes.rejected || []), ...(scRes.rejected || [])];
-        const serverSubmitted = [...(qtRes.submitted || []), ...(scRes.submitted || [])];
+        const serverPending: ApprovalRequest[] = [];
+        const serverApproved: ApprovalRequest[] = [];
+        const serverRejected: ApprovalRequest[] = [];
+        const serverSubmitted: ApprovalRequest[] = [];
 
         // 在 API 返回后再读一次 bridge，强制合并（防止竞态导致 bridge 数据被覆盖丢失）
         let liveBridgePending: ApprovalRequest[] = [];
@@ -495,33 +481,27 @@ export function ApprovalCenter() {
     return relatedId || nestedId;
   };
 
-  // 某些环境会把 PATCH 异常降级，做 method override 兜底。
+  // 更新 Supabase 审批状态（替换原来的 backend API PATCH 调用）
   const patchWithMethodOverrideFallback = async (
     path: string,
     payload: Record<string, any>,
   ) => {
-    try {
-      await apiFetchJson(path, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      return;
-    } catch (e: any) {
-      const msg = String(e?.message || '');
-      const shouldFallback =
-        msg.includes('GET method is not supported') ||
-        msg.includes('Supported methods: PATCH');
-      if (!shouldFallback) throw e;
+    // 解析 path 来决定更新哪个表
+    const isContract = path.includes('/sales-contracts/');
+    const isQuotation = path.includes('/sales-quotations/');
+    const isApprove = path.includes('/approve');
+    const isReject = path.includes('/reject');
+    const isSubmit = path.includes('/submit-approval');
 
-      await apiFetchJson(path, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-HTTP-Method-Override': 'PATCH',
-        },
-        body: JSON.stringify({ ...payload, _method: 'PATCH' }),
-      });
+    const keyMatch = path.match(/\/(sales-contracts|sales-quotations)\/([^/]+)\//);
+    const docKey = keyMatch ? decodeURIComponent(keyMatch[2]) : '';
+
+    if (isContract && docKey) {
+      const newStatus = isApprove ? 'approved' : isReject ? 'rejected' : 'pending';
+      await contractService.updateStatus(docKey, newStatus);
+    } else if (isQuotation && docKey) {
+      const newStatus = isApprove ? 'approved' : isReject ? 'rejected' : isSubmit ? 'pending_approval' : 'pending';
+      await salesQuotationService.updateStatus(docKey, newStatus, payload);
     }
   };
 
@@ -564,13 +544,9 @@ export function ApprovalCenter() {
             : []),
         ];
 
-    await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(quotationKey)}/submit-approval`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        approvalChain: rebuiltChain,
-        amount: Number(req.amount || 0),
-      }),
+    await salesQuotationService.updateStatus(quotationKey, 'pending_approval', {
+      approval_chain: rebuiltChain,
+      amount: Number(req.amount || 0),
     });
 
     const actionPath =

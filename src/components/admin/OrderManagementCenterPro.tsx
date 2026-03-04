@@ -36,7 +36,6 @@ import { SalesContractTemplate } from './SalesContractTemplate';
 import { SalesContractDocumentPaginated } from '../documents/SalesContractDocumentPaginated'; // 🔥 分页版销售合同
 import { SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 销售合同数据类型
 import { exportToPDF, generatePDFFilename } from '../../utils/pdfExport';
-import { apiFetchJson } from '../../api/backend-auth';
 const APPROVAL_CENTER_CACHE_PREFIX = 'approval_center_cache_v1';
 const getApprovalCenterCacheKey = (email: string) => `${APPROVAL_CENTER_CACHE_PREFIX}:${email || 'anonymous'}`;
 

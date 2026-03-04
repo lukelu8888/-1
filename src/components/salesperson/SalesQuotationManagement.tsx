@@ -38,7 +38,7 @@ import { useInquiry } from '../../contexts/InquiryContext'; // 🔥 导入询价
 import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 导入客户报价Context
 import { useOrders } from '../../contexts/OrderContext'; // 🔥 导入订单Context
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context（用于溯源回写）
-import { apiFetchJson } from '../../api/backend-auth'; // 🔥 后端接口调用工具
+import { salesQuotationService } from '../../lib/supabaseService';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
 import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
@@ -244,11 +244,10 @@ export function SalesQuotationManagement({
   // 🔥 加载数据的函数
   const loadSalesQuotations = React.useCallback(() => {
     setLoadingFromApi(true);
-    apiFetchJson<{ quotations: any[] }>('/api/sales-quotations')
-      .then((res) => {
-        if (Array.isArray(res?.quotations) && res.quotations.length === 0) {
-          // API 返回空列表：可能后端 401/email 不匹配/真的没数据
-          // 尝试用缓存、context、旧 localStorage 做兜底
+    salesQuotationService.getAll()
+      .then((rows) => {
+        const quotations: any[] = Array.isArray(rows) ? rows : [];
+        if (quotations.length === 0) {
           const existingCache = readSalesQuotationCache(currentUser?.email);
           const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
           const legacyList = readSalesQuotationLocalFallback();
@@ -263,17 +262,14 @@ export function SalesQuotationManagement({
             setServerQuotations(fallback);
             writeSalesQuotationCache(currentUser?.email, fallback);
           }
-        } else if (Array.isArray(res?.quotations)) {
-          let merged = mergeDraftOverrides(res.quotations);
-          // API 返回的记录从 bridge 里清掉（bridge 只存 API 没有的离线条目）
+        } else {
+          let merged = mergeDraftOverrides(quotations);
           try {
-            const apiIds = new Set(res.quotations.flatMap((q: any) => [String(q.qtNumber), String(q.id)].filter(Boolean)));
+            const apiIds = new Set(quotations.flatMap((q: any) => [String(q.qtNumber), String(q.id)].filter(Boolean)));
             const bridge = JSON.parse(localStorage.getItem('customer_quotations_bridge') || '[]');
             const trimmed = bridge.filter((b: any) => !apiIds.has(String(b.qtNumber)) && !apiIds.has(String(b.id)));
             localStorage.setItem('customer_quotations_bridge', JSON.stringify(trimmed));
           } catch {}
-          // 从 customer_decline_bridge 合并客户反馈（跨角色同步，避免业务员等 API 刷新才能看到拒绝理由）
-          // 注意：只在 API 也是 rejected/negotiating 状态时才覆盖，不能覆盖业务员刚重发后的 sent 状态
           try {
             const declineBridge: any[] = JSON.parse(localStorage.getItem('customer_decline_bridge') || '[]');
             if (declineBridge.length > 0) {
@@ -282,11 +278,7 @@ export function SalesQuotationManagement({
                   (b.qtNumber && b.qtNumber === q.qtNumber) || (b.id && b.id === String(q.id))
                 );
                 if (entry?.customerResponse && q.customerStatus !== 'sent' && q.customerStatus !== 'accepted') {
-                  return {
-                    ...q,
-                    customerStatus: entry.customerStatus ?? q.customerStatus,
-                    customerResponse: entry.customerResponse,
-                  };
+                  return { ...q, customerStatus: entry.customerStatus ?? q.customerStatus, customerResponse: entry.customerResponse };
                 }
                 return q;
               });
@@ -294,23 +286,10 @@ export function SalesQuotationManagement({
           } catch {}
           setServerQuotations(merged);
           writeSalesQuotationCache(currentUser?.email, merged);
-        } else {
-          // 响应格式异常，用缓存/context 兜底
-          const existingCache = readSalesQuotationCache(currentUser?.email);
-          const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
-          const legacyList = readSalesQuotationLocalFallback();
-          const fallback = existingCache.length > 0 ? existingCache
-            : contextList.length > 0 ? mergeDraftOverrides(contextList)
-            : legacyList.length > 0 ? mergeDraftOverrides(legacyList) : [];
-          if (fallback.length > 0) {
-            setServerQuotations(fallback);
-            writeSalesQuotationCache(currentUser?.email, fallback);
-          }
         }
       })
       .catch((err) => {
-        console.error('❌ [SalesQuotationManagement] 加载 /api/sales-quotations 失败:', err);
-        // API 失败时用缓存/context 兜底
+        console.error('❌ [SalesQuotationManagement] 加载 sales_quotations 失败:', err);
         const existingCache = readSalesQuotationCache(currentUser?.email);
         const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
         const legacyList = readSalesQuotationLocalFallback();
@@ -421,38 +400,20 @@ export function SalesQuotationManagement({
     
     if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个报价单吗？此操作不可恢复！`)) {
       const ids = selectedIds.map((id) => String(id));
-      let deletedByApiCount = 0;
-      let deleteMethodUnsupported = false;
-
+      let deletedCount = 0;
       for (const id of ids) {
         try {
-          await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(id)}`, {
-            method: 'DELETE',
-          });
-          deletedByApiCount += 1;
-        } catch (e: any) {
-          const msg = String(e?.message || '');
-          if (msg.includes('DELETE method is not supported') || msg.includes('Supported methods: OPTIONS')) {
-            deleteMethodUnsupported = true;
-            break;
-          }
-        }
+          await salesQuotationService.delete(id);
+          deletedCount += 1;
+        } catch {}
       }
-
-      if (deleteMethodUnsupported || deletedByApiCount < ids.length) {
-        appendDeletedIds(ids);
-      }
+      if (deletedCount < ids.length) appendDeletedIds(ids);
 
       removeDraftOverrideByIds(ids);
       setServerQuotations((prev) => prev.filter((qt) => !ids.includes(String(qt.id))));
       setSelectedIds([]);
-
-      if (deletedByApiCount === ids.length) {
-        toast.success(`成功删除 ${ids.length} 个报价单！`);
-        loadSalesQuotations();
-      } else {
-        toast.success(`已删除 ${ids.length} 个报价单（兼容模式）`);
-      }
+      toast.success(`成功删除 ${ids.length} 个报价单！`);
+      if (deletedCount > 0) loadSalesQuotations();
     }
   };
   
@@ -532,16 +493,12 @@ export function SalesQuotationManagement({
         : []),
     ];
 
-    // ─── 1. 后端同步（重置审批状态为 pending_approval）───
+    // ─── 1. 同步到 Supabase（重置审批状态为 pending_approval）───
     try {
       const submitKey = qt.qtNumber || qt.id;
-      await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(submitKey)}/submit-approval`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approvalChain, amount }),
-      });
+      await salesQuotationService.updateStatus(submitKey, 'pending_approval', { approval_chain: approvalChain });
     } catch (e: any) {
-      console.warn('⚠️ [申请复核] 后端同步失败，降级本地模式:', e?.message);
+      console.warn('⚠️ [申请复核] Supabase 同步失败，降级本地模式:', e?.message);
     }
 
     // ─── 2. 更新本地状态 ───
@@ -624,18 +581,14 @@ export function SalesQuotationManagement({
     if (!window.confirm(`确定撤回报价单 ${qt.qtNumber} 吗？撤回后可重新编辑并提交审批。`)) return;
     try {
       const qtId = qt.id || qt.quotation_uid || qt.qtNumber;
-      await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(qtId)}/withdraw`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      await salesQuotationService.updateStatus(qtId, 'draft', { approval_chain: [] });
       toast.success('✅ 报价单已撤回，可重新编辑并提交审批', {
         description: `报价单号：${qt.qtNumber}`,
         duration: 4000,
       });
       loadSalesQuotations();
     } catch (e: any) {
-      // 后端不可达时降级为本地状态更新
-      console.warn('⚠️ [撤回] 后端同步失败，降级本地模式:', e?.message);
+      console.warn('⚠️ [撤回] Supabase 同步失败，降级本地模式:', e?.message);
       setServerQuotations((prev: any[]) =>
         prev.map((q: any) => q.id === qt.id ? { ...q, approvalStatus: 'draft', approvalChain: [] } : q)
       );
@@ -688,36 +641,18 @@ export function SalesQuotationManagement({
         : []),
     ];
 
-    // ─── 1. 尝试后端同步（失败时降级为本地模式，不阻断业务流程）───
+    // ─── 1. 同步到 Supabase ───
     let backendSynced = false;
     try {
       const submitKey = qt.qtNumber || qt.id;
-      console.log('📤 [提交审批] 使用 key:', submitKey, '| qt.id:', qt.id, '| qt.approvalStatus:', qt.approvalStatus);
-      await apiFetchJson(`/api/sales-quotations/${encodeURIComponent(submitKey)}/submit-approval`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          approvalChain,
-          amount,
-          // 同时把业务员最新的 items 价格同步到后端，避免发给客户时价格被旧数据覆盖
-          items: qt.items?.map((item: any) => ({
-            productName: item.productName,
-            modelNo: item.modelNo,
-            specification: item.specification,
-            quantity: item.quantity,
-            unit: item.unit,
-            salesPrice: item.salesPrice ?? item.quotePrice ?? 0,
-            costPrice: item.costPrice ?? item.costUSD ?? 0,
-            profitMargin: item.profitMargin ?? 0,
-          })),
-          totalPrice: amount,
-        }),
+      await salesQuotationService.updateStatus(submitKey, 'pending_approval', {
+        approval_chain: approvalChain,
+        items: qt.items,
+        total_price: amount,
       });
       backendSynced = true;
-      console.log('✅ [提交审批] 后端同步成功');
     } catch (e: any) {
-      // 后端可能在旧版本（只允许 draft 状态）或网络不通，降级为本地模式
-      console.warn('⚠️ [提交审批] 后端同步失败，降级本地模式:', e?.message);
+      console.warn('⚠️ [提交审批] Supabase 同步失败，降级本地模式:', e?.message);
     }
 
     // ─── 2. 无论后端是否成功，都在本地更新状态 ───
@@ -863,24 +798,10 @@ export function SalesQuotationManagement({
       const sendKey = qt.qtNumber || qt.id;
       let apiQuotation: any = null;
       try {
-        const res = await apiFetchJson<{ message: string; quotation: any }>(`/api/sales-quotations/${encodeURIComponent(sendKey)}/send-to-customer`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ force: true }),
-        });
-        apiQuotation = res?.quotation ?? null;
+        await salesQuotationService.updateStatus(sendKey, 'sent', { customer_status: 'sent', sent_to_customer_at: nowIso });
+        apiQuotation = qt;
       } catch (patchErr: any) {
-        const msg = String(patchErr?.message || '');
-        if (msg.includes('GET method is not supported') || msg.includes('Supported methods: PATCH')) {
-          const res = await apiFetchJson<{ message: string; quotation: any }>(`/api/sales-quotations/${encodeURIComponent(sendKey)}/send-to-customer`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-HTTP-Method-Override': 'PATCH' },
-            body: JSON.stringify({ _method: 'PATCH', force: true }),
-          });
-          apiQuotation = res?.quotation ?? null;
-        } else {
-          throw patchErr;
-        }
+        console.warn('⚠️ [send-to-customer] Supabase 更新失败:', patchErr?.message);
       }
 
       // 合并时：用 API 返回的元数据（customerEmail、id 等），但保留本地 items（业务员改过的价格）
@@ -970,31 +891,11 @@ export function SalesQuotationManagement({
     };
 
     try {
-      try {
-        await apiFetchJson<{ message: string; quotation: any }>(
-          `/api/sales-quotations/${encodeURIComponent(String(key))}/reset-customer-status`,
-          { method: 'PATCH' }
-        );
-      } catch (patchErr: any) {
-        const msg = String(patchErr?.message || '');
-        if (msg.includes('GET method is not supported') || msg.includes('Supported methods: PATCH')) {
-          await apiFetchJson<{ message: string; quotation: any }>(
-            `/api/sales-quotations/${encodeURIComponent(String(key))}/reset-customer-status`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-HTTP-Method-Override': 'PATCH' },
-              body: JSON.stringify({ _method: 'PATCH' }),
-            }
-          );
-        } else {
-          throw patchErr;
-        }
-      }
+      await salesQuotationService.updateStatus(String(key), 'approved', { customer_status: null });
       applyLocalUnlock();
       toast.success('已解锁为可发送状态');
     } catch (e: any) {
-      // 后端不可用时，至少确保前端流程可继续
-      console.warn('⚠️ 解锁发送后端失败，降级本地模式:', e?.message);
+      console.warn('⚠️ 解锁发送 Supabase 更新失败，降级本地模式:', e?.message);
       applyLocalUnlock();
       toast.success('已解锁为可发送状态（本地兼容）');
     }
@@ -1118,24 +1019,13 @@ export function SalesQuotationManagement({
         }
       }, 600);
 
-      // 异步尝试同步到后端（失败不影响前端显示）
-      apiFetchJson<{ message: string; contract: any }>(
-        `/api/sales-quotations/${encodeURIComponent(qt.id || qt.qtNumber)}/push-to-contract`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            remarks: qt.remarks || '',
-            portOfDestination: qt.portOfDestination || '',
-            packing: qt.packing || '',
-            asEmail: currentUser?.email || undefined,
-          }),
-        }
-      ).then(() => {
-        console.log('✅ [handlePushToContract] 后端同步成功');
+      // 异步同步到 Supabase（失败不影响前端显示）
+      salesQuotationService.updateStatus(qt.id || qt.qtNumber, 'contract_created', {
+        pushed_contract_number: sc.contractNumber,
+      }).then(() => {
         loadSalesQuotations();
       }).catch((e: any) => {
-        console.warn('⚠️ [handlePushToContract] 后端同步失败（不影响本地合同）:', e?.message || e);
+        console.warn('⚠️ [handlePushToContract] Supabase 同步失败（不影响本地合同）:', e?.message || e);
       });
 
     } catch (localErr: any) {
@@ -1727,45 +1617,25 @@ export function SalesQuotationManagement({
           }}
           onSubmit={async (quoteData) => {
             try {
-              await apiFetchJson<{ message: string; quotation: any }>(
-                `/api/sales-quotations/${encodeURIComponent(String(selectedQuotation.id))}`,
-                {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(quoteData),
-                }
-              );
-
+              await salesQuotationService.upsert({ id: String(selectedQuotation.id), ...quoteData });
               toast.success('报价草稿已保存');
               loadSalesQuotations();
               setShowPriceCalculation(false);
               setSelectedQuotation(null);
             } catch (e: any) {
               console.error('❌ 保存报价草稿失败:', e);
-              const errMsg = String(e?.message || '');
-              const patchNotSupported =
-                errMsg.includes('PATCH method is not supported') ||
-                errMsg.includes('Supported methods: OPTIONS');
-
-              if (patchNotSupported) {
-                const fallback = mapQuoteDataToServerLike(quoteData, selectedQuotation);
-                writeDraftOverride(String(selectedQuotation.id), fallback);
-
-                setServerQuotations(prev =>
-                  prev.map(qt =>
-                    String(qt.id) === String(selectedQuotation.id)
-                      ? { ...qt, ...fallback, id: qt.id, qtNumber: qt.qtNumber }
-                      : qt
-                  )
-                );
-
-                toast.success('报价草稿已保存（本地兼容模式）');
-                setShowPriceCalculation(false);
-                setSelectedQuotation(null);
-                return;
-              }
-
-              toast.error(`保存失败：${e?.message || '请稍后重试'}`);
+              const fallback = mapQuoteDataToServerLike(quoteData, selectedQuotation);
+              writeDraftOverride(String(selectedQuotation.id), fallback);
+              setServerQuotations(prev =>
+                prev.map(qt =>
+                  String(qt.id) === String(selectedQuotation.id)
+                    ? { ...qt, ...fallback, id: qt.id, qtNumber: qt.qtNumber }
+                    : qt
+                )
+              );
+              toast.success('报价草稿已保存（本地兼容模式）');
+              setShowPriceCalculation(false);
+              setSelectedQuotation(null);
             }
           }}
         />

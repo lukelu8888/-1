@@ -1548,3 +1548,75 @@ function fromApprovalRow(r: any) {
     updatedAt: r.updated_at,
   }
 }
+
+// ============================================================
+// supplier_quotations 服务
+// ============================================================
+function toSQRow(q: any) {
+  return {
+    id: toUUID(q.id),
+    rfq_id: q.rfqId || q.rfq_id || null,
+    xj_number: q.xjNumber || q.xj_number || null,
+    supplier_email: q.supplierEmail || q.supplier_email || '',
+    supplier_name: q.supplierName || q.supplier_name || '',
+    products: q.products || q.items || [],
+    total_amount: q.totalAmount || q.total_amount || 0,
+    currency: q.currency || 'USD',
+    price_type: q.priceType || q.price_type || 'FOB',
+    payment_terms: q.paymentTerms || q.payment_terms || null,
+    delivery_time: q.deliveryTime || q.delivery_time || null,
+    validity_period: q.validityPeriod || q.validity_period || null,
+    status: q.status || 'pending',
+    notes: q.notes || null,
+    created_by: q.createdBy || q.created_by || null,
+  };
+}
+
+function fromSQRow(r: any) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    rfqId: r.rfq_id,
+    xjNumber: r.xj_number,
+    supplierEmail: r.supplier_email,
+    supplierName: r.supplier_name,
+    products: r.products || [],
+    totalAmount: r.total_amount || 0,
+    currency: r.currency || 'USD',
+    priceType: r.price_type,
+    paymentTerms: r.payment_terms,
+    deliveryTime: r.delivery_time,
+    validityPeriod: r.validity_period,
+    status: r.status,
+    notes: r.notes,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export const supplierQuotationService = {
+  async getAll() {
+    const { data, error } = await supabase.from('supplier_quotations').select('*').order('created_at', { ascending: false });
+    if (error) return handleError(error, 'getAll supplier_quotations');
+    return (data || []).map(fromSQRow);
+  },
+  async getBySupplierEmail(email: string) {
+    const { data, error } = await supabase.from('supplier_quotations').select('*').eq('supplier_email', email).order('created_at', { ascending: false });
+    if (error) return handleError(error, 'getBySupplierEmail supplier_quotations');
+    return (data || []).map(fromSQRow);
+  },
+  async upsert(q: any) {
+    const row = toSQRow(q);
+    const { data, error } = await supabase.from('supplier_quotations').upsert(row, { onConflict: 'id' }).select().single();
+    if (error) return handleError(error, 'upsert supplier_quotation');
+    return fromSQRow(data);
+  },
+  async delete(id: string) {
+    const { error } = await supabase.from('supplier_quotations').delete().eq('id', id);
+    if (error) return handleError(error, 'delete supplier_quotation');
+  },
+  subscribeToChanges(callback: (payload: any) => void) {
+    return supabase.channel('supplier_quotations_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'supplier_quotations' }, callback).subscribe();
+  },
+};

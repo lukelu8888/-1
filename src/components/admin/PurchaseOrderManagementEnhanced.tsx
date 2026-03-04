@@ -48,7 +48,7 @@ import { useUser } from '../../contexts/UserContext'; // 🔥 用户Context
 import { useApproval } from '../../contexts/ApprovalContext';
 import { generateXJNumber } from '../../utils/xjNumberGenerator'; // 🔥 XJ编号生成器
 import { generateCGNumber, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
-import { apiFetchJson } from '../../api/backend-auth';
+import { contractService, xjService, supplierQuotationService } from '../../lib/supabaseService';
 import { TERMS_OPTIONS } from './purchase-order/purchaseOrderConstants'; // 🔥 从常量文件导入
 import { PurchaseOrderEditDialog } from './purchase-order/PurchaseOrderEditDialog';
 import { PurchaseOrderCreateDialogs } from './purchase-order/PurchaseOrderCreateDialogs';
@@ -107,14 +107,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return reqStatus === 'pending_procurement_assignment' || poNo.startsWith('CQ-');
   }, []);
   const requestPurchaseOrders = React.useCallback(() => {
-    // 直接请求一次，确保点击“采购订单”Tab时 Network 一定能看到 /api/purchase-orders
-    void apiFetchJson<{ purchaseOrders: any[] }>('/api/purchase-orders')
-      .then(() => {
-        window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-      })
-      .catch((e) => {
-        console.warn('⚠️ [PurchaseOrderManagement] request /api/purchase-orders failed:', e);
-      });
+    window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
   }, []);
   useEffect(() => {
     // 进入采购订单页时主动请求一次
@@ -221,33 +214,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await apiFetchJson<{ suppliers: any[] }>('/api/suppliers');
-        const list = (res?.suppliers || []).map((s: any) => ({
-          id: String(s.id || s.code || s.company_id || ''),
-          name: s.name || '',
-          code: String(s.code || s.id || s.company_id || ''),
-          nameEn: s.nameEn || '',
-          level: (s.level || 'B') as any,
-          category: s.category || '供应商',
-          region: s.region || '',
-          businessTypes: ['trading'],
-          contact: s.contact || '',
-          phone: s.phone || '',
-          email: s.email || '',
-          address: s.address || '',
-          businessLicense: '',
-          certifications: [],
-          cooperationYears: 0,
-          totalOrders: 0,
-          totalAmount: 0,
-          onTimeRate: 0,
-          qualityRate: 0,
-          status: (s.status || 'active') as any,
-          capacity: '',
-        })) as Supplier[];
-        // ✅ IMPORTANT: use backend result as-is; don't fallback to local static DB
-        // Some suppliers might have empty email in DB, but we still want to show exactly what API returns.
-        setSuppliersFromApi(list.filter(s => (s.code || s.id) && s.name));
+        // 暂时使用本地静态供应商数据库（organizations 表接入在后续迭代中完成）
+        setSuppliersFromApi([]);
       } catch (e) {
         // ignore: fallback to local suppliersDatabase
       }
@@ -313,11 +281,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     const loadSalesContractsLite = async () => {
+      if (cancelled) return;
       try {
-        const res = await apiFetchJson<{ contracts: any[] }>('/api/sales-contracts');
-        if (!cancelled && Array.isArray(res?.contracts)) {
-          setSalesContractsLite(res.contracts);
-        }
+        const rows = await contractService.getAll();
+        if (!cancelled) setSalesContractsLite(Array.isArray(rows) ? rows : []);
       } catch {
         if (cancelled) return;
         try {
@@ -369,11 +336,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     );
 
     try {
-      const res = await apiFetchJson<{ quotations: any[] }>('/api/supplier-quotations');
-      const apiList: any[] = res?.quotations ?? [];
+      const rows = await supplierQuotationService.getAll();
+      const apiList: any[] = Array.isArray(rows) ? rows : [];
 
-      // Merge: backend records take precedence; supplement with local submitted records
-      // that don't yet exist in backend (dev environment without real DB)
       const apiIds = new Set(apiList.map((q: any) => String(q.id)));
       const localOnly = localVisible.filter((q: any) => !apiIds.has(String(q.id)));
       const merged = filterNotDeleted(
@@ -382,7 +347,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.xjNumber || '')],
       );
       setSupplierQuotations(merged);
-      // Do NOT overwrite localStorage here — supplier's local records must be preserved
     } catch (e) {
       // API unavailable: show local submitted quotations as fallback
       const visibleQuotations = filterNotDeleted(
@@ -415,15 +379,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     // Use quotationNo (BJ-YYMMDD-XXXX) as the backend lookup key — backend supports this format
     const backendKey = selectedSupplierQuotation.quotationNo || qid;
     try {
-      await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(backendKey)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'accepted' }),
-      });
+      await supplierQuotationService.upsert({ id: qid, status: 'accepted' });
     } catch (e: any) {
-      console.warn('⚠️ 接受报价后端同步失败，降级本地模式:', e?.message);
+      console.warn('⚠️ 接受报价 Supabase 同步失败，降级本地模式:', e?.message);
     }
-    // Always update local state regardless of backend result
     applyLocalQuotationStatus(qid, 'accepted');
     setShowSupplierQuotationDialog(false);
     setAcceptedQuotationNo(selectedSupplierQuotation.quotationNo || qid);
@@ -435,15 +394,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const qid = selectedSupplierQuotation.id;
     const backendKey = selectedSupplierQuotation.quotationNo || qid;
     try {
-      await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(backendKey)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'rejected' }),
-      });
+      await supplierQuotationService.upsert({ id: qid, status: 'rejected' });
     } catch (e: any) {
-      console.warn('⚠️ 拒绝报价后端同步失败，降级本地模式:', e?.message);
+      console.warn('⚠️ 拒绝报价 Supabase 同步失败，降级本地模式:', e?.message);
     }
-    // Always update local state regardless of backend result
     applyLocalQuotationStatus(qid, 'rejected');
     setShowSupplierQuotationDialog(false);
     toast.info(
@@ -1551,19 +1505,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           documentData: rfqDocumentData as any
         };
 
-        // ✅ 后端落库（让你能在 Network 看到请求 + DB 持久化）
-        const res = await apiFetchJson<{ xj: XJ }>('/api/supplier-xjs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...rfq,
-            expectedDate: rfq.expectedDate,
-            quotationDeadline: rfq.quotationDeadline,
-            supplierQuotationNo: (rfq as any).supplierQuotationNo ?? null,
-          }),
-        });
-
-        const saved = (res as any)?.rfq || rfq;
+        const savedXJ = await xjService.upsert(rfq).catch(() => null);
+        const saved = savedXJ || rfq;
         createdXJs.push(saved);
         addXJ(saved);
       }));
@@ -1695,11 +1638,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
     const ids = [...selectedQuotationIds];
     const results = await Promise.allSettled(
-      ids.map((id) =>
-        apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(String(id))}`, {
-          method: 'DELETE',
-        })
-      )
+      ids.map((id) => supplierQuotationService.delete(String(id)))
     );
 
     const successCount = results.filter((r) => r.status === 'fulfilled').length;
@@ -1837,14 +1776,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     // ✅ 同步到后端：将 XJ 从 draft 提交为 pending（供应商端可见）
     // 后端失败时降级走本地 localStorage 流程，不阻断操作
     try {
-      await apiFetchJson<{ xj: any }>(`/api/supplier-xjs/${encodeURIComponent(xj.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending' }),
-      });
+      await xjService.upsert({ id: xj.id, status: 'pending' });
     } catch (err: any) {
-      console.warn('⚠️ [下推供应商] 后端同步失败，降级为本地模式:', err?.message);
-      // 不 return，继续执行本地 localStorage 推送
+      console.warn('⚠️ [下推供应商] Supabase 同步失败，降级为本地模式:', err?.message);
     }
     
     // 🔥 将状态从draft改为sent
@@ -3302,13 +3236,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     onClick={async () => {
                                       const backendKey = quotation.quotationNo || quotation.id;
                                       try {
-                                        await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(backendKey)}`, {
-                                          method: 'PATCH',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({ status: 'accepted' }),
-                                        });
+                                        await supplierQuotationService.upsert({ id: quotation.id, status: 'accepted' });
                                       } catch (e: any) {
-                                        console.warn('⚠️ 接受报价后端同步失败，降级本地模式:', e?.message);
+                                        console.warn('⚠️ 接受报价 Supabase 同步失败，降级本地模式:', e?.message);
                                       }
                                       applyLocalQuotationStatus(quotation.id, 'accepted');
                                       setAcceptedQuotationNo(quotation.quotationNo || quotation.id);
@@ -3326,13 +3256,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     onClick={async () => {
                                       const backendKey = quotation.quotationNo || quotation.id;
                                       try {
-                                        await apiFetchJson(`/api/supplier-quotations/${encodeURIComponent(backendKey)}`, {
-                                          method: 'PATCH',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({ status: 'rejected' }),
-                                        });
+                                        await supplierQuotationService.upsert({ id: quotation.id, status: 'rejected' });
                                       } catch (e: any) {
-                                        console.warn('⚠️ 拒绝报价后端同步失败，降级本地模式:', e?.message);
+                                        console.warn('⚠️ 拒绝报价 Supabase 同步失败，降级本地模式:', e?.message);
                                       }
                                       applyLocalQuotationStatus(quotation.id, 'rejected');
                                       toast.info(

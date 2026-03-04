@@ -16,7 +16,7 @@ import { useInquiry } from '../../contexts/InquiryContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：销售报价Context
 import { generateQRNumber, generateQTNumber } from '../../utils/xjNumberGenerator'; // 🔥 新增：生成QT编号
 import { getCurrentUser } from '../../utils/dataIsolation';
-import { apiFetchJson } from '../../api/backend-auth';
+import { purchaseRequirementService, salesQuotationService } from '../../lib/supabaseService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { formatDocumentNumber, getDocumentLevel, getDocumentColorClass } from '../../utils/documentNumbering'; // 🔥 新增：7级编号体系辅助函数
 
@@ -353,28 +353,16 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           }))
         };
 
-        const createResponse = await apiFetchJson<{
-          id: string;
-          requirementNo: string;
-          [key: string]: any;
-        }>('/api/purchase-requirements', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(createData),
-        });
+        const createResponse: any = await purchaseRequirementService.upsert(createData) || createData;
 
-        console.log('✅ [提交到采购部门] 同步成功，新ID:', createResponse.id);
-        
-        // 更新本地Context中的ID为后端返回的UUID
         updatePurchaseRequirement(selectedQR.id, {
           ...selectedQR,
           id: createResponse.id,
-          requirementNo: createResponse.requirementNo,
+          requirementNumber: createResponse.requirementNumber || createResponse.requirementNo,
         });
         
-        // 使用新ID继续更新
         selectedQR.id = createResponse.id;
-        selectedQR.requirementNo = createResponse.requirementNo;
+        selectedQR.requirementNo = createResponse.requirementNumber || createResponse.requirementNo;
       } catch (syncError: any) {
         console.error('❌ [提交到采购部门] 同步失败:', syncError);
         toast.error(`❌ 数据同步失败: ${syncError.message || '未知错误'}`);
@@ -410,47 +398,16 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         requestData
       });
       
-      // 调用后端API
-      const response = await apiFetchJson<{
-        id: string;
-        requirementNo: string;
-        status: string;
-        [key: string]: any;
-      }>(`/api/purchase-requirements/${selectedQR.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestData),
-      });
+      const response: any = await purchaseRequirementService.upsert({ id: selectedQR.id, ...requestData }) || {};
       
-      console.log('✅ [提交到采购部门] API响应:', response);
-      
-      // 同步到本地Context（用于前端显示）
       const updateData = {
-        status: response.status as 'partial',
-        submittedAt: response.submittedAt || new Date().toISOString(),
-        requirementNo: response.requirementNo,
-        source: response.source || selectedQR.source,
-        sourceRef: response.sourceRef || selectedQR.sourceRef,
-        sourceInquiryNumber: response.sourceInquiryNumber || selectedQR.sourceInquiryNumber,
-        region: response.region || selectedQR.region,
-        customer: response.customer || selectedQR.customer,
-        items: response.items || selectedQR.items,
-        createdBy: response.createdBy || selectedQR.createdBy,
-        createdDate: response.createdDate || selectedQR.createdDate,
-        expectedQuoteDate: response.expectedQuoteDate,
-        deliveryDate: response.deliveryDate,
-        paymentTerms: response.paymentTerms,
-        tradeTerms: response.tradeTerms,
-        targetCostRange: response.targetCostRange,
-        qualityRequirements: response.qualityRequirements,
-        packagingRequirements: response.packagingRequirements,
-        remarks: response.remarks,
+        status: 'partial' as const,
+        submittedAt: new Date().toISOString(),
+        ...requestData,
       };
       
       updatePurchaseRequirement(selectedQR.id, updateData as any);
-      toast.success(`✅ 已提交给采购部门！单号：${response.requirementNo}`);
+      toast.success(`✅ 已提交给采购部门！单号：${selectedQR.requirementNo}`);
       setShowSubmitDialog(false);
       setSelectedQR(null);
     } catch (error: any) {
@@ -687,57 +644,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       console.log('7️⃣ 准备调用 POST /api/sales-quotations...');
       
       try {
-        const response = await apiFetchJson<{ quotation: any; message: string }>('/api/sales-quotations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            qrNumber: newQuotation.qrNumber,
-            qtNumber: newQuotation.qtNumber,
-            inqNumber: newQuotation.inqNumber,
-            region: newQuotation.region,
-            customerCompany: newQuotation.customerCompany,
-            customerName: newQuotation.customerName,
-            customerEmail: newQuotation.customerEmail,
-            customerPhone: newQuotation.customerPhone,
-            customerAddress: newQuotation.customerAddress,
-            items: quotationItems.map(item => ({
-              id: item.id,
-              productName: item.productName,
-              modelNo: item.modelNo,
-              specification: item.specification,
-              quantity: item.quantity,
-              unit: item.unit,
-              costPrice: item.costPrice,
-              selectedSupplier: item.selectedSupplier,
-              selectedSupplierName: item.selectedSupplierName,
-              selectedBJ: item.selectedBJ,
-              moq: item.moq,
-              leadTime: item.leadTime,
-              salesPrice: item.salesPrice,
-              profitMargin: item.profitMargin,
-              profit: item.profit,
-              totalCost: item.totalCost,
-              totalPrice: item.totalPrice,
-              currency: item.currency,
-              hsCode: item.hsCode,
-              remarks: item.remarks,
-            })),
-            totalCost: newQuotation.totalCost,
-            totalPrice: newQuotation.totalPrice,
-            totalProfit: newQuotation.totalProfit,
-            profitRate: newQuotation.profitRate,
-            currency: newQuotation.currency,
-            paymentTerms: newQuotation.paymentTerms,
-            deliveryTerms: newQuotation.deliveryTerms,
-            deliveryDate: newQuotation.deliveryDate,
-            validUntil: newQuotation.validUntil,
-            notes: newQuotation.notes,
-          }),
-        });
+        await salesQuotationService.upsert(newQuotation);
         
-        console.log('✅✅✅ POST /api/sales-quotations 调用成功！', response);
-        
-        // 🔥 同时添加到本地 Context（用于前端立即显示）
         addSalesQuotation(newQuotation);
         
         // 🔥 标记QR为已下推

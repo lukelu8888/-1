@@ -21,7 +21,7 @@ import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementConte
 import { generateQRNumber } from '../../utils/xjNumberGenerator';
 import { useUser } from '../../contexts/UserContext';
 import { extractModelNo, extractSpecification } from '../../utils/productDataExtractor';
-import { apiFetchJson } from '../../api/backend-auth';
+import { purchaseRequirementService } from '../../lib/supabaseService';
 
 interface AdminInquiryManagementProps {
   onCreateQuotation?: (inquiry: any) => void;
@@ -161,40 +161,11 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       
       console.log('📤 [下推成本询报] 发送请求:', requestData);
       
-      // 调用后端API
-      const response = await apiFetchJson<{
-        id: string;
-        requirementNo: string;
-        [key: string]: any;
-      }>('/api/purchase-requirements', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestData),
-      });
-      
-      console.log('✅ [下推成本询报] API响应:', response);
-      
-      // 同步到本地Context（用于前端显示）
-      const newQR = {
-        id: response.id,
-        requirementNo: response.requirementNo,
-        source: response.source || '销售订单',
-        sourceInquiryNumber: response.sourceInquiryNumber,
-        requiredDate: response.requiredDate,
-        urgency: response.urgency || 'medium',
-        status: response.status || 'pending',
-        createdBy: response.createdBy || currentUser?.email || '',
-        createdDate: response.createdDate || new Date().toISOString(),
-        region: response.region,
-        customer: response.customer,
-        items: response.items || [],
-        specialRequirements: response.specialRequirements || ''
-      };
+      const response = await purchaseRequirementService.upsert(requestData);
+      const newQR: any = response || requestData;
       
       addPurchaseRequirement(newQR);
-      toast.success(`✅ 成功下推到成本询报！采购需求单号：${response.requirementNo}`);
+      toast.success(`✅ 成功下推到成本询报！采购需求单号：${newQR.requirementNumber || newQR.requirementNo}`);
       
       // 🔥 新增：下推成功后自动切换到成本询报模块
       if (onSwitchToCostInquiry) {

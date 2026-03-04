@@ -35,7 +35,7 @@ import {
   DialogFooter
 } from '../ui/dialog';
 import { toast } from 'sonner';
-import { apiFetchJson } from '../../api/backend-auth';
+import { purchaseRequirementService } from '../../lib/supabaseService';
 
 /**
  * 💳 应付账款管理模块（供应商付款）
@@ -251,8 +251,8 @@ const AccountsPayableManagement: React.FC = () => {
     let alive = true;
     const loadAccountsPayable = async () => {
       try {
-        const res = await apiFetchJson<{ requirements: PurchaseRequirementApi[] }>('/api/purchase-requirements');
-        const requirements = Array.isArray(res?.requirements) ? res.requirements : [];
+        const rows = await purchaseRequirementService.getAll();
+        const requirements: PurchaseRequirementApi[] = Array.isArray(rows) ? (rows as any[]) : [];
 
         const mapped: AccountPayable[] = requirements.map((r, index) => {
           const items = Array.isArray(r.items) ? r.items : [];

@@ -42,7 +42,7 @@ import {
   RefreshCw, Percent, Globe, HelpCircle, Zap
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { apiFetchJson } from '../../api/backend-auth';
+import { supplierQuotationService } from '../../lib/supabaseService';
 
 // ─── 带问号 Tooltip 的字段标签 ────────────────────────────────────────────────
 interface FieldLabelProps {
@@ -552,43 +552,18 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
 
     if (submitNow) {
       try {
-        await apiFetchJson<{ quotation: any }>('/api/supplier-quotations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: updatedQuotation.id,
-            quotationNo: updatedQuotation.quotationNo,
-            sourceRFQId: updatedQuotation.sourceRFQId,
-            sourceXJ: updatedQuotation.sourceXJ,
-            sourceQR: updatedQuotation.sourceQR,
-            supplierCode: updatedQuotation.supplierCode,
-            supplierName: updatedQuotation.supplierName,
-            supplierEmail: updatedQuotation.supplierEmail,
-            currency: currencyCode,
-            // 🔥 报价条件（价格属性）随报价单传递
-            quoteMode,
-            taxSettings: tax,
-            totalAmount: totals.revenue,
-            paymentTerms,
-            deliveryTerms,
-            generalRemarks: remarks ?? '',
-            supplierRemarks: supplierRemarks ?? '',
-            items: updatedQuotation.items.map((item: any) => ({
-              id: item.id,
-              productName: item.productName,
-              modelNo: item.modelNo ?? '',
-              quantity: item.quantity,
-              unit: item.unit,
-              unitPrice: item.unitPrice,
-              currency: item.currency,
-              // 🔥 价格属性随 item 传递到后端
-              priceType: item.priceType,
-              quoteMode: item.quoteMode,
-              taxSettings: item.taxSettings,
-              leadTime: item.leadTime,
-              moq: item.moq,
-            })),
-          }),
+        await supplierQuotationService.upsert({
+          id: updatedQuotation.id,
+          xjNumber: updatedQuotation.sourceXJ,
+          supplierEmail: updatedQuotation.supplierEmail,
+          supplierName: updatedQuotation.supplierName,
+          currency: currencyCode,
+          totalAmount: totals.revenue,
+          paymentTerms,
+          deliveryTime: deliveryTerms,
+          status: 'submitted',
+          products: updatedQuotation.items,
+          notes: remarks ?? '',
         });
       } catch (err: any) {
         toast.error(err?.message ?? '提交报价失败，请重试');

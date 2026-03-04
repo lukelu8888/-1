@@ -40,7 +40,7 @@ import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext'; // 🔥
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { generateCQNumber } from '../../utils/purchaseOrderNumberGenerator';
-import { apiFetchJson } from '../../api/backend-auth';
+import { purchaseRequirementService } from '../../lib/supabaseService';
 import { toast } from 'sonner@2.0.3';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog'; // 🔥 新增：Dialog组件
 import { SalesContractDocument, SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 新增：销售合同文档模板
@@ -100,27 +100,14 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
             remarks: item.remarks || ''
           }))
         };
-        const res = await apiFetchJson<{ requirement?: any; message?: string }>(
-          `/api/sales-contracts/${encodeURIComponent(contract.id || contract.contractNumber)}/push-to-purchase`,
-          {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const createdRequirement = res?.requirement;
-        if (createdRequirement?.id) {
-          addRequirement(createdRequirement);
+        const saved = await purchaseRequirementService.upsert(payload);
+        if (saved?.id) {
+          addRequirement(saved as any);
           toast.success('采购请求已落库', {
-            description: `已生成采购需求 ${createdRequirement.requirementNo}（来源 ${poNumber}）`,
+            description: `已生成采购需求 ${(saved as any).requirementNumber}（来源 ${poNumber}）`,
             duration: 4500
           });
           void refreshFromBackend().catch(() => {});
-        } else if (res?.message) {
-          const isAlready = String(res.message).toLowerCase().includes('already');
-          toast[isAlready ? 'info' : 'success'](isAlready ? '该合同已下推采购' : res.message, {
-            description: `采购来源号：${poNumber}`,
-            duration: 3500
-          });
         }
       } catch (e: any) {
         toast.error('采购请求落库失败', {
