@@ -470,7 +470,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   // 🔥 创建销售合同
   const createContract = (contractData: Partial<SalesContract>): SalesContract => {
     clearingRef.current = false;
-    if (typeof window !== 'undefined') localStorage.removeItem('salesContracts_cleared');
     const now = new Date().toISOString();
     
     // 计算金额
@@ -723,16 +722,9 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         }
         return contract;
       });
-      // 立即同步写 localStorage
-      try {
-        if (!clearingRef.current) {
-          localStorage.setItem('salesContracts', JSON.stringify(next));
-          console.log(`✅ [approveContract] localStorage 已同步，id=${id}`);
-        }
-      } catch { /* ignore */ }
       return next;
     });
-    
+
     const contract = contracts.find(c => c.id === id);
     if (contract?.approvalFlow.requiresDirectorApproval && approverRole === 'supervisor') {
       toast.success('主管审批通过！合同已提交给销售总监审批。');
@@ -797,7 +789,7 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       return;
     }
     // 本地立即执行发送（确保 UI 响应），再异步同步后端
-    const doLocalSend = () => {
+    const doLocalSend = async () => {
       const now = new Date().toISOString();
 
       // 🔥 确保 customerEmail 有效：从合同、关联报价单、localStorage 多重来源兜底
@@ -808,47 +800,34 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       console.log(`🔍 [sendToCustomer] 合同customerEmail: "${contract.customerEmail}" → 有效: ${isValidEmail(contract.customerEmail)}`);
 
       if (!resolvedCustomerEmail) {
-        // 方法1：从本地 quotation 里通过 quotationNumber 查找
+        // 方法1：从 Supabase sales_quotations 通过 quotationNumber 查找
         try {
-          const allKeys = Object.keys(localStorage);
-          for (const key of allKeys) {
-            if (!key.startsWith('sales_quotations_') && !key.startsWith('quotations_')) continue;
-            const arr: any[] = JSON.parse(localStorage.getItem(key) || '[]');
-            const match = arr.find((q: any) =>
-              q.qtNumber === contract.quotationNumber || q.id === contract.quotationNumber
-            );
-            if (isValidEmail(match?.customerEmail)) {
-              resolvedCustomerEmail = match.customerEmail;
-              console.log(`🔍 [sendToCustomer] 方法1：从 ${key} 找到客户邮箱: ${resolvedCustomerEmail}`);
-              break;
-            }
-          }
-        } catch { /* ignore */ }
-      }
-
-      if (!resolvedCustomerEmail) {
-        // 方法2：从 InquiryContext 的 localStorage 里查找
-        try {
-          const inquiries: any[] = JSON.parse(localStorage.getItem('cosun_inquiries') || '[]');
-          const match = inquiries.find((inq: any) =>
-            inq.id === contract.inquiryNumber || inq.inquiryNumber === contract.inquiryNumber
-          );
-          const candidate = match?.buyerInfo?.email || match?.userEmail;
+          const { data: qtRows } = await supabase
+            .from('sales_quotations')
+            .select('customer_email')
+            .or(`qt_number.eq.${contract.quotationNumber},id.eq.${contract.quotationNumber}`)
+            .limit(1);
+          const candidate = qtRows?.[0]?.customer_email;
           if (isValidEmail(candidate)) {
             resolvedCustomerEmail = candidate;
-            console.log(`🔍 [sendToCustomer] 方法2：从询价记录找到客户邮箱: ${resolvedCustomerEmail}`);
+            console.log(`🔍 [sendToCustomer] 方法1 Supabase QT: ${resolvedCustomerEmail}`);
           }
         } catch { /* ignore */ }
       }
 
       if (!resolvedCustomerEmail) {
-        // 方法3：从 customerName 推断（最后兜底，写入所有 orders_* 前缀的 customer key）
+        // 方法2：从 Supabase inquiries 通过 inquiryNumber 查找
         try {
-          const existingOrderKeys = Object.keys(localStorage).filter(k => k.startsWith('orders_') && k !== 'orders_');
-          if (existingOrderKeys.length > 0) {
-            // 找最近的客户订单 key 作为兜底
-            resolvedCustomerEmail = existingOrderKeys[0].replace('orders_', '');
-            console.warn(`⚠️ [sendToCustomer] 方法3兜底：使用 ${resolvedCustomerEmail}`);
+          const { data: inqRows } = await supabase
+            .from('inquiries')
+            .select('user_email, buyer_info')
+            .or(`inquiry_number.eq.${contract.inquiryNumber},id.eq.${contract.inquiryNumber}`)
+            .limit(1);
+          const row = inqRows?.[0];
+          const candidate = (row?.buyer_info as any)?.email || row?.user_email;
+          if (isValidEmail(candidate)) {
+            resolvedCustomerEmail = candidate;
+            console.log(`🔍 [sendToCustomer] 方法2 Supabase INQ: ${resolvedCustomerEmail}`);
           }
         } catch { /* ignore */ }
       }
@@ -861,17 +840,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           ? { ...c, status: 'sent_to_customer' as const, sentToCustomerAt: now, updatedAt: now, customerEmail: resolvedCustomerEmail || c.customerEmail }
           : c
       ));
-      // 立即同步写 localStorage（不等 useEffect 异步触发，避免 ordersUpdated 事件读到旧状态）
-      try {
-        const saved: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-        const updated = saved.map((c: any) =>
-          c.id === contract.id
-            ? { ...c, status: 'sent_to_customer', sentToCustomerAt: now, updatedAt: now, customerEmail: resolvedCustomerEmail || c.customerEmail }
-            : c
-        );
-        localStorage.setItem('salesContracts', JSON.stringify(updated));
-        console.log(`✅ [sendToCustomer] salesContracts 已同步写入，合同状态: sent_to_customer`);
-      } catch { /* ignore */ }
 
       // 构建订单数据
       const orderData = {
@@ -997,11 +965,11 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         toast.success('合同已发送给客户！客户可在 My Orders → Active Orders 查看。');
       } else {
         // 后端返回无效响应，走本地兜底
-        doLocalSend();
+        void doLocalSend();
       }
     } catch (e: any) {
       console.warn('⚠️ [sendToCustomer] API 失败，使用本地兜底:', e?.message || e);
-      doLocalSend();
+      void doLocalSend();
     }
   };
   
