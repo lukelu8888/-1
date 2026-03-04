@@ -138,7 +138,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // 主动获取 session，不依赖 INITIAL_SESSION 事件触发
     let resolved = false;
     const resolve = async (session: any) => {
       if (resolved) return;
@@ -148,26 +147,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
       setAuthLoading(false);
     };
 
-    // 主动调用 getSession 作为主路径（快速、本地读取）
-    supabase.auth.getSession().then(({ data }) => {
-      resolve(data.session);
-    }).catch(() => {
-      resolve(null);
-    });
-
-    // 兜底超时：5秒后若仍未 resolve，强制登出
-    const sessionTimeout = setTimeout(() => {
-      if (!resolved) {
-        console.warn('Auth init timeout, treating as logged-out');
-        resolve(null);
-      }
-    }, 5000);
-
-    // 注册 onAuthStateChange 处理后续状态变化
+    // INITIAL_SESSION 从本地 storage 读取，几乎瞬时，必须先注册才能捕获
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === 'INITIAL_SESSION') {
-          resolve(session);
+          await resolve(session);
         } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           setAuthLoading(true);
           await applySession(session);
@@ -179,6 +163,14 @@ export function UserProvider({ children }: { children: ReactNode }) {
         }
       }
     );
+
+    // 兜底：若 INITIAL_SESSION 3秒内未触发（极少数情况），用 getSession 补救
+    const sessionTimeout = setTimeout(() => {
+      if (!resolved) {
+        console.warn('Auth init timeout, falling back to getSession');
+        supabase.auth.getSession().then(({ data }) => resolve(data.session)).catch(() => resolve(null));
+      }
+    }, 3000);
 
     return () => {
       clearTimeout(sessionTimeout);
