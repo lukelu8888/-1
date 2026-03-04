@@ -246,11 +246,17 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
 
   // 🔥 状态配置
   const statusConfig: Record<string, { label: string; color: string }> = {
-    pending: { label: '草稿', color: 'bg-gray-100 text-gray-600 border-gray-200' },
-    partial: { label: '已提交', color: 'bg-blue-100 text-blue-600 border-blue-200' },
+    pending:    { label: '待处理', color: 'bg-gray-100 text-gray-600 border-gray-200' },
+    draft:      { label: '草稿',   color: 'bg-gray-100 text-gray-600 border-gray-200' },
+    submitted:  { label: '已提交', color: 'bg-blue-100 text-blue-600 border-blue-200' },
+    partial:    { label: '已提交', color: 'bg-blue-100 text-blue-600 border-blue-200' },
     processing: { label: '处理中', color: 'bg-yellow-100 text-yellow-600 border-yellow-200' },
-    completed: { label: '已完成', color: 'bg-green-100 text-green-600 border-green-200' },
+    quoted:     { label: '已报价', color: 'bg-purple-100 text-purple-600 border-purple-200' },
+    completed:  { label: '已完成', color: 'bg-green-100 text-green-600 border-green-200' },
+    cancelled:  { label: '已取消', color: 'bg-red-100 text-red-600 border-red-200' },
   };
+  const getStatusConfig = (status: string) =>
+    statusConfig[status] ?? { label: status || '未知', color: 'bg-gray-100 text-gray-500 border-gray-200' };
 
   // 🔥 创建采购需求（从INQ）
   const handleCreateQRFromINQ = async (inq: any) => {
@@ -878,7 +884,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 </TableRow>
               ) : (
                 filteredQRs.map((qr, index) => {
-                  const config = statusConfig[qr.status];
+                  const config = getStatusConfig(qr.status);
                   // 🔥 修复：检查采购反馈数据（purchaserFeedback）而不是selectedSupplier
                   const hasPurchaserFeedback = qr.purchaserFeedback && qr.purchaserFeedback.status === 'quoted';
                   const isSelected = selectedIds.has(qr.id);
