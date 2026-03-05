@@ -211,6 +211,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 采购需求数据 - 从Context获取
   const purchaseRequirements = requirements;
 
+  // 🔥 供应商报价数据 - Supabase-first
+  const [supplierQuotations, setSupplierQuotations] = useState<any[]>([]);
+  const [selectedSupplierQuotation, setSelectedSupplierQuotation] = useState<any>(null);
+  const [showSupplierQuotationDialog, setShowSupplierQuotationDialog] = useState(false);
+  const [showFeedbackReminderDialog, setShowFeedbackReminderDialog] = useState(false);
+  const [acceptedQuotationNo, setAcceptedQuotationNo] = useState<string>('');
+  const [salesContractsLite, setSalesContractsLite] = useState<any[]>([]);
+
   // Supabase-first: 供应商数据从 companies 表读取，静态 suppliersDatabase 仅作加载失败兜底
   const [suppliersFromApi, setSuppliersFromApi] = useState<Supplier[]>([]);
   useEffect(() => {
@@ -272,13 +280,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     });
   }, [requirements, updateRequirement, xjs]);
   
-  // 🔥 供应商报价数据 - Supabase-first
-  const [supplierQuotations, setSupplierQuotations] = useState<any[]>([]);
-  const [selectedSupplierQuotation, setSelectedSupplierQuotation] = useState<any>(null);
-  const [showSupplierQuotationDialog, setShowSupplierQuotationDialog] = useState(false);
-  const [showFeedbackReminderDialog, setShowFeedbackReminderDialog] = useState(false);
-  const [acceptedQuotationNo, setAcceptedQuotationNo] = useState<string>('');
-  const [salesContractsLite, setSalesContractsLite] = useState<any[]>([]);
   useEffect(() => {
     let cancelled = false;
     const loadSalesContractsLite = async () => {
