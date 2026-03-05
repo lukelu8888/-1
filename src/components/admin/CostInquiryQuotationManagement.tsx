@@ -229,10 +229,6 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   
   // 🔥 新增：下推报价管理（从QR创建业务员销售报价单QT）
   const handlePushToQuotationManagement = async (qr: any) => {
-    console.log('🔽🔽🔽 [开始] 下推报价管理 🔽🔽🔽');
-    console.log('1️⃣ 采购需求单号:', qr.requirementNo);
-    console.log('2️⃣ addSalesQuotation函数:', addSalesQuotation);
-    console.log('3️⃣ addSalesQuotation类型:', typeof addSalesQuotation);
     
     try {
       // 🔥 检查是否有采购成本反馈
@@ -241,7 +237,6 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         toast.error('❌ 采购成本尚未反馈，无法下推到报价管理！');
         return;
       }
-      console.log('✅ 采购成本反馈检查通过');
       
       // 🔥 智能检查是否已经下推过（检查标记 AND 是否真的有QT）
       if (qr.pushedToQuotation) {
@@ -256,11 +251,9 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         } else {
           // 有标记但没有QT，说明之前创建失败，允许重新下推
           console.warn('⚠️ 检测到pushedToQuotation标记，但未找到对应的QT，允许重新下推');
-          console.log('  - 将清除pushedToQuotation标记并重新创建');
           toast.info('检测到之前下推失败，正在重新创建销售报价单...');
         }
       }
-      console.log('✅ 未下推过（或之前失败），可以继续');
       
       // 🔥 区域代码映射为完整区域名称
       const regionMap: Record<string, 'North America' | 'South America' | 'Europe & Africa'> = {
@@ -274,13 +267,10 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       };
       
       const fullRegion = regionMap[qr.region] || 'North America';
-      console.log('4️⃣ 区域映射:', { original: qr.region, mapped: fullRegion });
       
       // 🔥 自动创建draft状态的业务员销售报价单（QT）
-      console.log('5️⃣ 准备生成QT编号...');
       const regionCode = qr.region === 'South America' ? 'SA' : qr.region === 'Europe & Africa' ? 'EA' : 'NA';
       const qtNumber = await nextQTNumber(regionCode);
-      console.log('6️⃣ QT编号生成成功:', qtNumber);
       
       console.log('📋 准备创建销售报价单:', {
         qtNumber,
@@ -425,16 +415,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         notes: qr.purchaserFeedback.purchaserRemarks || ''
       };
       
-      console.log('✅ 创建的销售报价单:', newQuotation);
-      console.log('  - QT编号:', newQuotation.qtNumber);
-      console.log('  - 产品数量:', quotationItems.length);
-      console.log('  - 总成本:', totalCost.toFixed(2));
-      console.log('  - 总报价:', totalPrice.toFixed(2));
-      console.log('  - 总利润:', totalProfit.toFixed(2));
-      console.log('  - 利润率:', (profitRate * 100).toFixed(2) + '%');
       
       // 🔥 调用后端接口创建报价单
-      console.log('7️⃣ 准备调用 POST /api/sales-quotations...');
       
       try {
         await salesQuotationService.upsert(newQuotation);
@@ -449,7 +431,6 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           quotationNumber: newQuotation.qtNumber
         });
         
-        console.log(`✅ [溯源关联] 已将QT编号回写到QR记录: ${qr.requirementNo}.quotationNumber = ${newQuotation.qtNumber}`);
         
         toast.success(`✅ 成功下推到报价管理！销售报价单号：${newQuotation.qtNumber}`, {
           description: `已自动创建草稿状态的报价单，默认利润率18%，请前往报价管理模块查看和编辑`,
@@ -989,13 +970,6 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
             setSelectedQRForQuote(null);
           }}
           onSubmit={(quoteData) => {
-            console.log('📤 报价数据已提交:', quoteData);
-            console.log('  - totalAmount:', quoteData.totalAmount);
-            console.log('  - totalCost:', quoteData.totalCost);
-            console.log('  - totalProfit:', quoteData.totalProfit);
-            console.log('  - profitMargin:', quoteData.profitMargin);
-            console.log('  - items:', quoteData.items);
-            console.log('  - items[0]:', quoteData.items?.[0]);
             
             // 🔥 转换为 SalesQuotation 格式并保存到 Context
             const salesQuotation = {
@@ -1038,11 +1012,6 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
               notes: quoteData.approvalNotes || ''
             };
             
-            console.log('💾 保存到 SalesQuotationContext:', salesQuotation);
-            console.log('  - salesQuotation.totalPrice:', salesQuotation.totalPrice);
-            console.log('  - salesQuotation.totalCost:', salesQuotation.totalCost);
-            console.log('  - salesQuotation.totalProfit:', salesQuotation.totalProfit);
-            console.log('  - salesQuotation.profitRate:', salesQuotation.profitRate);
             addSalesQuotation(salesQuotation);
             
             toast.success('报价已创建！', {

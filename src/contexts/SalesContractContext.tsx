@@ -300,7 +300,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
             contract.status !== 'customer_confirmed' &&
             (contract.status === 'sent' || contract.status === 'approved')) {  // 🔥 修复：允许从approved或sent状态同步
           
-          console.log(`  ✅ 客户已确认合同 ${contract.contractNumber}，更新状态为 customer_confirmed`);
           hasChanges = true;
           
           return {
@@ -323,7 +322,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
             contract.status === 'customer_confirmed' &&
             !contract.depositProof) {  // 防止重复更新
           
-          console.log(`  💰 客户已上传定金凭证 ${contract.contractNumber}，更新状态为 deposit_uploaded`);
           hasChanges = true;
           
           return {
@@ -344,10 +342,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       });
       
       if (hasChanges) {
-        console.log('  ✅ 检测到客户确认或定金上传状态变化，更新contracts');
         return updated;
       } else {
-        console.log('  - 没有客户确认或定金上传状态变化，保持原状');
         return prev;
       }
     });
@@ -359,7 +355,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     const salesContractApprovals = approvalRequests.filter(req => req.type === 'sales_contract');
     
     if (salesContractApprovals.length === 0) {
-      console.log('  - 没有销售合同审批请求，无需同步');
       return;
     }
     
@@ -403,7 +398,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         
         // 如果状态有变化，更新合同
         if (newStatus !== contract.status) {
-          console.log(`  ✅ 更新合同 ${contract.contractNumber} 状态: ${contract.status} → ${newStatus}`);
           hasChanges = true;
           
           return {
@@ -418,10 +412,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       });
       
       if (hasChanges) {
-        console.log('  ✅ 检测到状态变化，更新contracts');
         return updated;
       } else {
-        console.log('  - 没有状态变化，保持原状');
         return prev;
       }
     });
@@ -526,11 +518,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       attachments: contractData.attachments || []
     };
     
-    console.log('📝 [SalesContractContext] 创建新合同对象:', newContract);
-    console.log('  - 合同编号:', newContract.contractNumber);
-    console.log('  - 报价单号:', newContract.quotationNumber);
-    console.log('  - 客户邮箱:', newContract.customerEmail);
-    console.log('  - 合同总金额:', newContract.totalAmount);
     
     setContracts(prev => [...prev, newContract]);
     toast.success(`销售合同 ${newContract.contractNumber} 创建成功！`);
@@ -731,9 +718,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   // 🔥 发送给客户（先调后端接口落库，再刷新列表并同步订单到客户视角）
   const sendToCustomer = async (id: string) => {
     const contract = contracts.find(c => c.id === id);
-    console.log('📤 [sendToCustomer] 调用 id:', id);
-    console.log('  找到合同:', contract ? contract.contractNumber : '❌未找到');
-    console.log('  合同状态:', contract?.status, '| customerEmail:', JSON.stringify(contract?.customerEmail));
     if (!contract || contract.status !== 'approved') {
       console.error('❌ [sendToCustomer] 状态不是approved，实际:', contract?.status);
       toast.error('只能发送审批通过的合同！');
@@ -753,7 +737,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       const isValidEmail = (e?: string) => !!e && !INVALID_EMAILS.has(e) && e.includes('@');
 
       let resolvedCustomerEmail = isValidEmail(contract.customerEmail) ? contract.customerEmail : '';
-      console.log(`🔍 [sendToCustomer] 合同customerEmail: "${contract.customerEmail}" → 有效: ${isValidEmail(contract.customerEmail)}`);
 
       if (!resolvedCustomerEmail) {
         // 方法1：从 Supabase sales_quotations 通过 quotationNumber 查找
@@ -766,7 +749,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           const candidate = qtRows?.[0]?.customer_email;
           if (isValidEmail(candidate)) {
             resolvedCustomerEmail = candidate;
-            console.log(`🔍 [sendToCustomer] 方法1 Supabase QT: ${resolvedCustomerEmail}`);
           }
         } catch { /* ignore */ }
       }
@@ -783,12 +765,10 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           const candidate = (row?.buyer_info as any)?.email || row?.user_email;
           if (isValidEmail(candidate)) {
             resolvedCustomerEmail = candidate;
-            console.log(`🔍 [sendToCustomer] 方法2 Supabase INQ: ${resolvedCustomerEmail}`);
           }
         } catch { /* ignore */ }
       }
 
-      console.log(`📧 [sendToCustomer] 最终使用客户邮箱: "${resolvedCustomerEmail}"`);
 
       // 更新合同状态（同时写入已解析的 customerEmail，防止后续操作丢失）
       setContracts(prev => prev.map(c =>

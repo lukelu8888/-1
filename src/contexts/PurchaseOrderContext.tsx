@@ -245,11 +245,9 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
 
 
   const addPurchaseOrder = (order: PurchaseOrder) => {
-    console.log('➕ 添加新采购订单:', order);
     setPurchaseOrders(prev => {
       const exists = prev.some(o => o.id === order.id || o.poNumber === order.poNumber);
       const newOrders = exists ? prev.map(o => (o.id === order.id || o.poNumber === order.poNumber ? order : o)) : [...prev, order];
-      console.log('  ✅ 当前采购订单总数:', newOrders.length);
       return filterVisiblePurchaseOrders(newOrders);
     });
     purchaseOrderService.upsert(order).catch((e) => console.warn('⚠️ PO upsert failed:', e));
@@ -292,13 +290,11 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
   };
 
   const addPurchaseOrderBatch = (orders: PurchaseOrder[]) => {
-    console.log('➕ 批量添加新采购订单:', orders);
     setPurchaseOrders(prev => {
       const byPo = new Map<string, PurchaseOrder>();
       prev.forEach((o) => byPo.set(o.poNumber || o.id, o));
       orders.forEach((o) => byPo.set(o.poNumber || o.id, o));
       const newOrders = Array.from(byPo.values());
-      console.log('  ✅ 当前采购订单总数:', newOrders.length);
       return filterVisiblePurchaseOrders(newOrders);
     });
     window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));

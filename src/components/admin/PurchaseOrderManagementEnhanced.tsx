@@ -1741,7 +1741,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       sentDate: new Date().toISOString().split('T')[0]
     });
 
-    console.log('📤 [提交询价单] Supabase 写入成功:', xj.supplierXjNo, '→', xj.supplierName);
 
     toast.success(
       <div className="space-y-1">
@@ -2168,13 +2167,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
     // 🔥 添加采购订单到Context（持久化保存）
     addPurchaseOrder(newPurchaseOrder);
-    console.log('✅ 采购订单已添加到Context:', newPurchaseOrder);
 
     // 🔥 更新采购需求状态为已完成
     updateRequirement(selectedRequirement.id, {
       status: 'completed'
     });
-    console.log('✅ 采购需求状态已更新为completed:', selectedRequirement.id);
 
     // 🔥 设置文档数据并打开预览
     setCurrentPOData(newPOData);
@@ -2244,9 +2241,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       status: 'completed' // 🔥 同时更新状态为已完成
     });
     
-    console.log('✅ [采购反馈] 已调用updateRequirement，业务员应该能看到了');
-    console.log('  - 业务员邮箱:', feedbackRequirement.createdBy);
-    console.log('  - 反馈产品数:', feedback.products.length);
     
     toast.success('✅ 采购反馈已提交', {
       description: `业务员 ${feedbackRequirement.createdBy} 将收到成本信息通知`,
@@ -3359,7 +3353,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             setSelectedRequirementForQuote(null);
           }}
           onSubmit={(quoteData) => {
-            console.log('📤 报价数据已提交:', quoteData);
             
             // 🔥 转换数据格式：QuoteData → Quotation
             const newQuotation = {
@@ -3403,7 +3396,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             // 🔥 保存到QuotationContext
             addQuotation(newQuotation);
             
-            console.log('✅ 报价已保存为草稿:', newQuotation);
             
             toast.success('报价已保存！', {
               description: `报价单号：${quoteData.quoteNo}\n已保存到报价管理，请前往报价管理模块提交审核。`,

@@ -130,14 +130,12 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addInquiry = async (inquiry: Inquiry) => {
-    console.log('🔵 [addInquiry] start:', inquiry.id, inquiry.userEmail);
 
     const result = await inquiryService.upsert(inquiry);
     if (!result) {
       console.error('❌ [addInquiry] Supabase upsert failed for:', inquiry.id);
       throw new Error('Failed to save inquiry to database');
     }
-    console.log('✅ [addInquiry] Supabase upsert OK:', result.id);
 
     setInquiries(prev => [result as Inquiry, ...prev.filter(i => i.id !== result.id)]);
 
@@ -193,7 +191,6 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       console.error('❌ [submitInquiry] Supabase upsert failed for:', id);
       return false;
     }
-    console.log('✅ [submitInquiry] Supabase OK:', result.id);
 
     setInquiries(prev => prev.map(inq => inq.id === id ? (result as Inquiry) : inq));
 

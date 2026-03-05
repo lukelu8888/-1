@@ -183,7 +183,6 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     ? inquiries.filter(inq => {
         const inquiryRegion = inq.region;
         const matches = inquiryRegion === currentUserRegion;
-        console.log(`🔍 询价 ${inq.id} | 询价区域: \"${inquiryRegion}\" | 用户区域: \"${currentUserRegion}\" | 匹配: ${matches ? '✅' : '❌'}`);
         return matches;
       })
     : inquiries; // CEO, CFO, and Sales_Director can see all inquiries
