@@ -1724,6 +1724,8 @@ function fromSQRow(r: any) {
     totalAmount: r.total_amount || 0,
     currency: r.currency || 'CNY',
     validUntil: r.valid_until,
+    paymentTerms: r.payment_terms,
+    deliveryTerms: r.delivery_terms,
     submittedDate: r.updated_at || r.created_at,
     status: r.status,
     notes: r.notes,
