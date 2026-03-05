@@ -248,7 +248,13 @@ export default function SupplierOrderManagementCenter() {
   // 🔥 获取当前供应商的所有报价单
   const myQuotations = useMemo(() => {
     if (!user?.email) return [];
-    return supplierQuotations.filter(q => q.supplierEmail === user.email);
+    const current = String(user.email || '').trim().toLowerCase();
+    return supplierQuotations.filter((q: any) => {
+      const bySupplierEmail = String(q?.supplierEmail || '').trim().toLowerCase() === current;
+      const byCreatedBy = String(q?.createdBy || '').trim().toLowerCase() === current;
+      const bySupplierCode = String(q?.supplierCode || '').trim().toLowerCase() === current;
+      return bySupplierEmail || byCreatedBy || bySupplierCode;
+    });
   }, [supplierQuotations, user?.email]);
 
   // 🔥 统计数据

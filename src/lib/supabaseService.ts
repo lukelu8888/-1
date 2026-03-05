@@ -1720,21 +1720,45 @@ function fromSQRow(r: any) {
 
 export const supplierQuotationService = {
   async getAll() {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('supplier_quotations')
       .select('*')
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
+    // 兼容旧环境：若 deleted_at 列不存在，则降级为不带 deleted_at 过滤
+    if (error && (error.code === '42703' || String(error.message || '').includes('deleted_at'))) {
+      const retry = await supabase
+        .from('supplier_quotations')
+        .select('*')
+        .order('created_at', { ascending: false });
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) return handleError(error, 'getAll supplier_quotations');
     return (data || []).map(fromSQRow);
   },
   async getBySupplierEmail(email: string) {
-    const { data, error } = await supabase
+    const normalized = String(email || '').trim().toLowerCase();
+    const bySupplierEmail = `supplier_email.ilike.%${normalized}%`;
+    const byCreatedBy = `created_by.ilike.%${normalized}%`;
+    const bySupplierCode = `supplier_code.ilike.%${normalized}%`;
+
+    let { data, error } = await supabase
       .from('supplier_quotations')
       .select('*')
-      .eq('supplier_email', email)
+      .or(`${bySupplierEmail},${byCreatedBy},${bySupplierCode}`)
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
+    // 兼容旧环境：若 deleted_at 列不存在，则降级为不带 deleted_at 过滤
+    if (error && (error.code === '42703' || String(error.message || '').includes('deleted_at'))) {
+      const retry = await supabase
+        .from('supplier_quotations')
+        .select('*')
+        .or(`${bySupplierEmail},${byCreatedBy},${bySupplierCode}`)
+        .order('created_at', { ascending: false });
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) return handleError(error, 'getBySupplierEmail supplier_quotations');
     return (data || []).map(fromSQRow);
   },
