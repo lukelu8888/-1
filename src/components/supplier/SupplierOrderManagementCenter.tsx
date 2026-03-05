@@ -183,6 +183,7 @@ export default function SupplierOrderManagementCenter() {
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [hiddenXJIds, setHiddenXJIds] = useState<Set<string>>(new Set());
+  const hasManualHideInSessionRef = React.useRef(false);
 
   const formatCompactUtcMinute = React.useCallback((raw: string | undefined) => {
     if (!raw) return '—';
@@ -223,10 +224,12 @@ export default function SupplierOrderManagementCenter() {
 
   React.useEffect(() => {
     setHiddenXJIds(loadHiddenXJIds(user?.email));
+    hasManualHideInSessionRef.current = false;
   }, [user?.email, loadHiddenXJIds]);
 
   const hideXJsForCurrentSupplier = React.useCallback((ids: string[]) => {
     if (!ids.length) return;
+    hasManualHideInSessionRef.current = true;
     const next = new Set(hiddenXJIds);
     ids.forEach((id) => next.add(String(id)));
     setHiddenXJIds(next);
@@ -343,6 +346,7 @@ export default function SupplierOrderManagementCenter() {
   React.useEffect(() => {
     if (activeTab !== 'xj') return;
     if (!hiddenXJIds.size) return;
+    if (hasManualHideInSessionRef.current) return;
     const pendingCount = categorizedRFQs.pending.length;
     if (pendingCount === 0) return;
     const visibleCount = categorizedRFQs.pending.filter((xj) => !hiddenXJIds.has(String(xj.id))).length;
