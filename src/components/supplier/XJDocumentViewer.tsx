@@ -5,10 +5,10 @@ import { toast } from 'sonner@2.0.3';
 import { XJDocument, XJData } from '../documents/templates/XJDocument';
 
 interface XJDocumentViewerProps {
-  rfq: any; // 采购询价对象，包含documentData字段
+  xj: any; // 采购询价对象，包含documentData字段
 }
 
-export default function XJDocumentViewer({ rfq }: XJDocumentViewerProps) {
+export default function XJDocumentViewer({ xj }: XJDocumentViewerProps) {
   const documentRef = useRef<HTMLDivElement>(null);
 
   // 🔥 打印/导出PDF功能
@@ -28,7 +28,7 @@ export default function XJDocumentViewer({ rfq }: XJDocumentViewerProps) {
   };
 
   // 检查是否有文档数据
-  if (!rfq.documentData) {
+  if (!xj.documentData) {
     return (
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
         <FileText className="w-12 h-12 text-yellow-600 mx-auto mb-3" />
@@ -42,7 +42,7 @@ export default function XJDocumentViewer({ rfq }: XJDocumentViewerProps) {
     );
   }
 
-  const documentData: XJData = rfq.documentData;
+  const documentData: XJData = xj.documentData;
 
   return (
     <div className="space-y-4">

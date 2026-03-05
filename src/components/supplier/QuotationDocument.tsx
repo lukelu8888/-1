@@ -8,13 +8,13 @@ import { Checkbox } from '../ui/checkbox';
 import { Slider } from '../ui/slider';
 
 interface QuotationDocumentProps {
-  rfq: any;
+  xj: any;
   initialData?: any;
   onSubmit?: (quoteData: any, submitType: 'draft' | 'review' | 'direct') => void;
   preview?: boolean;
 }
 
-export default function QuotationDocument({ rfq, initialData, onSubmit, preview = false }: QuotationDocumentProps) {
+export default function QuotationDocument({ xj, initialData, onSubmit, preview = false }: QuotationDocumentProps) {
   // 缩放比例状态
   const [scale, setScale] = useState(1);
 
@@ -84,7 +84,7 @@ export default function QuotationDocument({ rfq, initialData, onSubmit, preview 
     validDays: '30',
     customerName: 'COSUN采购部',
     contactPerson: '采购经理',
-    rfqNo: rfq.id,
+    rfqNo: xj.id,
   });
 
   // 产品列表
@@ -95,7 +95,7 @@ export default function QuotationDocument({ rfq, initialData, onSubmit, preview 
       nameEn: 'LED Panel Light',
       specification: '600x600mm 36W 白光', // 默认选择第一个产品
       hsCode: '9405.40.00',
-      quantity: rfq.quantity || 8000,
+      quantity: xj.quantity || 8000,
       unit: 'PCS',
       unitPrice: initialData?.unitPrice || '12.50',
       leadTime: initialData?.leadTime || '30',

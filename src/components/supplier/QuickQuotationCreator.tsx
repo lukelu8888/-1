@@ -41,12 +41,12 @@ export default function QuickQuotationCreator() {
     }
 
     // 查找对应的采购询价
-    const rfq = rfqs.find(r => 
+    const xj = rfqs.find(r => 
       r.supplierXjNo === xjNumber || 
       r.xjNumber === xjNumber
     );
 
-    if (!rfq) {
+    if (!xj) {
       toast.error(`未找到询价单 ${xjNumber}`);
       console.log('所有采购询价:', rfqs.map(r => ({ 
         supplierXjNo: r.supplierXjNo, 
@@ -64,7 +64,7 @@ export default function QuickQuotationCreator() {
     try {
       // 创建报价单 — Supabase-first
       const quotation = await createQuotationFromXJ(
-        rfq,
+        xj,
         { email: user.email, name: user.name || user.email, company: user.company || '供应商公司' },
         {
           unitPrice: parseFloat(unitPrice),
@@ -80,7 +80,7 @@ export default function QuickQuotationCreator() {
 
       // 更新采购询价状态
       if (status === 'submitted') {
-        updateRFQ(rfq.id, {
+        updateRFQ(xj.id, {
           supplierQuotationNo: quotation.quotationNo,
           status: 'quoted' as any
         });
@@ -112,7 +112,7 @@ export default function QuickQuotationCreator() {
   };
 
   // 查找采购询价信息
-  const rfq = rfqs.find(r => 
+  const xj = rfqs.find(r => 
     r.supplierXjNo === xjNumber || 
     r.xjNumber === xjNumber
   );
@@ -159,7 +159,7 @@ export default function QuickQuotationCreator() {
           </div>
 
           {/* 采购询价详情 */}
-          {rfq && (
+          {xj && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-blue-900">找到询价单</span>
@@ -168,29 +168,29 @@ export default function QuickQuotationCreator() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <span className="text-blue-700">产品名称：</span>
-                  <span className="font-medium">{rfq.productName || 'N/A'}</span>
+                  <span className="font-medium">{xj.productName || 'N/A'}</span>
                 </div>
                 <div>
                   <span className="text-blue-700">型号：</span>
-                  <span className="font-medium">{rfq.modelNo || 'N/A'}</span>
+                  <span className="font-medium">{xj.modelNo || 'N/A'}</span>
                 </div>
                 <div>
                   <span className="text-blue-700">数量：</span>
-                  <span className="font-medium">{rfq.quantity} {rfq.unit}</span>
+                  <span className="font-medium">{xj.quantity} {xj.unit}</span>
                 </div>
                 <div>
                   <span className="text-blue-700">货币：</span>
-                  <span className="font-medium">{rfq.currency || 'CNY'}</span>
+                  <span className="font-medium">{xj.currency || 'CNY'}</span>
                 </div>
                 <div className="col-span-2">
                   <span className="text-blue-700">关联采购需求：</span>
-                  <span className="font-medium">{rfq.requirementNo || 'N/A'}</span>
+                  <span className="font-medium">{xj.requirementNo || 'N/A'}</span>
                 </div>
               </div>
             </div>
           )}
 
-          {!rfq && xjNumber && (
+          {!xj && xjNumber && (
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
               <p className="text-sm text-orange-800">
                 ⚠️ 未找到询价单 {xjNumber}，请检查编号是否正确
@@ -284,16 +284,16 @@ export default function QuickQuotationCreator() {
           </div>
 
           {/* 总金额预览 */}
-          {rfq && unitPrice && (
+          {xj && unitPrice && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-green-800">报价总金额</span>
                 <span className="text-2xl font-bold text-green-900">
-                  ¥{(parseFloat(unitPrice) * (rfq.quantity || 0)).toLocaleString()}
+                  ¥{(parseFloat(unitPrice) * (xj.quantity || 0)).toLocaleString()}
                 </span>
               </div>
               <p className="text-xs text-green-700 mt-1">
-                {rfq.quantity} {rfq.unit} × ¥{parseFloat(unitPrice).toFixed(2)} = ¥{(parseFloat(unitPrice) * (rfq.quantity || 0)).toFixed(2)}
+                {xj.quantity} {xj.unit} × ¥{parseFloat(unitPrice).toFixed(2)} = ¥{(parseFloat(unitPrice) * (xj.quantity || 0)).toFixed(2)}
               </p>
             </div>
           )}
@@ -314,7 +314,7 @@ export default function QuickQuotationCreator() {
         </Button>
         <Button
           onClick={handleCreateQuotation}
-          disabled={!rfq || !unitPrice}
+          disabled={!xj || !unitPrice}
           className="bg-orange-600 hover:bg-orange-700 gap-2"
         >
           <CheckCircle className="w-4 h-4" />

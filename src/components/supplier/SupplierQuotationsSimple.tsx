@@ -37,7 +37,7 @@ export default function SupplierQuotationsSimple() {
     
     // 打印所有采购询价的供应商信息
     xjs.forEach(xj => {
-      console.log(`  - 采购询价 ${rfq.xjNumber}:`, {
+      console.log(`  - 采购询价 ${xj.xjNumber}:`, {
         supplierCode: xj.supplierCode,
         supplierEmail: xj.supplierEmail,
         supplierName: xj.supplierName
@@ -174,13 +174,13 @@ export default function SupplierQuotationsSimple() {
   };
 
   // 🔥 删除询价单
-  const handleDeleteXJ = (rfq: any) => {
-    if (window.confirm(`确定要删除询价单 ${rfq.xjNumber} 吗？\n\n⚠️ 此操作不可恢复！`)) {
-      deleteRFQ(rfq.id);
+  const handleDeleteXJ = (xj: any) => {
+    if (window.confirm(`确定要删除询价单 ${xj.xjNumber} 吗？\n\n⚠️ 此操作不可恢复！`)) {
+      deleteRFQ(xj.id);
       toast.success(
         <div className="space-y-1">
           <p className="font-semibold">🗑️ 询价单已删除</p>
-          <p className="text-sm">采购询价编号: {rfq.xjNumber}</p>
+          <p className="text-sm">采购询价编号: {xj.xjNumber}</p>
         </div>,
         { duration: 3000 }
       );
@@ -201,7 +201,7 @@ export default function SupplierQuotationsSimple() {
     if (selectedRFQIds.length === currentRFQs.length) {
       setSelectedRFQIds([]);
     } else {
-      setSelectedRFQIds(currentRFQs.map(rfq => rfq.id));
+      setSelectedRFQIds(currentRFQs.map(xj => xj.id));
     }
   };
 
@@ -386,69 +386,69 @@ export default function SupplierQuotationsSimple() {
             </TableHeader>
             <TableBody>
               {getCurrentRFQs().length > 0 ? (
-                getCurrentRFQs().map((rfq) => {
+                getCurrentRFQs().map((xj) => {
                   const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
                   
                   return (
-                    <TableRow key={rfq.id} className="hover:bg-gray-50">
+                    <TableRow key={xj.id} className="hover:bg-gray-50">
                       <TableCell className="py-3">
                         <Checkbox
-                          checked={selectedRFQIds.includes(rfq.id)}
-                          onCheckedChange={() => handleToggleSelectRFQ(rfq.id)}
+                          checked={selectedRFQIds.includes(xj.id)}
+                          onCheckedChange={() => handleToggleSelectRFQ(xj.id)}
                         />
                       </TableCell>
                       <TableCell className="py-3" style={{ fontSize: '14px' }}>
                         <div>
-                          <p className="font-medium text-blue-600">{rfq.supplierXjNo || 'XJ-未分配'}</p>
-                          {rfq.supplierQuotationNo && (
-                            <p className="text-xs text-green-600 font-medium">报价单: {rfq.supplierQuotationNo}</p>
+                          <p className="font-medium text-blue-600">{xj.supplierXjNo || 'XJ-未分配'}</p>
+                          {xj.supplierQuotationNo && (
+                            <p className="text-xs text-green-600 font-medium">报价单: {xj.supplierQuotationNo}</p>
                           )}
-                          <p className="text-xs text-gray-500">COSUN需求: {rfq.requirementNo || 'N/A'}</p>
-                          <p className="text-xs text-gray-400">{rfq.createdDate}</p>
+                          <p className="text-xs text-gray-500">COSUN需求: {xj.requirementNo || 'N/A'}</p>
+                          <p className="text-xs text-gray-400">{xj.createdDate}</p>
                         </div>
                       </TableCell>
                       <TableCell className="py-3" style={{ fontSize: '14px' }}>
                         <div>
                           {/* 🔥 如果有多个产品，显示产品数量 */}
-                          {rfq.products && rfq.products.length > 1 ? (
+                          {xj.products && xj.products.length > 1 ? (
                             <>
                               <p className="font-medium text-gray-900">
                                 <Package className="w-3.5 h-3.5 inline mr-1 text-orange-600" />
-                                {rfq.products.length} 个产品
+                                {xj.products.length} 个产品
                               </p>
                               <p className="text-xs text-gray-500 mt-1">
-                                {rfq.products.map(p => p.productName).slice(0, 2).join(', ')}
-                                {rfq.products.length > 2 && '...'}
+                                {xj.products.map(p => p.productName).slice(0, 2).join(', ')}
+                                {xj.products.length > 2 && '...'}
                               </p>
                             </>
                           ) : (
                             <>
-                              <p className="font-medium text-gray-900">{rfq.productName || 'N/A'}</p>
-                              <p className="text-xs text-gray-500">{rfq.modelNo || ''}</p>
-                              {rfq.specification && (
-                                <p className="text-xs text-gray-500">{rfq.specification}</p>
+                              <p className="font-medium text-gray-900">{xj.productName || 'N/A'}</p>
+                              <p className="text-xs text-gray-500">{xj.modelNo || ''}</p>
+                              {xj.specification && (
+                                <p className="text-xs text-gray-500">{xj.specification}</p>
                               )}
                             </>
                           )}
-                          {rfq.remarks && (
-                            <p className="text-xs text-orange-600 mt-1">{rfq.remarks}</p>
+                          {xj.remarks && (
+                            <p className="text-xs text-orange-600 mt-1">{xj.remarks}</p>
                           )}
                         </div>
                       </TableCell>
                       <TableCell className="py-3 text-right" style={{ fontSize: '14px' }}>
-                        {rfq.products && rfq.products.length > 1 ? (
+                        {xj.products && xj.products.length > 1 ? (
                           <div className="text-xs text-gray-600">
                             多产品<br/>询价
                           </div>
                         ) : (
                           <>
-                            <span className="font-medium">{rfq.quantity?.toLocaleString() || 0}</span>
-                            <span className="text-gray-500 ml-1">{rfq.unit || ''}</span>
+                            <span className="font-medium">{xj.quantity?.toLocaleString() || 0}</span>
+                            <span className="text-gray-500 ml-1">{xj.unit || ''}</span>
                           </>
                         )}
                       </TableCell>
                       <TableCell className="py-3" style={{ fontSize: '14px' }}>
-                        <span className="text-gray-600">{rfq.quotationDeadline}</span>
+                        <span className="text-gray-600">{xj.quotationDeadline}</span>
                       </TableCell>
                       {(activeTab === 'quoted' || activeTab === 'accepted') && myQuote && (
                         <>
@@ -475,13 +475,13 @@ export default function SupplierQuotationsSimple() {
                       </TableCell>
                       <TableCell className="py-3">
                         <div className="flex items-center justify-center gap-1">
-                          {rfq.documentData && (
+                          {xj.documentData && (
                             <Button 
                               variant="outline" 
                               size="sm" 
                               className="h-7 px-2 text-xs border-orange-600 text-orange-600 hover:bg-orange-50"
                               onClick={() => {
-                                setDocumentRFQ(rfq);
+                                setDocumentRFQ(xj);
                                 setDocumentViewerOpen(true);
                               }}
                             >
@@ -494,7 +494,7 @@ export default function SupplierQuotationsSimple() {
                             size="sm" 
                             className="h-7 px-2 text-xs"
                             onClick={() => {
-                              setDetailRFQ(rfq);
+                              setDetailRFQ(xj);
                               setDetailDialogOpen(true);
                             }}
                           >
@@ -506,7 +506,7 @@ export default function SupplierQuotationsSimple() {
                               size="sm"
                               className="h-7 px-2 text-xs bg-orange-600 hover:bg-orange-700"
                               onClick={() => {
-                                setSelectedRFQ(rfq);
+                                setSelectedRFQ(xj);
                                 setQuoteDialogOpen(true);
                               }}
                             >
@@ -520,7 +520,7 @@ export default function SupplierQuotationsSimple() {
                               variant="ghost"
                               className="h-7 px-2 text-xs"
                               onClick={() => {
-                                setDetailRFQ(rfq);
+                                setDetailRFQ(xj);
                                 setDetailDialogOpen(true);
                               }}
                             >
@@ -531,7 +531,7 @@ export default function SupplierQuotationsSimple() {
                             size="sm"
                             variant="ghost"
                             className="h-7 px-2 text-xs text-red-600"
-                            onClick={() => handleDeleteXJ(rfq)}
+                            onClick={() => handleDeleteXJ(xj)}
                           >
                             <Trash2 className="w-3 h-3 mr-1" />
                             删除
@@ -573,7 +573,7 @@ export default function SupplierQuotationsSimple() {
           
           {selectedRFQ && (
             <SimpleQuoteForm
-              rfq={selectedRFQ}
+              xj={selectedRFQ}
               onSubmit={handleSubmitQuote}
               onCancel={() => setQuoteDialogOpen(false)}
             />
@@ -736,7 +736,7 @@ export default function SupplierQuotationsSimple() {
           </DialogHeader>
           
           {documentRFQ && (
-            <XJDocumentViewer rfq={documentRFQ} />
+            <XJDocumentViewer xj={documentRFQ} />
           )}
         </DialogContent>
       </Dialog>

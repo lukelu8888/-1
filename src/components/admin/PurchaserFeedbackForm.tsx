@@ -84,9 +84,9 @@ export function PurchaserFeedbackForm({
       console.log('  BJ总数:', supplierQuotations.length);
       
       // 2. 找到关联的XJ（询价单）
-      const relatedXJs = rfqs.filter(rfq => 
-        rfq.sourceQRNumber === qr.requirementNo || 
-        rfq.requirementNo === qr.requirementNo
+      const relatedXJs = rfqs.filter(xj => 
+        xj.sourceQRNumber === qr.requirementNo || 
+        xj.requirementNo === qr.requirementNo
       );
       
       console.log('  关联XJ数:', relatedXJs.length);

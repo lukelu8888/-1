@@ -1690,7 +1690,7 @@ export default function SupplierOrderManagementCenter() {
             <DialogTitle>询价单文档</DialogTitle>
             <DialogDescription>完整的询价单文档，包含产品清单、商务条款和技术要求</DialogDescription>
           </DialogHeader>
-          {selectedItem && <XJDocumentViewer rfq={selectedItem} />}
+          {selectedItem && <XJDocumentViewer xj={selectedItem} />}
         </DialogContent>
       </Dialog>
 

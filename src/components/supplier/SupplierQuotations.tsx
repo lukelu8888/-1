@@ -94,11 +94,11 @@ export default function SupplierQuotations() {
     
     if (result.length > 0) {
       console.log('✅ [SupplierQuotations] 找到采购询价:');
-      result.forEach((rfq, idx) => {
-        console.log(`  ${idx + 1}. 采购询价单号: ${rfq.supplierXjNo || '未生成'} (内部: ${rfq.xjNumber})`);
-        console.log(`      产品: ${rfq.productName} - 供应商: ${rfq.supplierName}`);
-        if (rfq.supplierQuotationNo) {
-          console.log(`      报价单号: ${rfq.supplierQuotationNo}`);
+      result.forEach((xj, idx) => {
+        console.log(`  ${idx + 1}. 采购询价单号: ${xj.supplierXjNo || '未生成'} (内部: ${xj.xjNumber})`);
+        console.log(`      产品: ${xj.productName} - 供应商: ${xj.supplierName}`);
+        if (xj.supplierQuotationNo) {
+          console.log(`      报价单号: ${xj.supplierQuotationNo}`);
         }
       });
     } else {
@@ -118,18 +118,18 @@ export default function SupplierQuotations() {
 
   // 🔥 分类采购询价
   const categorizedRFQs = useMemo(() => {
-    const pending = supplierRFQs.filter(rfq => {
-      const myQuote = rfq.quotes?.find(q => q.supplierCode === user?.email);
-      return !myQuote && rfq.status === 'pending';
+    const pending = supplierRFQs.filter(xj => {
+      const myQuote = xj.quotes?.find(q => q.supplierCode === user?.email);
+      return !myQuote && xj.status === 'pending';
     });
     
-    const quoted = supplierRFQs.filter(rfq => {
-      const myQuote = rfq.quotes?.find(q => q.supplierCode === user?.email);
-      return myQuote && rfq.status !== 'accepted' && rfq.status !== 'rejected';
+    const quoted = supplierRFQs.filter(xj => {
+      const myQuote = xj.quotes?.find(q => q.supplierCode === user?.email);
+      return myQuote && xj.status !== 'accepted' && xj.status !== 'rejected';
     });
     
-    const accepted = supplierRFQs.filter(rfq => rfq.status === 'accepted');
-    const rejected = supplierRFQs.filter(rfq => rfq.status === 'rejected');
+    const accepted = supplierRFQs.filter(xj => xj.status === 'accepted');
+    const rejected = supplierRFQs.filter(xj => xj.status === 'rejected');
     
     return { pending, quoted, accepted, rejected };
   }, [supplierRFQs, user?.email]);
@@ -229,11 +229,11 @@ export default function SupplierQuotations() {
     });
   };
 
-  const handleOpenQuoteDialog = (rfq: any) => {
-    setSelectedRFQ(rfq);
+  const handleOpenQuoteDialog = (xj: any) => {
+    setSelectedRFQ(xj);
     
     // 如果之前报过价，预填数据
-    const existingQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
+    const existingQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
     if (existingQuote) {
       setQuoteForm({
         unitPrice: existingQuote.quotedPrice.toString(),
@@ -284,18 +284,18 @@ export default function SupplierQuotations() {
   ];
 
   // 🔥 生成供应商报价单文档数据
-  const generateQuotationData = (rfq: any): SupplierQuotationData => {
-    const myQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
+  const generateQuotationData = (xj: any): SupplierQuotationData => {
+    const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
     if (!myQuote) return null as any;
 
     const validUntilDate = new Date();
     validUntilDate.setDate(validUntilDate.getDate() + (myQuote.validityDays || 30));
 
     return {
-      quotationNo: rfq.supplierQuotationNo || `BJ-${new Date().toISOString().slice(2,10).replace(/-/g,'')}`, // fallback placeholder
+      quotationNo: xj.supplierQuotationNo || `BJ-${new Date().toISOString().slice(2,10).replace(/-/g,'')}`, // fallback placeholder
       quotationDate: myQuote.quotedDate,
       validUntil: validUntilDate.toISOString().split('T')[0],
-      rfqReference: rfq.supplierXjNo || rfq.xjNumber,
+      rfqReference: xj.supplierXjNo || xj.xjNumber,
       
       supplier: {
         companyName: supplierInfo?.name || supplierInfo?.company || user?.company || '供应商公司名称',
@@ -321,11 +321,11 @@ export default function SupplierQuotations() {
       
       products: [{
         no: 1,
-        modelNo: rfq.productCode || rfq.product || 'N/A',
-        description: rfq.productName || rfq.product,
-        specification: rfq.specifications || rfq.spec || '',
-        quantity: rfq.quantity,
-        unit: rfq.unit || 'pcs',
+        modelNo: xj.productCode || xj.product || 'N/A',
+        description: xj.productName || xj.product,
+        specification: xj.specifications || xj.spec || '',
+        quantity: xj.quantity,
+        unit: xj.unit || 'pcs',
         unitPrice: myQuote.quotedPrice,
         currency: myQuote.currency || 'USD',
         remarks: myQuote.remarks || ''
@@ -333,14 +333,14 @@ export default function SupplierQuotations() {
       
       terms: {
         paymentTerms: myQuote.paymentTerms || 'T/T 30% deposit, 70% before shipment',
-        deliveryTerms: rfq.deliveryTerms || 'EXW',
+        deliveryTerms: xj.deliveryTerms || 'EXW',
         deliveryTime: `${myQuote.leadTime || 30}天`,
-        deliveryAddress: rfq.deliveryAddress || '福建省福州市仓山区金山工业区',
+        deliveryAddress: xj.deliveryAddress || '福建省福州市仓山区金山工业区',
         moq: `${myQuote.moq || 1000}`,
-        qualityStandard: rfq.qualityStandard || '符合国家标准',
-        warranty: rfq.warranty || '12个月',
-        packaging: rfq.packaging || '标准出口包装',
-        shippingMarks: rfq.shippingMarks || '中性唛头',
+        qualityStandard: xj.qualityStandard || '符合国家标准',
+        warranty: xj.warranty || '12个月',
+        packaging: xj.packaging || '标准出口包装',
+        shippingMarks: xj.shippingMarks || '中性唛头',
         remarks: `报价有效期${myQuote.validityDays || 30}天`
       },
       
@@ -354,8 +354,8 @@ export default function SupplierQuotations() {
   };
 
   // 🔥 查看报价单
-  const handleViewQuotation = (rfq: any) => {
-    const quotationData = generateQuotationData(rfq);
+  const handleViewQuotation = (xj: any) => {
+    const quotationData = generateQuotationData(xj);
     if (quotationData) {
       setCurrentQuotationData(quotationData);
       setShowQuotationPreview(true);
@@ -569,7 +569,7 @@ export default function SupplierQuotations() {
                 getCurrentRFQs().map((item) => {
                   const statusConfig = getStatusConfig(item.status);
                   const isDraft = activeTab === 'drafts';
-                  const rfq = isDraft ? item : item;
+                  const xj = isDraft ? item : item;
                   
                   return (
                     <TableRow key={item.id} className="hover:bg-gray-50">
@@ -686,7 +686,7 @@ export default function SupplierQuotations() {
                                   </DialogHeader>
                                   
                                   <QuotationDocument
-                                    rfq={item}
+                                    xj={item}
                                     onSubmit={handleSubmitQuote}
                                   />
 
@@ -711,9 +711,9 @@ export default function SupplierQuotations() {
                                 size="sm"
                                 className="h-7 px-2 text-xs bg-orange-600 hover:bg-orange-700"
                                 onClick={() => {
-                                  const rfq = supplierRFQs.find(r => r.id === item.rfqId);
-                                  if (rfq) {
-                                    setSelectedRFQ(rfq);
+                                  const xj = supplierRFQs.find(r => r.id === item.rfqId);
+                                  if (xj) {
+                                    setSelectedRFQ(xj);
                                     setEditingDraft(item);
                                     setQuoteDialogOpen(true);
                                   }
@@ -731,7 +731,7 @@ export default function SupplierQuotations() {
                                 </DialogHeader>
                                 
                                 <QuotationDocument
-                                  rfq={{
+                                  xj={{
                                     id: item.rfqId,
                                     product: item.product,
                                     specifications: item.specifications,

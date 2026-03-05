@@ -242,8 +242,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     
     // 统计已经创建了询价单的产品
     const xjProductIds = new Set<string>();
-    relatedXJs.forEach(rfq => {
-      rfq.products?.forEach((p: any) => {
+    relatedXJs.forEach(xj => {
+      xj.products?.forEach((p: any) => {
         xjProductIds.add(p.id || p.modelNo);
       });
     });
@@ -412,10 +412,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     
     const lowerSearchTerm = xjSearchTerm.toLowerCase();
     return xjs.filter(xj => 
-      rfq.supplierXjNo?.toLowerCase().includes(lowerSearchTerm) ||
-      rfq.supplierName?.toLowerCase().includes(lowerSearchTerm) ||
+      xj.supplierXjNo?.toLowerCase().includes(lowerSearchTerm) ||
+      xj.supplierName?.toLowerCase().includes(lowerSearchTerm) ||
       xj.requirementNo?.toLowerCase().includes(lowerSearchTerm) ||
-      rfq.supplierCode?.toLowerCase().includes(lowerSearchTerm)
+      xj.supplierCode?.toLowerCase().includes(lowerSearchTerm)
     );
   }, [xjs, xjSearchTerm]);
 
@@ -2793,23 +2793,23 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredXJs.map((rfq, idx) => {
+                      {filteredXJs.map((xj, idx) => {
                         const xjStatus = (xj.status as any);
                         const isDraft = xjStatus === 'draft';
                         const isSent = xjStatus === 'sent';
                         
                         return (
-                          <tr key={rfq.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                          <tr key={xj.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
                             <td className="py-2 px-2 text-center">
                               <input 
                                 type="checkbox" 
                                 className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                                checked={selectedXJIds.includes(rfq.id)}
+                                checked={selectedXJIds.includes(xj.id)}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedRFQIds([...selectedXJIds, rfq.id]);
+                                    setSelectedRFQIds([...selectedXJIds, xj.id]);
                                   } else {
-                                    setSelectedRFQIds(selectedXJIds.filter(id => id !== rfq.id));
+                                    setSelectedRFQIds(selectedXJIds.filter(id => id !== xj.id));
                                   }
                                 }}
                               />
@@ -2820,47 +2820,47 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                             <td className="py-2 px-2">
                               <button
                                 onClick={() => {
-                                  setCurrentRFQData(rfq.documentData);
+                                  setCurrentRFQData(xj.documentData);
                                   setShowRFQPreview(true);
                                 }}
                                 className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
                               >
-                                {rfq.supplierXjNo}
+                                {xj.supplierXjNo}
                               </button>
-                              <div className="text-[12px] text-gray-500">{rfq.createdDate}</div>
+                              <div className="text-[12px] text-gray-500">{xj.createdDate}</div>
                             </td>
                             <td className="py-2 px-2">
-                              <div className="text-gray-900">{rfq.supplierName}</div>
-                              <div className="text-[12px] text-gray-500">{rfq.supplierCode}</div>
+                              <div className="text-gray-900">{xj.supplierName}</div>
+                              <div className="text-[12px] text-gray-500">{xj.supplierCode}</div>
                             </td>
                             <td className="py-2 px-2">
-                              <div className="text-gray-900 font-mono">{rfq.requirementNo}</div>
-                              {rfq.sourceRef && <div className="text-[12px] text-gray-500">{rfq.sourceRef}</div>}
+                              <div className="text-gray-900 font-mono">{xj.requirementNo}</div>
+                              {xj.sourceRef && <div className="text-[12px] text-gray-500">{xj.sourceRef}</div>}
                             </td>
                             <td className="py-2 px-2 text-center">
                               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
-                                {rfq.products?.length || 1}
+                                {xj.products?.length || 1}
                               </span>
                             </td>
                             <td className="py-2 px-2">
-                              <div className="text-gray-900">{rfq.createdDate}</div>
+                              <div className="text-gray-900">{xj.createdDate}</div>
                             </td>
                             <td className="py-2 px-2">
-                              <div className="text-gray-900">{rfq.quotationDeadline}</div>
+                              <div className="text-gray-900">{xj.quotationDeadline}</div>
                             </td>
                             <td className="py-2 px-2">
                               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${
                                 isDraft ? 'bg-gray-50 text-gray-700 border-gray-200' :
                                 isSent ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                rfq.status === 'pending' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                                rfq.status === 'quoted' ? 'bg-green-50 text-green-700 border-green-200' :
+                                xj.status === 'pending' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                                xj.status === 'quoted' ? 'bg-green-50 text-green-700 border-green-200' :
                                 'bg-gray-50 text-gray-700 border-gray-200'
                               }`}>
                                 {isDraft ? '草稿' :
                                  isSent ? '已发送' :
-                                 rfq.status === 'pending' ? '等待报价' :
-                                 rfq.status === 'quoted' ? '已回复' :
-                                 rfq.status}
+                                 xj.status === 'pending' ? '等待报价' :
+                                 xj.status === 'quoted' ? '已回复' :
+                                 xj.status}
                               </span>
                             </td>
                             <td className="py-2 px-2 text-center">
@@ -2869,7 +2869,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    setCurrentRFQData(rfq.documentData);
+                                    setCurrentRFQData(xj.documentData);
                                     setShowRFQPreview(true);
                                   }}
                                   className="h-6 text-[12px] px-2 border-blue-300 text-blue-600 hover:bg-blue-50"
@@ -2880,7 +2880,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleEditXJ(rfq)}
+                                  onClick={() => handleEditXJ(xj)}
                                   className="h-6 text-[12px] px-2 border-gray-300 text-gray-600 hover:bg-gray-50"
                                 >
                                   <Edit className="w-3 h-3 mr-1" />
@@ -2889,7 +2889,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 <Button
                                   size="sm"
                                   onClick={() => {
-                                    handleSubmitXJToSupplier(rfq);
+                                    handleSubmitXJToSupplier(xj);
                                   }}
                                   className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
                                 >

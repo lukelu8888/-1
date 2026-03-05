@@ -11,12 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import QuotationDocument from './QuotationDocument';
 
 interface QuoteFormProps {
-  rfq: any;
+  xj: any;
   onSubmit: (quoteData: any, submitType: 'draft' | 'review' | 'direct') => void;
   initialData?: any;
 }
 
-const QuoteForm = memo(({ rfq, onSubmit, initialData }: QuoteFormProps) => {
+const QuoteForm = memo(({ xj, onSubmit, initialData }: QuoteFormProps) => {
   // 报价表单数据
   const [baseCost, setBaseCost] = useState(initialData?.baseCost || '');
   const [profitMargin, setProfitMargin] = useState(initialData?.profitMargin || '15');
@@ -111,7 +111,7 @@ const QuoteForm = memo(({ rfq, onSubmit, initialData }: QuoteFormProps) => {
 
     return {
       quotationNo: initialData?.quotationNo || `COSUN-Q-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`,
-      rfqNo: rfq.id,
+      rfqNo: xj.id,
       date: today.toISOString().split('T')[0],
       validUntil: validUntilDate.toISOString().split('T')[0],
       
@@ -125,9 +125,9 @@ const QuoteForm = memo(({ rfq, onSubmit, initialData }: QuoteFormProps) => {
       customerAddress: '',
       customerContact: '',
       
-      productName: rfq.product,
-      productCode: rfq.productCode || 'LED-PL-1200x300',
-      specifications: rfq.specifications,
+      productName: xj.product,
+      productCode: xj.productCode || 'LED-PL-1200x300',
+      specifications: xj.specifications,
       hsCode: '9405.40.00',
       
       currency: 'CNY',
@@ -158,7 +158,7 @@ const QuoteForm = memo(({ rfq, onSubmit, initialData }: QuoteFormProps) => {
       samplePolicy: '样品可提供，¥50/件（大货订单可退还样品费）。样品交货期：5-7天。运费到付。',
       remarks: notes || '所有价格基于当前原材料成本，以最终确认为准。特殊包装、定制颜色或设计修改可能产生额外费用并影响交货期。下单前请确认所有规格要求。'
     };
-  }, [rfq, validityDays, moq, leadTime, paymentTerms, notes, calculatedPrices, initialData, certifications]);
+  }, [xj, validityDays, moq, leadTime, paymentTerms, notes, calculatedPrices, initialData, certifications]);
 
   const handleSubmit = useCallback((submitType: 'draft' | 'review' | 'direct') => {
     onSubmit({

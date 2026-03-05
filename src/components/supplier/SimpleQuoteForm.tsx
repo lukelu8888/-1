@@ -8,13 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { AlertCircle, Calculator, DollarSign, Clock, Package } from 'lucide-react';
 
 interface SimpleQuoteFormProps {
-  rfq: any;
+  xj: any;
   initialData?: any;
   onSubmit: (data: any, type: 'draft' | 'submit') => void;
   onCancel?: () => void;
 }
 
-export function SimpleQuoteForm({ rfq, initialData, onSubmit, onCancel }: SimpleQuoteFormProps) {
+export function SimpleQuoteForm({ xj, initialData, onSubmit, onCancel }: SimpleQuoteFormProps) {
   const [formData, setFormData] = useState({
     unitPrice: initialData?.unitPrice || '',
     currency: initialData?.currency || 'CNY', // 默认人民币
@@ -37,12 +37,12 @@ export function SimpleQuoteForm({ rfq, initialData, onSubmit, onCancel }: Simple
   };
 
   // 🔥 计算总金额
-  const totalAmount = rfq.items?.[0]?.quantity 
-    ? (parseFloat(formData.unitPrice) || 0) * rfq.items[0].quantity 
+  const totalAmount = xj.items?.[0]?.quantity 
+    ? (parseFloat(formData.unitPrice) || 0) * xj.items[0].quantity 
     : 0;
 
   // 🔥 比较目标价格
-  const targetPrice = rfq.items?.[0]?.targetPrice || 0;
+  const targetPrice = xj.items?.[0]?.targetPrice || 0;
   const priceDifference = formData.unitPrice 
     ? ((parseFloat(formData.unitPrice) - targetPrice) / targetPrice * 100).toFixed(1)
     : null;
@@ -96,18 +96,18 @@ export function SimpleQuoteForm({ rfq, initialData, onSubmit, onCancel }: Simple
           <div className="grid grid-cols-2 gap-4">
             <div>
               <span className="text-slate-600">询价单号：</span>
-              <span className="font-semibold">{rfq.xjNumber}</span>
+              <span className="font-semibold">{xj.xjNumber}</span>
             </div>
             <div>
               <span className="text-slate-600">截止日期：</span>
-              <span className="font-semibold text-orange-600">{rfq.quotationDeadline}</span>
+              <span className="font-semibold text-orange-600">{xj.quotationDeadline}</span>
             </div>
           </div>
           
-          {rfq.items && rfq.items.length > 0 && (
+          {xj.items && xj.items.length > 0 && (
             <div className="border-t border-blue-200 pt-2 mt-2">
               <p className="text-xs text-slate-600 mb-1">产品清单</p>
-              {rfq.items.map((item: any, idx: number) => (
+              {xj.items.map((item: any, idx: number) => (
                 <div key={idx} className="bg-white p-2 rounded border border-blue-100 mb-1">
                   <div className="flex items-center justify-between">
                     <div>
@@ -300,7 +300,7 @@ export function SimpleQuoteForm({ rfq, initialData, onSubmit, onCancel }: Simple
       </Card>
 
       {/* 报价摘要 */}
-      {formData.unitPrice && rfq.items?.[0]?.quantity && (
+      {formData.unitPrice && xj.items?.[0]?.quantity && (
         <Card className="border-green-200 bg-green-50">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">报价摘要</CardTitle>
@@ -312,7 +312,7 @@ export function SimpleQuoteForm({ rfq, initialData, onSubmit, onCancel }: Simple
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-600">数量</span>
-              <span className="font-semibold">{rfq.items[0].quantity.toLocaleString()} {rfq.items[0].unit}</span>
+              <span className="font-semibold">{xj.items[0].quantity.toLocaleString()} {xj.items[0].unit}</span>
             </div>
             <div className="border-t border-green-200 pt-2 flex items-center justify-between">
               <span className="font-semibold">总金额</span>

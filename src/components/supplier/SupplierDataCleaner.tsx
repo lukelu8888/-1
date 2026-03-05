@@ -32,13 +32,13 @@ export function SupplierDataCleaner() {
     
     if (rfqs.length > 0) {
       console.log('  └─ 询价单列表:');
-      rfqs.forEach((rfq: any, idx: number) => {
-        console.log(`      ${idx + 1}. ${rfq.supplierXjNo || rfq.xjNumber || rfq.id}`);
-        console.log(`         产品: ${rfq.productName}`);
-        console.log(`         供应商: ${rfq.supplierName}`);
-        console.log(`         状态: ${rfq.status}`);
-        if (rfq.quotes?.length > 0) {
-          console.log(`         报价数: ${rfq.quotes.length}`);
+      rfqs.forEach((xj: any, idx: number) => {
+        console.log(`      ${idx + 1}. ${xj.supplierXjNo || xj.xjNumber || xj.id}`);
+        console.log(`         产品: ${xj.productName}`);
+        console.log(`         供应商: ${xj.supplierName}`);
+        console.log(`         状态: ${xj.status}`);
+        if (xj.quotes?.length > 0) {
+          console.log(`         报价数: ${xj.quotes.length}`);
         }
       });
     }

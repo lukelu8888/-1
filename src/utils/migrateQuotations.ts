@@ -27,25 +27,25 @@ export function migrateRFQQuotesToBJQuotations() {
     let migratedCount = 0;
     const newBJs: any[] = [];
     
-    rfqs.forEach((rfq: any) => {
+    rfqs.forEach((xj: any) => {
       // 检查是否有supplierQuotationNo（说明供应商已经提交报价）
-      if (rfq.supplierQuotationNo && rfq.quotes && rfq.quotes.length > 0) {
-        const quote = rfq.quotes[0]; // 取第一个报价
+      if (xj.supplierQuotationNo && xj.quotes && xj.quotes.length > 0) {
+        const quote = xj.quotes[0]; // 取第一个报价
         
         // 检查是否已经存在对应的BJ
-        const bjExists = existingBJs.some((bj: any) => bj.quotationNo === rfq.supplierQuotationNo);
+        const bjExists = existingBJs.some((bj: any) => bj.quotationNo === xj.supplierQuotationNo);
         
         if (!bjExists) {
-          console.log(`  ✅ 迁移: ${rfq.supplierQuotationNo} (XJ: ${rfq.supplierXjNo})`);
+          console.log(`  ✅ 迁移: ${xj.supplierQuotationNo} (XJ: ${xj.supplierXjNo})`);
           
           // 创建BJ报价单对象
           const bjQuotation = {
             id: `bj_migrated_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            quotationNo: rfq.supplierQuotationNo,
-            sourceXJ: rfq.supplierXjNo, // 关联XJ询价单号
-            sourceQR: rfq.requirementNo, // 关联QR采购需求号
-            sourceRFQId: rfq.id,
-            customerName: rfq.customerName || 'COSUN',
+            quotationNo: xj.supplierQuotationNo,
+            sourceXJ: xj.supplierXjNo, // 关联XJ询价单号
+            sourceQR: xj.requirementNo, // 关联QR采购需求号
+            sourceRFQId: xj.id,
+            customerName: xj.customerName || 'COSUN',
             customerCompany: 'COSUN贸易',
             supplierCode: quote.supplierCode,
             supplierName: quote.supplierName,
@@ -54,9 +54,9 @@ export function migrateRFQQuotesToBJQuotations() {
             quotationDate: quote.quotedDate || new Date().toISOString().split('T')[0],
             validUntil: new Date(Date.now() + (quote.validityDays || 30) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             currency: quote.currency || 'USD',
-            totalAmount: quote.quotedPrice * (rfq.quantity || 0),
+            totalAmount: quote.quotedPrice * (xj.quantity || 0),
             paymentTerms: quote.paymentTerms,
-            items: rfq.products?.map((p: any) => ({
+            items: xj.products?.map((p: any) => ({
               id: p.id || `item_${Date.now()}`,
               productName: p.productName,
               modelNo: p.modelNo || 'N/A',
@@ -71,14 +71,14 @@ export function migrateRFQQuotesToBJQuotations() {
               remarks: quote.remarks
             })) || [{
               id: `item_${Date.now()}`,
-              productName: rfq.productName,
-              modelNo: rfq.modelNo || 'N/A',
-              specification: rfq.specification,
-              quantity: rfq.quantity,
-              unit: rfq.unit || 'pcs',
+              productName: xj.productName,
+              modelNo: xj.modelNo || 'N/A',
+              specification: xj.specification,
+              quantity: xj.quantity,
+              unit: xj.unit || 'pcs',
               unitPrice: quote.quotedPrice,
               currency: quote.currency || 'USD',
-              amount: quote.quotedPrice * rfq.quantity,
+              amount: quote.quotedPrice * xj.quantity,
               leadTime: quote.leadTime,
               moq: quote.moq,
               remarks: quote.remarks
@@ -136,9 +136,9 @@ export function checkMigrationStatus() {
   const rfqs = JSON.parse(localStorage.getItem('rfqs') || '[]');
   const bjs = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
   
-  const rfqsWithQuotes = rfqs.filter((rfq: any) => rfq.supplierQuotationNo && rfq.quotes);
-  const unmatchedRFQs = rfqsWithQuotes.filter((rfq: any) => 
-    !bjs.some((bj: any) => bj.quotationNo === rfq.supplierQuotationNo)
+  const rfqsWithQuotes = rfqs.filter((xj: any) => xj.supplierQuotationNo && xj.quotes);
+  const unmatchedRFQs = rfqsWithQuotes.filter((xj: any) => 
+    !bjs.some((bj: any) => bj.quotationNo === xj.supplierQuotationNo)
   );
   
   console.log('📊 迁移状态:');
@@ -149,8 +149,8 @@ export function checkMigrationStatus() {
   
   if (unmatchedRFQs.length > 0) {
     console.log('⚠️ 需要迁移的XJ:');
-    unmatchedRFQs.forEach((rfq: any) => {
-      console.log(`  - ${rfq.supplierQuotationNo} (XJ: ${rfq.supplierXjNo}, QR: ${rfq.requirementNo})`);
+    unmatchedRFQs.forEach((xj: any) => {
+      console.log(`  - ${xj.supplierQuotationNo} (XJ: ${xj.supplierXjNo}, QR: ${xj.requirementNo})`);
     });
   }
   

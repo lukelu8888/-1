@@ -58,7 +58,7 @@ export function generateTestMultiProductRFQ(): RFQ[] {
 
   const qrNumber = `QR-NA-${dateStr}-${Math.floor(Math.random() * 9000) + 1000}`;
   
-  const rfq: RFQ = {
+  const xj: RFQ = {
     id: `rfq_${Date.now()}_test`,
     xjNumber: qrNumber, // ⚠️ 字段名保留兼容性，实际存储QR采购需求编号
     supplierXjNo: generateXJNumber(), // 🔥 采购询价单号（从0001开始递增）
@@ -101,7 +101,7 @@ export function generateTestMultiProductRFQ(): RFQ[] {
     customerRegion: 'NA'
   };
 
-  return [rfq];
+  return [xj];
 }
 
 // 🔥 在浏览器控制台执行此函数生成测试数据
@@ -110,9 +110,9 @@ if (typeof window !== 'undefined') {
     const { useXJs } = require('../contexts/XJContext');
     const testRFQs = generateTestMultiProductRFQ();
     
-    testRFQs.forEach(rfq => {
+    testRFQs.forEach(xj => {
       const { addXJ } = useXJs();
-      addXJ(rfq);
+      addXJ(xj);
     });
     
     console.log('✅ 已生成测试XJ数据:', testRFQs.length);
