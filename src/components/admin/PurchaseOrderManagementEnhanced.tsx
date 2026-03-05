@@ -2966,7 +2966,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                               <div className="text-[12px] text-gray-500">{rfq.supplierCode}</div>
                             </td>
                             <td className="py-2 px-2">
-                              <div className="text-gray-900 font-mono">{xj.requirementNo}</div>
+                              <div className="text-gray-900 font-mono">{rfq.requirementNo}</div>
                               {rfq.sourceRef && <div className="text-[12px] text-gray-500">{rfq.sourceRef}</div>}
                             </td>
                             <td className="py-2 px-2 text-center">
