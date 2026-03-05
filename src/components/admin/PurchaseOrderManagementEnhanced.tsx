@@ -1319,7 +1319,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
     
     const xjData = generateXJDocumentData(supplier, selectedRequirementForXJ, xjDeadline, xjRemarks, selectedProductIds);
-    setCurrentXJData(xjData);
+    setCurrentRFQData(xjData);
     setShowRFQPreview(true);
   };
 
@@ -2790,13 +2790,45 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                             <td className="py-2 px-2">
                               <button
                                 onClick={() => {
-                                  const previewData = xj.documentData || {
-                                    xjNo: xj.supplierXjNo || xj.xjNumber,
-                                    supplierName: xj.supplierName,
-                                    supplierEmail: xj.supplierEmail,
-                                    requirementNo: xj.requirementNo,
-                                    deadline: xj.quotationDeadline,
-                                    products: xj.products || [],
+                                  const previewData: XJData = xj.documentData || {
+                                    xjNo: xj.supplierXjNo || xj.xjNumber || '',
+                                    xjDate: xj.createdDate || new Date().toISOString().split('T')[0],
+                                    quoteDeadline: xj.quotationDeadline || '',
+                                    requiredResponseDate: xj.quotationDeadline || '',
+                                    requiredDeliveryDate: xj.quotationDeadline || '',
+                                    requirementNo: xj.requirementNo || '',
+                                    buyer: {
+                                      name: '福建高盛达富建材有限公司',
+                                      nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
+                                      address: '福建省福州市仓山区金山街道浦上大道216号',
+                                      addressEn: 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China',
+                                      contactPerson: '采购部',
+                                      tel: '+86-591-8888-8888',
+                                      email: 'purchase@cosun.com',
+                                    },
+                                    supplier: {
+                                      companyName: xj.supplierName || '',
+                                      supplierCode: xj.supplierCode || '',
+                                      contactPerson: '',
+                                      tel: '',
+                                      email: xj.supplierEmail || '',
+                                      address: '',
+                                    },
+                                    products: (xj.products || []).map((p: any, i: number) => ({
+                                      no: i + 1,
+                                      description: p.productName || p.name || '',
+                                      specification: p.specification || '-',
+                                      quantity: p.quantity || 0,
+                                      unit: p.unit || '件',
+                                      modelNo: p.modelNo,
+                                      imageUrl: p.imageUrl,
+                                      targetPrice: p.targetPrice,
+                                    })),
+                                    terms: {
+                                      paymentTerms: 'T/T 30% 预付，70% 发货前付清',
+                                      deliveryTerms: 'EXW 工厂交货',
+                                      currency: 'USD',
+                                    },
                                   };
                                   setCurrentRFQData(previewData);
                                   setShowRFQPreview(true);
@@ -2848,13 +2880,45 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    const previewData = xj.documentData || {
-                                      xjNo: xj.supplierXjNo || xj.xjNumber,
-                                      supplierName: xj.supplierName,
-                                      supplierEmail: xj.supplierEmail,
-                                      requirementNo: xj.requirementNo,
-                                      deadline: xj.quotationDeadline,
-                                      products: xj.products || [],
+                                    const previewData: XJData = xj.documentData || {
+                                      xjNo: xj.supplierXjNo || xj.xjNumber || '',
+                                      xjDate: xj.createdDate || new Date().toISOString().split('T')[0],
+                                      quoteDeadline: xj.quotationDeadline || '',
+                                      requiredResponseDate: xj.quotationDeadline || '',
+                                      requiredDeliveryDate: xj.quotationDeadline || '',
+                                      requirementNo: xj.requirementNo || '',
+                                      buyer: {
+                                        name: '福建高盛达富建材有限公司',
+                                        nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
+                                        address: '福建省福州市仓山区金山街道浦上大道216号',
+                                        addressEn: 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China',
+                                        contactPerson: '采购部',
+                                        tel: '+86-591-8888-8888',
+                                        email: 'purchase@cosun.com',
+                                      },
+                                      supplier: {
+                                        companyName: xj.supplierName || '',
+                                        supplierCode: xj.supplierCode || '',
+                                        contactPerson: '',
+                                        tel: '',
+                                        email: xj.supplierEmail || '',
+                                        address: '',
+                                      },
+                                      products: (xj.products || []).map((p: any, i: number) => ({
+                                        no: i + 1,
+                                        description: p.productName || p.name || '',
+                                        specification: p.specification || '-',
+                                        quantity: p.quantity || 0,
+                                        unit: p.unit || '件',
+                                        modelNo: p.modelNo,
+                                        imageUrl: p.imageUrl,
+                                        targetPrice: p.targetPrice,
+                                      })),
+                                      terms: {
+                                        paymentTerms: 'T/T 30% 预付，70% 发货前付清',
+                                        deliveryTerms: 'EXW 工厂交货',
+                                        currency: 'USD',
+                                      },
                                     };
                                     setCurrentRFQData(previewData);
                                     setShowRFQPreview(true);

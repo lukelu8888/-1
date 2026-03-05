@@ -2,25 +2,25 @@ import React from 'react';
 import { Download, FileText, Printer } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../ui/dialog';
-import { XJDocument, SupplierRFQData } from '../../documents/templates/XJDocument';
+import { XJDocument, XJData } from '../../documents/templates/XJDocument';
 
 type XJPreviewDialogProps = {
-  showRFQPreview: boolean;
+  showXJPreview: boolean;
   setShowRFQPreview: React.Dispatch<React.SetStateAction<boolean>>;
-  currentXJData: SupplierRFQData | null;
+  currentXJData: XJData | null;
   xjDocRef: React.RefObject<HTMLDivElement>;
   handleExportRFQPDF: (download: boolean) => void;
 };
 
 export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
-  showRFQPreview,
+  showXJPreview,
   setShowRFQPreview,
   currentXJData,
   xjDocRef,
   handleExportRFQPDF,
 }) => {
   return (
-    <Dialog open={showRFQPreview} onOpenChange={setShowRFQPreview}>
+    <Dialog open={showXJPreview} onOpenChange={setShowRFQPreview}>
       <DialogContent className="max-w-[95vw] h-[95vh] p-0">
         <DialogHeader className="px-6 py-4 border-b">
           <DialogTitle className="text-base flex items-center gap-2">
