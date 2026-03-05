@@ -125,29 +125,17 @@ export const XJProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     return () => { subscription.unsubscribe(); };
   }, [loadFromSupabase]);
 
-  // Supabase Realtime 订阅
+  // Supabase Realtime 订阅 — 收到变更后重新拉取全量数据（确保 fromXJRow 转换正确）
   useEffect(() => {
     const channel = supabase
       .channel('supplier_xjs_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'supplier_xjs' }, (payload) => {
-        const { eventType, new: newRow, old: oldRow } = payload;
-        if (eventType === 'INSERT' || eventType === 'UPDATE') {
-          const updated = newRow as XJ;
-          setXJs(prev => {
-            const exists = prev.find(x => x.id === updated.id);
-            return exists
-              ? prev.map(x => x.id === updated.id ? { ...x, ...updated } : x)
-              : [updated, ...prev];
-          });
-        } else if (eventType === 'DELETE') {
-          const deletedId = (oldRow as any)?.id;
-          if (deletedId) setXJs(prev => prev.filter(x => x.id !== deletedId));
-        }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'supplier_xjs' }, () => {
+        void loadFromSupabase();
       })
       .subscribe();
 
     return () => { void supabase.removeChannel(channel); };
-  }, []);
+  }, [loadFromSupabase]);
 
   const addXJ = async (xj: XJ) => {
     const saved = await xjService.upsert(xj);

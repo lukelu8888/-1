@@ -89,6 +89,13 @@ interface XJDocumentProps {
   data: XJData;
 }
 
+function safeFormatDate(dateStr: string | undefined | null): string {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
+}
+
 export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
   ({ data }, ref) => {
     
@@ -228,31 +235,19 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">询价日期</td>
                         <td className="border border-gray-400 px-1.5 py-0.5">
-                          {new Date(data.xjDate).toLocaleDateString('zh-CN', { 
-                            year: 'numeric', 
-                            month: '2-digit', 
-                            day: '2-digit' 
-                          }).replace(/\//g, '-')}
+                          {safeFormatDate(data.xjDate)}
                         </td>
                       </tr>
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">回复截止</td>
                         <td className="border border-gray-400 px-1.5 py-0.5 font-semibold text-orange-600">
-                          {new Date(data.requiredResponseDate).toLocaleDateString('zh-CN', { 
-                            year: 'numeric', 
-                            month: '2-digit', 
-                            day: '2-digit' 
-                          }).replace(/\//g, '-')}
+                          {safeFormatDate(data.requiredResponseDate)}
                         </td>
                       </tr>
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">要求交期</td>
                         <td className="border border-gray-400 px-1.5 py-0.5 font-semibold text-black">
-                          {new Date(data.requiredDeliveryDate).toLocaleDateString('zh-CN', { 
-                            year: 'numeric', 
-                            month: '2-digit', 
-                            day: '2-digit' 
-                          }).replace(/\//g, '-')}
+                          {safeFormatDate(data.requiredDeliveryDate)}
                         </td>
                       </tr>
                     </tbody>
@@ -314,11 +309,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
                 ) : (
                   <>
                     请贵司根据以下产品清单和要求提供详细报价，包括单价、总价、交货期等信息。
-                    请在 <span className="font-bold text-orange-600">{new Date(data.requiredResponseDate).toLocaleDateString('zh-CN', { 
-                      year: 'numeric', 
-                      month: '2-digit', 
-                      day: '2-digit' 
-                    }).replace(/\//g, '-')}</span> 前将报价单回复至采购联系人邮箱。
+                    请在 <span className="font-bold text-orange-600">{safeFormatDate(data.requiredResponseDate)}</span> 前将报价单回复至采购联系人邮箱。
                   </>
                 )}
               </p>
