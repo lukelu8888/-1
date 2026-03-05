@@ -1627,6 +1627,27 @@ function fromApprovalRow(r: any) {
 // supplier_quotations 服务
 // ============================================================
 function toSQRow(q: any) {
+  const sourceItems = (Array.isArray(q.items) && q.items.length > 0)
+    ? q.items
+    : (Array.isArray(q.products) ? q.products : []);
+  const normalizedProducts = sourceItems.map((it: any) => {
+    const qty = Number(it?.quantity ?? 0);
+    const unitPriceRaw = it?.unitPrice ?? it?.price ?? null;
+    const unitPrice = unitPriceRaw != null && Number.isFinite(Number(unitPriceRaw))
+      ? Number(unitPriceRaw)
+      : null;
+    const amountRaw = it?.amount ?? it?.lineAmount ?? null;
+    const amount = amountRaw != null && Number.isFinite(Number(amountRaw))
+      ? Number(amountRaw)
+      : (unitPrice != null && qty > 0 ? unitPrice * qty : null);
+    return {
+      ...it,
+      quantity: qty,
+      unitPrice,
+      amount,
+    };
+  });
+
   return {
     id: toUUID(q.id),
     // BJ 编号：quotationNo / quotationNumber / bjNumber 三者取一
@@ -1643,7 +1664,7 @@ function toSQRow(q: any) {
     // QR 溯源
     source_qr_number: q.sourceQR || q.sourceQRNumber || q.source_qr_number || null,
     region_code:      q.regionCode || q.region_code || null,
-    products:         q.products || q.items || [],
+    products:         normalizedProducts,
     total_amount:     q.totalAmount || q.total_amount || 0,
     currency:         q.currency || 'CNY',
     quotation_date:   q.quotationDate || q.quotation_date || null,
