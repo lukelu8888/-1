@@ -145,35 +145,48 @@ function normaliseItems(quotation: any): QuotationDocItem[] {
 
   const currency = quotation.currency || liveItems[0]?.currency || 'CNY';
 
+  const toPositiveNumber = (v: any): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
   return base.map((_, idx: number) => {
     // Merge: live item for prices, meta for display fields
     const live = liveItems[idx] ?? {};
     const meta = metaProducts[idx] ?? {};
 
     // ── Unit price: always from live items, 0 treated as "not priced" ──
-    const rawPrice = live.unitPrice ?? meta.unitPrice;
-    const unitPrice: number | null =
-      rawPrice != null &&
-      Number.isFinite(Number(rawPrice)) &&
-      Number(rawPrice) > 0
-        ? Number(rawPrice)
-        : null;
+    const unitPrice: number | null = (
+      [
+        // 编辑器/标准字段
+        live.unitPrice,
+        // 兼容历史字段
+        live.price,
+        live.finalPrice,
+        live.quotedPrice,
+        live.quotePrice,
+        // 从详细核算结果兜底
+        live.calcDetail?.effectivePrice,
+        live.calcDetail?.suggested,
+        live.simpleCost?.suggested,
+        // 兼容 documentData.products
+        meta.unitPrice,
+        meta.price,
+      ]
+        .map(toPositiveNumber)
+        .find((v) => v !== null) ?? null
+    );
 
     // ── Quantity: prefer live, fall back to meta ──
     const qty = Number(live.quantity ?? meta.quantity) || 0;
 
     // ── Line amount: recalculate from live price × qty ──
     // Never trust the stored amount field — it may be stale from creation time.
-    const lineAmount: number | null =
-      unitPrice !== null && qty > 0
-        ? unitPrice * qty
-        : // fall back to any explicitly stored amount only if it's > 0
-          (() => {
-            const stored = live.amount ?? meta.amount ?? live.lineAmount ?? meta.lineAmount;
-            return stored != null && Number.isFinite(Number(stored)) && Number(stored) > 0
-              ? Number(stored)
-              : null;
-          })();
+    const storedAmount = toPositiveNumber(live.amount ?? meta.amount ?? live.lineAmount ?? meta.lineAmount);
+    const calculatedLine = calcLineAmount(qty, unitPrice);
+    const lineAmount: number | null = calculatedLine ?? storedAmount;
+    const normalizedUnitPrice: number | null =
+      unitPrice ?? (lineAmount !== null && qty > 0 ? lineAmount / qty : null);
 
     return {
       no:            live.no ?? meta.no ?? idx + 1,
@@ -183,7 +196,7 @@ function normaliseItems(quotation: any): QuotationDocItem[] {
       specification: live.specification || meta.specification || '',
       quantity:      qty,
       unit:          live.unit || meta.unit || 'pcs',
-      unitPrice,
+      unitPrice: normalizedUnitPrice,
       lineAmount,
       currency:      live.currency || meta.currency || currency,
       remarks:       live.remarks || meta.remarks,
@@ -270,7 +283,14 @@ export function useQuotationDocumentData(
     // zero that was written at quotation creation (before pricing).
     // Fall back to the stored totalAmount only when items carry no prices
     // at all (e.g. document is still in draft with nothing priced).
-    const itemsTotal = items.reduce((sum, it) => sum + (it.lineAmount ?? 0), 0);
+    const itemsTotal = calcGrandTotal(
+      items.map((it) => ({
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        lineAmount: it.lineAmount,
+        amount: it.lineAmount,
+      })),
+    );
     const storedTotal =
       quotation.totalAmount != null && Number.isFinite(Number(quotation.totalAmount))
         ? Number(quotation.totalAmount)
