@@ -295,9 +295,209 @@ export interface Database {
         };
         Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
       };
+
+      // ─── 采购流转表 ──────────────────────────────────────────────────────────
+      supplier_xjs: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          xj_number: string;
+          supplier_xj_no: string | null;
+          supplier_quotation_no: string | null;
+          source_qr_number: string | null;
+          source_inquiry_id: string | null;
+          source_inquiry_number: string | null;
+          requirement_no: string | null;
+          region_code: string | null;
+          customer_name: string | null;
+          customer_region: string | null;
+          supplier_company_id: string | null;
+          supplier_code: string;
+          supplier_name: string;
+          supplier_contact: string | null;
+          supplier_email: string;
+          products: Json;
+          product_name: string | null;
+          model_no: string | null;
+          specification: string | null;
+          quantity: number | null;
+          unit: string | null;
+          target_price: number | null;
+          currency: string;
+          expected_date: string | null;
+          quotation_deadline: string | null;
+          due_date: string | null;
+          priority: string;
+          status: string;
+          quotes: Json;
+          document_data: Json | null;
+          remarks: string | null;
+          created_by: string;
+          created_by_uid: string | null;
+          source_ref: string | null;
+          display_number: string | null;
+          source_doc_id: string | null;
+          sales_contract_id: string | null;
+          root_sales_contract_id: string | null;
+          deleted_at: string | null;
+          created_at: string;
+          updated_at: string;
+          updated_by: string | null;
+          updated_date: string | null;
+        };
+        Insert: Omit<Database['public']['Tables']['supplier_xjs']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['supplier_xjs']['Insert']>;
+      };
+
+      purchase_requirements: {
+        Row: {
+          id: string;
+          tenant_id: string | null;
+          requirement_no: string | null;
+          source_inquiry_number: string | null;
+          source_so_number: string | null;
+          region: string | null;
+          urgency: string | null;
+          required_date: string | null;
+          items: Json;
+          status: string;
+          notes: string | null;
+          created_by: string | null;
+          assigned_to: string | null;
+          qr_number: string | null;
+          display_number: string | null;
+          source_doc_id: string | null;
+          sales_contract_id: string | null;
+          root_sales_contract_id: string | null;
+          customer_info: Json | null;
+          deleted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['purchase_requirements']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['purchase_requirements']['Insert']>;
+      };
+
+      companies: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          party_type: 'customer' | 'supplier' | 'partner';
+          code: string | null;
+          name: string;
+          name_en: string | null;
+          name_cn: string | null;
+          short_name: string | null;
+          country: string | null;
+          state_province: string | null;
+          city: string | null;
+          region: string | null;
+          address: string | null;
+          postal_code: string | null;
+          website: string | null;
+          main_email: string;
+          main_phone: string | null;
+          logo_url: string | null;
+          industry: string | null;
+          business_types: string[];
+          currency: string;
+          customer_level: string | null;
+          customer_source: string | null;
+          assigned_to: string | null;
+          supplier_level: string | null;
+          supplier_category: string | null;
+          certifications: string[];
+          production_capacity: string | null;
+          on_time_rate: number | null;
+          quality_rate: number | null;
+          cooperation_years: number;
+          bg_checked: boolean;
+          bg_data: Json;
+          linked_user_id: string | null;
+          status: string;
+          notes: string | null;
+          deleted_at: string | null;
+          created_at: string;
+          created_by: string | null;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: Omit<Database['public']['Tables']['companies']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['companies']['Insert']>;
+      };
+
+      number_sequences: {
+        Row: {
+          id: string;
+          doc_type: string;
+          scope_type: string;
+          scope_id: string;
+          last_seq: number;
+          prefix: string | null;
+          region_code: string | null;
+          date_key: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['number_sequences']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['number_sequences']['Insert']>;
+      };
+
+      user_profiles: {
+        Row: {
+          id: string;
+          email: string | null;
+          name: string | null;
+          role: string | null;
+          type: string | null;
+          region: string | null;
+          company: string | null;
+          phone: string | null;
+          avatar_url: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['user_profiles']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['user_profiles']['Insert']>;
+      };
     };
     Views: {};
-    Functions: {};
-    Enums: {};
+    Functions: {
+      next_number_ex: {
+        Args: {
+          p_doc_type: string;
+          p_scope_type: string;
+          p_scope_id: string;
+          p_customer_id?: string | null;
+        };
+        Returns: string;
+      };
+      next_inquiry_number: {
+        Args: {
+          p_region_code: string;
+          p_customer_id?: string | null;
+        };
+        Returns: string;
+      };
+    };
+    Enums: {
+      party_type: 'customer' | 'supplier' | 'partner';
+      xj_status: 'pending' | 'sent' | 'quoted' | 'cancelled' | 'completed';
+    };
   };
 }
