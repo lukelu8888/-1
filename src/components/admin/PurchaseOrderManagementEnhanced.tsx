@@ -2342,6 +2342,24 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setShowFeedbackForm(true);
   };
 
+  // 🔥 下推业务员询报（采购侧仅做下推动作，不创建业务员报价）
+  const handlePushToSalesInquiry = (req: PurchaseRequirement) => {
+    if (!req.purchaserFeedback) {
+      toast.error('请先完成智能对比建议并提交采购反馈');
+      return;
+    }
+    if (req.pushedToQuotation) {
+      toast.info('该需求已下推业务员询报');
+      return;
+    }
+    updateRequirement(req.id, {
+      pushedToQuotation: true,
+      pushedToQuotationDate: new Date().toISOString(),
+      pushedBy: user?.email || user?.name || 'procurement',
+    });
+    toast.success('已下推业务员询报');
+  };
+
   // 🔥 提交采购反馈
   const handleSubmitFeedback = (feedback: PurchaserFeedback) => {
     if (!feedbackRequirement) return;
@@ -2775,18 +2793,30 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   <Badge className="h-6 px-2 bg-green-100 text-green-700 border-green-300 text-[12px]">
                                     ✓ 已反馈
                                   </Badge>
-                                  {/* 🔥 创建报价按钮 - 只有采购反馈后才显示 */}
                                   <Button
                                     size="sm"
-                                    onClick={() => {
-                                      setSelectedRequirementForQuote(req);
-                                      setShowQuoteCreation(true);
-                                    }}
-                                    className="h-6 text-[12px] bg-orange-500 hover:bg-orange-600 px-2 gap-1"
-                                    title="创建客户报价单（含智能价格计算）"
+                                    onClick={() => handleSmartFeedback(req)}
+                                    className="h-6 text-[12px] bg-emerald-600 hover:bg-emerald-700 px-2 gap-1"
+                                    title="重新查看/调整智能对比建议"
                                   >
                                     <Calculator className="w-3 h-3" />
-                                    <span>创建报价</span>
+                                    <span>智能对比建议</span>
+                                  </Button>
+
+                                  {/* 采购侧只保留下推业务员询报，不再显示“创建报价” */}
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handlePushToSalesInquiry(req)}
+                                    disabled={!!req.pushedToQuotation}
+                                    className={`h-6 text-[12px] px-2 gap-1 ${
+                                      req.pushedToQuotation
+                                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                        : 'bg-orange-500 hover:bg-orange-600 text-white'
+                                    }`}
+                                    title={req.pushedToQuotation ? '已下推业务员询报' : '下推业务员询报'}
+                                  >
+                                    <Calculator className="w-3 h-3" />
+                                    <span>{req.pushedToQuotation ? '已下推业务员询报' : '下推业务员询报'}</span>
                                   </Button>
                                 </>
                               )}
