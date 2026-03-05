@@ -1639,7 +1639,7 @@ function toSQRow(q: any) {
     supplier_company: q.supplierCompany || q.supplier_company || null,
     // XJ 溯源
     source_xj_number: q.sourceXJNumber || q.sourceXJ || q.xjNumber || q.source_xj_number || null,
-    source_xj_id:     toUUID(q.sourceXJId || q.xjId || q.source_xj_id) || null,
+    source_xj_id:     toUUIDOrNull(q.sourceXJId || q.xjId || q.source_xj_id),
     // QR 溯源
     source_qr_number: q.sourceQR || q.sourceQRNumber || q.source_qr_number || null,
     region_code:      q.regionCode || q.region_code || null,
@@ -1653,9 +1653,9 @@ function toSQRow(q: any) {
     status:           q.status || 'draft',
     notes:            q.notes || q.generalRemarks || null,
     created_by:       q.createdBy || q.created_by || null,
-    source_doc_id:              toUUID(q.sourceDocId || q.source_doc_id) || null,
-    sales_contract_id:          toUUID(q.salesContractId || q.sales_contract_id) || null,
-    root_sales_contract_id:     toUUID(q.rootSalesContractId || q.root_sales_contract_id) || null,
+    source_doc_id:              toUUIDOrNull(q.sourceDocId || q.source_doc_id),
+    sales_contract_id:          toUUIDOrNull(q.salesContractId || q.sales_contract_id),
+    root_sales_contract_id:     toUUIDOrNull(q.rootSalesContractId || q.root_sales_contract_id),
   };
 }
 
@@ -1663,19 +1663,26 @@ function fromSQRow(r: any) {
   if (!r) return null;
   return {
     id: r.id,
+    quotationNo: r.quotation_number || r.bj_number || r.display_number || '',
     quotationNumber: r.quotation_number,
+    sourceXJ: r.source_xj_number,
+    sourceQR: r.source_qr_number,
+    quotationDate: r.quotation_date,
     supplierCode: r.supplier_code,
     supplierName: r.supplier_name,
     supplierEmail: r.supplier_email,
+    supplierCompany: r.supplier_company,
     sourceXJNumber: r.source_xj_number,
     xjNumber: r.source_xj_number,       // 向后兼容
     sourceXJId: r.source_xj_id,
     xjId: r.source_xj_id,               // 向后兼容
     regionCode: r.region_code,
     products: r.products || [],
+    items: r.products || [],
     totalAmount: r.total_amount || 0,
-    currency: r.currency || 'USD',
+    currency: r.currency || 'CNY',
     validUntil: r.valid_until,
+    submittedDate: r.updated_at || r.created_at,
     status: r.status,
     notes: r.notes,
     createdBy: r.created_by,
@@ -1692,12 +1699,21 @@ function fromSQRow(r: any) {
 
 export const supplierQuotationService = {
   async getAll() {
-    const { data, error } = await supabase.from('supplier_quotations').select('*').order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('supplier_quotations')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
     if (error) return handleError(error, 'getAll supplier_quotations');
     return (data || []).map(fromSQRow);
   },
   async getBySupplierEmail(email: string) {
-    const { data, error } = await supabase.from('supplier_quotations').select('*').eq('supplier_email', email).order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('supplier_quotations')
+      .select('*')
+      .eq('supplier_email', email)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
     if (error) return handleError(error, 'getBySupplierEmail supplier_quotations');
     return (data || []).map(fromSQRow);
   },

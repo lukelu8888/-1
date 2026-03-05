@@ -77,7 +77,7 @@ import {
   desensitizeFeedback,
   generateXJDocumentData
 } from './purchase-order/purchaseOrderUtils'; // 🔥 从工具函数文件导入
-import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { addTombstones } from '../../lib/erp-core/deletion-tombstone';
 
 /**
  * 🔥 采购订单管理 - 台湾大厂风格
@@ -247,7 +247,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [showSupplierQuotationDialog, setShowSupplierQuotationDialog] = useState(false);
   const [showFeedbackReminderDialog, setShowFeedbackReminderDialog] = useState(false);
   const [acceptedQuotationNo, setAcceptedQuotationNo] = useState<string>('');
-  const DELETED_SUPPLIER_QUOTATIONS_KEY = 'deleted_supplier_quotations';
   const [salesContractsLite, setSalesContractsLite] = useState<any[]>([]);
   const supplierQuotationSnapshot = useMemo(() => supplierQuotations, [supplierQuotations]);
 
@@ -267,65 +266,34 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return () => { cancelled = true; };
   }, []);
 
-  const getDeletedSupplierQuotationIds = React.useCallback((): Set<string> => {
-    try {
-      const raw = localStorage.getItem(DELETED_SUPPLIER_QUOTATIONS_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(parsed)) return new Set<string>();
-      return new Set(parsed.map((id) => String(id)));
-    } catch {
-      return new Set<string>();
-    }
-  }, []);
-
-  const addDeletedSupplierQuotationIds = React.useCallback((ids: string[]) => {
-    const merged = getDeletedSupplierQuotationIds();
-    ids.forEach((id) => merged.add(String(id)));
-    localStorage.setItem(DELETED_SUPPLIER_QUOTATIONS_KEY, JSON.stringify(Array.from(merged)));
-    addTombstones('quotation', ids.map((id) => String(id)), {
-      reason: 'manual-delete-admin-supplier-quotation',
-      deletedBy: user?.email || 'admin',
-    });
-  }, [getDeletedSupplierQuotationIds]);
-  
   // 🔥 加载供应商报价数据 — Supabase-first: 纯从 supplier_quotations 表读取
   const loadSupplierQuotationsFromApi = React.useCallback(async () => {
-    const deletedIds = getDeletedSupplierQuotationIds();
     try {
       const rows = await supplierQuotationService.getAll();
       const apiList: any[] = Array.isArray(rows) ? rows : [];
-      const visible = filterNotDeleted(
-        'quotation',
-        apiList.filter((q: any) => !deletedIds.has(String(q.id))),
-        (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.xjNumber || '')],
-      );
-      setSupplierQuotations(visible);
+      setSupplierQuotations(apiList);
     } catch (e: any) {
       console.warn('⚠️ [loadSupplierQuotations] Supabase 读取失败:', e?.message);
       setSupplierQuotations([]);
     }
-  }, [getDeletedSupplierQuotationIds]);
+  }, []);
 
-  // Apply status change to Supabase + local state
+  // Apply status change to local state after Supabase success
   const applyLocalQuotationStatus = React.useCallback((id: string, status: 'accepted' | 'rejected') => {
     setSupplierQuotations((prev) =>
       prev.map((q: any) => (q.id === id ? { ...q, status } : q)),
-    );
-    // Supabase-first: 同步状态到后端
-    supplierQuotationService.upsert({ id, status }).catch((e: any) =>
-      console.warn('⚠️ [applyLocalQuotationStatus] Supabase 同步失败:', e?.message)
     );
   }, []);
 
   const handleAcceptSupplierQuotation = React.useCallback(async () => {
     if (!selectedSupplierQuotation) return;
     const qid = selectedSupplierQuotation.id;
-    // Use quotationNo (BJ-YYMMDD-XXXX) as the backend lookup key — backend supports this format
-    const backendKey = selectedSupplierQuotation.quotationNo || qid;
     try {
       await supplierQuotationService.upsert({ id: qid, status: 'accepted' });
     } catch (e: any) {
-      console.warn('⚠️ 接受报价 Supabase 同步失败，降级本地模式:', e?.message);
+      console.warn('⚠️ 接受报价 Supabase 同步失败:', e?.message);
+      toast.error('接受报价失败：Supabase 写入未成功');
+      return;
     }
     applyLocalQuotationStatus(qid, 'accepted');
     setShowSupplierQuotationDialog(false);
@@ -336,11 +304,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const handleRejectSupplierQuotation = React.useCallback(async () => {
     if (!selectedSupplierQuotation) return;
     const qid = selectedSupplierQuotation.id;
-    const backendKey = selectedSupplierQuotation.quotationNo || qid;
     try {
       await supplierQuotationService.upsert({ id: qid, status: 'rejected' });
     } catch (e: any) {
-      console.warn('⚠️ 拒绝报价 Supabase 同步失败，降级本地模式:', e?.message);
+      console.warn('⚠️ 拒绝报价 Supabase 同步失败:', e?.message);
+      toast.error('拒绝报价失败：Supabase 写入未成功');
+      return;
     }
     applyLocalQuotationStatus(qid, 'rejected');
     setShowSupplierQuotationDialog(false);
@@ -1660,10 +1629,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       });
     }
 
-    if (failedCount > 0 && failedIds.length > 0) {
-      // 兼容：当后端未提供 DELETE 时，至少保证前端“永久隐藏”
-      addDeletedSupplierQuotationIds(failedIds);
-      toast.success(`已永久移除 ${failedIds.length} 条（本地隐藏）`, { duration: 3000 });
+    if (failedCount > 0) {
+      toast.error(`删除失败 ${failedCount} 条，请重试`, { duration: 4000 });
+      console.warn('⚠️ [BatchDeleteSupplierQuotation] failed ids:', failedIds);
     }
 
     await loadSupplierQuotationsFromApi();
@@ -3153,11 +3121,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   <Button
                                     size="sm"
                                     onClick={async () => {
-                                      const backendKey = quotation.quotationNo || quotation.id;
                                       try {
                                         await supplierQuotationService.upsert({ id: quotation.id, status: 'accepted' });
                                       } catch (e: any) {
-                                        console.warn('⚠️ 接受报价 Supabase 同步失败，降级本地模式:', e?.message);
+                                        console.warn('⚠️ 接受报价 Supabase 同步失败:', e?.message);
+                                        toast.error('接受报价失败：Supabase 写入未成功');
+                                        return;
                                       }
                                       applyLocalQuotationStatus(quotation.id, 'accepted');
                                       setAcceptedQuotationNo(quotation.quotationNo || quotation.id);
@@ -3173,11 +3142,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     size="sm"
                                     variant="outline"
                                     onClick={async () => {
-                                      const backendKey = quotation.quotationNo || quotation.id;
                                       try {
                                         await supplierQuotationService.upsert({ id: quotation.id, status: 'rejected' });
                                       } catch (e: any) {
-                                        console.warn('⚠️ 拒绝报价 Supabase 同步失败，降级本地模式:', e?.message);
+                                        console.warn('⚠️ 拒绝报价 Supabase 同步失败:', e?.message);
+                                        toast.error('拒绝报价失败：Supabase 写入未成功');
+                                        return;
                                       }
                                       applyLocalQuotationStatus(quotation.id, 'rejected');
                                       toast.info(
