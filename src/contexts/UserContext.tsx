@@ -98,75 +98,86 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   // 监听 Supabase Auth 状态变化（登录/登出/刷新）
   useEffect(() => {
-    const applySession = async (session: any) => {
-      if (!session?.user) { setUserState(null); return; }
-      let profile: any = null;
+    // 从 session.user_metadata 立即构建用户对象（无需网络请求）
+    const userFromMeta = (sessionUser: any): AuthUser => {
+      const meta = sessionUser.user_metadata ?? {};
+      const portalRole = meta.portal_role ?? 'customer';
+      return {
+        id: sessionUser.id,
+        email: sessionUser.email!,
+        name: meta.name ?? sessionUser.email!.split('@')[0],
+        type: portalRole === 'admin' ? 'admin'
+            : portalRole === 'staff' ? 'admin'
+            : portalRole === 'supplier' ? 'supplier'
+            : 'customer',
+        role: meta.rbac_role ?? undefined,
+        userRole: meta.rbac_role ?? undefined,
+        region: meta.region ?? undefined,
+      };
+    };
+
+    // 后台静默拉取 profile 并更新（不阻塞 UI）
+    const enrichFromProfile = async (sessionUser: any) => {
       try {
-        profile = await fetchProfile(session.user.id);
-      } catch (err) {
-        console.warn('fetchProfile failed, falling back to user_metadata:', err);
-      }
-      if (profile) {
-        setUserState({
-          id: session.user.id,
-          email: session.user.email!,
-          name: profile.name,
+        const profileTimeout = new Promise<null>(r => setTimeout(() => r(null), 3000));
+        const profilePromise = fetchProfile(sessionUser.id).catch(() => null);
+        const profile = await Promise.race([profilePromise, profileTimeout]);
+        if (!profile) return;
+        setUserState(prev => prev ? {
+          ...prev,
+          name: profile.name ?? prev.name,
           type: profile.portal_role === 'admin' ? 'admin'
               : profile.portal_role === 'staff' ? 'admin'
               : profile.portal_role === 'supplier' ? 'supplier'
               : 'customer',
-          role: profile.rbac_role ?? undefined,
-          userRole: profile.rbac_role ?? undefined,
-          region: profile.region ?? undefined,
-        });
-      } else {
-        // profile 查不到时，用 user_metadata 兜底
-        const meta = session.user.user_metadata ?? {};
-        const portalRole = meta.portal_role ?? 'customer';
-        setUserState({
-          id: session.user.id,
-          email: session.user.email!,
-          name: meta.name ?? session.user.email!.split('@')[0],
-          type: portalRole === 'admin' ? 'admin'
-              : portalRole === 'staff' ? 'admin'
-              : portalRole === 'supplier' ? 'supplier'
-              : 'customer',
-          role: meta.rbac_role ?? undefined,
-          userRole: meta.rbac_role ?? undefined,
-          region: meta.region ?? undefined,
-        });
+          role: profile.rbac_role ?? prev.role,
+          userRole: profile.rbac_role ?? prev.userRole,
+          region: profile.region ?? prev.region,
+        } : prev);
+      } catch {
+        // 静默失败，保持 user_metadata 的值
       }
     };
 
     let initialDone = false;
 
-    // 用 Promise.race 强制 800ms 超时，防止 getSession 挂起
-    const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 800));
-    const sessionPromise = supabase.auth.getSession().then(({ data }) => data?.session ?? null).catch(() => null);
+    // getSession() 读本地 storage，通常 < 10ms，给 1s 超时即可
+    const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 1000));
+    const sessionPromise = supabase.auth.getSession()
+      .then(({ data }) => data?.session ?? null)
+      .catch(() => null);
 
-    Promise.race([sessionPromise, timeout]).then(async (session) => {
+    Promise.race([sessionPromise, timeout]).then((session) => {
       if (initialDone) return;
       initialDone = true;
-      await applySession(session);
+      if (session?.user) {
+        // 立即用 metadata 解锁 UI，后台再丰富 profile
+        setUserState(userFromMeta(session.user));
+        void enrichFromProfile(session.user);
+      } else {
+        setUserState(null);
+      }
       setAuthLoading(false);
     });
 
-    // 最终兜底：1.5秒还没完成就强制结束
+    // 硬兜底：2s 强制解锁，不再卡死
     const hardTimeout = setTimeout(() => {
       if (!initialDone) {
-        console.warn('[Auth] hard timeout');
+        console.warn('[Auth] hard timeout — forcing unlock');
         initialDone = true;
         setUserState(null);
         setAuthLoading(false);
       }
-    }, 1500);
+    }, 2000);
 
-    // 监听后续状态变化
+    // 监听后续状态变化（登录/登出/token刷新）
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          setAuthLoading(true);
-          await applySession(session);
+          if (session?.user) {
+            setUserState(userFromMeta(session.user));
+            void enrichFromProfile(session.user);
+          }
           setAuthLoading(false);
         } else if (event === 'SIGNED_OUT') {
           setUserState(null);
