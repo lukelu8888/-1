@@ -728,7 +728,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         if (s === 'submitted' || s === 'quoted') return 1;
         return 2;
       };
-      const candidates = supplierQuotationSnapshot.filter((q: any) => {
+      const candidates = supplierQuotations.filter((q: any) => {
         const qSupplier = String(q?.supplierCode || '').trim().toUpperCase();
         if (preferredSupplier && preferredSupplier !== 'TBD' && qSupplier && qSupplier !== preferredSupplier) {
           return false;
@@ -756,7 +756,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         return db - da;
       });
     },
-    [getPOTraceRefs, supplierQuotationSnapshot]
+    [getPOTraceRefs, supplierQuotations]
   );
 
   const resolveQuotedItemPricing = React.useCallback(
@@ -1659,7 +1659,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     if (!window.confirm(confirmMessage)) return;
 
     const ids = [...selectedQuotationIds];
-    const deletedQuotationRows = supplierQuotationSnapshot.filter((q: any) => ids.includes(String(q.id)));
+    const deletedQuotationRows = supplierQuotations.filter((q: any) => ids.includes(String(q.id)));
     const results = await Promise.allSettled(
       ids.map((id) => supplierQuotationService.delete(String(id)))
     );
@@ -1678,7 +1678,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       // 下游(BJ)删除后：上游(XJ)立即恢复为可编辑/可下推（状态从 quoted 回滚到 sent）
       const successIds = ids.filter((_, idx) => results[idx].status === 'fulfilled');
       const successRows = deletedQuotationRows.filter((q: any) => successIds.includes(String(q.id)));
-      const remainingQuotationList = supplierQuotationSnapshot.filter((q: any) => !successIds.includes(String(q.id)));
+      const remainingQuotationList = supplierQuotations.filter((q: any) => !successIds.includes(String(q.id)));
       await Promise.all(successRows.map(async (q: any) => {
         const key = getQuotationXJKey(q);
         if (!key) return;
