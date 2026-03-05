@@ -55,16 +55,17 @@ export function RegionProvider({ children }: { children: ReactNode }) {
   // Detect user's region based on IP
   const detectRegion = async () => {
     try {
-      const response = await fetch('https://ip-api.com/json/?fields=status,country,countryCode,continent,continentCode,city');
+      // ipwho.is: 免费、支持 HTTPS、无需 API key
+      const response = await fetch('https://ipwho.is/');
       const data = await response.json();
-      
-      if (data.status === 'success' && data.countryCode && data.continentCode) {
-        const detected = mapToRegion(data.countryCode, data.continentCode);
+
+      if (data.success && data.country_code && data.continent_code) {
+        const detected = mapToRegion(data.country_code, data.continent_code);
         setDetectedRegion(detected);
         setLocationInfo({
-          city: data.city,
-          country: data.country,
-          countryCode: data.countryCode,
+          city: data.city || '',
+          country: data.country || '',
+          countryCode: data.country_code,
         });
         return detected;
       }
