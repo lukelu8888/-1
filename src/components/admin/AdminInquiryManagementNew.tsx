@@ -111,23 +111,19 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   
   // 🔥 下推成本询报：从INQ创建QR（调用后端API）
   const handlePushToCostInquiry = async (inquiry: any) => {
-    console.log('🔽 下推成本询报，询价单号:', inquiry.inquiryNumber);
-    
     try {
-      // 🔍 调试：检查产品字段
-      if (inquiry.products && inquiry.products.length > 0) {
-        const firstProduct = inquiry.products[0];
-        console.log('📦 第一个产品完整对象:', firstProduct);
-        console.log('   - 所有字段名:', Object.keys(firstProduct));
-      }
-      
-      // 准备请求数据
-      const requestData = {
-        source_inquiry_number: inquiry.inquiryNumber || inquiry.id,
+      const regionCode = inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA';
+      const qrNumber = await nextQRNumber(regionCode);
+      const newQR = {
+        id: `qr_${Date.now()}`,
+        requirementNo: qrNumber,
+        sourceInquiryNumber: inquiry.inquiryNumber || inquiry.id,
         region: inquiry.region || 'North America',
-        required_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         urgency: 'medium',
-        special_requirements: inquiry.message || '',
+        status: 'pending',
+        createdBy: currentUser?.email || '',
+        notes: inquiry.message || '',
         customer: {
           companyName: inquiry.buyerInfo?.companyName || inquiry.customer?.name || 'N/A',
           contactPerson: inquiry.buyerInfo?.contactPerson || inquiry.customer?.name || 'N/A',
@@ -138,48 +134,23 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
           website: inquiry.buyerInfo?.website || '',
           businessType: inquiry.buyerInfo?.businessType || ''
         },
-        items: inquiry.products.map((p: any, idx: number) => {
-          // 🔥 智能提取 modelNo（与CustomerInquiryView.tsx保持一致）
-          const modelNo = extractModelNo(p, idx);
-          
-          // 🔥 智能提取 specification（支持多种字段名）
-          const specification = extractSpecification(p);
-          
-          return {
-            productName: p.productName || p.name || 'Unnamed Product',
-            modelNo: modelNo,
-            specification: specification,
-            quantity: p.quantity || 0,
-            unit: p.unit || 'PCS',
-            targetPrice: p.unitPrice || p.price || p.targetPrice || 0,
-            targetCurrency: 'USD',
-            hsCode: p.hsCode || '',
-            imageUrl: p.image || p.imageUrl || '',
-            remarks: p.notes || p.remarks || ''
-          };
-        })
+        items: inquiry.products.map((p: any, idx: number) => ({
+          productName: p.productName || p.name || 'Unnamed Product',
+          modelNo: extractModelNo(p, idx),
+          specification: extractSpecification(p),
+          quantity: p.quantity || 0,
+          unit: p.unit || 'PCS',
+          targetPrice: p.unitPrice || p.price || p.targetPrice || 0,
+          targetCurrency: 'USD',
+          hsCode: p.hsCode || '',
+          imageUrl: p.image || p.imageUrl || '',
+          remarks: p.notes || p.remarks || ''
+        })),
       };
-      
-      // 生成 QR 编号
-      const regionCode = (inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA');
-      const qrNumber = await nextQRNumber(regionCode);
-      (requestData as any).requirementNo = qrNumber;
-      (requestData as any).qr_number = qrNumber;
-
-      console.log('📤 [下推成本询报] 发送请求:', requestData);
-      
-      const response = await purchaseRequirementService.upsert(requestData);
-      const newQR: any = response || requestData;
-      
-      addPurchaseRequirement(newQR);
-      toast.success(`✅ 成功下推到成本询报！采购需求单号：${newQR.requirementNumber || newQR.requirementNo}`);
-      
-      // 🔥 新增：下推成功后自动切换到成本询报模块
-      if (onSwitchToCostInquiry) {
-        setTimeout(() => {
-          onSwitchToCostInquiry();
-        }, 500); // 延迟500ms，让用户看到toast提示
-      }
+      const saved = await purchaseRequirementService.upsert(newQR);
+      addPurchaseRequirement(saved || newQR);
+      toast.success(`✅ 成功下推到成本询报！采购需求单号：${qrNumber}`);
+      if (onSwitchToCostInquiry) setTimeout(() => onSwitchToCostInquiry(), 500);
     } catch (error: any) {
       console.error('❌ [下推成本询报] 失败:', error);
       toast.error(`❌ 下推失败: ${error.message || '未知错误'}`);

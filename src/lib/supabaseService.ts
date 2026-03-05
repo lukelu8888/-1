@@ -1389,9 +1389,11 @@ export const purchaseOrderService = {
 // ============================================================
 function toPRRow(p: any) {
   // 只写 purchase_requirements 表实际存在的列
+  // 兼容前端字段名（camelCase）和 DB 列名（snake_case）两种格式
+  const reqNo = p.requirementNo || p.requirementNumber || p.requirement_no || p.qr_number || '';
   return {
-    id: toUUID(p.id),
-    requirement_no: p.requirementNo || p.requirementNumber || p.requirement_no || p.requirement_number || '',
+    id: toUUID(p.id) || toUUID(`qr_${Date.now()}`),
+    requirement_no: reqNo,
     source_inquiry_number: p.sourceInquiryNumber || p.source_inquiry_number || null,
     source_so_number: p.sourceSoNumber || p.source_so_number || null,
     region: p.region || null,
@@ -1399,12 +1401,12 @@ function toPRRow(p: any) {
     required_date: p.requiredDate || p.required_date || null,
     items: p.items || p.products || [],
     status: (['pending','in_progress','completed','cancelled','partial','processing','submitted','quoted','draft'].includes(p.status) ? p.status : 'pending'),
-    notes: p.notes || p.specialRequirements || null,
+    notes: p.notes || p.specialRequirements || p.special_requirements || null,
     created_by: p.createdBy || p.created_by || null,
     assigned_to: p.assignedTo || p.assigned_to || null,
-    qr_number: p.requirementNo || p.requirementNumber || p.qr_number || null,
-    display_number: p.requirementNo || p.requirementNumber || p.display_number || null,
-    customer_info: p.customer || null,
+    qr_number: reqNo || null,
+    display_number: reqNo || null,
+    customer_info: p.customer || p.customer_info || null,
   }
 }
 

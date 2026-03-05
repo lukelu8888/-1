@@ -118,59 +118,52 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
 
   // 🔥 创建采购需求（从INQ）
   const handleCreateQRFromINQ = async (inq: any) => {
-    console.log('🔍 [创建QR] 原始询价单数据:', inq);
-    console.log('  - buyerInfo:', inq.buyerInfo);
-    console.log('  - products:', inq.products);
-    console.log('  - products[0].image:', inq.products[0]?.image);
-    
-    const newQR = {
-      id: `qr_${Date.now()}`,
-      requirementNo: await nextQRNumber(
-        inq.region === 'South America' ? 'SA' : inq.region === 'Europe & Africa' ? 'EA' : 'NA'
-      ),
-      source: '销售订单',
-      sourceInquiryNumber: inq.inquiryNumber || `INQ-${inq.id}`,
-      requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      urgency: 'medium' as const,
-      status: 'pending' as const,
-      createdBy: currentUser?.email || '',
-      createdDate: new Date().toISOString(),
-      region: inq.region,
-      // 🔥 同步客户信息（从buyerInfo）
-      customer: {
-        companyName: inq.buyerInfo?.companyName || 'N/A',
-        contactPerson: inq.buyerInfo?.contactPerson || 'N/A',
-        email: [inq.buyerInfo?.email, inq.userEmail].find(e => e && e !== 'N/A' && e.includes('@')) || inq.userEmail || '',
-        phone: inq.buyerInfo?.phone || 'N/A',
-        mobile: inq.buyerInfo?.mobile || '',
-        address: inq.buyerInfo?.address || 'N/A',
-        website: inq.buyerInfo?.website || '',
-        businessType: inq.buyerInfo?.businessType || ''
-      },
-      items: inq.products.map((p: any) => ({
-        id: p.id,
-        productName: p.productName, // 🔥 修复：CartItem的字段是productName，不是name
-        modelNo: p.modelNo || '-', // 🔥 修复：CartItem的字段是modelNo，不是model
-        specification: p.specification || '-',
-        quantity: p.quantity,
-        unit: p.unit || 'PCS',
-        targetPrice: p.unitPrice || 0, // 🔥 修复：CartItem的字段是unitPrice，不是price
-        targetCurrency: 'USD',
-        hsCode: p.hsCode || '',
-        imageUrl: p.image || '', // 🔥 CartItem的字段是image
-        remarks: p.notes || ''
-      })),
-      specialRequirements: inq.message || ''
-    };
-
-    console.log('✅ [创建QR] 新建的采购需求:', newQR);
-    console.log('  - customer:', newQR.customer);
-    console.log('  - items[0]:', newQR.items[0]);
-
-    addPurchaseRequirement(newQR);
-    toast.success(`✅ 成功创建采购需求！单号：${newQR.requirementNo}`);
-    setShowCreateModal(false);
-    setSelectedINQ(null);
+    try {
+      const regionCode = inq.region === 'South America' ? 'SA' : inq.region === 'Europe & Africa' ? 'EA' : 'NA';
+      const qrNumber = await nextQRNumber(regionCode);
+      const newQR = {
+        id: `qr_${Date.now()}`,
+        requirementNo: qrNumber,
+        sourceInquiryNumber: inq.inquiryNumber || `INQ-${inq.id}`,
+        requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        urgency: 'medium' as const,
+        status: 'pending' as const,
+        createdBy: currentUser?.email || '',
+        region: inq.region,
+        notes: inq.message || '',
+        customer: {
+          companyName: inq.buyerInfo?.companyName || 'N/A',
+          contactPerson: inq.buyerInfo?.contactPerson || 'N/A',
+          email: [inq.buyerInfo?.email, inq.userEmail].find((e: string) => e && e !== 'N/A' && e.includes('@')) || inq.userEmail || '',
+          phone: inq.buyerInfo?.phone || 'N/A',
+          mobile: inq.buyerInfo?.mobile || '',
+          address: inq.buyerInfo?.address || 'N/A',
+          website: inq.buyerInfo?.website || '',
+          businessType: inq.buyerInfo?.businessType || ''
+        },
+        items: inq.products.map((p: any) => ({
+          id: p.id,
+          productName: p.productName || p.name || 'Unnamed Product',
+          modelNo: p.modelNo || p.model || '-',
+          specification: p.specification || '-',
+          quantity: p.quantity || 0,
+          unit: p.unit || 'PCS',
+          targetPrice: p.unitPrice || p.price || 0,
+          targetCurrency: 'USD',
+          hsCode: p.hsCode || '',
+          imageUrl: p.image || p.imageUrl || '',
+          remarks: p.notes || ''
+        })),
+      };
+      const saved = await purchaseRequirementService.upsert(newQR);
+      addPurchaseRequirement(saved || newQR);
+      toast.success(`✅ 成功创建采购需求！单号：${qrNumber}`);
+      setShowCreateModal(false);
+      setSelectedINQ(null);
+    } catch (error: any) {
+      console.error('❌ [创建QR] 失败:', error);
+      toast.error(`❌ 创建失败: ${error.message || '未知错误'}`);
+    }
   };
 
   // 🔥 提交给采购部门 - 打开提交弹窗

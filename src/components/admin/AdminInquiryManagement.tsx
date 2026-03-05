@@ -19,6 +19,7 @@ import { useQuotationRequests } from '../../contexts/QuotationRequestContext'; /
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
 import { nextQRNumber } from '../../utils/xjNumberGenerator'; // 🔥 导入QR编号生成
 import { useUser } from '../../contexts/UserContext'; // 🔥 从 Supabase Auth 读取当前用户
+import { purchaseRequirementService } from '../../lib/supabaseService';
 
 interface AdminInquiryManagementProps {
   onCreateQuotation?: (inquiry: any) => void;
@@ -54,60 +55,50 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   
   // 🔥 下推成本询报：从INQ创建QR
   const handlePushToCostInquiry = async (inquiry: any) => {
-    
-    const newQR = {
-      id: `qr_${Date.now()}`,
-      requirementNo: await nextQRNumber(
-        inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA'
-      ),
-      source: '销售订单',
-      sourceInquiryNumber: inquiry.inquiryNumber || inquiry.id,
-      requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      urgency: 'medium' as const,
-      status: 'pending' as const,
-      createdBy: currentUser?.email || '',
-      createdDate: new Date().toISOString(),
-      region: inquiry.region,
-      // 🔥 同步客户信息（优先使用buyerInfo，其次使用customer）
-      customer: {
-        companyName: inquiry.buyerInfo?.companyName || inquiry.customer?.name || 'N/A',
-        contactPerson: inquiry.buyerInfo?.contactPerson || inquiry.customer?.name || 'N/A',
-        email: inquiry.buyerInfo?.email || inquiry.customer?.email || inquiry.userEmail || 'N/A',
-        phone: inquiry.buyerInfo?.phone || inquiry.customer?.phone || 'N/A',
-        mobile: inquiry.buyerInfo?.mobile || '',
-        address: inquiry.buyerInfo?.address || inquiry.customer?.address || 'N/A',
-        website: inquiry.buyerInfo?.website || '',
-        businessType: inquiry.buyerInfo?.businessType || ''
-      },
-      // 🔥 同步产品信息（包括图片）
-      items: inquiry.products.map((p: any) => ({
-        id: p.id,
-        productName: p.name,
-        modelNo: p.model || '-',
-        specification: p.specification || '-',
-        quantity: p.quantity,
-        unit: p.unit || 'PCS',
-        targetPrice: p.price || 0,
-        targetCurrency: 'USD',
-        hsCode: p.hsCode || '',
-        imageUrl: p.image || '', // 🔥 同步产品图片
-        remarks: p.notes || ''
-      })),
-      specialRequirements: inquiry.message || ''
-    };
-    
-    console.log('✅ [下推成本询报] 新建的QR:', newQR);
-    console.log('  - customer:', newQR.customer);
-    console.log('  - items[0]:', newQR.items[0]);
-    
-    addPurchaseRequirement(newQR);
-    toast.success(`✅ 成功下推到成本询报！采购需求单号：${newQR.requirementNo}`);
-    
-    // 🔥 新增：下推成功后自动切换到成本询报模块
-    if (onSwitchToCostInquiry) {
-      setTimeout(() => {
-        onSwitchToCostInquiry();
-      }, 500); // 延迟500ms，让用户看到toast提示
+    try {
+      const regionCode = inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA';
+      const qrNumber = await nextQRNumber(regionCode);
+      const newQR = {
+        id: `qr_${Date.now()}`,
+        requirementNo: qrNumber,
+        sourceInquiryNumber: inquiry.inquiryNumber || inquiry.id,
+        requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        urgency: 'medium' as const,
+        status: 'pending' as const,
+        createdBy: currentUser?.email || '',
+        region: inquiry.region,
+        notes: inquiry.message || '',
+        customer: {
+          companyName: inquiry.buyerInfo?.companyName || inquiry.customer?.name || 'N/A',
+          contactPerson: inquiry.buyerInfo?.contactPerson || inquiry.customer?.name || 'N/A',
+          email: inquiry.buyerInfo?.email || inquiry.customer?.email || inquiry.userEmail || 'N/A',
+          phone: inquiry.buyerInfo?.phone || inquiry.customer?.phone || 'N/A',
+          mobile: inquiry.buyerInfo?.mobile || '',
+          address: inquiry.buyerInfo?.address || inquiry.customer?.address || 'N/A',
+          website: inquiry.buyerInfo?.website || '',
+          businessType: inquiry.buyerInfo?.businessType || ''
+        },
+        items: inquiry.products.map((p: any) => ({
+          id: p.id,
+          productName: p.productName || p.name || 'Unnamed Product',
+          modelNo: p.modelNo || p.model || '-',
+          specification: p.specification || '-',
+          quantity: p.quantity || 0,
+          unit: p.unit || 'PCS',
+          targetPrice: p.unitPrice || p.price || 0,
+          targetCurrency: 'USD',
+          hsCode: p.hsCode || '',
+          imageUrl: p.image || p.imageUrl || '',
+          remarks: p.notes || ''
+        })),
+      };
+      const saved = await purchaseRequirementService.upsert(newQR);
+      addPurchaseRequirement(saved || newQR);
+      toast.success(`✅ 成功下推到成本询报！采购需求单号：${qrNumber}`);
+      if (onSwitchToCostInquiry) setTimeout(() => onSwitchToCostInquiry(), 500);
+    } catch (error: any) {
+      console.error('❌ [下推成本询报] 失败:', error);
+      toast.error(`❌ 下推失败: ${error.message || '未知错误'}`);
     }
   };
 
