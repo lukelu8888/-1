@@ -55,159 +55,17 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   const [showQuoteCreation, setShowQuoteCreation] = useState(false);
   const [selectedQRForQuote, setSelectedQRForQuote] = useState<any>(null);
   
-  // 🔧 临时数据修复：检查和修复QR的items字段
-  React.useEffect(() => {
-    const targetQR = purchaseRequirements.find(qr => qr.requirementNo === 'QR-NA-251220-0004');
-    if (targetQR) {
-      console.log('🔍 [数据检查] 找到目标QR: QR-NA-251220-0004');
-      console.log('  - items:', targetQR.items);
-      console.log('  - items长度:', targetQR.items?.length);
-      console.log('  - sourceInquiryNumber:', targetQR.sourceInquiryNumber);
-      
-      if (targetQR.items && targetQR.items.length > 0) {
-        console.log('  - items[0]:', targetQR.items[0]);
-        console.log('  - items[0].productName:', targetQR.items[0].productName);
-        console.log('  - items[0].modelNo:', targetQR.items[0].modelNo);
-        
-        // 检查是否需要修复
-        const needsFix = targetQR.items.some((item: any) => !item.productName);
-        if (needsFix) {
-          console.warn('⚠️ [数据修复] 检测到items字段不完整，尝试从源INQ修复...');
-          
-          // 🔥 查找源INQ - 支持多种格式匹配
-          // 可能是 RFQ-NA-251220-0001 或 INQ-NA-251220-0001
-          let sourceINQ = inquiries.find(inq => inq.inquiryNumber === targetQR.sourceInquiryNumber);
-          
-          // 兼容旧 RFQ- 前缀：尝试替换为 INQ-
-          if (!sourceINQ && targetQR.sourceInquiryNumber?.startsWith('RFQ-')) {
-            const inqNumber = targetQR.sourceInquiryNumber.replace('RFQ-', 'INQ-');
-            sourceINQ = inquiries.find(inq => inq.inquiryNumber === inqNumber);
-            console.log('  - 尝试匹配INQ格式:', inqNumber, sourceINQ ? '✅ 找到' : '❌ 未找到');
-          }
-          
-          // 如果还是没找到，尝试通过日期和产品数量匹配
-          if (!sourceINQ) {
-            console.log('  - 尝试通过日期和产品数量匹配...');
-            console.log('  - 所有INQ:', inquiries.map(inq => ({
-              inquiryNumber: inq.inquiryNumber,
-              productsCount: inq.products.length,
-              date: new Date(inq.submittedAt || inq.createdAt).toLocaleDateString()
-            })));
-            
-            // 通过产品数量匹配
-            sourceINQ = inquiries.find(inq => 
-              inq.products.length === targetQR.items.length &&
-              inq.isSubmitted
-            );
-            
-            if (sourceINQ) {
-              console.log('  - 通过产品数量匹配找到:', sourceINQ.inquiryNumber);
-            }
-          }
-          
-          if (sourceINQ) {
-            console.log('✅ [数据修复] 找到源INQ:', sourceINQ.inquiryNumber);
-            console.log('  - sourceINQ.products:', sourceINQ.products);
-            console.log('  - sourceINQ.products[0]:', sourceINQ.products[0]);
-            
-            // 重新映射items
-            const fixedItems = sourceINQ.products.map((p: any) => ({
-              id: p.id || `item_${Date.now()}_${Math.random()}`,
-              productName: p.productName,
-              modelNo: p.modelNo || '-',
-              specification: p.specification || '-',
-              quantity: p.quantity,
-              unit: p.unit || 'PCS',
-              targetPrice: p.unitPrice || 0,
-              targetCurrency: 'USD',
-              hsCode: p.hsCode || '',
-              imageUrl: p.image || '',
-              remarks: p.notes || ''
-            }));
-            
-            console.log('🔧 [数据修复] 修复后的items:', fixedItems);
-            console.log('  - fixedItems[0].productName:', fixedItems[0].productName);
-            console.log('  - fixedItems[0].modelNo:', fixedItems[0].modelNo);
-            
-            // 更新QR，同时更新sourceInquiryNumber为正确的INQ编号
-            updatePurchaseRequirement(targetQR.id, { 
-              items: fixedItems,
-              sourceInquiryNumber: sourceINQ.inquiryNumber // 🔥 更新为正确的INQ编号
-            });
-            toast.success(`✅ 已自动修复 QR-NA-251220-0004 的产品数据！来源: ${sourceINQ.inquiryNumber}`);
-          } else {
-            console.error('❌ [数据修复] 未找到源INQ:', targetQR.sourceInquiryNumber);
-            console.error('  - 当前所有INQ:', inquiries.map(inq => inq.inquiryNumber));
-            toast.error('❌ 无法修复数据：未找到源询价单');
-          }
-        } else {
-          console.log('✅ [数据检查] items字段完整，无需修复');
-        }
-      }
-    }
-  }, [purchaseRequirements, inquiries]);
 
   // 🔥 筛选业务员自己创建的QR（Admin可以看所有）
   const myQRs = useMemo(() => {
-    console.log('🔍 [业务员端] 筛选QR列表:', {
-      totalQRs: purchaseRequirements.length,
-      currentUserEmail: currentUser?.email,
-      currentUserType: currentUser?.type,
-      currentUserRegion: currentUser?.region, // 🔥 新增：当前用户区域
-      allQRs: purchaseRequirements.map(qr => ({
-        requirementNo: qr.requirementNo,
-        createdBy: qr.createdBy,
-        region: qr.region,
-        status: qr.status,
-        hasFeedback: !!qr.purchaserFeedback
-      }))
-    });
-    
-    // 🔥 Admin可以看所有QR，业务员只能看自己创建的且在自己负责区域的
+    // Admin可以看所有QR，业务员只能看自己创建的且在自己负责区域的
     const isAdmin = currentUser?.type === 'admin';
-    
-    let filtered;
-    if (isAdmin) {
-      console.log('  🔑 Admin用户，显示所有QR');
-      filtered = purchaseRequirements;
-    } else {
-      console.log('  👤 业务员用户，只显示自己创建的且在自己负责区域的QR');
-      
-      // 🔥 获取业务员负责的区域
-      const userRegion = currentUser?.region;
-      
-      filtered = purchaseRequirements.filter(qr => {
-        // ✅ 条件1：必须是自己创建的
-        const isCreatedByMe = qr.createdBy === currentUser?.email;
-        
-        // ✅ 条件2：必须是自己负责的区域
-        const isMyRegion = qr.region === userRegion;
-        
-        console.log(`  - 检查QR ${qr.requirementNo}:`, {
-          createdBy: qr.createdBy,
-          isCreatedByMe,
-          region: qr.region,
-          userRegion,
-          isMyRegion,
-          finalResult: isCreatedByMe && isMyRegion
-        });
-        
-        return isCreatedByMe && isMyRegion;
-      });
-    }
-    
-    console.log('  ✅ 筛选后的QR数量:', filtered.length);
-    if (filtered.length > 0) {
-      console.log('  - 详情:', filtered.map(qr => ({
-        requirementNo: qr.requirementNo,
-        status: qr.status,
-        createdBy: qr.createdBy,
-        region: qr.region,
-        hasFeedback: !!qr.purchaserFeedback
-      })));
-    }
-    
-    return filtered;
+    if (isAdmin) return purchaseRequirements;
+
+    const userRegion = currentUser?.region;
+    return purchaseRequirements.filter(qr =>
+      qr.createdBy === currentUser?.email && qr.region === userRegion
+    );
   }, [purchaseRequirements, currentUser]);
 
   // 🔥 根据状态和搜索词筛选

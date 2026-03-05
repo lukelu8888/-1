@@ -18,68 +18,49 @@ export interface AuthUser {
 
 /**
  * 获取当前登录用户
+ * 优先读取 UserContext 写入的 cosun_auth_user（Supabase Auth 格式）
+ * 兼容旧的 cosun_current_user（RBAC 格式）
  */
 export function getCurrentUser(): AuthUser | null {
   if (typeof window === 'undefined') return null;
-  
+
   try {
-    // 🔥 修复：同时读取 cosun_auth_user 和 cosun_current_user，合并信息
-    let user: AuthUser | null = null;
-    
-    // 1. 先读取 cosun_auth_user（基础用户信息）
+    // 1. 优先读取 Supabase Auth 写入的 cosun_auth_user
     const authUserStr = localStorage.getItem('cosun_auth_user');
     if (authUserStr) {
-      user = JSON.parse(authUserStr);
+      const authUser = JSON.parse(authUserStr);
+      // 验证格式有效（必须有 email 和 type）
+      if (authUser?.email && authUser?.type) {
+        return authUser as AuthUser;
+      }
     }
-    
-    // 2. 再读取 cosun_current_user（RBAC用户信息，包含role等详细信息）
+
+    // 2. 降级：读取旧 RBAC cosun_current_user
     const rbacUserStr = localStorage.getItem('cosun_current_user');
     if (rbacUserStr) {
       const rbacUser = JSON.parse(rbacUserStr);
-      
-      // 🔥 根据role自动推断type
-      let userType: UserType = user?.type || 'admin';
-      if (rbacUser.role) {
-        // 供应商角色
-        if (rbacUser.role === 'Supplier') {
-          userType = 'supplier';
-        }
-        // 客户角色
-        else if (rbacUser.role === 'Customer') {
-          userType = 'customer';
-        }
-        // 所有内部员工角色都是admin
-        else if (['Sales_Director', 'Regional_Manager', 'Sales_Rep', 'Procurement_Manager', 'Procurement_Specialist'].includes(rbacUser.role)) {
-          userType = 'admin';
-        }
-      }
-      
-      // 合并两个对象，RBAC用户信息优先（包含role、userRole、region等）
-      user = {
-        ...user,
-        ...rbacUser,
-        // 确保 email 和 type 存在
-        email: rbacUser.email || user?.email || '',
-        type: userType, // 🔥 使用推断的type
+      if (!rbacUser?.email) return null;
+
+      // 根据 role 推断 type（兼容大小写）
+      const role = rbacUser.role || '';
+      let userType: UserType = 'admin';
+      if (role === 'Supplier') userType = 'supplier';
+      else if (role === 'Customer') userType = 'customer';
+
+      return {
+        id: rbacUser.id,
+        email: rbacUser.email,
+        name: rbacUser.name,
+        type: userType,
+        role: rbacUser.role,
+        userRole: rbacUser.userRole || rbacUser.role,
+        region: rbacUser.region,
       };
-    }
-    
-    if (user) {
-      // 🔥 调试：打印当前用户信息
-      console.log('🔍 [dataIsolation] getCurrentUser:', {
-        email: user.email,
-        type: user.type,
-        role: user.role,
-        userRole: user.userRole,
-        region: user.region,
-        name: user.name
-      });
-      return user;
     }
   } catch (e) {
     console.error('Failed to get current user:', e);
   }
-  
+
   return null;
 }
 
