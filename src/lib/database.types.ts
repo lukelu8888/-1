@@ -226,22 +226,28 @@ export interface Database {
       supplier_quotations: {
         Row: {
           id: string;
-          xj_id: string | null;
-          xj_number: string | null;
-          supplier_email: string;
+          quotation_number: string | null;
+          supplier_code: string | null;
           supplier_name: string | null;
+          supplier_email: string;
+          source_xj_number: string | null;
+          source_xj_id: string | null;
+          region_code: string | null;
           products: Json;
           total_amount: number;
           currency: string;
-          price_type: string | null;
-          payment_terms: string | null;
-          delivery_time: string | null;
-          validity_period: string | null;
+          valid_until: string | null;
           status: string;
           notes: string | null;
           created_by: string | null;
+          deleted_at: string | null;
           created_at: string;
           updated_at: string;
+          bj_number: string | null;
+          display_number: string | null;
+          source_doc_id: string | null;
+          sales_contract_id: string | null;
+          root_sales_contract_id: string | null;
         };
         Insert: Omit<Database['public']['Tables']['supplier_quotations']['Row'], 'created_at' | 'updated_at'> & {
           created_at?: string;

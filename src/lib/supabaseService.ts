@@ -1128,8 +1128,8 @@ function toQRRow(q: any) {
     request_date: toIsoDate(q.requestDate || q.request_date),
     expected_quote_date: toIsoDate(q.expectedQuoteDate || q.expected_quote_date),
     urgency: q.urgency || 'medium',
-    xj_ids: q.xjIds || q.xjIds || q.xj_ids || [],
-    xj_count: q.xjCount || q.xjCount || q.xj_count || 0,
+    xj_ids: q.xjIds || q.xj_ids || [],
+    xj_count: q.xjCount || q.xj_count || 0,
     priority: q.priority || 'medium',
     notes: q.notes || null,
   };
@@ -1565,20 +1565,25 @@ function fromApprovalRow(r: any) {
 function toSQRow(q: any) {
   return {
     id: toUUID(q.id),
-    xj_id: q.xjId || q.xj_id || null,
-    xj_number: q.xjNumber || q.xj_number || null,
+    quotation_number: q.quotationNumber || q.quotation_number || null,
+    supplier_code: q.supplierCode || q.supplier_code || null,
+    supplier_name: q.supplierName || q.supplier_name || null,
     supplier_email: q.supplierEmail || q.supplier_email || '',
-    supplier_name: q.supplierName || q.supplier_name || '',
+    source_xj_number: q.sourceXJNumber || q.xjNumber || q.source_xj_number || null,
+    source_xj_id: toUUID(q.sourceXJId || q.xjId || q.source_xj_id) || null,
+    region_code: q.regionCode || q.region_code || null,
     products: q.products || q.items || [],
     total_amount: q.totalAmount || q.total_amount || 0,
     currency: q.currency || 'USD',
-    price_type: q.priceType || q.price_type || 'FOB',
-    payment_terms: q.paymentTerms || q.payment_terms || null,
-    delivery_time: q.deliveryTime || q.delivery_time || null,
-    validity_period: q.validityPeriod || q.validity_period || null,
+    valid_until: q.validUntil || q.valid_until || null,
     status: q.status || 'pending',
     notes: q.notes || null,
     created_by: q.createdBy || q.created_by || null,
+    bj_number: q.bjNumber || q.bj_number || null,
+    display_number: q.displayNumber || q.display_number || null,
+    source_doc_id: toUUID(q.sourceDocId || q.source_doc_id) || null,
+    sales_contract_id: toUUID(q.salesContractId || q.sales_contract_id) || null,
+    root_sales_contract_id: toUUID(q.rootSalesContractId || q.root_sales_contract_id) || null,
   };
 }
 
@@ -1586,22 +1591,30 @@ function fromSQRow(r: any) {
   if (!r) return null;
   return {
     id: r.id,
-    xjId: r.xj_id,
-    xjNumber: r.xj_number,
-    supplierEmail: r.supplier_email,
+    quotationNumber: r.quotation_number,
+    supplierCode: r.supplier_code,
     supplierName: r.supplier_name,
+    supplierEmail: r.supplier_email,
+    sourceXJNumber: r.source_xj_number,
+    xjNumber: r.source_xj_number,       // 向后兼容
+    sourceXJId: r.source_xj_id,
+    xjId: r.source_xj_id,               // 向后兼容
+    regionCode: r.region_code,
     products: r.products || [],
     totalAmount: r.total_amount || 0,
     currency: r.currency || 'USD',
-    priceType: r.price_type,
-    paymentTerms: r.payment_terms,
-    deliveryTime: r.delivery_time,
-    validityPeriod: r.validity_period,
+    validUntil: r.valid_until,
     status: r.status,
     notes: r.notes,
     createdBy: r.created_by,
+    deletedAt: r.deleted_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    bjNumber: r.bj_number,
+    displayNumber: r.display_number,
+    sourceDocId: r.source_doc_id,
+    salesContractId: r.sales_contract_id,
+    rootSalesContractId: r.root_sales_contract_id,
   };
 }
 
