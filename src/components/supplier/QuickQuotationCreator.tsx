@@ -78,11 +78,15 @@ export default function QuickQuotationCreator() {
 
       await saveSupplierQuotation(quotation);
 
-      // 更新采购询价状态
+      // Supabase-first: BJ 草稿仅建立关联，提交后才把 XJ 标记为 quoted
       if (status === 'submitted') {
         updateXJ(xj.id, {
           supplierQuotationNo: quotation.quotationNo,
           status: 'quoted' as any
+        });
+      } else {
+        updateXJ(xj.id, {
+          supplierQuotationNo: quotation.quotationNo
         });
       }
 

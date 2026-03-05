@@ -193,6 +193,31 @@ export default function SupplierOrderManagementCenter() {
     return result;
   }, [xjs, user?.email, getXJsBySupplier]);
 
+  const syncXJQuoteFromBJ = React.useCallback(async (quotation: any, bjStatus: 'draft' | 'submitted' | 'accepted' | 'rejected' | 'completed') => {
+    const relatedXJ = myXJs.find(r =>
+      (r.supplierXjNo || r.xjNumber) === quotation.sourceXJ
+    );
+    if (!relatedXJ) return;
+    const firstItem = quotation.items?.[0];
+    await addQuoteToXJ(relatedXJ.id, {
+      supplierCode: quotation.supplierEmail || supplierInfo?.email || user?.email || '',
+      supplierName: quotation.supplierName || supplierInfo?.name || user?.name || '供应商',
+      quotationNo: quotation.quotationNo,
+      quotedDate: new Date().toISOString().split('T')[0],
+      quotedPrice: quotation.totalAmount ?? 0,
+      totalAmount: quotation.totalAmount ?? 0,
+      unitPrice: firstItem?.unitPrice ?? 0,
+      currency: quotation.currency || 'CNY',
+      leadTime: firstItem?.leadTime ?? 0,
+      moq: firstItem?.moq ?? 0,
+      validityDays: 30,
+      paymentTerms: quotation.paymentTerms || '',
+      deliveryTerms: quotation.deliveryTerms || '',
+      status: bjStatus,
+      remarks: `报价单号: ${quotation.quotationNo}`,
+    } as any);
+  }, [myXJs, addQuoteToXJ, supplierInfo?.email, supplierInfo?.name, user?.email, user?.name]);
+
   // 🔥 分类采购询价（客户需求池）
   const categorizedRFQs = useMemo(() => {
     console.log('🔍 [分类采购询价] 开始分类，总采购询价数:', myXJs.length);
@@ -872,19 +897,8 @@ export default function SupplierOrderManagementCenter() {
                               const updatedQuotations = [...supplierQuotations, quotation];
                               setSupplierQuotations(updatedQuotations);
 
-                              // 🔥 将报价信息添加到采购询价的quotes数组中，标记为"已下推"
-                              addQuoteToXJ(xj.id, {
-                                supplierCode: supplierInfo?.email || user?.email || '',
-                                supplierName: supplierInfo?.name || user?.username || '供应商',
-                                quotedDate: new Date().toISOString().split('T')[0],
-                                quotedPrice: quotation.totalAmount || 0,
-                                currency: quotation.currency,
-                                leadTime: quotation.items?.[0]?.leadTime || 30,
-                                moq: quotation.items?.[0]?.moq || 1000,
-                                validityDays: 30,
-                                paymentTerms: quotation.paymentTerms || 'T/T 30天',
-                                remarks: `报价单号: ${quotation.quotationNo}`
-                              });
+                              // Supabase-first: BJ 草稿仅建立关联，不把 XJ 提前标记为 quoted
+                              await syncXJQuoteFromBJ(quotation, 'draft');
 
                               // 显示成功提示
                               toast.success(
@@ -1225,6 +1239,7 @@ export default function SupplierOrderManagementCenter() {
                             onClick={async () => {
                               const reverted = { ...quotation, status: 'draft' as const };
                               await saveSupplierQuotation(reverted);
+                              await syncXJQuoteFromBJ(reverted, 'draft');
                               const updated = supplierQuotations.map(q =>
                                 q.id === quotation.id ? reverted : q
                               );
@@ -1280,6 +1295,7 @@ export default function SupplierOrderManagementCenter() {
                                 };
                                 // Supabase-first: 更新 supplier_quotations 表
                                 await saveSupplierQuotation(updatedQuotation);
+                                await syncXJQuoteFromBJ(updatedQuotation, 'submitted');
                                 setSupplierQuotations(prev => prev.map(q => q.id === quotation.id ? updatedQuotation : q));
                                 toast.success(
                                   <div className="space-y-1">
@@ -1777,6 +1793,7 @@ export default function SupplierOrderManagementCenter() {
             };
             // Supabase-first
             await saveSupplierQuotation(updatedQuotation);
+            await syncXJQuoteFromBJ(updatedQuotation, 'submitted');
             setSupplierQuotations(prev => prev.map(q => q.id === selectedQuotation.id ? updatedQuotation : q));
             setQuotationDocumentViewerOpen(false);
             toast.success(
@@ -1844,31 +1861,7 @@ export default function SupplierOrderManagementCenter() {
                       setSelectedQuotation(updatedQuotation);
 
                       // 4. Sync back to the parent 采购询价
-                      const relatedRFQ = myXJs.find(r =>
-                        (r.supplierXjNo || r.xjNumber) === updatedQuotation.sourceXJ
-                      );
-                      if (relatedRFQ) {
-                        const firstItem = updatedQuotation.items?.[0];
-                        addQuoteToXJ(relatedRFQ.id, {
-                          supplierCode: updatedQuotation.supplierEmail || user?.email || '',
-                          supplierName: updatedQuotation.supplierName || user?.username || '供应商',
-                          unitPrice: firstItem?.unitPrice ?? 0,
-                          totalAmount: updatedQuotation.totalAmount ?? 0,
-                          currency: updatedQuotation.currency || 'CNY',
-                          leadTime: firstItem?.leadTime ?? 0,
-                          moq: firstItem?.moq ?? 0,
-                          validityDays: 30,
-                          paymentTerms: updatedQuotation.paymentTerms || '',
-                          deliveryTerms: updatedQuotation.deliveryTerms || '',
-                          remarks: [
-                            updatedQuotation.generalRemarks,
-                            updatedQuotation.supplierRemarks,
-                          ].filter(Boolean).join(' | ') || `报价单号: ${updatedQuotation.quotationNo}`,
-                          quoteMode: updatedQuotation.quoteMode,
-                          overallMargin: updatedQuotation.overallMargin,
-                          status: updatedQuotation.status,
-                        });
-                      }
+                      await syncXJQuoteFromBJ(updatedQuotation, updatedQuotation.status || 'draft');
 
                       // 5. Close dialog
                       closeQuotationEditor();

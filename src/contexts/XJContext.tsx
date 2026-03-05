@@ -65,6 +65,7 @@ export interface XJ {
   quotes?: Array<{
     supplierCode: string;
     supplierName: string;
+    quotationNo?: string;
     quotedDate: string;
     quotedPrice: number;
     currency: string;
@@ -72,6 +73,10 @@ export interface XJ {
     moq: number;
     validityDays: number;
     paymentTerms: string;
+    deliveryTerms?: string;
+    unitPrice?: number;
+    totalAmount?: number;
+    status?: 'draft' | 'submitted' | 'accepted' | 'rejected' | 'completed';
     remarks?: string;
   }>;
 
@@ -172,10 +177,21 @@ export const XJProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const addQuoteToXJ = async (xjId: string, quote: XJQuote) => {
     const current = xjs.find(x => x.id === xjId);
     if (!current) return;
+    const incomingStatus = (quote as any)?.status as string | undefined;
+    const shouldMarkQuoted = incomingStatus === 'submitted' || incomingStatus === 'accepted' || incomingStatus === 'completed';
+    const nextStatus: XJStatus = shouldMarkQuoted ? 'quoted' : (current.status as XJStatus);
+    const quoteSupplierKey = String((quote as any)?.supplierCode || '').trim().toLowerCase();
+    const existingQuotes = [...(current.quotes || [])];
+    const idx = existingQuotes.findIndex((q) => String((q as any)?.supplierCode || '').trim().toLowerCase() === quoteSupplierKey);
+    const nextQuotes = idx >= 0
+      ? existingQuotes.map((q, i) => (i === idx ? { ...q, ...quote } : q))
+      : [...existingQuotes, quote];
+
     const updated: XJ = {
       ...current,
-      quotes: [...(current.quotes || []), quote],
-      status: 'quoted' as XJStatus,
+      supplierQuotationNo: (quote as any)?.quotationNo || current.supplierQuotationNo,
+      quotes: nextQuotes,
+      status: nextStatus,
       updatedDate: new Date().toISOString(),
     };
     await updateXJ(xjId, updated);
