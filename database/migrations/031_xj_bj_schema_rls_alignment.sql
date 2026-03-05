@@ -13,12 +13,51 @@ ALTER TABLE public.supplier_quotations
   ADD COLUMN IF NOT EXISTS valid_until           DATE,
   ADD COLUMN IF NOT EXISTS deleted_at            TIMESTAMPTZ;
 
--- 兼容历史字段回填（不覆盖已有标准字段）
-UPDATE public.supplier_quotations
-SET
-  quotation_number = COALESCE(quotation_number, bj_number, display_number, xj_number),
-  source_xj_number = COALESCE(source_xj_number, xj_number)
-WHERE quotation_number IS NULL OR source_xj_number IS NULL;
+-- 兼容历史字段回填（按“列是否存在”动态执行，避免环境差异报错）
+DO $$
+DECLARE
+  has_bj_number BOOLEAN;
+  has_display_number BOOLEAN;
+  has_xj_number BOOLEAN;
+  quotation_expr TEXT := 'quotation_number';
+  source_xj_expr TEXT := 'source_xj_number';
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'supplier_quotations' AND column_name = 'bj_number'
+  ) INTO has_bj_number;
+
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'supplier_quotations' AND column_name = 'display_number'
+  ) INTO has_display_number;
+
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'supplier_quotations' AND column_name = 'xj_number'
+  ) INTO has_xj_number;
+
+  IF has_bj_number THEN
+    quotation_expr := quotation_expr || ', bj_number';
+  END IF;
+  IF has_display_number THEN
+    quotation_expr := quotation_expr || ', display_number';
+  END IF;
+  IF has_xj_number THEN
+    quotation_expr := quotation_expr || ', xj_number';
+    source_xj_expr := source_xj_expr || ', xj_number';
+  END IF;
+
+  EXECUTE format(
+    'UPDATE public.supplier_quotations
+     SET quotation_number = COALESCE(%s),
+         source_xj_number = COALESCE(%s)
+     WHERE quotation_number IS NULL OR source_xj_number IS NULL',
+    quotation_expr,
+    source_xj_expr
+  );
+END;
+$$;
 
 -- 默认值 / 非空兜底
 ALTER TABLE public.supplier_quotations
