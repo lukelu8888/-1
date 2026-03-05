@@ -247,9 +247,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const hasDownstreamQuotationForXJ = React.useCallback((xj: any, quotationList?: any[]) => {
     const key = getXJKey(xj);
     if (!key) return false;
-    const list = Array.isArray(quotationList) ? quotationList : supplierQuotationSnapshot;
+    const list = Array.isArray(quotationList) ? quotationList : supplierQuotations;
     return list.some((q: any) => getQuotationXJKey(q) === key);
-  }, [supplierQuotationSnapshot]);
+  }, [supplierQuotations]);
 
   const hasDownstreamXJForRequirement = React.useCallback((req: PurchaseRequirement, xjList?: XJ[]) => {
     const reqNo = String(req?.requirementNo || '').trim();
@@ -279,8 +279,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [showFeedbackReminderDialog, setShowFeedbackReminderDialog] = useState(false);
   const [acceptedQuotationNo, setAcceptedQuotationNo] = useState<string>('');
   const [salesContractsLite, setSalesContractsLite] = useState<any[]>([]);
-  const supplierQuotationSnapshot = useMemo(() => supplierQuotations, [supplierQuotations]);
-
   useEffect(() => {
     let cancelled = false;
     const loadSalesContractsLite = async () => {
