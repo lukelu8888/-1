@@ -55,16 +55,16 @@ export function RegionProvider({ children }: { children: ReactNode }) {
   // Detect user's region based on IP
   const detectRegion = async () => {
     try {
-      const response = await fetch('https://ipapi.co/json/');
+      const response = await fetch('https://ip-api.com/json/?fields=status,country,countryCode,continent,continentCode,city');
       const data = await response.json();
       
-      if (data.country_code && data.continent_code) {
-        const detected = mapToRegion(data.country_code, data.continent_code);
+      if (data.status === 'success' && data.countryCode && data.continentCode) {
+        const detected = mapToRegion(data.countryCode, data.continentCode);
         setDetectedRegion(detected);
         setLocationInfo({
           city: data.city,
-          country: data.country_name,
-          countryCode: data.country_code,
+          country: data.country,
+          countryCode: data.countryCode,
         });
         return detected;
       }

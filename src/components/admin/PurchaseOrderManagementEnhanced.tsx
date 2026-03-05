@@ -2754,8 +2754,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                   <p className="text-sm text-gray-400 mt-1">从报价请求池创建询价单后将显示在这里</p>
                 </div>
               ) : (
-                <div className="border border-gray-200 rounded overflow-hidden">
-                  <table className="w-full text-[14px]">
+                <div className="border border-gray-200 rounded overflow-x-auto">
+                  <table className="min-w-max w-full text-[14px]">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
@@ -2772,15 +2772,15 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                             }}
                           />
                         </th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">序号</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">询价单号</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">供应商</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">关联需求</th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700">产品数</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">创建日期</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">截止日期</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">状态</th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700">操作</th>
+                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">序号</th>
+                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-36">询价单号</th>
+                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-40">供应商</th>
+                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-32">关联需求</th>
+                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-16">产品数</th>
+                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-28">创建日期</th>
+                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-24">截止日期</th>
+                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-20">状态</th>
+                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-40">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2820,11 +2820,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                               </button>
                               <div className="text-[12px] text-gray-500">{xj.createdDate}</div>
                             </td>
-                            <td className="py-2 px-2">
+                            <td className="py-2 px-2 whitespace-nowrap">
                               <div className="text-gray-900">{xj.supplierName}</div>
                               <div className="text-[12px] text-gray-500">{xj.supplierCode}</div>
                             </td>
-                            <td className="py-2 px-2">
+                            <td className="py-2 px-2 whitespace-nowrap">
                               <div className="text-gray-900 font-mono">{xj.requirementNo}</div>
                               {xj.sourceRef && <div className="text-[12px] text-gray-500">{xj.sourceRef}</div>}
                             </td>
