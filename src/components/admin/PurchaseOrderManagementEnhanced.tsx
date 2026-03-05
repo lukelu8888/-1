@@ -3424,9 +3424,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       />
 
       <CreateXJAndHistoryDialogs
-        showCreateXJDialog={showCreateXJDialog}
+        showCreateRFQDialog={showCreateXJDialog}
         setShowCreateRFQDialog={setShowCreateRFQDialog}
-        selectedRequirementForXJ={selectedRequirementForXJ}
+        selectedRequirementForRFQ={selectedRequirementForXJ}
         selectedProductIds={selectedProductIds}
         setSelectedProductIds={setSelectedProductIds}
         selectedSuppliers={selectedSuppliers}
@@ -3434,14 +3434,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         supplierSearchTerm={supplierSearchTerm}
         setSupplierSearchTerm={setSupplierSearchTerm}
         allSuppliers={allSuppliers}
-        handlePreviewXJ={handlePreviewXJ}
-        xjDeadline={xjDeadline}
+        handlePreviewRFQ={handlePreviewXJ}
+        rfqDeadline={xjDeadline}
         setRFQDeadline={setRFQDeadline}
-        xjRemarks={xjRemarks}
+        rfqRemarks={xjRemarks}
         setRFQRemarks={setRFQRemarks}
-        handleSubmitXJ={handleSubmitXJ}
-        submittingXJ={submittingXJ}
-        showXJHistoryDialog={showXJHistoryDialog}
+        handleSubmitRFQ={handleSubmitXJ}
+        submittingRFQ={submittingXJ}
+        showRFQHistoryDialog={showXJHistoryDialog}
         setShowRFQHistoryDialog={setShowRFQHistoryDialog}
         selectedProductForHistory={selectedProductForHistory}
         setSelectedProductForHistory={setSelectedProductForHistory}
