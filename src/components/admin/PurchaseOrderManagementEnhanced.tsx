@@ -2843,11 +2843,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                             </td>
                             <td className="py-2 px-2 text-center">
                               <div className="flex gap-1 justify-center">
+                                {/* 查看按钮：始终可用 */}
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    // documentData 可能为空（旧数据），回退构造基础预览
                                     const previewData = xj.documentData || {
                                       xjNo: xj.supplierXjNo || xj.xjNumber,
                                       supplierName: xj.supplierName,
@@ -2864,25 +2864,41 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   <Eye className="w-3 h-3 mr-1" />
                                   查看
                                 </Button>
+                                {/* 编辑按钮：已下推（sent/quoted/completed）后禁用 */}
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleEditXJ(xj)}
-                                  className="h-6 text-[12px] px-2 border-gray-300 text-gray-600 hover:bg-gray-50"
+                                  disabled={isSent || xj.status === 'quoted' || xj.status === 'completed'}
+                                  className={`h-6 text-[12px] px-2 ${
+                                    isSent || xj.status === 'quoted' || xj.status === 'completed'
+                                      ? 'border-gray-200 text-gray-300 cursor-not-allowed'
+                                      : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                                  }`}
                                 >
                                   <Edit className="w-3 h-3 mr-1" />
                                   编辑
                                 </Button>
-                                <Button
-                                  size="sm"
-                                  onClick={() => {
-                                    handleSubmitXJToSupplier(xj);
-                                  }}
-                                  className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
-                                >
-                                  <Send className="w-3 h-3 mr-1" />
-                                  下推供应商
-                                </Button>
+                                {/* 下推按钮：已下推后变灰禁用 */}
+                                {isSent || xj.status === 'quoted' || xj.status === 'completed' ? (
+                                  <Button
+                                    size="sm"
+                                    disabled
+                                    className="h-6 text-[12px] px-2 bg-gray-200 text-gray-400 cursor-not-allowed"
+                                  >
+                                    <Send className="w-3 h-3 mr-1" />
+                                    已下推
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleSubmitXJToSupplier(xj)}
+                                    className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
+                                  >
+                                    <Send className="w-3 h-3 mr-1" />
+                                    下推供应商
+                                  </Button>
+                                )}
                               </div>
                             </td>
                           </tr>

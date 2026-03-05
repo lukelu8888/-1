@@ -32,12 +32,6 @@ export function ProcurementQuotationRequests() {
   const [isDistributionDialogOpen, setIsDistributionDialogOpen] = useState(false);
   const [selectedQuotationRequest, setSelectedQuotationRequest] = useState<any>(null);
 
-  // 🔍 调试日志：输出所有报价请求
-  React.useEffect(() => {
-    console.log('🔍 [ProcurementQuotationRequests] 当前用户:', user);
-    console.log('🔍 [ProcurementQuotationRequests] 全部报价请求数量:', quotationRequests.length);
-    console.log('🔍 [ProcurementQuotationRequests] 全部报价请求:', quotationRequests);
-  }, [quotationRequests, user]);
 
   // 🔥 获取采购员可见的报价请求（所有未分配的或分配给自己的）
   const getProcurementRequests = () => {
