@@ -78,8 +78,8 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
           website: inquiry.buyerInfo?.website || '',
           businessType: inquiry.buyerInfo?.businessType || ''
         },
-        items: inquiry.products.map((p: any) => ({
-          id: p.id,
+        items: inquiry.products.map((p: any, idx: number) => ({
+          id: (p.id && String(p.id) !== 'undefined') ? String(p.id) : `item_idx_${idx}`,
           productName: p.productName || p.name || 'Unnamed Product',
           modelNo: p.modelNo || p.model || '-',
           specification: p.specification || '-',

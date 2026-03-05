@@ -141,8 +141,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           website: inq.buyerInfo?.website || '',
           businessType: inq.buyerInfo?.businessType || ''
         },
-        items: inq.products.map((p: any) => ({
-          id: p.id,
+        items: inq.products.map((p: any, idx: number) => ({
+          id: (p.id && String(p.id) !== 'undefined') ? String(p.id) : `item_idx_${idx}`,
           productName: p.productName || p.name || 'Unnamed Product',
           modelNo: p.modelNo || p.model || '-',
           specification: p.specification || '-',

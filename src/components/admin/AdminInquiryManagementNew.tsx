@@ -135,6 +135,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
           businessType: inquiry.buyerInfo?.businessType || ''
         },
         items: inquiry.products.map((p: any, idx: number) => ({
+          id: (p.id && String(p.id) !== 'undefined') ? String(p.id) : `item_idx_${idx}`,
           productName: p.productName || p.name || 'Unnamed Product',
           modelNo: extractModelNo(p, idx),
           specification: extractSpecification(p),

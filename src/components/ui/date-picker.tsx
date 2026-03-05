@@ -59,7 +59,10 @@ export function DatePicker({
           }}
           disabled={(date) => {
             if (minDate) {
-              return date < minDate;
+              // 只比较日期部分，不含时间，允许选今天
+              const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+              const m = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate());
+              return d < m;
             }
             return false;
           }}
