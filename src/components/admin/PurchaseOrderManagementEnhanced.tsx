@@ -1506,8 +1506,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           documentData: xjDocumentData as any
         };
 
-        const savedXJ = await xjService.upsert(rfq).catch(() => null);
-        const saved = savedXJ || rfq;
+        const savedXJ = await xjService.upsert(xj).catch(() => null);
+        const saved = savedXJ || xj;
         createdXJs.push(saved);
         addXJ(saved);
       }));
@@ -1707,10 +1707,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 编辑询价单
   const handleEditXJ = (xj: XJ) => {
-    setEditingXJ(rfq);
+    setEditingXJ(xj);
     // 深拷贝documentData，确保编辑不影响原数据，并与列表XJ单号强制对齐
-    const cloned = JSON.parse(JSON.stringify(rfq.documentData || {}));
-    cloned.rfqNo = rfq.supplierXjNo || cloned.rfqNo || '';
+    const cloned = JSON.parse(JSON.stringify(xj.documentData || {}));
+    cloned.rfqNo = xj.supplierXjNo || cloned.rfqNo || '';
     setEditRFQData(cloned);
     setShowEditXJDialog(true);
   };
@@ -1756,11 +1756,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const handleSubmitXJToSupplier = async (xj: XJ) => {
     // 🔥 检查是否已经提交过（以采购询价单号优先，避免id误判）
     const existingSupplierXJs = JSON.parse(localStorage.getItem('supplierXJs') || '[]');
-    const supplierXjNo = String(rfq.supplierXjNo || '').trim();
+    const supplierXjNo = String(xj.supplierXjNo || '').trim();
     const alreadySubmitted = existingSupplierXJs.some((item: any) => {
       const itemNo = String(item?.supplierXjNo || item?.xjNumber || '').trim();
       const sameNo = !!supplierXjNo && itemNo !== '' && itemNo === supplierXjNo;
-      const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(rfq.id || '').trim();
+      const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(xj.id || '').trim();
       return sameNo || sameId;
     });
     
@@ -1784,65 +1784,65 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     
     // 🔥 将状态从draft改为sent
     const updatedXJ = {
-      ...rfq,
+      ...xj,
       status: 'sent' as any, // 🔥 已发送给供应商
       sentDate: new Date().toISOString().split('T')[0]
     };
     
     // 🔥 更新XJ Context中的状态
-    updateRFQ(rfq.id, {
+    updateRFQ(xj.id, {
       status: 'sent' as any,
       sentDate: new Date().toISOString().split('T')[0]
     });
     
     // 🔥 将询价单推送到供应商Portal（保存到supplierXJs）
     const supplierRFQData = {
-      id: rfq.id,
-      xjNumber: rfq.supplierXjNo || '', // XJ-xxx
-      supplierXjNo: rfq.supplierXjNo,
-      supplierCode: rfq.supplierCode,
-      supplierName: rfq.supplierName,
-      supplierEmail: rfq.supplierEmail,
+      id: xj.id,
+      xjNumber: xj.supplierXjNo || '', // XJ-xxx
+      supplierXjNo: xj.supplierXjNo,
+      supplierCode: xj.supplierCode,
+      supplierName: xj.supplierName,
+      supplierEmail: xj.supplierEmail,
       
       // 关联COSUN采购需求
       sourceQRNumber: xj.requirementNo, // QR-xxx
       
       // 产品信息（支持多产品）
-      products: rfq.products || [{
+      products: xj.products || [{
         id: `product_${Date.now()}`,
-        productName: rfq.productName,
-        modelNo: rfq.modelNo,
-        specification: rfq.specification || '',
-        quantity: rfq.quantity,
-        unit: rfq.unit,
-        targetPrice: rfq.targetPrice,
-        currency: rfq.currency
+        productName: xj.productName,
+        modelNo: xj.modelNo,
+        specification: xj.specification || '',
+        quantity: xj.quantity,
+        unit: xj.unit,
+        targetPrice: xj.targetPrice,
+        currency: xj.currency
       }],
       
       // 单产品字段（兼容）
-      productName: rfq.productName,
-      modelNo: rfq.modelNo,
-      specification: rfq.specification || '',
-      quantity: rfq.quantity,
-      unit: rfq.unit,
-      targetPrice: rfq.targetPrice,
-      currency: rfq.currency,
+      productName: xj.productName,
+      modelNo: xj.modelNo,
+      specification: xj.specification || '',
+      quantity: xj.quantity,
+      unit: xj.unit,
+      targetPrice: xj.targetPrice,
+      currency: xj.currency,
       
-      expectedDate: rfq.expectedDate,
-      quotationDeadline: rfq.quotationDeadline,
+      expectedDate: xj.expectedDate,
+      quotationDeadline: xj.quotationDeadline,
       
       status: 'pending', // 供应商端看到的是pending状态
-      createdDate: rfq.createdDate,
+      createdDate: xj.createdDate,
       sentDate: new Date().toISOString().split('T')[0],
       
-      remarks: rfq.remarks,
+      remarks: xj.remarks,
       
       // 🔥 完整的询价单文档数据
-      documentData: rfq.documentData,
+      documentData: xj.documentData,
       
       // 🔥 买方信息（COSUN采购）
-      buyerContact: rfq.documentData?.buyer?.contactPerson || '采购部',
-      buyerEmail: rfq.documentData?.buyer?.email || 'purchasing@gosundafu.com'
+      buyerContact: xj.documentData?.buyer?.contactPerson || '采购部',
+      buyerEmail: xj.documentData?.buyer?.email || 'purchasing@gosundafu.com'
     };
     
     // 保存到localStorage的supplierXJs
@@ -1850,7 +1850,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       ...existingSupplierXJs.filter((item: any) => {
         const itemNo = String(item?.supplierXjNo || item?.xjNumber || '').trim();
         const sameNo = supplierXjNo !== '' && itemNo === supplierXjNo;
-        const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(rfq.id || '').trim();
+        const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(xj.id || '').trim();
         return !(sameNo || sameId);
       }),
       supplierRFQData,
@@ -1862,25 +1862,25 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     
     // 🔥 触发自定义事件（同标签页内）- 让供应商Portal能立即接收到
     window.dispatchEvent(new CustomEvent('supplierXJsUpdated', {
-      detail: { xjNumber: rfq.supplierXjNo, supplierName: rfq.supplierName }
+      detail: { xjNumber: xj.supplierXjNo, supplierName: xj.supplierName }
     }));
     
     // 🔥 记录提交日志
     console.log('📤 [提交询价单] 已成功提交给供应商');
-    console.log('  - 询价单号:', rfq.supplierXjNo);
-    console.log('  - 供应商:', rfq.supplierName);
-    console.log('  - 供应商邮箱:', rfq.supplierEmail);
-    console.log('  - 供应商代码:', rfq.supplierCode);
-    console.log('  - 产品数量:', rfq.products?.length || 1);
-    console.log('  - 报价截止:', rfq.quotationDeadline);
+    console.log('  - 询价单号:', xj.supplierXjNo);
+    console.log('  - 供应商:', xj.supplierName);
+    console.log('  - 供应商邮箱:', xj.supplierEmail);
+    console.log('  - 供应商代码:', xj.supplierCode);
+    console.log('  - 产品数量:', xj.products?.length || 1);
+    console.log('  - 报价截止:', xj.quotationDeadline);
     console.log('  - 已保存到supplierXJs，总数:', updatedSupplierXJs.length);
     console.log('  - 已触发supplierXJsUpdated事件');
     
     toast.success(
       <div className="space-y-1">
         <p className="font-semibold">✅ 已下推供应商</p>
-        <p className="text-sm">询价单号: {rfq.supplierXjNo}</p>
-        <p className="text-sm">供应商: {rfq.supplierName}</p>
+        <p className="text-sm">询价单号: {xj.supplierXjNo}</p>
+        <p className="text-sm">供应商: {xj.supplierName}</p>
         <p className="text-xs text-slate-600 mt-1">✓ 供应商将在Portal【客户需求池】中收到询价通知</p>
       </div>,
       { duration: 5000 }
