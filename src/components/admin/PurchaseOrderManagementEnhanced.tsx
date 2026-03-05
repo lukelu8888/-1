@@ -1477,7 +1477,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           customerRegion: selectedRequirementForXJ.region, // 🔥 客户来源区域
 
           // 🔥 多产品数组（新字段）
-          products: rfqProducts,
+          products: xjProducts,
 
           // 🔥 主产品信息（兼容旧字段）
           productName: mainProduct.productName,
