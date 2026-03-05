@@ -1333,6 +1333,18 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return Number.isNaN(d.getTime()) ? new Date().toISOString().split('T')[0] : d.toISOString().split('T')[0];
   };
 
+  const formatCompactUtcMinute = (raw?: string) => {
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return raw;
+    const yy = String(d.getUTCFullYear()).slice(-2);
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mi = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${yy}${mm}${dd} UTC ${hh}:${mi}`;
+  };
+
   const buildXJPreviewData = (xj: XJ): XJData => {
     const raw = xj.documentData && typeof xj.documentData === 'object' && !Array.isArray(xj.documentData)
       ? (xj.documentData as any)
@@ -2900,7 +2912,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                         <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-40">供应商</th>
                         <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-32">关联需求</th>
                         <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-16">产品数</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-28">创建日期</th>
+                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-28">发送日期</th>
                         <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-24">截止日期</th>
                         <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-20">状态</th>
                         <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-40">操作</th>
@@ -2940,7 +2952,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                               >
                                 {xj.supplierXjNo}
                               </button>
-                              <div className="text-[12px] text-gray-500">{xj.createdDate}</div>
                             </td>
                             <td className="py-2 px-2 whitespace-nowrap">
                               <div className="text-gray-900">{xj.supplierName}</div>
@@ -2956,7 +2967,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                               </span>
                             </td>
                             <td className="py-2 px-2">
-                              <div className="text-gray-900">{xj.createdDate}</div>
+                              <div className="text-gray-900">{formatCompactUtcMinute((xj as any).sentDate || xj.createdDate)}</div>
                             </td>
                             <td className="py-2 px-2">
                               <div className="text-gray-900">{xj.quotationDeadline}</div>
