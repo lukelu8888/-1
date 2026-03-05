@@ -36,7 +36,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          console.log('💾 从localStorage加载购物车数据，共', parsed.length, '项');
           return parsed;
         } catch (e) {
           console.error('❌ 加载购物车数据失败:', e);
@@ -50,7 +49,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('cosun_cart_items', JSON.stringify(cartItems));
-      console.log('💾 购物车数据已保存到localStorage，共', cartItems.length, '项');
     }
   }, [cartItems]);
 

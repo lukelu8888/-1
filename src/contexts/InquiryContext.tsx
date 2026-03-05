@@ -86,7 +86,6 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        console.log('⚠️ [loadFromSupabase] No session, skip');
         return;
       }
       const userId = session.user.id;
@@ -103,13 +102,9 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       const portalRole = profile?.portal_role || '';
       const isStaff = portalRole === 'admin' || portalRole === 'staff';
 
-      console.log(`📥 [loadFromSupabase] user=${email} rbac=${rbacRole} portal=${portalRole} isStaff=${isStaff}`);
-
       const data = isStaff
         ? await inquiryService.getAll()
         : await inquiryService.getByUserEmail(email);
-
-      console.log(`📥 [loadFromSupabase] loaded: ${Array.isArray(data) ? data.length : 0} inquiries`);
       if (Array.isArray(data)) {
         setInquiries(data as Inquiry[]);
       }
