@@ -1323,6 +1323,75 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setShowRFQPreview(true);
   };
 
+  const toDateText = (value?: string) => {
+    if (!value) return new Date().toISOString().split('T')[0];
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString().split('T')[0] : d.toISOString().split('T')[0];
+  };
+
+  const buildXJPreviewData = (xj: XJ): XJData => {
+    const raw = xj.documentData && typeof xj.documentData === 'object' && !Array.isArray(xj.documentData)
+      ? (xj.documentData as any)
+      : {};
+    const rawBuyer = raw.buyer && typeof raw.buyer === 'object' ? raw.buyer : {};
+    const rawSupplier = raw.supplier && typeof raw.supplier === 'object' ? raw.supplier : {};
+    const rawTerms = raw.terms && typeof raw.terms === 'object' ? raw.terms : {};
+    const sourceProducts = Array.isArray(raw.products)
+      ? raw.products
+      : Array.isArray(xj.products)
+        ? xj.products
+        : [];
+    const dateFallback = toDateText(xj.quotationDeadline || xj.createdDate);
+
+    return {
+      xjNo: String(raw.xjNo || xj.supplierXjNo || xj.xjNumber || ''),
+      xjDate: toDateText(raw.xjDate || xj.createdDate),
+      requiredResponseDate: toDateText(raw.requiredResponseDate || raw.quoteDeadline || raw.deadline || xj.quotationDeadline || dateFallback),
+      requiredDeliveryDate: toDateText(raw.requiredDeliveryDate || xj.quotationDeadline || dateFallback),
+      inquiryDescription: String(raw.inquiryDescription || ''),
+      buyer: {
+        name: String(rawBuyer.name || rawBuyer.companyName || '福建高盛达富建材有限公司'),
+        nameEn: String(rawBuyer.nameEn || rawBuyer.companyNameEn || 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.'),
+        address: String(rawBuyer.address || '福建省福州市仓山区金山街道浦上大道216号'),
+        addressEn: String(rawBuyer.addressEn || 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China'),
+        contactPerson: String(rawBuyer.contactPerson || '采购部'),
+        tel: String(rawBuyer.tel || '+86-591-8888-8888'),
+        email: String(rawBuyer.email || 'purchase@cosun.com'),
+      },
+      supplier: {
+        companyName: String(rawSupplier.companyName || xj.supplierName || ''),
+        supplierCode: String(rawSupplier.supplierCode || xj.supplierCode || ''),
+        contactPerson: String(rawSupplier.contactPerson || ''),
+        tel: String(rawSupplier.tel || ''),
+        email: String(rawSupplier.email || xj.supplierEmail || ''),
+        address: String(rawSupplier.address || ''),
+      },
+      products: sourceProducts.map((p: any, i: number) => ({
+        no: i + 1,
+        description: String(p?.description || p?.productName || p?.name || ''),
+        specification: String(p?.specification || '-'),
+        quantity: Number(p?.quantity || 0),
+        unit: String(p?.unit || '件'),
+        modelNo: p?.modelNo ? String(p.modelNo) : undefined,
+        imageUrl: p?.imageUrl ? String(p.imageUrl) : undefined,
+        targetPrice: p?.targetPrice ? String(p.targetPrice) : undefined,
+      })),
+      terms: {
+        paymentTerms: String(rawTerms.paymentTerms || 'T/T 30% 预付，70% 发货前付清'),
+        deliveryTerms: String(rawTerms.deliveryTerms || 'EXW 工厂交货'),
+        currency: String(rawTerms.currency || 'USD'),
+        deliveryAddress: rawTerms.deliveryAddress ? String(rawTerms.deliveryAddress) : undefined,
+        qualityStandard: rawTerms.qualityStandard ? String(rawTerms.qualityStandard) : undefined,
+        inspectionMethod: rawTerms.inspectionMethod ? String(rawTerms.inspectionMethod) : undefined,
+      },
+    };
+  };
+
+  const openXJPreview = (xj: XJ) => {
+    setCurrentRFQData(buildXJPreviewData(xj));
+    setShowRFQPreview(true);
+  };
+
   // 🔥 导出询价单为PDF
   const handleExportRFQPDF = async (download: boolean = true) => {
     if (!currentXJData || !xjDocRef.current) return;
@@ -2789,50 +2858,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                             </td>
                             <td className="py-2 px-2">
                               <button
-                                onClick={() => {
-                                  const previewData: XJData = xj.documentData || {
-                                    xjNo: xj.supplierXjNo || xj.xjNumber || '',
-                                    xjDate: xj.createdDate || new Date().toISOString().split('T')[0],
-                                    quoteDeadline: xj.quotationDeadline || '',
-                                    requiredResponseDate: xj.quotationDeadline || '',
-                                    requiredDeliveryDate: xj.quotationDeadline || '',
-                                    requirementNo: xj.requirementNo || '',
-                                    buyer: {
-                                      name: '福建高盛达富建材有限公司',
-                                      nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-                                      address: '福建省福州市仓山区金山街道浦上大道216号',
-                                      addressEn: 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China',
-                                      contactPerson: '采购部',
-                                      tel: '+86-591-8888-8888',
-                                      email: 'purchase@cosun.com',
-                                    },
-                                    supplier: {
-                                      companyName: xj.supplierName || '',
-                                      supplierCode: xj.supplierCode || '',
-                                      contactPerson: '',
-                                      tel: '',
-                                      email: xj.supplierEmail || '',
-                                      address: '',
-                                    },
-                                    products: (xj.products || []).map((p: any, i: number) => ({
-                                      no: i + 1,
-                                      description: p.productName || p.name || '',
-                                      specification: p.specification || '-',
-                                      quantity: p.quantity || 0,
-                                      unit: p.unit || '件',
-                                      modelNo: p.modelNo,
-                                      imageUrl: p.imageUrl,
-                                      targetPrice: p.targetPrice,
-                                    })),
-                                    terms: {
-                                      paymentTerms: 'T/T 30% 预付，70% 发货前付清',
-                                      deliveryTerms: 'EXW 工厂交货',
-                                      currency: 'USD',
-                                    },
-                                  };
-                                  setCurrentRFQData(previewData);
-                                  setShowRFQPreview(true);
-                                }}
+                                type="button"
+                                onClick={() => openXJPreview(xj)}
                                 className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
                               >
                                 {xj.supplierXjNo}
@@ -2877,52 +2904,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                               <div className="flex gap-1 justify-center">
                                 {/* 查看按钮：始终可用 */}
                                 <Button
+                                  type="button"
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => {
-                                    const previewData: XJData = xj.documentData || {
-                                      xjNo: xj.supplierXjNo || xj.xjNumber || '',
-                                      xjDate: xj.createdDate || new Date().toISOString().split('T')[0],
-                                      quoteDeadline: xj.quotationDeadline || '',
-                                      requiredResponseDate: xj.quotationDeadline || '',
-                                      requiredDeliveryDate: xj.quotationDeadline || '',
-                                      requirementNo: xj.requirementNo || '',
-                                      buyer: {
-                                        name: '福建高盛达富建材有限公司',
-                                        nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-                                        address: '福建省福州市仓山区金山街道浦上大道216号',
-                                        addressEn: 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China',
-                                        contactPerson: '采购部',
-                                        tel: '+86-591-8888-8888',
-                                        email: 'purchase@cosun.com',
-                                      },
-                                      supplier: {
-                                        companyName: xj.supplierName || '',
-                                        supplierCode: xj.supplierCode || '',
-                                        contactPerson: '',
-                                        tel: '',
-                                        email: xj.supplierEmail || '',
-                                        address: '',
-                                      },
-                                      products: (xj.products || []).map((p: any, i: number) => ({
-                                        no: i + 1,
-                                        description: p.productName || p.name || '',
-                                        specification: p.specification || '-',
-                                        quantity: p.quantity || 0,
-                                        unit: p.unit || '件',
-                                        modelNo: p.modelNo,
-                                        imageUrl: p.imageUrl,
-                                        targetPrice: p.targetPrice,
-                                      })),
-                                      terms: {
-                                        paymentTerms: 'T/T 30% 预付，70% 发货前付清',
-                                        deliveryTerms: 'EXW 工厂交货',
-                                        currency: 'USD',
-                                      },
-                                    };
-                                    setCurrentRFQData(previewData);
-                                    setShowRFQPreview(true);
-                                  }}
+                                  onClick={() => openXJPreview(xj)}
                                   className="h-6 text-[12px] px-2 border-blue-300 text-blue-600 hover:bg-blue-50"
                                 >
                                   <Eye className="w-3 h-3 mr-1" />
