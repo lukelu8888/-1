@@ -276,9 +276,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   
   // 🔥 监听客户确认订单，同步更新销售合同状态
   useEffect(() => {
-    console.log('🔍 [SalesContractSync-Customer] 订单状态变化，检查客户是否确认合同...');
-    console.log('  - 订单数量:', allOrders.length);
-    console.log('  - 销售合同数量:', contracts.length);
     
     let hasChanges = false;
     
@@ -358,13 +355,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   
   // 🔥 监听审批状态变化，同步更新销售合同状态
   useEffect(() => {
-    console.log('🔍 [SalesContractSync] 审批状态变化，检查是否需要同步...');
-    console.log('  - 审批请求数量:', approvalRequests.length);
-    console.log('  - 销售合同数量:', contracts.length);
-    
     // 遍历所有销售合同类型的审批请求
     const salesContractApprovals = approvalRequests.filter(req => req.type === 'sales_contract');
-    console.log('  - 销售合同审批请求:', salesContractApprovals.length);
     
     if (salesContractApprovals.length === 0) {
       console.log('  - 没有销售合同审批请求，无需同步');
