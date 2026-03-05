@@ -261,7 +261,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
   };
   
-  // 🔥 供应商报价数据 - 从localStorage读取
+  // 🔥 供应商报价数据 - Supabase-first
   const [supplierQuotations, setSupplierQuotations] = useState<any[]>([]);
   const [selectedSupplierQuotation, setSelectedSupplierQuotation] = useState<any>(null);
   const [showSupplierQuotationDialog, setShowSupplierQuotationDialog] = useState(false);
@@ -269,15 +269,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [acceptedQuotationNo, setAcceptedQuotationNo] = useState<string>('');
   const DELETED_SUPPLIER_QUOTATIONS_KEY = 'deleted_supplier_quotations';
   const [salesContractsLite, setSalesContractsLite] = useState<any[]>([]);
-  const supplierQuotationSnapshot = useMemo(() => {
-    if (supplierQuotations.length > 0) return supplierQuotations;
-    try {
-      const stored = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
-      return Array.isArray(stored) ? stored : [];
-    } catch {
-      return [];
-    }
-  }, [supplierQuotations]);
+  const supplierQuotationSnapshot = useMemo(() => supplierQuotations, [supplierQuotations]);
 
   useEffect(() => {
     let cancelled = false;
@@ -286,20 +278,13 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       try {
         const rows = await contractService.getAll();
         if (!cancelled) setSalesContractsLite(Array.isArray(rows) ? rows : []);
-      } catch {
-        if (cancelled) return;
-        try {
-          const local = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-          if (Array.isArray(local)) setSalesContractsLite(local);
-        } catch {
-          setSalesContractsLite([]);
-        }
+      } catch (e: any) {
+        console.warn('⚠️ [PurchaseOrderMgmt] 加载销售合同失败:', e?.message);
+        if (!cancelled) setSalesContractsLite([]);
       }
     };
     void loadSalesContractsLite();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   const getDeletedSupplierQuotationIds = React.useCallback((): Set<string> => {
@@ -323,55 +308,33 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     });
   }, [getDeletedSupplierQuotationIds]);
   
-  // 🔥 加载供应商报价数据：优先从后端接口拉取（采购员可见供应商提交的 BJ）
+  // 🔥 加载供应商报价数据 — Supabase-first: 纯从 supplier_quotations 表读取
   const loadSupplierQuotationsFromApi = React.useCallback(async () => {
     const deletedIds = getDeletedSupplierQuotationIds();
-
-    // Always read localStorage first — supplier writes here when they submit a quotation
-    const stored = localStorage.getItem('supplierQuotations');
-    const localQuotations: any[] = stored ? (() => { try { return JSON.parse(stored); } catch { return []; } })() : [];
-
-    // Local submitted/accepted/rejected quotations (non-draft) are always visible to admin
-    const localVisible = localQuotations.filter(
-      (q: any) => q.status !== 'draft' && !deletedIds.has(String(q.id))
-    );
-
     try {
       const rows = await supplierQuotationService.getAll();
       const apiList: any[] = Array.isArray(rows) ? rows : [];
-
-      const apiIds = new Set(apiList.map((q: any) => String(q.id)));
-      const localOnly = localVisible.filter((q: any) => !apiIds.has(String(q.id)));
-      const merged = filterNotDeleted(
+      const visible = filterNotDeleted(
         'quotation',
-        [...apiList.filter((q: any) => !deletedIds.has(String(q.id))), ...localOnly],
+        apiList.filter((q: any) => !deletedIds.has(String(q.id))),
         (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.xjNumber || '')],
       );
-      setSupplierQuotations(merged);
-    } catch (e) {
-      // API unavailable: show local submitted quotations as fallback
-      const visibleQuotations = filterNotDeleted(
-        'quotation',
-        localVisible,
-        (q: any) => [String(q?.id || ''), String(q?.quotationNo || ''), String(q?.xjNumber || '')],
-      );
-      setSupplierQuotations(visibleQuotations);
+      setSupplierQuotations(visible);
+    } catch (e: any) {
+      console.warn('⚠️ [loadSupplierQuotations] Supabase 读取失败:', e?.message);
+      setSupplierQuotations([]);
     }
   }, [getDeletedSupplierQuotationIds]);
 
-  // Apply status change locally (localStorage + state) for quotations that only exist locally (non bj- ids)
+  // Apply status change to Supabase + local state
   const applyLocalQuotationStatus = React.useCallback((id: string, status: 'accepted' | 'rejected') => {
     setSupplierQuotations((prev) =>
       prev.map((q: any) => (q.id === id ? { ...q, status } : q)),
     );
-    try {
-      const stored = localStorage.getItem('supplierQuotations');
-      if (stored) {
-        const all = JSON.parse(stored);
-        const updated = all.map((q: any) => (q.id === id ? { ...q, status } : q));
-        localStorage.setItem('supplierQuotations', JSON.stringify(updated));
-      }
-    } catch {}
+    // Supabase-first: 同步状态到后端
+    supplierQuotationService.upsert({ id, status }).catch((e: any) =>
+      console.warn('⚠️ [applyLocalQuotationStatus] Supabase 同步失败:', e?.message)
+    );
   }, []);
 
   const handleAcceptSupplierQuotation = React.useCallback(async () => {
@@ -1752,19 +1715,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setEditRFQData(null);
   };
 
-  // 🔥 提交询价单给供应商 - 从草稿状态提交
+  // 🔥 提交询价单给供应商 - Supabase-first: 状态改为 pending，供应商通过 XJContext getByEmail 可见
   const handleSubmitXJToSupplier = async (xj: XJ) => {
-    // 🔥 检查是否已经提交过（以采购询价单号优先，避免id误判）
-    const existingSupplierXJs = JSON.parse(localStorage.getItem('supplierXJs') || '[]');
-    const supplierXjNo = String(xj.supplierXjNo || '').trim();
-    const alreadySubmitted = existingSupplierXJs.some((item: any) => {
-      const itemNo = String(item?.supplierXjNo || item?.xjNumber || '').trim();
-      const sameNo = !!supplierXjNo && itemNo !== '' && itemNo === supplierXjNo;
-      const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(xj.id || '').trim();
-      return sameNo || sameId;
-    });
-    
-    if (alreadySubmitted) {
+    // 检查是否已经提交过（以 Supabase 数据为准）
+    if (xj.status === 'pending' || xj.status === 'sent') {
       toast.error(
         <div className="space-y-1">
           <p className="font-semibold">⚠️ 已下推供应商</p>
@@ -1774,108 +1728,22 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       return;
     }
 
-    // ✅ 同步到后端：将 XJ 从 draft 提交为 pending（供应商端可见）
-    // 后端失败时降级走本地 localStorage 流程，不阻断操作
     try {
-      await xjService.upsert({ id: xj.id, status: 'pending' });
+      // Supabase-first: 将状态改为 pending，供应商端通过 supplier_xjs 表查询可见
+      await xjService.upsert({ ...xj, status: 'pending', sentDate: new Date().toISOString().split('T')[0] });
     } catch (err: any) {
-      console.warn('⚠️ [下推供应商] Supabase 同步失败，降级为本地模式:', err?.message);
+      toast.error('下推失败：' + (err?.message || '请稍后重试'));
+      return;
     }
-    
-    // 🔥 将状态从draft改为sent
-    const updatedXJ = {
-      ...xj,
-      status: 'sent' as any, // 🔥 已发送给供应商
-      sentDate: new Date().toISOString().split('T')[0]
-    };
-    
-    // 🔥 更新XJ Context中的状态
+
+    // 更新 XJ Context 中的本地状态
     updateRFQ(xj.id, {
       status: 'sent' as any,
       sentDate: new Date().toISOString().split('T')[0]
     });
-    
-    // 🔥 将询价单推送到供应商Portal（保存到supplierXJs）
-    const supplierRFQData = {
-      id: xj.id,
-      xjNumber: xj.supplierXjNo || '', // XJ-xxx
-      supplierXjNo: xj.supplierXjNo,
-      supplierCode: xj.supplierCode,
-      supplierName: xj.supplierName,
-      supplierEmail: xj.supplierEmail,
-      
-      // 关联COSUN采购需求
-      sourceQRNumber: xj.requirementNo, // QR-xxx
-      
-      // 产品信息（支持多产品）
-      products: xj.products || [{
-        id: `product_${Date.now()}`,
-        productName: xj.productName,
-        modelNo: xj.modelNo,
-        specification: xj.specification || '',
-        quantity: xj.quantity,
-        unit: xj.unit,
-        targetPrice: xj.targetPrice,
-        currency: xj.currency
-      }],
-      
-      // 单产品字段（兼容）
-      productName: xj.productName,
-      modelNo: xj.modelNo,
-      specification: xj.specification || '',
-      quantity: xj.quantity,
-      unit: xj.unit,
-      targetPrice: xj.targetPrice,
-      currency: xj.currency,
-      
-      expectedDate: xj.expectedDate,
-      quotationDeadline: xj.quotationDeadline,
-      
-      status: 'pending', // 供应商端看到的是pending状态
-      createdDate: xj.createdDate,
-      sentDate: new Date().toISOString().split('T')[0],
-      
-      remarks: xj.remarks,
-      
-      // 🔥 完整的询价单文档数据
-      documentData: xj.documentData,
-      
-      // 🔥 买方信息（COSUN采购）
-      buyerContact: xj.documentData?.buyer?.contactPerson || '采购部',
-      buyerEmail: xj.documentData?.buyer?.email || 'purchasing@gosundafu.com'
-    };
-    
-    // 保存到localStorage的supplierXJs
-    const updatedSupplierXJs = [
-      ...existingSupplierXJs.filter((item: any) => {
-        const itemNo = String(item?.supplierXjNo || item?.xjNumber || '').trim();
-        const sameNo = supplierXjNo !== '' && itemNo === supplierXjNo;
-        const sameId = String(item?.id || '').trim() !== '' && String(item?.id || '').trim() === String(xj.id || '').trim();
-        return !(sameNo || sameId);
-      }),
-      supplierRFQData,
-    ];
-    localStorage.setItem('supplierXJs', JSON.stringify(updatedSupplierXJs));
-    
-    // 🔥 触发storage事件（跨标签页）
-    window.dispatchEvent(new Event('storage'));
-    
-    // 🔥 触发自定义事件（同标签页内）- 让供应商Portal能立即接收到
-    window.dispatchEvent(new CustomEvent('supplierXJsUpdated', {
-      detail: { xjNumber: xj.supplierXjNo, supplierName: xj.supplierName }
-    }));
-    
-    // 🔥 记录提交日志
-    console.log('📤 [提交询价单] 已成功提交给供应商');
-    console.log('  - 询价单号:', xj.supplierXjNo);
-    console.log('  - 供应商:', xj.supplierName);
-    console.log('  - 供应商邮箱:', xj.supplierEmail);
-    console.log('  - 供应商代码:', xj.supplierCode);
-    console.log('  - 产品数量:', xj.products?.length || 1);
-    console.log('  - 报价截止:', xj.quotationDeadline);
-    console.log('  - 已保存到supplierXJs，总数:', updatedSupplierXJs.length);
-    console.log('  - 已触发supplierXJsUpdated事件');
-    
+
+    console.log('📤 [提交询价单] Supabase 写入成功:', xj.supplierXjNo, '→', xj.supplierName);
+
     toast.success(
       <div className="space-y-1">
         <p className="font-semibold">✅ 已下推供应商</p>

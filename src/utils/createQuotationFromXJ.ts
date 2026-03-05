@@ -1,31 +1,30 @@
 /**
- * 从采购询价(XJ)创建供应商报价单
+ * 从采购询价(XJ)创建供应商报价单 — Supabase-first
  */
-import { generateBJNumber } from './xjNumberGenerator'; // 🔥 导入BJ编号生成器
+import { nextBJNumber } from './xjNumberGenerator';
+import { supplierQuotationService } from '../lib/supabaseService';
 
-export function createQuotationFromXJ(
+export async function createQuotationFromXJ(
   rfq: any,
-  supplierUser: any, // 🔥 改为接收完整的用户对象
+  supplierUser: any,
   options: {
     unitPrice?: number;
     leadTime?: number;
     moq?: number;
     paymentTerms?: string;
     deliveryTerms?: string;
-    supplierRemarks?: string; // 🔥 供应商备注
+    supplierRemarks?: string;
     status?: 'draft' | 'submitted';
   } = {}
-): SupplierQuotation {
-  // 🔥 生成BJ报价单号（从0001开始递增）
-  const quotationNo = generateBJNumber();
+): Promise<SupplierQuotation> {
+  // 生成BJ报价单号 — Supabase RPC
+  const quotationNo = await nextBJNumber();
 
-  // 计算有效期（默认30天）
   const quotationDate = new Date().toISOString().split('T')[0];
   const validUntilDate = new Date();
   validUntilDate.setDate(validUntilDate.getDate() + 30);
   const validUntil = validUntilDate.toISOString().split('T')[0];
 
-  // 🔥 提取供应商信息（优先使用完整字段，回退到简化字段）
   const supplierEmail = supplierUser?.email || 'supplier@example.com';
   const supplierName = supplierUser?.name || supplierUser?.contact || supplierUser?.username || '供应商';
   const supplierCompany = supplierUser?.company || supplierUser?.name || '供应商公司';
@@ -34,12 +33,9 @@ export function createQuotationFromXJ(
   const supplierPhone = supplierUser?.phone || supplierUser?.tel || '';
   const supplierCode = supplierUser?.code || supplierUser?.companyId || supplierEmail;
 
-  // 🔥 创建产品项 - 支持多产品
   let items: SupplierQuotationItem[] = [];
-  
-  // 优先使用 products 数组（多产品）
+
   if (rfq.products && Array.isArray(rfq.products) && rfq.products.length > 0) {
-    console.log(`🔍 从 XJ.products 提取 ${rfq.products.length} 个产品`);
     items = rfq.products.map((product: any, index: number) => ({
       id: `item-${Date.now()}-${index}`,
       productName: product.productName || '产品名称',
@@ -48,15 +44,13 @@ export function createQuotationFromXJ(
       quantity: product.quantity || 0,
       unit: product.unit || 'pcs',
       unitPrice: options.unitPrice || 0,
-      currency: 'CNY', // 🔥 默认人民币
+      currency: 'CNY',
       amount: (options.unitPrice || 0) * (product.quantity || 0),
       leadTime: options.leadTime || 30,
       moq: options.moq || 1000,
       remarks: ''
     }));
   } else {
-    // 兼容旧版单产品字段
-    console.log('🔍 使用旧版单产品字段创建产品项');
     items = [{
       id: `item-${Date.now()}`,
       productName: rfq.productName || '产品名称',
@@ -65,7 +59,7 @@ export function createQuotationFromXJ(
       quantity: rfq.quantity || 0,
       unit: rfq.unit || 'pcs',
       unitPrice: options.unitPrice || 0,
-      currency: 'CNY', // 🔥 默认人民币
+      currency: 'CNY',
       amount: (options.unitPrice || 0) * (rfq.quantity || 0),
       leadTime: options.leadTime || 30,
       moq: options.moq || 1000,
@@ -78,21 +72,21 @@ export function createQuotationFromXJ(
   const quotation: SupplierQuotation = {
     id: `quotation-${Date.now()}`,
     quotationNo,
-    sourceXJ: rfq.supplierXjNo || rfq.xjNumber, // 关联XJ号
-    sourceQR: rfq.requirementNo, // 关联QR号
+    sourceXJ: rfq.supplierXjNo || rfq.xjNumber,
+    sourceQR: rfq.requirementNo,
     sourceRFQId: rfq.id,
-    customerName: 'COSUN采购', // 买方是COSUN
+    customerName: 'COSUN采购',
     customerCompany: '福建高盛达富建材有限公司',
     customerContact: rfq.buyerContact,
     customerEmail: rfq.buyerEmail,
-    supplierCode: supplierCode,
-    supplierName: supplierName,
-    supplierCompany: supplierCompany,
-    supplierEmail: supplierEmail,
-    supplierPhone: supplierPhone,
+    supplierCode,
+    supplierName,
+    supplierCompany,
+    supplierEmail,
+    supplierPhone,
     quotationDate,
     validUntil,
-    currency: 'CNY', // 🔥 默认人民币
+    currency: 'CNY',
     totalAmount,
     paymentTerms: options.paymentTerms || 'T/T 30天',
     deliveryTerms: options.deliveryTerms || 'FOB 厦门',
@@ -105,44 +99,30 @@ export function createQuotationFromXJ(
     version: 1
   };
 
-  // 🔥 提取原始询价说明（从XJ的documentData中获取）
   const originalInquiryDescription = rfq.documentData?.inquiryDescription || '';
-  
-  // 🔥 从完整的询价说明中提取【特殊要求】/【客户要求】部分
   let customerRequirements = '';
   if (originalInquiryDescription) {
-    // 尝试匹配【特殊要求】或【客户要求】部分
     const specialReqMatch = originalInquiryDescription.match(/【特殊要求】\s*\n([\s\S]*?)(?=\n\n【|$)/);
     const customerReqMatch = originalInquiryDescription.match(/【客户要求】\s*\n([\s\S]*?)(?=\n\n【|$)/);
-    
-    if (specialReqMatch) {
-      customerRequirements = specialReqMatch[1].trim();
-    } else if (customerReqMatch) {
-      customerRequirements = customerReqMatch[1].trim();
-    }
-    // 如果没有找到特定标记，则使用完整内容
-    if (!customerRequirements) {
-      customerRequirements = originalInquiryDescription;
-    }
+    if (specialReqMatch) customerRequirements = specialReqMatch[1].trim();
+    else if (customerReqMatch) customerRequirements = customerReqMatch[1].trim();
+    if (!customerRequirements) customerRequirements = originalInquiryDescription;
   }
 
-  // 构建文档数据
   quotation.documentData = {
     quotationNo,
     quotationDate,
     validUntil,
     rfqReference: rfq.supplierXjNo || rfq.xjNumber,
-    inquiryReference: customerRequirements, // 🔥 只保存客户要求部分
-    
+    inquiryReference: customerRequirements,
     supplier: {
       companyName: supplierCompany,
       address: supplierAddress,
       tel: supplierPhone,
       email: supplierEmail,
       contactPerson: supplierName,
-      supplierCode: supplierCode
+      supplierCode
     },
-    
     buyer: {
       name: '福建高盛达富建材有限公司',
       nameEn: 'Fujian Gaoshengdafu Building Materials Co., Ltd.',
@@ -152,7 +132,6 @@ export function createQuotationFromXJ(
       email: 'purchase@cosun.com',
       contactPerson: 'COSUN采购'
     },
-    
     products: items.map((item, index) => ({
       no: index + 1,
       modelNo: item.modelNo,
@@ -160,27 +139,24 @@ export function createQuotationFromXJ(
       specification: item.specification,
       quantity: item.quantity,
       unit: item.unit,
-      // Store null (not 0) so the document renderer shows "—" instead of "0.00"
-      // until the supplier completes pricing in the quotation editor.
       unitPrice: item.unitPrice > 0 ? item.unitPrice : null,
       currency: item.currency || 'CNY',
       remarks: item.remarks
     })),
-    
     terms: {
       paymentTerms: quotation.paymentTerms,
       deliveryTerms: quotation.deliveryTerms,
       deliveryTime: '收到订单后30天内',
-      deliveryAddress: '福建省福州市仓山区金山工业区', // 🔥 添加交货地址
+      deliveryAddress: '福建省福州市仓山区金山工业区',
       moq: `${options.moq || 1000} ${rfq.unit || 'pcs'}`,
-      qualityStandard: '符合国家标准', // 🔥 添加质量标准
-      warranty: '12个月', // 🔥 添加质保期
+      qualityStandard: '符合国家标准',
+      warranty: '12个月',
       packaging: quotation.packingTerms,
-      shippingMarks: '中性唛头', // 🔥 添加唛头
-      remarks: originalInquiryDescription ? `【原始询价说明】\n${originalInquiryDescription}\n\n${quotation.generalRemarks || ''}`.trim() : quotation.generalRemarks // 🔥 包含原始询价说明
+      shippingMarks: '中性唛头',
+      remarks: originalInquiryDescription
+        ? `【原始询价说明】\n${originalInquiryDescription}\n\n${quotation.generalRemarks || ''}`.trim()
+        : quotation.generalRemarks
     },
-    
-    // 🔥 供应商备注
     supplierRemarks: options.supplierRemarks ? {
       content: options.supplierRemarks,
       remarkDate: quotationDate,
@@ -192,49 +168,27 @@ export function createQuotationFromXJ(
 }
 
 /**
- * 保存报价单到localStorage
+ * 保存报价单到 Supabase — Supabase-first
  */
-export function saveSupplierQuotation(quotation: SupplierQuotation): void {
-  if (typeof window === 'undefined') return;
-
-  const saved = localStorage.getItem('supplierQuotations');
-  let quotations: SupplierQuotation[] = [];
-  
-  if (saved) {
-    try {
-      quotations = JSON.parse(saved);
-    } catch (e) {
-      console.error('Failed to parse supplier quotations:', e);
-    }
+export async function saveSupplierQuotation(quotation: SupplierQuotation): Promise<void> {
+  try {
+    await supplierQuotationService.upsert(quotation as any);
+    console.log('✅ 报价单已保存到 Supabase:', quotation.quotationNo);
+  } catch (e: any) {
+    console.error('❌ [saveSupplierQuotation] Supabase 写入失败:', e?.message);
+    throw e;
   }
-
-  // 检查是否已存在
-  const existingIndex = quotations.findIndex(q => q.quotationNo === quotation.quotationNo);
-  if (existingIndex >= 0) {
-    // 更新版本
-    quotation.version = quotations[existingIndex].version + 1;
-    quotations[existingIndex] = quotation;
-  } else {
-    quotations.push(quotation);
-  }
-
-  localStorage.setItem('supplierQuotations', JSON.stringify(quotations));
-  console.log('✅ 报价单已保存:', quotation.quotationNo);
 }
 
 /**
- * 获取所有报价单
+ * 获取所有报价单 — Supabase-first
  */
-export function getAllSupplierQuotations(): SupplierQuotation[] {
-  if (typeof window === 'undefined') return [];
-
-  const saved = localStorage.getItem('supplierQuotations');
-  if (!saved) return [];
-
+export async function getAllSupplierQuotations(): Promise<SupplierQuotation[]> {
   try {
-    return JSON.parse(saved);
-  } catch (e) {
-    console.error('Failed to parse supplier quotations:', e);
+    const rows = await supplierQuotationService.getAll();
+    return (Array.isArray(rows) ? rows : []) as SupplierQuotation[];
+  } catch (e: any) {
+    console.error('❌ [getAllSupplierQuotations] Supabase 读取失败:', e?.message);
     return [];
   }
 }

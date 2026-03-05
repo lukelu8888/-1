@@ -34,7 +34,7 @@ export default function QuickQuotationCreator() {
     }
   }, []);
 
-  const handleCreateQuotation = () => {
+  const handleCreateQuotation = async () => {
     if (!user?.email) {
       toast.error('请先登录');
       return;
@@ -62,12 +62,10 @@ export default function QuickQuotationCreator() {
     }
 
     try {
-      // 创建报价单
-      const quotation = createQuotationFromXJ(
+      // 创建报价单 — Supabase-first
+      const quotation = await createQuotationFromXJ(
         rfq,
-        user.email,
-        user.name || user.email,
-        user.company || '供应商公司',
+        { email: user.email, name: user.name || user.email, company: user.company || '供应商公司' },
         {
           unitPrice: parseFloat(unitPrice),
           leadTime: parseInt(leadTime),
@@ -78,8 +76,7 @@ export default function QuickQuotationCreator() {
         }
       );
 
-      // 保存到localStorage
-      saveSupplierQuotation(quotation);
+      await saveSupplierQuotation(quotation);
 
       // 更新采购询价状态
       if (status === 'submitted') {

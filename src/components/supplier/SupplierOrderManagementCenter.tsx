@@ -27,6 +27,7 @@ import XJDocumentViewer from './XJDocumentViewer';
 import SupplierQuotationDocumentViewer from './SupplierQuotationDocumentViewer';
 import SupplierQuotationEditor from './SupplierQuotationEditor';
 import { createQuotationFromXJ, saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
+import { supplierQuotationService } from '../../lib/supabaseService';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
 
 // 🔥 供应商报价单接口（从localStorage读取）
@@ -112,38 +113,24 @@ export default function SupplierOrderManagementCenter() {
     };
   }, [user]);
   
-  // 🔥 从localStorage读取供应商报价单
-  const [supplierQuotations, setSupplierQuotations] = useState<SupplierQuotation[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('supplierQuotations');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          console.error('Failed to parse supplier quotations:', e);
-          return [];
-        }
-      }
-    }
-    return [];
-  });
-  
-  // 🔥 定时刷新供应商报价数据（用于同步Admin端的接受/拒绝状态）
+  // 🔥 供应商报价单 — Supabase-first
+  const [supplierQuotations, setSupplierQuotations] = useState<SupplierQuotation[]>([]);
+
+  // 从 Supabase 加载当前供应商的报价单，并定期刷新同步状态
   React.useEffect(() => {
-    const interval = setInterval(() => {
-      const saved = localStorage.getItem('supplierQuotations');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          setSupplierQuotations(parsed);
-        } catch (e) {
-          console.error('Failed to parse supplier quotations:', e);
-        }
+    if (!user?.email) return;
+    const load = async () => {
+      try {
+        const rows = await supplierQuotationService.getBySupplierEmail(user.email);
+        setSupplierQuotations(Array.isArray(rows) ? (rows as SupplierQuotation[]) : []);
+      } catch (e: any) {
+        console.warn('⚠️ [SupplierOrderMgmt] 加载报价单失败:', e?.message);
       }
-    }, 3000);
-    
+    };
+    void load();
+    const interval = setInterval(load, 10000); // 每10秒刷新
     return () => clearInterval(interval);
-  }, []);
+  }, [user?.email]);
   
   // Tab状态
   const [activeTab, setActiveTab] = useState<'overview' | 'rfq' | 'quotation' | 'active-orders' | 'history'>('overview');
@@ -813,7 +800,7 @@ export default function SupplierOrderManagementCenter() {
                                 size="sm"
                                 variant="outline"
                                 className="h-7 px-2 text-xs border-orange-300 text-orange-700 hover:bg-orange-50"
-                                onClick={() => {
+                                onClick={async () => {
                             // 🔥 下推报价 - 自动创建报价单并跳转到我的报价
                             try {
                               // 🔥 防止重复创建：检查是否已存在对应的报价单
@@ -860,11 +847,11 @@ export default function SupplierOrderManagementCenter() {
                                 phone: supplierInfo?.phone
                               });
 
-                              const quotation = createQuotationFromXJ(
+                              const quotation = await createQuotationFromXJ(
                                 rfq,
-                                supplierInfo, // 🔥 传递完整的供应商信息对象
+                                supplierInfo,
                                 {
-                                  unitPrice: 0, // 待填写
+                                  unitPrice: 0,
                                   leadTime: 30,
                                   moq: 1000,
                                   paymentTerms: 'T/T 30天',
@@ -873,15 +860,13 @@ export default function SupplierOrderManagementCenter() {
                                 }
                               );
 
-                              // 🔥 验证产品数量
                               console.log('✅ 报价单创建成功:', {
                                 quotationNo: quotation.quotationNo,
                                 itemsCount: quotation.items?.length || 0,
-                                items: quotation.items
                               });
 
-                              // 保存到localStorage
-                              saveSupplierQuotation(quotation);
+                              // Supabase-first: 保存到 supplier_quotations 表
+                              await saveSupplierQuotation(quotation);
                               
                               // 更新本地状态
                               const updatedQuotations = [...supplierQuotations, quotation];
@@ -982,11 +967,12 @@ export default function SupplierOrderManagementCenter() {
                 size="sm" 
                 variant="destructive" 
                 className="h-9 gap-2"
-                onClick={() => {
+                onClick={async () => {
                   if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个报价单吗？\n\n⚠️ 此操作不可恢复！`)) {
                     const updatedQuotations = supplierQuotations.filter(q => !selectedIds.includes(q.id));
                     setSupplierQuotations(updatedQuotations);
-                    localStorage.setItem('supplierQuotations', JSON.stringify(updatedQuotations));
+                    // Supabase-first: 软删除
+                    await Promise.all(selectedIds.map(id => supplierQuotationService.delete(id).catch(() => null)));
                     
                     toast.success(
                       <div className="space-y-1">
@@ -1236,9 +1222,9 @@ export default function SupplierOrderManagementCenter() {
                             size="sm"
                             variant="outline"
                             className="h-8 px-3 text-xs font-medium border-orange-200 text-orange-600 hover:bg-orange-50 gap-1.5"
-                            onClick={() => {
+                            onClick={async () => {
                               const reverted = { ...quotation, status: 'draft' as const };
-                              saveSupplierQuotation(reverted);
+                              await saveSupplierQuotation(reverted);
                               const updated = supplierQuotations.map(q =>
                                 q.id === quotation.id ? reverted : q
                               );
@@ -1269,7 +1255,7 @@ export default function SupplierOrderManagementCenter() {
                               size="sm"
                               className="h-8 px-3 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                               disabled={!isValid}
-                              onClick={() => {
+                              onClick={async () => {
                                 if (!isValid) {
                                   toast.error(
                                     <div className="space-y-1">
@@ -1292,12 +1278,9 @@ export default function SupplierOrderManagementCenter() {
                                   status: 'submitted' as const,
                                   submittedDate: new Date().toISOString().split('T')[0],
                                 };
-                                const storedQuotations = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
-                                const updatedQuotations = storedQuotations.map((q: SupplierQuotation) =>
-                                  q.id === quotation.id ? updatedQuotation : q
-                                );
-                                localStorage.setItem('supplierQuotations', JSON.stringify(updatedQuotations));
-                                setSupplierQuotations(updatedQuotations);
+                                // Supabase-first: 更新 supplier_quotations 表
+                                await saveSupplierQuotation(updatedQuotation);
+                                setSupplierQuotations(prev => prev.map(q => q.id === quotation.id ? updatedQuotation : q));
                                 toast.success(
                                   <div className="space-y-1">
                                     <p className="font-semibold">✅ 报价单已提交给COSUN采购</p>
@@ -1786,18 +1769,15 @@ export default function SupplierOrderManagementCenter() {
             setQuotationDocumentViewerOpen(false);
             setQuotationEditorOpen(true);
           }}
-          onSubmit={() => {
+          onSubmit={async () => {
             const updatedQuotation = {
               ...selectedQuotation,
               status: 'submitted' as const,
               submittedDate: new Date().toISOString().split('T')[0],
             };
-            const storedQuotations = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
-            const updatedQuotations = storedQuotations.map((q: SupplierQuotation) =>
-              q.id === selectedQuotation.id ? updatedQuotation : q,
-            );
-            localStorage.setItem('supplierQuotations', JSON.stringify(updatedQuotations));
-            setSupplierQuotations(updatedQuotations);
+            // Supabase-first
+            await saveSupplierQuotation(updatedQuotation);
+            setSupplierQuotations(prev => prev.map(q => q.id === selectedQuotation.id ? updatedQuotation : q));
             setQuotationDocumentViewerOpen(false);
             toast.success(
               <div className="space-y-1">
@@ -1850,9 +1830,9 @@ export default function SupplierOrderManagementCenter() {
                 {selectedQuotation && (
                   <SupplierQuotationEditor
                     quotation={selectedQuotation}
-                    onSave={(updatedQuotation) => {
-                      // 1. Persist to localStorage
-                      saveSupplierQuotation(updatedQuotation);
+                    onSave={async (updatedQuotation) => {
+                      // 1. Supabase-first: 持久化到 supplier_quotations 表
+                      await saveSupplierQuotation(updatedQuotation);
 
                       // 2. Sync unitPrice + totalAmount back into the table row
                       const updatedQuotations = supplierQuotations.map(q =>
