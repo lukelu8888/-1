@@ -234,6 +234,12 @@ export default function SupplierOrderManagementCenter() {
     setSelectedIds([]);
   }, [hiddenXJIds, persistHiddenXJIds]);
 
+  const clearHiddenXJIdsForCurrentSupplier = React.useCallback(() => {
+    const next = new Set<string>();
+    setHiddenXJIds(next);
+    persistHiddenXJIds(next);
+  }, [persistHiddenXJIds]);
+
   // 统一行内产品展示：只显示代表产品 + 总产品数 + 总数量
   const summarizeProducts = React.useCallback((products?: any[], fallback?: any): ProductSummary => {
     const list = Array.isArray(products) ? products.filter(Boolean) : [];
@@ -332,6 +338,19 @@ export default function SupplierOrderManagementCenter() {
     
     return { pending, quoted, accepted };
   }, [myXJs, user?.email]);
+
+  // 自愈：如果“客户需求”统计有数据但列表被隐藏规则全部挡住，则自动恢复显示
+  React.useEffect(() => {
+    if (activeTab !== 'xj') return;
+    if (!hiddenXJIds.size) return;
+    const pendingCount = categorizedRFQs.pending.length;
+    if (pendingCount === 0) return;
+    const visibleCount = categorizedRFQs.pending.filter((xj) => !hiddenXJIds.has(String(xj.id))).length;
+    if (visibleCount === 0) {
+      clearHiddenXJIdsForCurrentSupplier();
+      toast.info('检测到客户需求被全部隐藏，已自动恢复显示');
+    }
+  }, [activeTab, hiddenXJIds, categorizedRFQs.pending, clearHiddenXJIdsForCurrentSupplier]);
 
   // 🔥 获取当前供应商的所有报价单
   const myQuotations = useMemo(() => {
