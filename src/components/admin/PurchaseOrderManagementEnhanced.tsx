@@ -1380,8 +1380,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       // allow UI to paint loading state before heavy work / network
       await new Promise<void>(resolve => setTimeout(resolve, 0));
 
-      const currentUser = JSON.parse(localStorage.getItem('cosun_current_user') || '{}');
-      const createdBy = currentUser.name || '采购员';
+      const createdBy = user?.name || user?.email || '采购员';
 
       const requirementItems = selectedRequirementForXJ.items || [];
       if (requirementItems.length === 0) {
@@ -2502,9 +2501,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                       const dynamicStatus = calculateRequirementStatus(req);
                       
                       // 🔥 区域标签配置
-                      const regionConfig = req.region === 'North America' || req.region === 'NA' ? { label: 'NA', color: 'bg-blue-100 text-blue-700' }
-                        : req.region === 'South America' || req.region === 'SA' ? { label: 'SA', color: 'bg-green-100 text-green-700' }
-                        : req.region === 'Europe & Africa' || req.region === 'EA' ? { label: 'EA', color: 'bg-purple-100 text-purple-700' }
+                      // region 统一用 Supabase 存储的 code（NA/SA/EA）
+                      const regionCode = req.region?.toUpperCase().replace('NORTH AMERICA','NA').replace('SOUTH AMERICA','SA').replace('EUROPE & AFRICA','EA').replace('EUROPE-AFRICA','EA');
+                      const regionConfig = regionCode === 'NA' ? { label: 'NA', color: 'bg-blue-100 text-blue-700' }
+                        : regionCode === 'SA' ? { label: 'SA', color: 'bg-green-100 text-green-700' }
+                        : regionCode === 'EA' ? { label: 'EA', color: 'bg-purple-100 text-purple-700' }
                         : null;
                       
                       return (
@@ -3366,7 +3367,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
               totalAmount: quoteData.totalAmount,
               currency: 'USD' as 'USD' | 'EUR' | 'CNY',
               status: 'draft' as any, // 🔥 草稿状态，待业务员在报价管理中提交审核
-              region: selectedRequirementForQuote.region || 'North America',
+              region: selectedRequirementForQuote.region || 'NA',
               products: quoteData.items.map((item: any) => ({
                 name: item.productName,
                 productName: item.productName,
