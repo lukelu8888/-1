@@ -1413,7 +1413,13 @@ function toPRRow(p: any) {
     region: p.region || null,
     urgency: p.urgency || 'medium',
     required_date: requiredDate,
-    items: p.items || p.products || [],
+    items: (p.items || p.products || []).map((item: any) => ({
+      ...item,
+      // 写入时确保每个 item 有合法 UUID，Supabase 即为唯一数据源，无需前端兜底
+      id: (item.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(item.id)))
+        ? item.id
+        : crypto.randomUUID(),
+    })),
     status: (['pending','in_progress','completed','cancelled','partial','processing','submitted','quoted','draft'].includes(p.status) ? p.status : 'pending'),
     notes: p.notes || p.specialRequirements || p.special_requirements || null,
     created_by: createdBy,
@@ -1435,10 +1441,7 @@ function fromPRRow(r: any) {
     region: r.region,
     urgency: r.urgency || 'medium',
     requiredDate: r.required_date,
-    items: (r.items || []).map((item: any, idx: number) => ({
-      ...item,
-      id: (item.id && String(item.id) !== 'undefined') ? item.id : `item_idx_${idx}`,
-    })),
+    items: r.items || [],
     status: r.status || 'pending',
     notes: r.notes,
     createdBy: r.created_by,   // uuid，不是 email
