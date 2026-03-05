@@ -232,7 +232,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const relatedXJs = xjs.filter(xj => 
       xj.requirementNo === req.requirementNo || 
       xj.xjNumber === req.requirementNo ||
-      rfq.sourceQRNumber === req.requirementNo
+      xj.sourceQRNumber === req.requirementNo
     );
     
     if (relatedXJs.length === 0) {
