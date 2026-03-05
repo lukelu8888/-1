@@ -1128,8 +1128,8 @@ function toQRRow(q: any) {
     request_date: toIsoDate(q.requestDate || q.request_date),
     expected_quote_date: toIsoDate(q.expectedQuoteDate || q.expected_quote_date),
     urgency: q.urgency || 'medium',
-    xj_ids: q.rfqIds || q.xjIds || q.xj_ids || [],
-    xj_count: q.rfqCount || q.xjCount || q.xj_count || 0,
+    xj_ids: q.xjIds || q.xjIds || q.xj_ids || [],
+    xj_count: q.xjCount || q.xjCount || q.xj_count || 0,
     priority: q.priority || 'medium',
     notes: q.notes || null,
   };
@@ -1154,8 +1154,8 @@ function fromQRRow(r: any) {
     requestDate: r.request_date,
     expectedQuoteDate: r.expected_quote_date,
     urgency: r.urgency || 'medium',
-    rfqIds: r.xj_ids || [],
-    rfqCount: r.xj_count || 0,
+    xjIds: r.xj_ids || [],
+    xjCount: r.xj_count || 0,
     priority: r.priority,
     notes: r.notes,
     createdAt: r.created_at,
@@ -1565,7 +1565,7 @@ function fromApprovalRow(r: any) {
 function toSQRow(q: any) {
   return {
     id: toUUID(q.id),
-    rfq_id: q.rfqId || q.rfq_id || null,
+    rfq_id: q.xjId || q.rfq_id || null,
     xj_number: q.xjNumber || q.xj_number || null,
     supplier_email: q.supplierEmail || q.supplier_email || '',
     supplier_name: q.supplierName || q.supplier_name || '',
@@ -1586,7 +1586,7 @@ function fromSQRow(r: any) {
   if (!r) return null;
   return {
     id: r.id,
-    rfqId: r.rfq_id,
+    xjId: r.rfq_id,
     xjNumber: r.xj_number,
     supplierEmail: r.supplier_email,
     supplierName: r.supplier_name,

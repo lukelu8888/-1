@@ -87,10 +87,10 @@ function DocHeader({ data }: { data: QuotationDocData }) {
                   {formatDate(data.validUntil)}
                 </td>
               </tr>
-              {data.rfqReference && (
+              {data.xjReference && (
                 <tr>
                   <td className="border border-gray-400 px-1.5 py-[3px] bg-gray-100 font-semibold whitespace-nowrap">询价单号</td>
-                  <td className="border border-gray-400 px-1.5 py-[3px] text-blue-600 text-[10px]">{data.rfqReference}</td>
+                  <td className="border border-gray-400 px-1.5 py-[3px] text-blue-600 text-[10px]">{data.xjReference}</td>
                 </tr>
               )}
             </tbody>

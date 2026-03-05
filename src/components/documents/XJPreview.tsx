@@ -12,7 +12,7 @@ import { toast } from 'sonner@2.0.3';
 
 // 示例数据
 const sampleRFQData: XJData = {
-  rfqNo: 'XJ-251218-1001',
+  xjNo: 'XJ-251218-1001',
   xjDate: '2025-12-18',
   requiredResponseDate: '2025-12-25',
   requiredDeliveryDate: '2026-01-15',
@@ -100,7 +100,7 @@ export function XJPreview() {
     if (!docRef.current) return;
     
     try {
-      await exportToPDF(docRef.current, `采购询价单_${sampleRFQData.rfqNo}_${sampleRFQData.supplier.companyName}.pdf`);
+      await exportToPDF(docRef.current, `采购询价单_${sampleRFQData.xjNo}_${sampleRFQData.supplier.companyName}.pdf`);
       toast.success('询价单已下载为PDF');
     } catch (error) {
       toast.error('导出PDF失败');

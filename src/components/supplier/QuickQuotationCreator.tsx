@@ -14,7 +14,7 @@ import { useXJs } from '../../contexts/XJContext';
 
 export default function QuickQuotationCreator() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier, updateRFQ } = useXJs();
+  const { xjs, getXJsBySupplier, updateXJ } = useXJs();
   
   const [xjNumber, setXjNumber] = useState('XJ-251220-7726');
   const [unitPrice, setUnitPrice] = useState('');
@@ -41,14 +41,14 @@ export default function QuickQuotationCreator() {
     }
 
     // 查找对应的采购询价
-    const xj = rfqs.find(r => 
+    const xj = xjs.find(r => 
       r.supplierXjNo === xjNumber || 
       r.xjNumber === xjNumber
     );
 
     if (!xj) {
       toast.error(`未找到询价单 ${xjNumber}`);
-      console.log('所有采购询价:', rfqs.map(r => ({ 
+      console.log('所有采购询价:', xjs.map(r => ({ 
         supplierXjNo: r.supplierXjNo, 
         xjNumber: r.xjNumber 
       })));
@@ -80,7 +80,7 @@ export default function QuickQuotationCreator() {
 
       // 更新采购询价状态
       if (status === 'submitted') {
-        updateRFQ(xj.id, {
+        updateXJ(xj.id, {
           supplierQuotationNo: quotation.quotationNo,
           status: 'quoted' as any
         });
@@ -112,7 +112,7 @@ export default function QuickQuotationCreator() {
   };
 
   // 查找采购询价信息
-  const xj = rfqs.find(r => 
+  const xj = xjs.find(r => 
     r.supplierXjNo === xjNumber || 
     r.xjNumber === xjNumber
   );

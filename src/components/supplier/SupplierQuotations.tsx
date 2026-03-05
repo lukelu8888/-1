@@ -29,7 +29,7 @@ import { generateBJNumber, nextBJNumber } from '../../utils/xjNumberGenerator'; 
  */
 export default function SupplierQuotations() {
   const { user } = useUser(); // 🔥 当前登录的供应商（我方）
-  const { rfqs, getRFQsBySupplier, addQuoteToRFQ, updateRFQ } = useXJs(); // 🔥 使用采购询价 Context
+  const { xjs, getXJsBySupplier, addQuoteToXJ, updateXJ } = useXJs(); // 🔥 使用采购询价 Context
   
   // 🔥 获取完整的供应商信息（从suppliersDatabase）
   const supplierInfo = useMemo(() => {
@@ -55,7 +55,7 @@ export default function SupplierQuotations() {
   
   const [activeTab, setActiveTab] = useState('pending');
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
-  const [selectedRFQ, setSelectedRFQ] = useState<any>(null);
+  const [selectedXJ, setSelectedRFQ] = useState<any>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [pendingQuoteData, setPendingQuoteData] = useState<any>(null);
   const [drafts, setDrafts] = useState<any[]>([]);
@@ -79,7 +79,7 @@ export default function SupplierQuotations() {
   });
 
   // 🔥 获取当前供应商的所有采购询价
-  const supplierRFQs = useMemo(() => {
+  const supplierXJs = useMemo(() => {
     if (!user?.email) {
       console.log('❌ [SupplierQuotations] 供应商未登录，user.email 为空');
       return [];
@@ -87,9 +87,9 @@ export default function SupplierQuotations() {
     
     console.log('🔍 [SupplierQuotations] 查询采购询价...');
     console.log('  - 当前供应商Email:', user.email);
-    console.log('  - 总采购询价数量:', rfqs.length);
+    console.log('  - 总采购询价数量:', xjs.length);
     
-    const result = getRFQsBySupplier(user.email);
+    const result = getXJsBySupplier(user.email);
     console.log('  - 匹配到的采购询价数量:', result.length);
     
     if (result.length > 0) {
@@ -104,9 +104,9 @@ export default function SupplierQuotations() {
     } else {
       console.log('⚠️ [SupplierQuotations] 未找到采购询价');
       console.log('  - 请检查供应商Email是否与采购询价中的supplierEmail匹配');
-      if (rfqs.length > 0) {
+      if (xjs.length > 0) {
         console.log('  - 现有采购询价的供应商Email列表:');
-        const uniqueEmails = [...new Set(rfqs.map(r => r.supplierEmail))];
+        const uniqueEmails = [...new Set(xjs.map(r => r.supplierEmail))];
         uniqueEmails.forEach(email => {
           console.log(`    * ${email}`);
         });
@@ -114,29 +114,29 @@ export default function SupplierQuotations() {
     }
     
     return result;
-  }, [rfqs, user?.email]);
+  }, [xjs, user?.email]);
 
   // 🔥 分类采购询价
   const categorizedRFQs = useMemo(() => {
-    const pending = supplierRFQs.filter(xj => {
+    const pending = supplierXJs.filter(xj => {
       const myQuote = xj.quotes?.find(q => q.supplierCode === user?.email);
       return !myQuote && xj.status === 'pending';
     });
     
-    const quoted = supplierRFQs.filter(xj => {
+    const quoted = supplierXJs.filter(xj => {
       const myQuote = xj.quotes?.find(q => q.supplierCode === user?.email);
       return myQuote && xj.status !== 'accepted' && xj.status !== 'rejected';
     });
     
-    const accepted = supplierRFQs.filter(xj => xj.status === 'accepted');
-    const rejected = supplierRFQs.filter(xj => xj.status === 'rejected');
+    const accepted = supplierXJs.filter(xj => xj.status === 'accepted');
+    const rejected = supplierXJs.filter(xj => xj.status === 'rejected');
     
     return { pending, quoted, accepted, rejected };
-  }, [supplierRFQs, user?.email]);
+  }, [supplierXJs, user?.email]);
 
   // 🔥 提交报价
   const handleSubmitQuote = useCallback((submitType: 'draft' | 'submit') => {
-    if (!selectedRFQ) return;
+    if (!selectedXJ) return;
     
     // 验证必填项
     if (!quoteForm.unitPrice || !quoteForm.leadTime || !quoteForm.moq) {
@@ -149,9 +149,9 @@ export default function SupplierQuotations() {
       const draftId = editingDraft?.id || `DRAFT-${Date.now()}`;
       const newDraft = {
         id: draftId,
-        rfqId: selectedRFQ.id,
-        xjNumber: selectedRFQ.xjNumber,
-        productName: selectedRFQ.items[0]?.productName,
+        xjId: selectedXJ.id,
+        xjNumber: selectedXJ.xjNumber,
+        productName: selectedXJ.items[0]?.productName,
         ...quoteForm,
         savedDate: new Date().toISOString().split('T')[0],
         status: 'draft'
@@ -174,11 +174,11 @@ export default function SupplierQuotations() {
       setQuoteDialogOpen(false);
       setConfirmDialogOpen(true);
     }
-  }, [selectedRFQ, quoteForm, editingDraft]);
+  }, [selectedXJ, quoteForm, editingDraft]);
 
   // 🔥 确认提交报价
   const handleConfirmSubmitQuote = useCallback(async () => {
-    if (!selectedRFQ || !pendingQuoteData || !user) return;
+    if (!selectedXJ || !pendingQuoteData || !user) return;
     
     // 🔥 生成供应商报价单号（BJ，调用 Supabase RPC）
     const supplierQuotationNo = await nextBJNumber();
@@ -197,15 +197,15 @@ export default function SupplierQuotations() {
     };
     
     // 🔥 添加报价到采购询价
-    addQuoteToRFQ(selectedRFQ.id, quote);
+    addQuoteToXJ(selectedXJ.id, quote);
     
     // 🔥 更新采购询价，添加供应商报价单号
-    updateRFQ(selectedRFQ.id, { supplierQuotationNo });
+    updateXJ(selectedXJ.id, { supplierQuotationNo });
     
     toast.success(
       <div className="space-y-1">
         <p className="font-semibold">✅ 报价已成功提交！</p>
-        <p className="text-sm">询价单号: {selectedRFQ.supplierXjNo || selectedRFQ.xjNumber}</p>
+        <p className="text-sm">询价单号: {selectedXJ.supplierXjNo || selectedXJ.xjNumber}</p>
         <p className="text-sm">报价单号: {supplierQuotationNo}</p>
         <p className="text-xs text-slate-500">报价已发送至COSUN管理员审核</p>
       </div>,
@@ -216,7 +216,7 @@ export default function SupplierQuotations() {
     setPendingQuoteData(null);
     setSelectedRFQ(null);
     resetQuoteForm();
-  }, [selectedRFQ, pendingQuoteData, user, addQuoteToRFQ]);
+  }, [selectedXJ, pendingQuoteData, user, addQuoteToXJ]);
 
   const resetQuoteForm = () => {
     setQuoteForm({
@@ -271,7 +271,7 @@ export default function SupplierQuotations() {
       case 'drafts': return drafts;
       case 'quoted': return quotedRFQs;
       case 'accepted': return acceptedRFQs;
-      default: return supplierRFQs;
+      default: return supplierXJs;
     }
   };
 
@@ -280,7 +280,7 @@ export default function SupplierQuotations() {
     { id: 'drafts', label: '报价草稿', icon: FileText, count: drafts.length },
     { id: 'quoted', label: '已报价', icon: Send, count: quotedRFQs.length },
     { id: 'accepted', label: '已接受', icon: CheckCircle, count: acceptedRFQs.length },
-    { id: 'all', label: '全部', icon: FileText, count: supplierRFQs.length },
+    { id: 'all', label: '全部', icon: FileText, count: supplierXJs.length },
   ];
 
   // 🔥 生成供应商报价单文档数据
@@ -295,7 +295,7 @@ export default function SupplierQuotations() {
       quotationNo: xj.supplierQuotationNo || `BJ-${new Date().toISOString().slice(2,10).replace(/-/g,'')}`, // fallback placeholder
       quotationDate: myQuote.quotedDate,
       validUntil: validUntilDate.toISOString().split('T')[0],
-      rfqReference: xj.supplierXjNo || xj.xjNumber,
+      xjReference: xj.supplierXjNo || xj.xjNumber,
       
       supplier: {
         companyName: supplierInfo?.name || supplierInfo?.company || user?.company || '供应商公司名称',
@@ -429,12 +429,12 @@ export default function SupplierQuotations() {
   return (
     <div className="space-y-4">
       {/* 🧹 测试数据清理横幅 - 仅在有数据时显示 */}
-      {supplierRFQs.length > 0 && (
+      {supplierXJs.length > 0 && (
         <div className="bg-red-50 border-2 border-red-500 rounded-lg p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-6 h-6 text-red-600" />
             <div>
-              <div className="font-bold text-red-600">⚠️ 检测到 {supplierRFQs.length} 条测试数据</div>
+              <div className="font-bold text-red-600">⚠️ 检测到 {supplierXJs.length} 条测试数据</div>
               <div className="text-sm text-red-500">
                 这些是旧的测试数据，建议清空后重新从采购端流转生成真实数据
               </div>
@@ -442,8 +442,8 @@ export default function SupplierQuotations() {
           </div>
           <Button
             onClick={() => {
-              if (window.confirm('⚠️ 确定要清空所有询价数据吗？\n\n这将删除：\n- 所有询价单（' + supplierRFQs.length + '条）\n- 所有报价记录\n- 所有草稿\n\n此操作不可恢复！清空后请从采购端重新发送询价。')) {
-                localStorage.removeItem('rfqs');
+              if (window.confirm('⚠️ 确定要清空所有询价数据吗？\n\n这将删除：\n- 所有询价单（' + supplierXJs.length + '条）\n- 所有报价记录\n- 所有草稿\n\n此操作不可恢复！清空后请从采购端重新发送询价。')) {
+                localStorage.removeItem('xjs');
                 toast.success('✅ 所有测试数据已清空', {
                   description: '页面将在2秒后刷新'
                 });
@@ -577,7 +577,7 @@ export default function SupplierQuotations() {
                         <div>
                           <p className="font-medium text-blue-600">
                             {isDraft 
-                              ? item.xjNumber || item.rfqId 
+                              ? item.xjNumber || item.xjId 
                               : item.supplierXjNo || item.xjNumber || item.id}
                           </p>
                           <p className="text-xs text-gray-500">{isDraft ? item.savedDate : item.createdDate}</p>
@@ -665,7 +665,7 @@ export default function SupplierQuotations() {
                                 <Eye className="w-3 h-3 mr-1" />
                                 详情
                               </Button>
-                              <Dialog open={quoteDialogOpen && selectedRFQ?.id === item.id} onOpenChange={setQuoteDialogOpen}>
+                              <Dialog open={quoteDialogOpen && selectedXJ?.id === item.id} onOpenChange={setQuoteDialogOpen}>
                                 <Button
                                   size="sm"
                                   className="h-7 px-2 text-xs bg-orange-600 hover:bg-orange-700"
@@ -701,7 +701,7 @@ export default function SupplierQuotations() {
                           )}
                           {activeTab === 'drafts' && (
                             <Dialog 
-                              open={quoteDialogOpen && selectedRFQ?.id === item.rfqId && editingDraft?.id === item.id} 
+                              open={quoteDialogOpen && selectedXJ?.id === item.xjId && editingDraft?.id === item.id} 
                               onOpenChange={(open) => {
                                 setQuoteDialogOpen(open);
                                 if (!open) setEditingDraft(null);
@@ -711,7 +711,7 @@ export default function SupplierQuotations() {
                                 size="sm"
                                 className="h-7 px-2 text-xs bg-orange-600 hover:bg-orange-700"
                                 onClick={() => {
-                                  const xj = supplierRFQs.find(r => r.id === item.rfqId);
+                                  const xj = supplierXJs.find(r => r.id === item.xjId);
                                   if (xj) {
                                     setSelectedRFQ(xj);
                                     setEditingDraft(item);
@@ -724,7 +724,7 @@ export default function SupplierQuotations() {
                               </Button>
                               <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
                                 <DialogHeader>
-                                  <DialogTitle>继续编辑报价 - {item.rfqId}</DialogTitle>
+                                  <DialogTitle>继续编辑报价 - {item.xjId}</DialogTitle>
                                   <DialogDescription>
                                     为 {item.product} 提供详细报价
                                   </DialogDescription>
@@ -732,7 +732,7 @@ export default function SupplierQuotations() {
                                 
                                 <QuotationDocument
                                   xj={{
-                                    id: item.rfqId,
+                                    id: item.xjId,
                                     product: item.product,
                                     specifications: item.specifications,
                                     quantity: item.quantity,
@@ -799,11 +799,11 @@ export default function SupplierQuotations() {
               <div className="grid grid-cols-2 gap-3 p-3 bg-gray-50 rounded-lg border">
                 <div>
                   <p className="text-xs text-gray-600">询价单号</p>
-                  <p className="text-sm font-medium font-mono text-blue-600">{selectedRFQ?.supplierXjNo || selectedRFQ?.xjNumber || selectedRFQ?.id}</p>
+                  <p className="text-sm font-medium font-mono text-blue-600">{selectedXJ?.supplierXjNo || selectedXJ?.xjNumber || selectedXJ?.id}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-600">产品名称</p>
-                  <p className="text-sm font-medium">{selectedRFQ?.productName || selectedRFQ?.product}</p>
+                  <p className="text-sm font-medium">{selectedXJ?.productName || selectedXJ?.product}</p>
                 </div>
                 <div className="col-span-2">
                   <p className="text-xs text-gray-600 mb-1">报价信息</p>

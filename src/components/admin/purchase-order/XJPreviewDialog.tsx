@@ -7,16 +7,16 @@ import { XJDocument, SupplierRFQData } from '../../documents/templates/XJDocumen
 type XJPreviewDialogProps = {
   showRFQPreview: boolean;
   setShowRFQPreview: React.Dispatch<React.SetStateAction<boolean>>;
-  currentRFQData: SupplierRFQData | null;
-  rfqDocRef: React.RefObject<HTMLDivElement>;
+  currentXJData: SupplierRFQData | null;
+  xjDocRef: React.RefObject<HTMLDivElement>;
   handleExportRFQPDF: (download: boolean) => void;
 };
 
 export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
   showRFQPreview,
   setShowRFQPreview,
-  currentRFQData,
-  rfqDocRef,
+  currentXJData,
+  xjDocRef,
   handleExportRFQPDF,
 }) => {
   return (
@@ -25,7 +25,7 @@ export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
         <DialogHeader className="px-6 py-4 border-b">
           <DialogTitle className="text-base flex items-center gap-2">
             <FileText className="w-4 h-4" />
-            📋 采购询价单预览 - {currentRFQData?.rfqNo}
+            📋 采购询价单预览 - {currentXJData?.xjNo}
           </DialogTitle>
           <DialogDescription style={{ fontSize: '12px' }}>
             Procurement Inquiry Preview - 可直接发送给供应商的询价单文档
@@ -33,7 +33,7 @@ export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
         </DialogHeader>
 
         <div className="flex-1 overflow-auto bg-gray-100 p-6">
-          {currentRFQData && <XJDocument ref={rfqDocRef} data={currentRFQData} />}
+          {currentXJData && <XJDocument ref={xjDocRef} data={currentXJData} />}
         </div>
 
         <div className="border-t bg-white px-6 py-4 flex items-center justify-between">

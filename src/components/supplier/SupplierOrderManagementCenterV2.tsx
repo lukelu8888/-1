@@ -41,16 +41,16 @@ interface SupplierQuotation {
 
 export default function SupplierOrderManagementCenterV2() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier, deleteRFQ, updateRFQ, addQuoteToRFQ } = useXJs();
+  const { xjs, getXJsBySupplier, deleteXJ, updateXJ, addQuoteToXJ } = useXJs();
   
   // 主Tab状态
-  const [mainTab, setMainTab] = useState<'overview' | 'rfq' | 'quotation' | 'orders' | 'payment'>('overview');
+  const [mainTab, setMainTab] = useState<'overview' | 'xj' | 'quotation' | 'orders' | 'payment'>('overview');
   
   // 概览子Tab
   const [overviewTab, setOverviewTab] = useState<'summary' | 'conversion' | 'performance' | 'risk'>('summary');
   
   // 询价管理子Tab
-  const [rfqTab, setRfqTab] = useState<'pending' | 'quoted' | 'accepted' | 'all'>('pending');
+  const [xjTab, setRfqTab] = useState<'pending' | 'quoted' | 'accepted' | 'all'>('pending');
   
   // 时间筛选
   const [timeFilter, setTimeFilter] = useState('month');
@@ -78,10 +78,10 @@ export default function SupplierOrderManagementCenterV2() {
   });
 
   // 🔥 获取当前供应商的数据
-  const myRFQs = useMemo(() => {
+  const myXJs = useMemo(() => {
     if (!user?.email) return [];
-    return getRFQsBySupplier(user.email);
-  }, [rfqs, user?.email, getRFQsBySupplier]);
+    return getXJsBySupplier(user.email);
+  }, [xjs, user?.email, getXJsBySupplier]);
 
   const myQuotations = useMemo(() => {
     if (!user?.email) return [];
@@ -385,7 +385,7 @@ export default function SupplierOrderManagementCenterV2() {
                 </div>
               </TabsTrigger>
               <TabsTrigger 
-                value="rfq"
+                value="xj"
                 className="relative h-14 px-0 pb-3 rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-600 data-[state=active]:shadow-none bg-transparent"
               >
                 <div className="flex items-center gap-2">
@@ -518,7 +518,7 @@ export default function SupplierOrderManagementCenterV2() {
             </div>
           )}
 
-          {mainTab === 'rfq' && (
+          {mainTab === 'xj' && (
             <Card>
               <CardContent className="p-12 text-center">
                 <p className="text-slate-500">询价管理模块</p>

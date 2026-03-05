@@ -48,7 +48,7 @@ export interface QuotationDocData {
   quotationNo: string;
   quotationDate: string;
   validUntil: string;
-  rfqReference?: string;
+  xjReference?: string;
   inquiryReference?: string;
 
   currency: string;
@@ -325,7 +325,7 @@ export function useQuotationDocumentData(
       quotationNo:       quotation.quotationNo      || '',
       quotationDate:     quotation.quotationDate     || '',
       validUntil:        quotation.validUntil        || '',
-      rfqReference:      quotation.sourceXJ          || quotation.sourceQR,
+      xjReference:      quotation.sourceXJ          || quotation.sourceQR,
       inquiryReference:  quotation.documentData?.inquiryReference,
       currency,
       supplier:          supplierProfile,

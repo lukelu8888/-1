@@ -9,7 +9,7 @@ import { useXJs } from '../../contexts/XJContext';
 
 export function XJDebugger() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier } = useXJs();
+  const { xjs, getXJsBySupplier } = useXJs();
   const [debugData, setDebugData] = useState<any>(null);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -37,15 +37,15 @@ export function XJDebugger() {
         
         if (supplierRFQs.length > 0) {
           console.log('  - supplierRFQs详细信息:');
-          supplierRFQs.forEach((rfq: any, idx: number) => {
-            console.log(`    ${idx + 1}. 采购询价ID: ${rfq.id}`);
-            console.log(`       - xjNumber: ${rfq.xjNumber}`);
-            console.log(`       - supplierXjNo: ${rfq.supplierXjNo}`);
-            console.log(`       - supplierCode: ${rfq.supplierCode}`);
-            console.log(`       - supplierEmail: ${rfq.supplierEmail}`);
-            console.log(`       - supplierName: ${rfq.supplierName}`);
-            console.log(`       - status: ${rfq.status}`);
-            console.log(`       - productName: ${rfq.productName}`);
+          supplierRFQs.forEach((xj: any, idx: number) => {
+            console.log(`    ${idx + 1}. 采购询价ID: ${xj.id}`);
+            console.log(`       - xjNumber: ${xj.xjNumber}`);
+            console.log(`       - supplierXjNo: ${xj.supplierXjNo}`);
+            console.log(`       - supplierCode: ${xj.supplierCode}`);
+            console.log(`       - supplierEmail: ${xj.supplierEmail}`);
+            console.log(`       - supplierName: ${xj.supplierName}`);
+            console.log(`       - status: ${xj.status}`);
+            console.log(`       - productName: ${xj.productName}`);
           });
         }
       } catch (e) {
@@ -57,17 +57,17 @@ export function XJDebugger() {
     
     // 3. 检查XJContext中的所有采购询价
     console.log('\n📌 步骤3: 检查XJContext中的所有采购询价');
-    console.log('  - rfqs总数:', rfqs.length);
-    if (rfqs.length > 0) {
+    console.log('  - rfqs总数:', xjs.length);
+    if (xjs.length > 0) {
       console.log('  - rfqs详细信息:');
-      rfqs.forEach((rfq: any, idx: number) => {
-        console.log(`    ${idx + 1}. 采购询价ID: ${rfq.id}`);
-        console.log(`       - xjNumber: ${rfq.xjNumber}`);
-        console.log(`       - supplierXjNo: ${rfq.supplierXjNo}`);
-        console.log(`       - supplierCode: ${rfq.supplierCode}`);
-        console.log(`       - supplierEmail: ${rfq.supplierEmail}`);
-        console.log(`       - supplierName: ${rfq.supplierName}`);
-        console.log(`       - status: ${rfq.status}`);
+      xjs.forEach((xj: any, idx: number) => {
+        console.log(`    ${idx + 1}. 采购询价ID: ${xj.id}`);
+        console.log(`       - xjNumber: ${xj.xjNumber}`);
+        console.log(`       - supplierXjNo: ${xj.supplierXjNo}`);
+        console.log(`       - supplierCode: ${xj.supplierCode}`);
+        console.log(`       - supplierEmail: ${xj.supplierEmail}`);
+        console.log(`       - supplierName: ${xj.supplierName}`);
+        console.log(`       - status: ${xj.status}`);
       });
     } else {
       console.log('  ⚠️ XJContext中没有采购询价数据');
@@ -77,15 +77,15 @@ export function XJDebugger() {
     console.log('\n📌 步骤4: 测试getRFQsBySupplier（获取供应商采购询价）函数');
     if (user?.email) {
       console.log('  - 查询参数:', user.email);
-      const myRFQs = getRFQsBySupplier(user.email);
+      const myRFQs = getXJsBySupplier(user.email);
       console.log('  - 返回结果数量:', myRFQs.length);
       console.log('  - 返回结果:', myRFQs);
       
       // 5. 手动过滤验证
       console.log('\n📌 步骤5: 手动过滤验证');
-      const manualFiltered = rfqs.filter(rfq => 
-        rfq.supplierCode === user.email || 
-        rfq.supplierEmail === user.email
+      const manualFiltered = xjs.filter(xj => 
+        xj.supplierCode === user.email || 
+        xj.supplierEmail === user.email
       );
       console.log('  - 手动过滤结果数量:', manualFiltered.length);
       console.log('  - 手动过滤结果:', manualFiltered);
@@ -95,12 +95,12 @@ export function XJDebugger() {
       if (manualFiltered.length === 0 && supplierRFQs.length > 0) {
         console.log('  ⚠️ supplierRFQs中有数据，但过滤结果为空');
         console.log('  - 可能原因分析:');
-        supplierRFQs.forEach((rfq: any, idx: number) => {
-          const codeMatch = rfq.supplierCode === user.email;
-          const emailMatch = rfq.supplierEmail === user.email;
+        supplierRFQs.forEach((xj: any, idx: number) => {
+          const codeMatch = xj.supplierCode === user.email;
+          const emailMatch = xj.supplierEmail === user.email;
           console.log(`    采购询价 ${idx + 1}:`);
-          console.log(`      - supplierCode匹配: ${codeMatch} (${rfq.supplierCode} === ${user.email})`);
-          console.log(`      - supplierEmail匹配: ${emailMatch} (${rfq.supplierEmail} === ${user.email})`);
+          console.log(`      - supplierCode匹配: ${codeMatch} (${xj.supplierCode} === ${user.email})`);
+          console.log(`      - supplierEmail匹配: ${emailMatch} (${xj.supplierEmail} === ${user.email})`);
         });
       }
       
@@ -112,7 +112,7 @@ export function XJDebugger() {
           company: user?.company
         },
         localStorageSupplierRFQs: supplierRFQs,
-        contextRFQs: rfqs,
+        contextRFQs: xjs,
         getRFQsBySupplierResult: myRFQs,
         manualFilterResult: manualFiltered,
         issues: []
@@ -140,7 +140,7 @@ export function XJDebugger() {
     if (isOpen) {
       runDiagnostics();
     }
-  }, [isOpen, rfqs, user]);
+  }, [isOpen, xjs, user]);
 
   if (!isOpen) {
     return (
@@ -217,16 +217,16 @@ export function XJDebugger() {
                         共 {parsed.length} 条记录
                       </Badge>
                       <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {parsed.map((rfq: any, idx: number) => (
+                        {parsed.map((xj: any, idx: number) => (
                           <div key={idx} className="bg-white border rounded p-2 text-xs font-mono">
                             <div className="grid grid-cols-2 gap-1">
-                              <div><span className="text-slate-600">ID:</span> {rfq.id}</div>
-                              <div><span className="text-slate-600">询价单号:</span> {rfq.supplierXjNo || rfq.xjNumber}</div>
-                              <div><span className="text-slate-600">supplierEmail:</span> {rfq.supplierEmail}</div>
-                              <div><span className="text-slate-600">supplierCode:</span> {rfq.supplierCode}</div>
-                              <div className="col-span-2"><span className="text-slate-600">supplierName:</span> {rfq.supplierName}</div>
-                              <div><span className="text-slate-600">status:</span> <Badge variant="outline">{rfq.status}</Badge></div>
-                              <div><span className="text-slate-600">产品:</span> {rfq.productName}</div>
+                              <div><span className="text-slate-600">ID:</span> {xj.id}</div>
+                              <div><span className="text-slate-600">询价单号:</span> {xj.supplierXjNo || xj.xjNumber}</div>
+                              <div><span className="text-slate-600">supplierEmail:</span> {xj.supplierEmail}</div>
+                              <div><span className="text-slate-600">supplierCode:</span> {xj.supplierCode}</div>
+                              <div className="col-span-2"><span className="text-slate-600">supplierName:</span> {xj.supplierName}</div>
+                              <div><span className="text-slate-600">status:</span> <Badge variant="outline">{xj.status}</Badge></div>
+                              <div><span className="text-slate-600">产品:</span> {xj.productName}</div>
                             </div>
                           </div>
                         ))}
@@ -244,22 +244,22 @@ export function XJDebugger() {
           <div>
             <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-              XJContext.rfqs
+              XJContext.xjs
             </h3>
             <div className="bg-slate-50 rounded p-3 text-sm">
               <Badge variant="outline" className="mb-2">
-                共 {rfqs.length} 条记录
+                共 {xjs.length} 条记录
               </Badge>
               <div className="space-y-2 max-h-60 overflow-y-auto">
-                {rfqs.map((rfq: any, idx: number) => (
+                {xjs.map((xj: any, idx: number) => (
                   <div key={idx} className="bg-white border rounded p-2 text-xs font-mono">
                     <div className="grid grid-cols-2 gap-1">
-                      <div><span className="text-slate-600">ID:</span> {rfq.id}</div>
-                      <div><span className="text-slate-600">询价单号:</span> {rfq.supplierXjNo || rfq.xjNumber}</div>
-                      <div><span className="text-slate-600">supplierEmail:</span> {rfq.supplierEmail}</div>
-                      <div><span className="text-slate-600">supplierCode:</span> {rfq.supplierCode}</div>
-                      <div className="col-span-2"><span className="text-slate-600">supplierName:</span> {rfq.supplierName}</div>
-                      <div><span className="text-slate-600">status:</span> <Badge variant="outline">{rfq.status}</Badge></div>
+                      <div><span className="text-slate-600">ID:</span> {xj.id}</div>
+                      <div><span className="text-slate-600">询价单号:</span> {xj.supplierXjNo || xj.xjNumber}</div>
+                      <div><span className="text-slate-600">supplierEmail:</span> {xj.supplierEmail}</div>
+                      <div><span className="text-slate-600">supplierCode:</span> {xj.supplierCode}</div>
+                      <div className="col-span-2"><span className="text-slate-600">supplierName:</span> {xj.supplierName}</div>
+                      <div><span className="text-slate-600">status:</span> <Badge variant="outline">{xj.status}</Badge></div>
                     </div>
                   </div>
                 ))}
@@ -271,36 +271,36 @@ export function XJDebugger() {
           <div>
             <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-orange-500"></div>
-              getRFQsBySupplier('{user?.email}') 结果
+              getXJsBySupplier('{user?.email}') 结果
             </h3>
             <div className="bg-slate-50 rounded p-3 text-sm">
               {(() => {
                 if (!user?.email) return <p className="text-slate-500">用户未登录</p>;
-                const myRFQs = getRFQsBySupplier(user.email);
+                const myRFQs = getXJsBySupplier(user.email);
                 return (
                   <div>
                     <Badge variant="outline" className="mb-2">
                       共 {myRFQs.length} 条记录
                     </Badge>
-                    {myRFQs.length === 0 && rfqs.length > 0 && (
+                    {myRFQs.length === 0 && xjs.length > 0 && (
                       <div className="bg-red-50 border border-red-200 rounded p-3 mb-2">
                         <div className="flex items-start gap-2">
                           <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5" />
                           <div className="text-xs text-red-900">
                             <p className="font-semibold mb-1">⚠️ 数据匹配失败</p>
-                            <p>XJ Context中有 {rfqs.length} 条采购询价，但过滤结果为0</p>
+                            <p>XJ Context中有 {xjs.length} 条采购询价，但过滤结果为0</p>
                             <p className="mt-1">可能原因：supplierEmail/supplierCode 与登录用户email不匹配</p>
                           </div>
                         </div>
                       </div>
                     )}
                     <div className="space-y-2 max-h-60 overflow-y-auto">
-                      {myRFQs.map((rfq: any, idx: number) => (
+                      {myRFQs.map((xj: any, idx: number) => (
                         <div key={idx} className="bg-white border rounded p-2 text-xs font-mono">
                           <div className="grid grid-cols-2 gap-1">
-                            <div><span className="text-slate-600">ID:</span> {rfq.id}</div>
-                            <div><span className="text-slate-600">询价单号:</span> {rfq.supplierXjNo || rfq.xjNumber}</div>
-                            <div className="col-span-2"><span className="text-slate-600">产品:</span> {rfq.productName}</div>
+                            <div><span className="text-slate-600">ID:</span> {xj.id}</div>
+                            <div><span className="text-slate-600">询价单号:</span> {xj.supplierXjNo || xj.xjNumber}</div>
+                            <div className="col-span-2"><span className="text-slate-600">产品:</span> {xj.productName}</div>
                           </div>
                         </div>
                       ))}
@@ -330,7 +330,7 @@ export function XJDebugger() {
               onClick={() => {
                 const data = {
                   localStorage_supplierRFQs: JSON.parse(localStorage.getItem('supplierRFQs') || '[]'),
-                  contextRFQs: rfqs,
+                  contextRFQs: xjs,
                   user: user
                 };
                 console.log('📋 导出诊断数据:', data);

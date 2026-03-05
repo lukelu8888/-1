@@ -111,7 +111,7 @@ const QuoteForm = memo(({ xj, onSubmit, initialData }: QuoteFormProps) => {
 
     return {
       quotationNo: initialData?.quotationNo || `COSUN-Q-${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`,
-      rfqNo: xj.id,
+      xjNo: xj.id,
       date: today.toISOString().split('T')[0],
       validUntil: validUntilDate.toISOString().split('T')[0],
       

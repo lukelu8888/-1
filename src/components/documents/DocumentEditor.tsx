@@ -58,7 +58,7 @@ type DocumentType =
   | 'sales-contract'    // 销售合同
   | 'purchase-order'    // 采购订单
   | 'proforma-invoice'  // 形式发票
-  | 'supplier-rfq'      // 采购询价单
+  | 'supplier-xj'      // 采购询价单
   | 'supplier-quotation' // 供应商报价单
   | 'purchase-requirement' // 采购需求单
   | 'statement'         // 对账单
@@ -906,7 +906,7 @@ function getDefaultData(type: DocumentType): DocumentData {
         quotationNo: 'BJ-' + Date.now(),
         quotationDate: baseDate,
         validUntil: baseDate,
-        rfqReference: '',
+        xjReference: '',
         supplier: {
           companyName: '',
           companyNameEn: '',

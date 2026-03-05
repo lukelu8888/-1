@@ -172,7 +172,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [showXJPreview, setShowRFQPreview] = useState(false);
   const [currentXJData, setCurrentRFQData] = useState<XJData | null>(null);
   const xjDocRef = React.useRef<HTMLDivElement>(null);
-  const rfqDocRef = React.useRef<HTMLDivElement>(null);
   
   // 🔥 询价单编辑状态
   const [showEditXJDialog, setShowEditXJDialog] = useState(false);
@@ -440,7 +439,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return supplierQuotations.filter(q => 
       q.quotationNo?.toLowerCase().includes(lowerSearchTerm) ||
       q.supplierName?.toLowerCase().includes(lowerSearchTerm) ||
-      q.rfqNo?.toLowerCase().includes(lowerSearchTerm) ||
+      q.xjNo?.toLowerCase().includes(lowerSearchTerm) ||
       q.supplierCode?.toLowerCase().includes(lowerSearchTerm)
     );
   }, [supplierQuotations, quotationSearchTerm]);
@@ -757,12 +756,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const qRefs = [
           q?.sourceQR,
           q?.xjNumber,
-          q?.rfqNo,
+          q?.xjNo,
           q?.sourceXJ,
           q?.requirementNo,
           q?.sourceRFQId,
           q?.quoteData?.sourceQR,
-          q?.quoteData?.rfqNo,
+          q?.quoteData?.xjNo,
           q?.quoteData?.xjNumber,
         ]
           .map((v) => String(v || '').trim().toUpperCase())
@@ -1345,15 +1344,15 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 导出询价单为PDF
   const handleExportRFQPDF = async (download: boolean = true) => {
-    if (!currentXJData || !rfqDocRef.current) return;
+    if (!currentXJData || !xjDocRef.current) return;
     
-    const filename = generatePDFFilename('采购询价单', currentXJData.rfqNo);
+    const filename = generatePDFFilename('采购询价单', currentXJData.xjNo);
     
     if (download) {
-      await exportToPDF(rfqDocRef.current, filename);
+      await exportToPDF(xjDocRef.current, filename);
       toast.success('询价单已下载');
     } else {
-      await exportToPDFPrint(rfqDocRef.current, filename);
+      await exportToPDFPrint(xjDocRef.current, filename);
     }
   };
 
@@ -1558,7 +1557,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     
     if (window.confirm(confirmMessage)) {
       selectedXJIds.forEach(id => {
-        deleteRFQ(id);
+        deleteXJ(id);
       });
       
       toast.success(`已删除 ${selectedXJIds.length} 个询价单`, {
@@ -1673,7 +1672,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setEditingXJ(xj);
     // 深拷贝documentData，确保编辑不影响原数据，并与列表XJ单号强制对齐
     const cloned = JSON.parse(JSON.stringify(xj.documentData || {}));
-    cloned.rfqNo = xj.supplierXjNo || cloned.rfqNo || '';
+    cloned.xjNo = xj.supplierXjNo || cloned.xjNo || '';
     setEditRFQData(cloned);
     setShowEditXJDialog(true);
   };
@@ -1681,14 +1680,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 保存编辑的询价单
   const handleSaveEditXJ = () => {
     if (!editingXJ || !editXJData) return;
-    const normalizedRfqNo = String(editingXJ.supplierXjNo || editXJData?.rfqNo || '').trim();
+    const normalizedRfqNo = String(editingXJ.supplierXjNo || editXJData?.xjNo || '').trim();
     const normalizedDocumentData = {
       ...editXJData,
-      rfqNo: normalizedRfqNo || editXJData?.rfqNo || '',
+      xjNo: normalizedRfqNo || editXJData?.xjNo || '',
     };
     
     // 更新XJ，包括完整的documentData
-    updateRFQ(editingXJ.id, {
+    updateXJ(editingXJ.id, {
       documentData: normalizedDocumentData,
       supplierXjNo: normalizedRfqNo || editingXJ.supplierXjNo,
       // 同步更新关键字段
@@ -1737,7 +1736,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
 
     // 更新 XJ Context 中的本地状态
-    updateRFQ(xj.id, {
+    updateXJ(xj.id, {
       status: 'sent' as any,
       sentDate: new Date().toISOString().split('T')[0]
     });
@@ -3303,9 +3302,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         setSupplierSearchTerm={setSupplierSearchTerm}
         allSuppliers={allSuppliers}
         handlePreviewRFQ={handlePreviewXJ}
-        rfqDeadline={xjDeadline}
+        xjDeadline={xjDeadline}
         setRFQDeadline={setRFQDeadline}
-        rfqRemarks={xjRemarks}
+        xjRemarks={xjRemarks}
         setRFQRemarks={setRFQRemarks}
         handleSubmitRFQ={handleSubmitXJ}
         submittingRFQ={submittingXJ}
@@ -3319,7 +3318,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         showXJPreview={showXJPreview}
         setShowRFQPreview={setShowRFQPreview}
         currentXJData={currentXJData}
-        rfqDocRef={rfqDocRef}
+        xjDocRef={xjDocRef}
         handleExportRFQPDF={handleExportRFQPDF}
       />
 

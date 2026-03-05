@@ -24,7 +24,7 @@ export default function QuotationPreview({ open, onOpenChange, data }: Quotation
     quotationNo: data.fullQuoteData?.quotationData?.quotationNo || `QT-${Date.now()}`,
     issueDate: currentDate,
     validUntil: data.fullQuoteData?.quotationData?.validUntil || '2024-12-17',
-    rfqId: data.rfqId || data.id,
+    xjId: data.xjId || data.id,
     product: data.product,
     specifications: data.specifications,
     quantity: data.quantity,
@@ -62,7 +62,7 @@ export default function QuotationPreview({ open, onOpenChange, data }: Quotation
 Fujian Gaoshengdafu Building Materials Co., Ltd.
 
 报价单号：${quotationData.quotationNo}          日期：${quotationData.issueDate}
-客户名称：COSUN                                询价单号：${quotationData.rfqId}
+客户名称：COSUN                                询价单号：${quotationData.xjId}
 有效期限：${quotationData.validityDays} 天      有效期至：${quotationData.validUntil}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -163,7 +163,7 @@ Fujian Gaoshengdafu Building Materials Co., Ltd.
                 </div>
                 <div className="flex">
                   <div className="w-28 bg-gray-50 border-r border-black px-3 py-2 font-medium" style={{ fontSize: '13px' }}>询价单号</div>
-                  <div className="flex-1 px-3 py-2" style={{ fontSize: '13px' }}>{quotationData.rfqId}</div>
+                  <div className="flex-1 px-3 py-2" style={{ fontSize: '13px' }}>{quotationData.xjId}</div>
                 </div>
               </div>
               

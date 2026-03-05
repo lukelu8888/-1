@@ -85,7 +85,7 @@ export default function CustomerSamples() {
   }));
 
   // 🔥 模拟询价单数据（实际应从后端获取）
-  const [availableRFQs, setAvailableRFQs] = useState([
+  const [availableXJs, setAvailableRFQs] = useState([
     {
       id: 'XJ-2024-045',
       customer: '福建高盛达富建材有限公司',
@@ -894,13 +894,13 @@ export default function CustomerSamples() {
                       <SelectItem value="none">
                         <span className="text-gray-500">不关联询价单</span>
                       </SelectItem>
-                      {availableRFQs.map((rfq) => (
-                        <SelectItem key={rfq.id} value={rfq.id}>
+                      {availableXJs.map((xj) => (
+                        <SelectItem key={xj.id} value={xj.id}>
                           <div className="flex items-center gap-2">
-                            <span className="font-medium">{rfq.id}</span>
+                            <span className="font-medium">{xj.id}</span>
                             <span className="text-gray-500">-</span>
-                            <span className="text-xs text-gray-600">{rfq.customer}</span>
-                            <span className="text-xs text-gray-500">{rfq.productName}</span>
+                            <span className="text-xs text-gray-600">{xj.customer}</span>
+                            <span className="text-xs text-gray-500">{xj.productName}</span>
                           </div>
                         </SelectItem>
                       ))}
@@ -1174,13 +1174,13 @@ export default function CustomerSamples() {
                       <SelectItem value="none">
                         <span className="text-gray-500">不关联询价单</span>
                       </SelectItem>
-                      {availableRFQs.map((rfq) => (
-                        <SelectItem key={rfq.id} value={rfq.id}>
+                      {availableXJs.map((xj) => (
+                        <SelectItem key={xj.id} value={xj.id}>
                           <div className="flex items-center gap-2">
-                            <span className="font-medium">{rfq.id}</span>
+                            <span className="font-medium">{xj.id}</span>
                             <span className="text-gray-500">-</span>
-                            <span className="text-xs text-gray-600">{rfq.customer}</span>
-                            <span className="text-xs text-gray-500">{rfq.productName}</span>
+                            <span className="text-xs text-gray-600">{xj.customer}</span>
+                            <span className="text-xs text-gray-500">{xj.productName}</span>
                           </div>
                         </SelectItem>
                       ))}

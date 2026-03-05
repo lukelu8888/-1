@@ -11,7 +11,7 @@ export function SupplierDataCleaner() {
   const clearAllRFQData = () => {
     if (window.confirm('⚠️ 确定要清空所有询价数据吗？\n\n这将删除：\n- 所有采购询价单（XJ）\n- 所有报价记录\n- 所有草稿\n\n此操作不可恢复！请确保已备份重要数据。')) {
       // 清空采购询价数据
-      localStorage.removeItem('rfqs');
+      localStorage.removeItem('xjs');
       
       toast.success('✅ 所有询价数据已清空', {
         description: '页面将在2秒后刷新，请重新从采购端发送询价'
@@ -24,15 +24,15 @@ export function SupplierDataCleaner() {
   };
 
   const showDataInfo = () => {
-    const rfqsData = localStorage.getItem('rfqs');
-    const rfqs = rfqsData ? JSON.parse(rfqsData) : [];
+    const xjsData = localStorage.getItem('xjs');
+    const xjs = xjsData ? JSON.parse(xjsData) : [];
     
     console.log('📊 当前数据统计:');
-    console.log(`  ├─ 询价单总数: ${rfqs.length}`);
+    console.log(`  ├─ 询价单总数: ${xjs.length}`);
     
-    if (rfqs.length > 0) {
+    if (xjs.length > 0) {
       console.log('  └─ 询价单列表:');
-      rfqs.forEach((xj: any, idx: number) => {
+      xjs.forEach((xj: any, idx: number) => {
         console.log(`      ${idx + 1}. ${xj.supplierXjNo || xj.xjNumber || xj.id}`);
         console.log(`         产品: ${xj.productName}`);
         console.log(`         供应商: ${xj.supplierName}`);
@@ -44,7 +44,7 @@ export function SupplierDataCleaner() {
     }
     
     toast.info('数据统计信息已输出到控制台', {
-      description: `共 ${rfqs.length} 条询价单`
+      description: `共 ${xjs.length} 条询价单`
     });
   };
 

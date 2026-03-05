@@ -28,12 +28,12 @@ type CreateXJAndHistoryDialogsProps = {
   setSupplierSearchTerm: React.Dispatch<React.SetStateAction<string>>;
   allSuppliers: Supplier[];
   handlePreviewRFQ: (supplier: Supplier) => void;
-  rfqDeadline: Date | undefined;
-  setRFQDeadline: React.Dispatch<React.SetStateAction<Date | undefined>>;
-  rfqRemarks: string;
+  xjDeadline: Date | undefined;
+  setXJDeadline: React.Dispatch<React.SetStateAction<Date | undefined>>;
+  xjRemarks: string;
   setRFQRemarks: React.Dispatch<React.SetStateAction<string>>;
-  handleSubmitRFQ: () => void;
-  submittingRFQ: boolean;
+  handleSubmitXJ: () => void;
+  submittingXJ: boolean;
   showRFQHistoryDialog: boolean;
   setShowRFQHistoryDialog: React.Dispatch<React.SetStateAction<boolean>>;
   selectedProductForHistory: any;
@@ -52,12 +52,12 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
   setSupplierSearchTerm,
   allSuppliers,
   handlePreviewRFQ,
-  rfqDeadline,
-  setRFQDeadline,
-  rfqRemarks,
+  xjDeadline,
+  setXJDeadline,
+  xjRemarks,
   setRFQRemarks,
-  handleSubmitRFQ,
-  submittingRFQ,
+  handleSubmitXJ,
+  submittingXJ,
   showRFQHistoryDialog,
   setShowRFQHistoryDialog,
   selectedProductForHistory,
@@ -239,14 +239,14 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
 
             <div>
               <Label className="text-xs font-semibold text-gray-900 mb-2 block">报价截止日期 *</Label>
-              <DatePicker date={rfqDeadline} onSelect={setRFQDeadline} placeholder="选择截止日期" minDate={new Date()} className="text-xs h-9" />
+              <DatePicker date={xjDeadline} onSelect={setXJDeadline} placeholder="选择截止日期" minDate={new Date()} className="text-xs h-9" />
               <p className="text-xs text-gray-500 mt-1">供应商需要在此日期前提交报价</p>
             </div>
 
             <div>
               <Label className="text-xs font-semibold text-gray-900 mb-2 block">备注说明</Label>
               <Textarea
-                value={rfqRemarks}
+                value={xjRemarks}
                 onChange={(e) => setRFQRemarks(e.target.value)}
                 placeholder="向供应商说明特殊要求、注意事项等..."
                 rows={3}
@@ -257,8 +257,8 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
 
           <DialogFooter className="border-t border-gray-200 pt-4">
             <Button variant="outline" onClick={() => setShowCreateRFQDialog(false)} className="text-xs">取消</Button>
-            <Button onClick={handleSubmitRFQ} disabled={submittingRFQ || selectedSuppliers.length === 0 || !rfqDeadline} className="bg-blue-600 hover:bg-blue-700 text-xs">
-              {submittingRFQ ? '创建中...' : `创建询价单 (${selectedSuppliers.length} 个供应商)`}
+            <Button onClick={handleSubmitXJ} disabled={submittingXJ || selectedSuppliers.length === 0 || !xjDeadline} className="bg-blue-600 hover:bg-blue-700 text-xs">
+              {submittingXJ ? '创建中...' : `创建询价单 (${selectedSuppliers.length} 个供应商)`}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -476,7 +476,7 @@ export function DocumentTestPage() {
 
   // 🔥 示例数据：采购询价单
   const sampleRFQData: XJData = {
-    rfqNo: 'XJ-251218-1001',
+    xjNo: 'XJ-251218-1001',
     xjDate: '2025-12-18',
     requiredResponseDate: '2025-12-25',
     requiredDeliveryDate: '2026-01-15',
@@ -561,7 +561,7 @@ export function DocumentTestPage() {
     quotationNo: 'BJ-20251218-001',
     quotationDate: '2025-12-18',
     validUntil: '2026-01-18',
-    rfqReference: 'XJ-251218-1001',
+    xjReference: 'XJ-251218-1001',
     
     supplier: {
       companyName: '深圳市优质五金制品有限公司',

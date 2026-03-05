@@ -89,7 +89,7 @@ interface OrderStats {
 
 export default function SupplierOrderManagementCenter() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier, deleteRFQ, updateRFQ, addQuoteToRFQ, refreshMineFromBackend } = useXJs();
+  const { xjs, getXJsBySupplier, deleteXJ, updateXJ, addQuoteToXJ, refreshMineFromBackend } = useXJs();
   
   // 🔥 获取完整的供应商信息（从suppliersDatabase）
   const supplierInfo = useMemo(() => {
@@ -133,11 +133,11 @@ export default function SupplierOrderManagementCenter() {
   }, [user?.email]);
   
   // Tab状态
-  const [activeTab, setActiveTab] = useState<'overview' | 'rfq' | 'quotation' | 'active-orders' | 'history'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'xj' | 'quotation' | 'active-orders' | 'history'>('overview');
 
   // ✅ When supplier opens "客户需求", actively fetch from backend so Network shows the request.
   React.useEffect(() => {
-    if (activeTab === 'rfq') {
+    if (activeTab === 'xj') {
       void refreshMineFromBackend({ force: true });
     }
   }, [activeTab, refreshMineFromBackend]);
@@ -174,51 +174,51 @@ export default function SupplierOrderManagementCenter() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // 🔥 获取当前供应商的询价单
-  const myRFQs = useMemo(() => {
+  const myXJs = useMemo(() => {
     if (!user?.email) {
       console.log('⚠️ [供应商订单管理中心] 用户未登录，无法获取采购询价');
       return [];
     }
     console.log('🔍 [供应商订单管理中心] 正在获取采购询价，供应商邮箱:', user.email);
-    const result = getRFQsBySupplier(user.email);
+    const result = getXJsBySupplier(user.email);
     console.log('📦 [供应商订单管理中心] 获取到的采购询价数量:', result.length);
     if (result.length > 0) {
       console.log('  - 采购询价详情:', result.map(r => ({
         id: r.id,
-        rfqNo: r.supplierXjNo,
+        xjNo: r.supplierXjNo,
         status: r.status,
         supplier: r.supplierName
       })));
     }
     return result;
-  }, [rfqs, user?.email, getRFQsBySupplier]);
+  }, [xjs, user?.email, getXJsBySupplier]);
 
   // 🔥 分类采购询价（客户需求池）
   const categorizedRFQs = useMemo(() => {
-    console.log('🔍 [分类采购询价] 开始分类，总采购询价数:', myRFQs.length);
+    console.log('🔍 [分类采购询价] 开始分类，总采购询价数:', myXJs.length);
     
     // 🔥 修改：客户需求Tab显示所有待处理的采购询价（包括待报价和已下推）
-    const pending = myRFQs.filter(rfq => {
+    const pending = myXJs.filter(xj => {
       // 接受 'pending'、'sent' 和 'quoted' 状态
-      const isPendingOrSent = rfq.status === 'pending' || rfq.status === 'sent' || rfq.status === 'quoted';
+      const isPendingOrSent = xj.status === 'pending' || xj.status === 'sent' || xj.status === 'quoted';
       // 排除已接受和已拒绝的
-      const result = isPendingOrSent && rfq.status !== 'accepted' && rfq.status !== 'rejected';
-      const myQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
-      console.log(`  - 采购询价 ${rfq.supplierXjNo}: status=${rfq.status}, hasQuote=${!!myQuote}, 是否在客户需求=${result}`);
+      const result = isPendingOrSent && xj.status !== 'accepted' && xj.status !== 'rejected';
+      const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
+      console.log(`  - 采购询价 ${xj.supplierXjNo}: status=${xj.status}, hasQuote=${!!myQuote}, 是否在客户需求=${result}`);
       return result;
     });
     
-    const quoted = myRFQs.filter(rfq => {
-      const myQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
-      return myQuote && rfq.status !== 'accepted' && rfq.status !== 'rejected';
+    const quoted = myXJs.filter(xj => {
+      const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
+      return myQuote && xj.status !== 'accepted' && xj.status !== 'rejected';
     });
     
-    const accepted = myRFQs.filter(rfq => rfq.status === 'accepted');
+    const accepted = myXJs.filter(xj => xj.status === 'accepted');
     
     console.log('📊 [分类结果] 客户需求:', pending.length, '已报价:', quoted.length, '已接受:', accepted.length);
     
     return { pending, quoted, accepted };
-  }, [myRFQs, user?.email]);
+  }, [myXJs, user?.email]);
 
   // 🔥 获取当前供应商的所有报价单
   const myQuotations = useMemo(() => {
@@ -315,7 +315,7 @@ export default function SupplierOrderManagementCenter() {
               <CardContent className="pt-6">
                 <div className="text-center">
                   <p className="text-sm text-slate-600 mb-2">总询价</p>
-                  <div className="text-3xl font-bold text-slate-900">{myRFQs.length}</div>
+                  <div className="text-3xl font-bold text-slate-900">{myXJs.length}</div>
                   <div className="flex items-center justify-center gap-1 mt-2">
                     <TrendingUp className="w-3 h-3 text-green-600" />
                     <span className="text-xs text-green-600">+12%</span>
@@ -386,7 +386,7 @@ export default function SupplierOrderManagementCenter() {
                 <div className="text-center">
                   <p className="text-sm text-orange-800 mb-2">赢单转化率</p>
                   <div className="text-3xl font-bold text-orange-900">
-                    {myRFQs.length > 0 ? Math.round((myQuotations.filter(q => q.status === 'accepted').length / myRFQs.length) * 100) : 0}%
+                    {myXJs.length > 0 ? Math.round((myQuotations.filter(q => q.status === 'accepted').length / myXJs.length) * 100) : 0}%
                   </div>
                   <div className="flex items-center justify-center gap-1 mt-2">
                     <TrendingUp className="w-3 h-3 text-orange-700" />
@@ -518,11 +518,11 @@ export default function SupplierOrderManagementCenter() {
             <CardContent>
               <div className="space-y-4 max-w-2xl mx-auto py-8">
                 {[
-                  { label: '询价', count: myRFQs.length, percentage: 100, color: 'bg-blue-500' },
-                  { label: '报价', count: myQuotations.length, percentage: myRFQs.length > 0 ? Math.round((myQuotations.length / myRFQs.length) * 100) : 0, color: 'bg-indigo-500' },
-                  { label: '合同', count: myQuotations.filter(q => q.status === 'accepted').length, percentage: myRFQs.length > 0 ? Math.round((myQuotations.filter(q => q.status === 'accepted').length / myRFQs.length) * 100) : 0, color: 'bg-purple-500' },
-                  { label: '订单', count: stats.activeOrders, percentage: myRFQs.length > 0 ? Math.round((stats.activeOrders / myRFQs.length) * 100) : 0, color: 'bg-pink-500' },
-                  { label: '完成', count: stats.completedOrders, percentage: myRFQs.length > 0 ? Math.round((stats.completedOrders / myRFQs.length) * 100) : 0, color: 'bg-green-500' }
+                  { label: '询价', count: myXJs.length, percentage: 100, color: 'bg-blue-500' },
+                  { label: '报价', count: myQuotations.length, percentage: myXJs.length > 0 ? Math.round((myQuotations.length / myXJs.length) * 100) : 0, color: 'bg-indigo-500' },
+                  { label: '合同', count: myQuotations.filter(q => q.status === 'accepted').length, percentage: myXJs.length > 0 ? Math.round((myQuotations.filter(q => q.status === 'accepted').length / myXJs.length) * 100) : 0, color: 'bg-purple-500' },
+                  { label: '订单', count: stats.activeOrders, percentage: myXJs.length > 0 ? Math.round((stats.activeOrders / myXJs.length) * 100) : 0, color: 'bg-pink-500' },
+                  { label: '完成', count: stats.completedOrders, percentage: myXJs.length > 0 ? Math.round((stats.completedOrders / myXJs.length) * 100) : 0, color: 'bg-green-500' }
                 ].map((stage, idx) => (
                   <div key={idx} className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -617,7 +617,7 @@ export default function SupplierOrderManagementCenter() {
                 onClick={() => {
                   if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个询价单吗？\n\n⚠️ 此操作不可恢复！`)) {
                     selectedIds.forEach(id => {
-                      deleteRFQ(id);
+                      deleteXJ(id);
                     });
                     
                     toast.success(
@@ -651,7 +651,7 @@ export default function SupplierOrderManagementCenter() {
                       if (selectedIds.length === pendingRFQs.length) {
                         setSelectedIds([]);
                       } else {
-                        setSelectedIds(pendingRFQs.map(rfq => rfq.id));
+                        setSelectedIds(pendingRFQs.map(xj => xj.id));
                       }
                     }}
                   />
@@ -667,16 +667,16 @@ export default function SupplierOrderManagementCenter() {
             </TableHeader>
             <TableBody>
               {pendingRFQs.length > 0 ? (
-                pendingRFQs.map((rfq, index) => (
-                  <TableRow key={rfq.id} className="hover:bg-slate-50">
+                pendingRFQs.map((xj, index) => (
+                  <TableRow key={xj.id} className="hover:bg-slate-50">
                     <TableCell>
                       <Checkbox 
-                        checked={selectedIds.includes(rfq.id)}
+                        checked={selectedIds.includes(xj.id)}
                         onCheckedChange={() => {
                           setSelectedIds(prev => 
-                            prev.includes(rfq.id) 
-                              ? prev.filter(id => id !== rfq.id)
-                              : [...prev, rfq.id]
+                            prev.includes(xj.id) 
+                              ? prev.filter(id => id !== xj.id)
+                              : [...prev, xj.id]
                           );
                         }}
                       />
@@ -686,14 +686,14 @@ export default function SupplierOrderManagementCenter() {
                     </TableCell>
                     <TableCell>
                       <div>
-                        <p className="text-sm font-medium text-blue-600">{rfq.supplierXjNo || rfq.xjNumber}</p>
-                        <p className="text-xs text-slate-500">{rfq.createdDate}</p>
+                        <p className="text-sm font-medium text-blue-600">{xj.supplierXjNo || xj.xjNumber}</p>
+                        <p className="text-xs text-slate-500">{xj.createdDate}</p>
                       </div>
                     </TableCell>
                     <TableCell>
-                      {rfq.products && rfq.products.length > 0 ? (
+                      {xj.products && xj.products.length > 0 ? (
                         <div className="space-y-0.5">
-                          {rfq.products.slice(0, 2).map((p: any, i: number) => (
+                          {xj.products.slice(0, 2).map((p: any, i: number) => (
                             <div key={i}>
                               <p className="text-sm font-medium text-slate-900 leading-tight">{p.productName || p.description || 'N/A'}</p>
                               {p.modelNo && p.modelNo !== '-' && (
@@ -704,43 +704,43 @@ export default function SupplierOrderManagementCenter() {
                               )}
                             </div>
                           ))}
-                          {rfq.products.length > 2 && (
-                            <p className="text-xs text-blue-500">+{rfq.products.length - 2} 件产品</p>
+                          {xj.products.length > 2 && (
+                            <p className="text-xs text-blue-500">+{xj.products.length - 2} 件产品</p>
                           )}
                         </div>
                       ) : (
                         <div>
-                          <p className="text-sm font-medium text-slate-900">{rfq.productName || 'N/A'}</p>
-                          {rfq.modelNo && <p className="text-xs text-slate-500">{rfq.modelNo}</p>}
-                          {rfq.specification && <p className="text-xs text-slate-400">{rfq.specification}</p>}
+                          <p className="text-sm font-medium text-slate-900">{xj.productName || 'N/A'}</p>
+                          {xj.modelNo && <p className="text-xs text-slate-500">{xj.modelNo}</p>}
+                          {xj.specification && <p className="text-xs text-slate-400">{xj.specification}</p>}
                         </div>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {rfq.products && rfq.products.length > 0 ? (
+                      {xj.products && xj.products.length > 0 ? (
                         <div className="space-y-0.5">
-                          {rfq.products.slice(0, 2).map((p: any, i: number) => (
+                          {xj.products.slice(0, 2).map((p: any, i: number) => (
                             <div key={i} className="text-right">
                               <span className="text-sm font-medium">{(p.quantity ?? 0).toLocaleString()}</span>
                               <span className="text-xs text-slate-500 ml-1">{p.unit || 'PCS'}</span>
                             </div>
                           ))}
-                          {rfq.products.length > 2 && <div className="h-4" />}
+                          {xj.products.length > 2 && <div className="h-4" />}
                         </div>
                       ) : (
                         <>
-                          <span className="text-sm font-medium">{rfq.quantity?.toLocaleString() || 0}</span>
-                          <span className="text-xs text-slate-500 ml-1">{rfq.unit || ''}</span>
+                          <span className="text-sm font-medium">{xj.quantity?.toLocaleString() || 0}</span>
+                          <span className="text-xs text-slate-500 ml-1">{xj.unit || ''}</span>
                         </>
                       )}
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm text-slate-600">{rfq.quotationDeadline}</span>
+                      <span className="text-sm text-slate-600">{xj.quotationDeadline}</span>
                     </TableCell>
                     <TableCell>
                       {(() => {
                         // 🔥 检查是否已下推报价
-                        const myQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
+                        const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
                         if (myQuote) {
                           return (
                             <Badge className="bg-green-100 text-green-800 border-green-300">
@@ -758,13 +758,13 @@ export default function SupplierOrderManagementCenter() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-center gap-1">
-                        {rfq.documentData && (
+                        {xj.documentData && (
                           <Button
                             size="sm"
                             variant="outline"
                             className="h-7 px-2 text-xs"
                             onClick={() => {
-                              setSelectedItem(rfq);
+                              setSelectedItem(xj);
                               setDocumentViewerOpen(true);
                             }}
                           >
@@ -774,9 +774,9 @@ export default function SupplierOrderManagementCenter() {
                         )}
                         {/* 🔥 根据是否已下推报价显示不同按钮 */}
                         {(() => {
-                          const myQuote = rfq.quotes?.find((q: any) => q.supplierCode === user?.email);
+                          const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
                           const existingQuotation = supplierQuotations.find(q => 
-                            q.sourceXJ === (rfq.supplierXjNo || rfq.xjNumber) &&
+                            q.sourceXJ === (xj.supplierXjNo || xj.xjNumber) &&
                             q.supplierEmail === user?.email
                           );
                           
@@ -805,7 +805,7 @@ export default function SupplierOrderManagementCenter() {
                             try {
                               // 🔥 防止重复创建：检查是否已存在对应的报价单
                               const existingQuotation = supplierQuotations.find(q => 
-                                q.sourceXJ === (rfq.supplierXjNo || rfq.xjNumber) &&
+                                q.sourceXJ === (xj.supplierXjNo || xj.xjNumber) &&
                                 q.supplierEmail === user?.email
                               );
 
@@ -813,7 +813,7 @@ export default function SupplierOrderManagementCenter() {
                                 toast.warning(
                                   <div className="space-y-1">
                                     <p className="font-semibold">⚠️ 报价单已存在</p>
-                                    <p className="text-sm">询价单: {rfq.supplierXjNo || rfq.xjNumber}</p>
+                                    <p className="text-sm">询价单: {xj.supplierXjNo || xj.xjNumber}</p>
                                     <p className="text-sm">报价单: {existingQuotation.quotationNo}</p>
                                     <p className="text-xs text-slate-500 mt-1">正在跳转到我的报价...</p>
                                   </div>,
@@ -829,14 +829,14 @@ export default function SupplierOrderManagementCenter() {
 
                               // 创建报价单（使用默认值）
                               console.log('🔍 创建报价单 - 采购询价数据:', {
-                                id: rfq.id,
-                                xjNumber: rfq.xjNumber,
-                                supplierXjNo: rfq.supplierXjNo,
-                                productName: rfq.productName,
-                                quantity: rfq.quantity,
-                                unit: rfq.unit,
-                                products: rfq.products, // 🔥 多产品数组
-                                productsCount: rfq.products?.length || 0
+                                id: xj.id,
+                                xjNumber: xj.xjNumber,
+                                supplierXjNo: xj.supplierXjNo,
+                                productName: xj.productName,
+                                quantity: xj.quantity,
+                                unit: xj.unit,
+                                products: xj.products, // 🔥 多产品数组
+                                productsCount: xj.products?.length || 0
                               });
                               
                               console.log('🔍 供应商信息:', {
@@ -848,7 +848,7 @@ export default function SupplierOrderManagementCenter() {
                               });
 
                               const quotation = await createQuotationFromXJ(
-                                rfq,
+                                xj,
                                 supplierInfo,
                                 {
                                   unitPrice: 0,
@@ -873,7 +873,7 @@ export default function SupplierOrderManagementCenter() {
                               setSupplierQuotations(updatedQuotations);
 
                               // 🔥 将报价信息添加到采购询价的quotes数组中，标记为"已下推"
-                              addQuoteToRFQ(rfq.id, {
+                              addQuoteToXJ(xj.id, {
                                 supplierCode: supplierInfo?.email || user?.email || '',
                                 supplierName: supplierInfo?.name || user?.username || '供应商',
                                 quotedDate: new Date().toISOString().split('T')[0],
@@ -890,7 +890,7 @@ export default function SupplierOrderManagementCenter() {
                               toast.success(
                                 <div className="space-y-1">
                                   <p className="font-semibold">✅ 报价单创建成功</p>
-                                  <p className="text-sm">询价单: {rfq.supplierXjNo || rfq.xjNumber}</p>
+                                  <p className="text-sm">询价单: {xj.supplierXjNo || xj.xjNumber}</p>
                                   <p className="text-sm">报价单: {quotation.quotationNo}</p>
                                   <p className="text-xs text-slate-500 mt-1">状态已更新为"已下推"，正在跳转到我的报价...</p>
                                 </div>,
@@ -1632,7 +1632,7 @@ export default function SupplierOrderManagementCenter() {
               <p className="text-xs opacity-75">Overview</p>
             </div>
           </TabsTrigger>
-          <TabsTrigger value="rfq" className="gap-2 py-2.5 data-[state=active]:bg-white">
+          <TabsTrigger value="xj" className="gap-2 py-2.5 data-[state=active]:bg-white">
             <FileText className="w-4 h-4" />
             <div className="text-left">
               <p className="text-sm font-medium">客户需求</p>
@@ -1666,7 +1666,7 @@ export default function SupplierOrderManagementCenter() {
           {renderOverview()}
         </TabsContent>
 
-        <TabsContent value="rfq" className="mt-6">
+        <TabsContent value="xj" className="mt-6">
           {renderRFQList()}
         </TabsContent>
 
@@ -1844,12 +1844,12 @@ export default function SupplierOrderManagementCenter() {
                       setSelectedQuotation(updatedQuotation);
 
                       // 4. Sync back to the parent 采购询价
-                      const relatedRFQ = myRFQs.find(r =>
+                      const relatedRFQ = myXJs.find(r =>
                         (r.supplierXjNo || r.xjNumber) === updatedQuotation.sourceXJ
                       );
                       if (relatedRFQ) {
                         const firstItem = updatedQuotation.items?.[0];
-                        addQuoteToRFQ(relatedRFQ.id, {
+                        addQuoteToXJ(relatedRFQ.id, {
                           supplierCode: updatedQuotation.supplierEmail || user?.email || '',
                           supplierName: updatedQuotation.supplierName || user?.username || '供应商',
                           unitPrice: firstItem?.unitPrice ?? 0,

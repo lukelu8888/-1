@@ -84,7 +84,7 @@ export default function QuotationDocument({ xj, initialData, onSubmit, preview =
     validDays: '30',
     customerName: 'COSUN采购部',
     contactPerson: '采购经理',
-    rfqNo: xj.id,
+    xjNo: xj.id,
   });
 
   // 产品列表
@@ -1542,8 +1542,8 @@ export default function QuotationDocument({ xj, initialData, onSubmit, preview =
             <td className="border border-gray-400 px-2 py-1">
               <input
                 type="text"
-                value={quotationData.rfqNo}
-                onChange={(e) => setQuotationData({ ...quotationData, rfqNo: e.target.value })}
+                value={quotationData.xjNo}
+                onChange={(e) => setQuotationData({ ...quotationData, xjNo: e.target.value })}
                 className="w-full bg-transparent border-none outline-none"
                 style={{ fontSize: '11px' }}
               />

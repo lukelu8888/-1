@@ -97,10 +97,10 @@ export default function SupplierQuotationPreview({ quotationData }: SupplierQuot
             <p className="text-xs text-blue-700">报价有效期</p>
             <p className="font-medium text-orange-600">{quotationData.validUntil}</p>
           </div>
-          {quotationData.rfqReference && (
+          {quotationData.xjReference && (
             <div className="col-span-2">
               <p className="text-xs text-blue-700">关联询价单</p>
-              <p className="font-medium text-blue-900">{quotationData.rfqReference}</p>
+              <p className="font-medium text-blue-900">{quotationData.xjReference}</p>
             </div>
           )}
         </div>

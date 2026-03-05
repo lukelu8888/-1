@@ -277,7 +277,7 @@ export const generateXJDocumentData = (
   selectedProductIds: string[],
   xjNoOverride?: string
 ): XJData => {
-  const rfqNo = xjNoOverride || `XJ-${new Date().toISOString().slice(2,10).replace(/-/g,'')}-0000`; // caller must provide xjNoOverride
+  const xjNo = xjNoOverride || `XJ-${new Date().toISOString().slice(2,10).replace(/-/g,'')}-0000`; // caller must provide xjNoOverride
   
   // 只包含选中的产品
   const selectedProducts = requirement.items?.filter(item => selectedProductIds.includes(item.id)) || [];
@@ -303,7 +303,7 @@ export const generateXJDocumentData = (
   }
   
   return {
-    rfqNo: rfqNo,
+    xjNo: xjNo,
     xjDate: new Date().toISOString().split('T')[0],
     quoteDeadline: deadline.toISOString().split('T')[0],
     requirementNo: requirement.requirementNo,

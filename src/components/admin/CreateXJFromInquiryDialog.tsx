@@ -282,7 +282,7 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
     setLoading(true);
 
     try {
-      let rfqCount = 0;
+      let xjCount = 0;
 
       // 🔥 为每个产品的每个供应商创建独立的采购询价（XJ）
       inquiry.items.forEach(item => {
@@ -335,14 +335,14 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
             quotes: []
           });
 
-          rfqCount++;
+          xjCount++;
         });
       });
 
       toast.success(
         `✅ 询价单已创建！`,
         {
-          description: `已创建 ${rfqCount} 个采购询价单（XJ）`
+          description: `已创建 ${xjCount} 个采购询价单（XJ）`
         }
       );
 

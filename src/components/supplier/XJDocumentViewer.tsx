@@ -51,7 +51,7 @@ export default function XJDocumentViewer({ xj }: XJDocumentViewerProps) {
         <div>
           <h4 className="font-semibold text-gray-900">询价单文档</h4>
           <p className="text-xs text-gray-500 mt-1">
-            编号: {documentData.rfqNo} | 日期: {documentData.xjDate}
+            编号: {documentData.xjNo} | 日期: {documentData.xjDate}
           </p>
         </div>
         <div className="flex items-center gap-2">

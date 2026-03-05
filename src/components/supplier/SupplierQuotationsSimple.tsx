@@ -14,11 +14,11 @@ import { nextBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号�
 
 export default function SupplierQuotationsSimple() {
   const { user } = useUser();
-  const { rfqs, getRFQsBySupplier, addQuoteToRFQ, deleteRFQ, updateRFQ } = useXJs();
+  const { xjs, getXJsBySupplier, addQuoteToXJ, deleteXJ, updateXJ } = useXJs();
   
   const [activeTab, setActiveTab] = useState('pending');
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
-  const [selectedRFQ, setSelectedRFQ] = useState<any>(null);
+  const [selectedXJ, setSelectedRFQ] = useState<any>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailRFQ, setDetailRFQ] = useState<any>(null);
   const [documentViewerOpen, setDocumentViewerOpen] = useState(false);
@@ -33,7 +33,7 @@ export default function SupplierQuotationsSimple() {
     
     console.log('🔍 [供应商采购询价查询] ==================');
     console.log('📧 当前供应商用户email:', user.email);
-    console.log('📊 所有采购询价总数:', rfqs.length);
+    console.log('📊 所有采购询价总数:', xjs.length);
     
     // 打印所有采购询价的供应商信息
     xjs.forEach(xj => {
@@ -44,12 +44,12 @@ export default function SupplierQuotationsSimple() {
       });
     });
     
-    const filtered = getRFQsBySupplier(user.email);
+    const filtered = getXJsBySupplier(user.email);
     console.log('✅ 筛选后的采购询价数量:', filtered.length);
     console.log('==================\n');
     
     return filtered;
-  }, [rfqs, user?.email, getRFQsBySupplier]);
+  }, [xjs, user?.email, getXJsBySupplier]);
 
   // 🔥 分类采购询价
   const categorizedRFQs = useMemo(() => {
@@ -70,7 +70,7 @@ export default function SupplierQuotationsSimple() {
 
   // 🔥 提交报价
   const handleSubmitQuote = async (formData: any, type: 'draft' | 'submit') => {
-    if (!selectedRFQ || !user) return;
+    if (!selectedXJ || !user) return;
     
     if (type === 'submit') {
       // 🔥 生成供应商报价单号（BJ，调用 Supabase RPC）
@@ -88,10 +88,10 @@ export default function SupplierQuotationsSimple() {
         remarks: formData.remarks
       };
       
-      addQuoteToRFQ(selectedRFQ.id, quote);
+      addQuoteToXJ(selectedXJ.id, quote);
       
       // 🔥 更新报价单号
-      updateRFQ(selectedRFQ.id, { 
+      updateXJ(selectedXJ.id, { 
         supplierQuotationNo,
         status: 'quoted' as any
       });
@@ -100,10 +100,10 @@ export default function SupplierQuotationsSimple() {
       const bjQuotation = {
         id: `bj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         quotationNo: supplierQuotationNo,
-        sourceXJ: selectedRFQ.supplierXjNo, // 关联XJ询价单号
-        sourceQR: selectedRFQ.requirementNo, // 关联QR采购需求号
-        sourceRFQId: selectedRFQ.id,
-        customerName: selectedRFQ.customerName || 'COSUN',
+        sourceXJ: selectedXJ.supplierXjNo, // 关联XJ询价单号
+        sourceQR: selectedXJ.requirementNo, // 关联QR采购需求号
+        sourceRFQId: selectedXJ.id,
+        customerName: selectedXJ.customerName || 'COSUN',
         customerCompany: 'COSUN贸易',
         supplierCode: user.email,
         supplierName: user.name || user.email,
@@ -112,9 +112,9 @@ export default function SupplierQuotationsSimple() {
         quotationDate: new Date().toISOString().split('T')[0],
         validUntil: new Date(Date.now() + parseInt(formData.validityDays) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         currency: formData.currency || 'USD',
-        totalAmount: parseFloat(formData.unitPrice) * (selectedRFQ.quantity || 0),
+        totalAmount: parseFloat(formData.unitPrice) * (selectedXJ.quantity || 0),
         paymentTerms: formData.paymentTerms,
-        items: selectedRFQ.products?.map((p: any) => ({
+        items: selectedXJ.products?.map((p: any) => ({
           id: p.id || `item_${Date.now()}`,
           productName: p.productName,
           modelNo: p.modelNo || 'N/A',
@@ -129,14 +129,14 @@ export default function SupplierQuotationsSimple() {
           remarks: formData.remarks
         })) || [{
           id: `item_${Date.now()}`,
-          productName: selectedRFQ.productName,
-          modelNo: selectedRFQ.modelNo || 'N/A',
-          specification: selectedRFQ.specification,
-          quantity: selectedRFQ.quantity,
-          unit: selectedRFQ.unit || 'pcs',
+          productName: selectedXJ.productName,
+          modelNo: selectedXJ.modelNo || 'N/A',
+          specification: selectedXJ.specification,
+          quantity: selectedXJ.quantity,
+          unit: selectedXJ.unit || 'pcs',
           unitPrice: parseFloat(formData.unitPrice),
           currency: formData.currency || 'USD',
-          amount: parseFloat(formData.unitPrice) * selectedRFQ.quantity,
+          amount: parseFloat(formData.unitPrice) * selectedXJ.quantity,
           leadTime: parseInt(formData.leadTime),
           moq: parseInt(formData.moq),
           remarks: formData.remarks
@@ -154,15 +154,15 @@ export default function SupplierQuotationsSimple() {
       
       console.log('✅ [SupplierQuotationsSimple] 创建BJ报价单:', bjQuotation);
       console.log('  - BJ编号:', supplierQuotationNo);
-      console.log('  - 关联XJ:', selectedRFQ.supplierXjNo);
-      console.log('  - 关联QR:', selectedRFQ.requirementNo);
+      console.log('  - 关联XJ:', selectedXJ.supplierXjNo);
+      console.log('  - 关联QR:', selectedXJ.requirementNo);
       
       toast.success(
         <div className="space-y-1">
           <p className="font-semibold">✅ 报价已成功提交！</p>
-          <p className="text-sm">询价单号: {selectedRFQ.supplierXjNo || 'XJ-未分配'}</p>
+          <p className="text-sm">询价单号: {selectedXJ.supplierXjNo || 'XJ-未分配'}</p>
           <p className="text-sm">报价单号: {supplierQuotationNo}</p>
-          <p className="text-xs text-slate-500">COSUN采购需求: {selectedRFQ.requirementNo}</p>
+          <p className="text-xs text-slate-500">COSUN采购需求: {selectedXJ.requirementNo}</p>
           <p className="text-xs text-slate-500">报价已发送至COSUN管理员</p>
         </div>,
         { duration: 5000 }
@@ -176,7 +176,7 @@ export default function SupplierQuotationsSimple() {
   // 🔥 删除询价单
   const handleDeleteXJ = (xj: any) => {
     if (window.confirm(`确定要删除询价单 ${xj.xjNumber} 吗？\n\n⚠️ 此操作不可恢复！`)) {
-      deleteRFQ(xj.id);
+      deleteXJ(xj.id);
       toast.success(
         <div className="space-y-1">
           <p className="font-semibold">🗑️ 询价单已删除</p>
@@ -188,11 +188,11 @@ export default function SupplierQuotationsSimple() {
   };
 
   // 🔥 批量删除功能
-  const handleToggleSelectRFQ = (rfqId: string) => {
+  const handleToggleSelectXJ = (xjId: string) => {
     setSelectedRFQIds(prev => 
-      prev.includes(rfqId) 
-        ? prev.filter(id => id !== rfqId)
-        : [...prev, rfqId]
+      prev.includes(xjId) 
+        ? prev.filter(id => id !== xjId)
+        : [...prev, xjId]
     );
   };
 
@@ -215,7 +215,7 @@ export default function SupplierQuotationsSimple() {
     
     if (window.confirm(confirmMessage)) {
       selectedRFQIds.forEach(id => {
-        deleteRFQ(id);
+        deleteXJ(id);
       });
 
       toast.success(
@@ -394,7 +394,7 @@ export default function SupplierQuotationsSimple() {
                       <TableCell className="py-3">
                         <Checkbox
                           checked={selectedRFQIds.includes(xj.id)}
-                          onCheckedChange={() => handleToggleSelectRFQ(xj.id)}
+                          onCheckedChange={() => handleToggleSelectXJ(xj.id)}
                         />
                       </TableCell>
                       <TableCell className="py-3" style={{ fontSize: '14px' }}>
@@ -565,15 +565,15 @@ export default function SupplierQuotationsSimple() {
       <Dialog open={quoteDialogOpen} onOpenChange={setQuoteDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>提交报价 - {selectedRFQ?.xjNumber}</DialogTitle>
+            <DialogTitle>提交报价 - {selectedXJ?.xjNumber}</DialogTitle>
             <DialogDescription>
               请填写您的报价信息并提交给COSUN管理员
             </DialogDescription>
           </DialogHeader>
           
-          {selectedRFQ && (
+          {selectedXJ && (
             <SimpleQuoteForm
-              xj={selectedRFQ}
+              xj={selectedXJ}
               onSubmit={handleSubmitQuote}
               onCancel={() => setQuoteDialogOpen(false)}
             />

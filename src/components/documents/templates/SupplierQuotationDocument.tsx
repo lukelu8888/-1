@@ -13,7 +13,7 @@ export interface SupplierQuotationData {
   quotationNo: string;              // BJ-20251218-001
   quotationDate: string;            // 2025-12-18
   validUntil: string;               // 报价有效期至
-  rfqReference?: string;            // 关联的询价单号（可选）
+  xjReference?: string;            // 关联的询价单号（可选）
   inquiryReference?: string;        // 🔥 原始询价说明（业务部说明+特殊要求等）
   
   // 报价方（供应商）信息
@@ -218,11 +218,11 @@ export const SupplierQuotationDocument = forwardRef<HTMLDivElement, SupplierQuot
                           }).replace(/\//g, '-')}
                         </td>
                       </tr>
-                      {data.rfqReference && (
+                      {data.xjReference && (
                         <tr>
                           <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">询价单号</td>
                           <td className="border border-gray-400 px-1.5 py-0.5 text-blue-600 text-xs">
-                            {data.rfqReference}
+                            {data.xjReference}
                           </td>
                         </tr>
                       )}

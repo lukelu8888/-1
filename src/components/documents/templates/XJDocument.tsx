@@ -12,7 +12,7 @@ import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png'
 
 export interface XJData {
   // 询价单基本信息
-  rfqNo: string;                    // XJ-20251218-001
+  xjNo: string;                    // XJ-20251218-001
   xjDate: string;                  // 2025-12-18
   requiredResponseDate: string;     // 要求回复日期
   requiredDeliveryDate: string;     // 要求交货日期
@@ -223,7 +223,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
                     <tbody>
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">询价编号</td>
-                        <td className="border border-gray-400 px-1.5 py-0.5 font-bold text-black">{data.rfqNo}</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5 font-bold text-black">{data.xjNo}</td>
                       </tr>
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">询价日期</td>

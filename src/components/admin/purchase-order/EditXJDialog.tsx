@@ -44,7 +44,7 @@ export const EditXJDialog: React.FC<EditXJDialogProps> = ({
     <Dialog open={showEditXJDialog} onOpenChange={setShowEditXJDialog}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle style={{ fontSize: '16px' }}>✏️ 编辑询价单 - {editRFQData?.rfqNo}</DialogTitle>
+          <DialogTitle style={{ fontSize: '16px' }}>✏️ 编辑询价单 - {editRFQData?.xjNo}</DialogTitle>
           <DialogDescription style={{ fontSize: '12px' }}>Edit Procurement Inquiry - All fields are editable</DialogDescription>
         </DialogHeader>
 
@@ -55,7 +55,7 @@ export const EditXJDialog: React.FC<EditXJDialogProps> = ({
               <div className="grid grid-cols-4 gap-2">
                 <div>
                   <Label className="text-[10px] text-gray-600">询价单号</Label>
-                  <Input value={editRFQData.rfqNo || ''} onChange={(e) => setEditRFQData({ ...editRFQData, rfqNo: e.target.value })} className="text-xs h-7" readOnly />
+                  <Input value={editRFQData.xjNo || ''} onChange={(e) => setEditRFQData({ ...editRFQData, xjNo: e.target.value })} className="text-xs h-7" readOnly />
                 </div>
                 <div>
                   <Label className="text-[10px] text-gray-600">询价日期</Label>

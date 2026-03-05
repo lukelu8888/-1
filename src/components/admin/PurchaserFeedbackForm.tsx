@@ -50,7 +50,7 @@ export function PurchaserFeedbackForm({
   currentUserName
 }: PurchaserFeedbackFormProps) {
   
-  const { rfqs } = useXJs();
+  const { xjs } = useXJs();
   
   // 🔥 状态管理
   const [loading, setLoading] = useState(false);
@@ -80,11 +80,11 @@ export function PurchaserFeedbackForm({
       console.log('🔍 开始智能比价...');
       console.log('  QR编号:', qr.requirementNo);
       console.log('  QR产品数:', qr.items.length);
-      console.log('  XJ数量:', rfqs.length);
+      console.log('  XJ数量:', xjs.length);
       console.log('  BJ总数:', supplierQuotations.length);
       
       // 2. 找到关联的XJ（询价单）
-      const relatedXJs = rfqs.filter(xj => 
+      const relatedXJs = xjs.filter(xj => 
         xj.sourceQRNumber === qr.requirementNo || 
         xj.requirementNo === qr.requirementNo
       );
