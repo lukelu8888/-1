@@ -1409,13 +1409,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const mainProduct = selectedProducts[0];
 
         const xj: XJ = {
-          id: `rfq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          xjNumber: selectedRequirementForXJ.requirementNo, // 🔥 使用QR采购需求编号
-          supplierXjNo, // 🔥 采购询价单号 XJ-xxx
-          requirementNo: selectedRequirementForXJ.requirementNo, // 🔥 采购需求编号 QR-xxx
+          id: crypto.randomUUID(),                          // 合法 UUID，toXJRow 无需再生成
+          xjNumber: supplierXjNo,                          // XJ-xxx（RPC 生成的询价单号，唯一约束键）
+          supplierXjNo,                                    // 同上，冗余保留兼容旧字段
+          requirementNo: selectedRequirementForXJ.requirementNo, // QR-xxx（关联采购需求）
+          sourceQRNumber: selectedRequirementForXJ.requirementNo, // 溯源链：QR → XJ
           sourceRef: selectedRequirementForXJ.sourceRef,
           customerName: (selectedRequirementForXJ as any).customerName,
-          customerRegion: selectedRequirementForXJ.region, // 🔥 客户来源区域
+          customerRegion: selectedRequirementForXJ.region,
 
           // 🔥 多产品数组（新字段）
           products: xjProducts,
@@ -1478,22 +1479,18 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       return item;
       });
     
-    // 🔥 判断询价状态：
-    // - 如果所有产品都已发送询价 → 'processing'
-    // - 如果只有部分产品发送询价 → 'partial' 
-    // - 如果没有产品发送询价 → 'pending'
-    const allProductsSent = updatedItems.every(item => (item as any).xjHistory && (item as any).xjHistory.length > 0);
-    const someProductsSent = updatedItems.some(item => (item as any).xjHistory && (item as any).xjHistory.length > 0);
-    
+    // QR status 基于选中产品数量判断（Supabase-first：写回 DB）
+    const totalItems = requirementItems.length;
+    const sentCount = selectedProductIds.length;
     let newStatus: 'pending' | 'partial' | 'processing' | 'completed' = 'pending';
-    if (allProductsSent) {
-      newStatus = 'processing'; // 所有产品都已询价
-    } else if (someProductsSent) {
-      newStatus = 'partial'; // 部分产品已询价
+    if (sentCount >= totalItems) {
+      newStatus = 'processing'; // 全部产品已发询价
+    } else if (sentCount > 0) {
+      newStatus = 'partial';    // 部分产品已发询价
     }
-    
-    // 更新采购需求状态和产品询价历史
-    updateRequirement(selectedRequirementForXJ.id, { 
+
+    // 写回 Supabase（updateRequirement 内部调用 purchaseRequirementService.upsert）
+    updateRequirement(selectedRequirementForXJ.id, {
       status: newStatus,
       items: updatedItems
     });
