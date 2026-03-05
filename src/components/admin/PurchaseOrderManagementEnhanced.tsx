@@ -3295,7 +3295,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         allSuppliers={allSuppliers}
         handlePreviewRFQ={handlePreviewXJ}
         xjDeadline={xjDeadline}
-        setRFQDeadline={setRFQDeadline}
+        setXJDeadline={setRFQDeadline}
         xjRemarks={xjRemarks}
         setRFQRemarks={setRFQRemarks}
         handleSubmitRFQ={handleSubmitXJ}
