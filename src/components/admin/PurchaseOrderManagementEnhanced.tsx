@@ -21,7 +21,7 @@ import {
   Edit,  // 🔥 编辑图标
   Calculator  // 🔥 智能反馈图标
 } from 'lucide-react';
-import { suppliersDatabase, searchSuppliers, type Supplier } from '../../data/suppliersData'; // 🔥 导入真实供应商数据
+import { suppliersDatabase, type Supplier } from '../../data/suppliersData'; // fallback only，已废弃，以 Supabase companies 表为准
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -48,7 +48,7 @@ import { useUser } from '../../contexts/UserContext'; // 🔥 用户Context
 import { useApproval } from '../../contexts/ApprovalContext';
 import { generateXJNumber, nextXJNumber } from '../../utils/xjNumberGenerator'; // 🔥 XJ编号生成器
 import { generateCGNumber, nextCGNumberAsync, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
-import { contractService, xjService, supplierQuotationService } from '../../lib/supabaseService';
+import { contractService, xjService, supplierQuotationService, companyService } from '../../lib/supabaseService';
 import { TERMS_OPTIONS } from './purchase-order/purchaseOrderConstants'; // 🔥 从常量文件导入
 import { PurchaseOrderEditDialog } from './purchase-order/PurchaseOrderEditDialog';
 import { PurchaseOrderCreateDialogs } from './purchase-order/PurchaseOrderCreateDialogs';
@@ -211,18 +211,22 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 采购需求数据 - 从Context获取
   const purchaseRequirements = requirements;
 
-  // ✅ Suppliers: prefer backend DB organizations, fallback to local static list
+  // Supabase-first: 供应商数据从 companies 表读取，静态 suppliersDatabase 仅作加载失败兜底
   const [suppliersFromApi, setSuppliersFromApi] = useState<Supplier[]>([]);
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       try {
-        // 暂时使用本地静态供应商数据库（organizations 表接入在后续迭代中完成）
-        setSuppliersFromApi([]);
+        const rows = await companyService.getSuppliers();
+        if (!cancelled && Array.isArray(rows) && rows.length > 0) {
+          setSuppliersFromApi(rows as Supplier[]);
+        }
       } catch (e) {
-        // ignore: fallback to local suppliersDatabase
+        console.warn('[PurchaseOrderMgmt] 供应商数据加载失败，使用本地静态数据:', e);
       }
     };
     void load();
+    return () => { cancelled = true; };
   }, []);
 
   const allSuppliers: Supplier[] = suppliersFromApi.length > 0 ? suppliersFromApi : suppliersDatabase;

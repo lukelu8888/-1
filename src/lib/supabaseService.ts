@@ -1707,3 +1707,77 @@ export const supplierQuotationService = {
     return supabase.channel('supplier_quotations_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'supplier_quotations' }, callback).subscribe();
   },
 };
+
+// ─── companies 表（供应商 / 客户统一主档）───────────────────────────────────
+const COSUN_TENANT_ID_COMPANIES = '3683e7c6-8c05-4074-8a58-5e9e599ff4b9';
+
+function fromCompanyRow(r: any) {
+  if (!r) return null;
+  return {
+    // 与前端 Supplier interface 保持字段对齐
+    id: r.id,
+    code: r.code || '',
+    name: r.name || '',
+    nameEn: r.name_en || '',
+    level: (r.supplier_level || 'C') as 'A' | 'B' | 'C',
+    category: r.supplier_category || r.industry || '',
+    region: r.region || '',
+    businessTypes: r.business_types || [],
+    contact: r.notes?.replace(/^联系人：/, '') || '',
+    phone: r.main_phone || '',
+    email: r.main_email || '',
+    address: r.address || '',
+    certifications: r.certifications || [],
+    cooperationYears: r.cooperation_years || 0,
+    onTimeRate: Number(r.on_time_rate) || 0,
+    qualityRate: Number(r.quality_rate) || 0,
+    status: (r.status || 'active') as 'active' | 'inactive' | 'suspended',
+    capacity: r.production_capacity || '',
+    logoUrl: r.logo_url || undefined,
+    // 额外字段（companies 表有但 Supplier interface 无）
+    partyType: r.party_type,
+    tenantId: r.tenant_id,
+  };
+}
+
+export const companyService = {
+  /** 获取所有供应商（party_type = supplier） */
+  async getSuppliers() {
+    const { data, error } = await supabase
+      .from('companies')
+      .select('*')
+      .eq('tenant_id', COSUN_TENANT_ID_COMPANIES)
+      .eq('party_type', 'supplier')
+      .is('deleted_at', null)
+      .order('code', { ascending: true });
+    if (error) return handleError(error, 'getSuppliers companies');
+    return (data || []).map(fromCompanyRow);
+  },
+  /** 按关键词搜索供应商（名称/code/email/类别） */
+  async searchSuppliers(keyword: string) {
+    if (!keyword.trim()) return this.getSuppliers();
+    const kw = `%${keyword.trim()}%`;
+    const { data, error } = await supabase
+      .from('companies')
+      .select('*')
+      .eq('tenant_id', COSUN_TENANT_ID_COMPANIES)
+      .eq('party_type', 'supplier')
+      .is('deleted_at', null)
+      .or(`name.ilike.${kw},name_en.ilike.${kw},code.ilike.${kw},main_email.ilike.${kw},supplier_category.ilike.${kw}`)
+      .order('code', { ascending: true });
+    if (error) return handleError(error, 'searchSuppliers companies');
+    return (data || []).map(fromCompanyRow);
+  },
+  /** 按 email 精确查找 */
+  async getByEmail(email: string) {
+    const { data, error } = await supabase
+      .from('companies')
+      .select('*')
+      .eq('tenant_id', COSUN_TENANT_ID_COMPANIES)
+      .eq('main_email', email)
+      .is('deleted_at', null)
+      .single();
+    if (error) return null;
+    return fromCompanyRow(data);
+  },
+};

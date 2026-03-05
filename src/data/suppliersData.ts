@@ -1,4 +1,7 @@
-// 🔥 供应商主数据 - 全局共享
+// ⚠️  [已废弃] 供应商静态数据 — 数据已迁移至 Supabase companies 表
+// 唯一数据源：supabaseService.companyService.getSuppliers()
+// 此文件仅作加载失败兜底（fallback），勿在此添加新供应商数据
+// 迁移 migration: database/migrations/026_seed_suppliers_to_companies.sql
 // 供应商接口
 export interface Supplier {
   id: string;
