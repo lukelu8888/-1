@@ -1691,8 +1691,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 提交询价单给供应商 - Supabase-first: 状态改为 pending，供应商通过 XJContext getByEmail 可见
   const handleSubmitXJToSupplier = async (xj: XJ) => {
-    // 检查是否已经提交过（以 Supabase 数据为准）
-    if (xj.status === 'pending' || xj.status === 'sent') {
+    // 检查是否已经提交过（sent/quoted/completed 才算已下推，pending 是待下推）
+    if (xj.status === 'sent' || xj.status === 'quoted' || xj.status === 'completed') {
       toast.error(
         <div className="space-y-1">
           <p className="font-semibold">⚠️ 已下推供应商</p>
@@ -2790,7 +2790,15 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                             <td className="py-2 px-2">
                               <button
                                 onClick={() => {
-                                  setCurrentRFQData(xj.documentData);
+                                  const previewData = xj.documentData || {
+                                    xjNo: xj.supplierXjNo || xj.xjNumber,
+                                    supplierName: xj.supplierName,
+                                    supplierEmail: xj.supplierEmail,
+                                    requirementNo: xj.requirementNo,
+                                    deadline: xj.quotationDeadline,
+                                    products: xj.products || [],
+                                  };
+                                  setCurrentRFQData(previewData);
                                   setShowRFQPreview(true);
                                 }}
                                 className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
@@ -2839,7 +2847,16 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    setCurrentRFQData(xj.documentData);
+                                    // documentData 可能为空（旧数据），回退构造基础预览
+                                    const previewData = xj.documentData || {
+                                      xjNo: xj.supplierXjNo || xj.xjNumber,
+                                      supplierName: xj.supplierName,
+                                      supplierEmail: xj.supplierEmail,
+                                      requirementNo: xj.requirementNo,
+                                      deadline: xj.quotationDeadline,
+                                      products: xj.products || [],
+                                    };
+                                    setCurrentRFQData(previewData);
                                     setShowRFQPreview(true);
                                   }}
                                   className="h-6 text-[12px] px-2 border-blue-300 text-blue-600 hover:bg-blue-50"
