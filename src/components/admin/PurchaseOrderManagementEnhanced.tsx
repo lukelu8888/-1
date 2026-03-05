@@ -113,7 +113,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     // 进入采购订单页时主动请求一次
     requestPurchaseOrders();
   }, [requestPurchaseOrders]);
-  const [activeTab, setActiveTab] = useState<'requirements' | 'rfq-management' | 'supplier-quotations' | 'procurement-requests' | 'orders'>('orders');
+  const [activeTab, setActiveTab] = useState<'requirements' | 'xj-management' | 'supplier-quotations' | 'procurement-requests' | 'orders'>('orders');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [selectedSource, setSelectedSource] = useState('all');
@@ -1533,7 +1533,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     
     // 🔥 自动跳转到询价管理Tab
     setTimeout(() => {
-      setActiveTab('rfq-management');
+      setActiveTab('xj-management');
     }, 1000);
     
     setShowCreateRFQDialog(false);
@@ -2369,7 +2369,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
               </TabsTrigger>
 
               <TabsTrigger 
-                value="rfq-management" 
+                value="xj-management" 
                 className="bg-transparent border-b-2 border-transparent data-[state=active]:border-purple-600 data-[state=active]:bg-transparent data-[state=active]:text-purple-700 rounded-none px-0 pb-2 pt-2 text-[14px] font-medium relative"
               >
                 <FileText className="w-3 h-3 mr-1" />
@@ -2699,7 +2699,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           </TabsContent>
 
           {/* ==================== Tab 2: 询价管理 ==================== */}
-          <TabsContent value="rfq-management" className="m-0">
+          <TabsContent value="xj-management" className="m-0">
             {/* 询价统计 */}
             <div className="px-3 py-3 bg-gray-50 border-b border-gray-200">
               <div className="grid grid-cols-5 gap-2">

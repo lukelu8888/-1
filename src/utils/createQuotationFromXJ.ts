@@ -5,7 +5,7 @@ import { nextBJNumber } from './xjNumberGenerator';
 import { supplierQuotationService } from '../lib/supabaseService';
 
 export async function createQuotationFromXJ(
-  rfq: any,
+  xj: any,
   supplierUser: any,
   options: {
     unitPrice?: number;
@@ -35,8 +35,8 @@ export async function createQuotationFromXJ(
 
   let items: SupplierQuotationItem[] = [];
 
-  if (rfq.products && Array.isArray(rfq.products) && rfq.products.length > 0) {
-    items = rfq.products.map((product: any, index: number) => ({
+  if (xj.products && Array.isArray(xj.products) && xj.products.length > 0) {
+    items = xj.products.map((product: any, index: number) => ({
       id: `item-${Date.now()}-${index}`,
       productName: product.productName || '产品名称',
       modelNo: product.modelNo || '',
@@ -53,14 +53,14 @@ export async function createQuotationFromXJ(
   } else {
     items = [{
       id: `item-${Date.now()}`,
-      productName: rfq.productName || '产品名称',
-      modelNo: rfq.modelNo || '',
-      specification: rfq.specification || '',
-      quantity: rfq.quantity || 0,
-      unit: rfq.unit || 'pcs',
+      productName: xj.productName || '产品名称',
+      modelNo: xj.modelNo || '',
+      specification: xj.specification || '',
+      quantity: xj.quantity || 0,
+      unit: xj.unit || 'pcs',
       unitPrice: options.unitPrice || 0,
       currency: 'CNY',
-      amount: (options.unitPrice || 0) * (rfq.quantity || 0),
+      amount: (options.unitPrice || 0) * (xj.quantity || 0),
       leadTime: options.leadTime || 30,
       moq: options.moq || 1000,
       remarks: ''
@@ -72,13 +72,13 @@ export async function createQuotationFromXJ(
   const quotation: SupplierQuotation = {
     id: `quotation-${Date.now()}`,
     quotationNo,
-    sourceXJ: rfq.supplierXjNo || rfq.xjNumber,
-    sourceQR: rfq.requirementNo,
-    sourceRFQId: rfq.id,
+    sourceXJ: xj.supplierXjNo || xj.xjNumber,
+    sourceQR: xj.requirementNo,
+    sourceXJId: xj.id,
     customerName: 'COSUN采购',
     customerCompany: '福建高盛达富建材有限公司',
-    customerContact: rfq.buyerContact,
-    customerEmail: rfq.buyerEmail,
+    customerContact: xj.buyerContact,
+    customerEmail: xj.buyerEmail,
     supplierCode,
     supplierName,
     supplierCompany,
@@ -99,7 +99,7 @@ export async function createQuotationFromXJ(
     version: 1
   };
 
-  const originalInquiryDescription = rfq.documentData?.inquiryDescription || '';
+  const originalInquiryDescription = xj.documentData?.inquiryDescription || '';
   let customerRequirements = '';
   if (originalInquiryDescription) {
     const specialReqMatch = originalInquiryDescription.match(/【特殊要求】\s*\n([\s\S]*?)(?=\n\n【|$)/);
@@ -113,7 +113,7 @@ export async function createQuotationFromXJ(
     quotationNo,
     quotationDate,
     validUntil,
-    rfqReference: rfq.supplierXjNo || rfq.xjNumber,
+    xjReference: xj.supplierXjNo || xj.xjNumber,
     inquiryReference: customerRequirements,
     supplier: {
       companyName: supplierCompany,
@@ -148,7 +148,7 @@ export async function createQuotationFromXJ(
       deliveryTerms: quotation.deliveryTerms,
       deliveryTime: '收到订单后30天内',
       deliveryAddress: '福建省福州市仓山区金山工业区',
-      moq: `${options.moq || 1000} ${rfq.unit || 'pcs'}`,
+      moq: `${options.moq || 1000} ${xj.unit || 'pcs'}`,
       qualityStandard: '符合国家标准',
       warranty: '12个月',
       packaging: quotation.packingTerms,

@@ -55,7 +55,7 @@ const dataCategories: DataCategory[] = [
     color: 'text-orange-600'
   },
   {
-    key: 'rfq',
+    key: 'xj',
     label: '采购询价管理数据',
     storageKeys: ['xjs', 'supplierXJs'],
     description: 'Admin端询价管理和供应商XJ数据（XJ系列）',

@@ -1565,7 +1565,7 @@ function fromApprovalRow(r: any) {
 function toSQRow(q: any) {
   return {
     id: toUUID(q.id),
-    rfq_id: q.xjId || q.rfq_id || null,
+    xj_id: q.xjId || q.xj_id || null,
     xj_number: q.xjNumber || q.xj_number || null,
     supplier_email: q.supplierEmail || q.supplier_email || '',
     supplier_name: q.supplierName || q.supplier_name || '',
@@ -1586,7 +1586,7 @@ function fromSQRow(r: any) {
   if (!r) return null;
   return {
     id: r.id,
-    xjId: r.rfq_id,
+    xjId: r.xj_id,
     xjNumber: r.xj_number,
     supplierEmail: r.supplier_email,
     supplierName: r.supplier_name,

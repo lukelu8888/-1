@@ -1019,10 +1019,10 @@ const hdTemplatesPart4: FormTemplate[] = [
 
   // 11. 客户询价单 (Customer Inquiry)
   {
-    id: 'hd_rfq_customer',
+    id: 'hd_xj_customer',
     name: '客户询价单',
     name_en: 'CUSTOMER INQUIRY (INQ)',
-    type: 'rfq',
+    type: 'xj',
     owner: 'customer',
     version: '1.0',
     lastModified: '2024-01-15',

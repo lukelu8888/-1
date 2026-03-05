@@ -113,7 +113,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
             }
             
             /* 文档容器 - A4标准宽度 210mm */
-            .rfq-document {
+            .xj-document {
               width: 794px !important;
               max-width: 794px !important;
               margin: 0 !important;
@@ -122,7 +122,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
             }
             
             /* 内容区域 - 打印时不额外padding，margin已在@page设置 */
-            .rfq-content {
+            .xj-content {
               padding: 0 !important;
               margin: 0 !important;
               page-break-after: auto;
@@ -175,7 +175,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
           
           /* 屏幕预览样式 */
           @media screen {
-            .rfq-document {
+            .xj-document {
               box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
               min-height: 1123px;
             }
@@ -184,7 +184,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
         
         <div 
           ref={ref}
-          className="rfq-document bg-white w-[794px] min-h-[1123px] mx-auto"
+          className="xj-document bg-white w-[794px] min-h-[1123px] mx-auto"
           style={{ 
             fontFamily: '"Microsoft YaHei", "SimHei", Arial, sans-serif',
             fontSize: '10pt',
@@ -192,7 +192,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
           }}
         >
           {/* ✅ 内容区域 - 屏幕预览20mm padding，打印时0 padding（margin在@page设置） */}
-          <div className="rfq-content p-[20mm] print:p-0">
+          <div className="xj-content p-[20mm] print:p-0">
             {/* 页眉 - 台湾大厂紧凑风格 */}
             <div className="mb-3">
               {/* 第一行：Logo + 询价单标题 + 询价信息 */}

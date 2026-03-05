@@ -14,9 +14,9 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
   
   // 2️⃣ 恢复询价单数据
   console.log('\n📋 [2/5] 恢复询价单数据...');
-  const testRFQs = [
+  const testXJs = [
     {
-      id: 'rfq-001',
+      id: 'xj-001',
       xjNumber: 'INQ-NA-251119-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
@@ -33,7 +33,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
       notes: 'Sample inquiry for testing'
     },
     {
-      id: 'rfq-002',
+      id: 'xj-002',
       xjNumber: 'INQ-NA-251120-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
@@ -52,15 +52,15 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
   ];
   
   const existingRFQs = JSON.parse(localStorage.getItem(`rfqs_${customerEmail}`) || '[]');
-  const mergedRFQs = [...existingRFQs];
-  testRFQs.forEach(rfq => {
-    const exists = mergedRFQs.find(r => r.xjNumber === rfq.xjNumber);
+  const mergedXJs = [...existingRFQs];
+  testXJs.forEach(xj => {
+    const exists = mergedXJs.find(r => r.xjNumber === xj.xjNumber);
     if (!exists) {
-      mergedRFQs.push(rfq);
+      mergedXJs.push(xj);
     }
   });
-  localStorage.setItem(`rfqs_${customerEmail}`, JSON.stringify(mergedRFQs));
-  console.log(`  ✅ 已添加 ${testRFQs.length} 个询价单`);
+  localStorage.setItem(`rfqs_${customerEmail}`, JSON.stringify(mergedXJs));
+  console.log(`  ✅ 已添加 ${testXJs.length} 个询价单`);
   
   // 3️⃣ 恢复报价单数据
   console.log('\n💰 [3/5] 恢复报价单数据...');
@@ -352,7 +352,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
   console.log('✅ [Data Recovery] 数据恢复完成！');
   console.log('\n📊 恢复数据统计：');
   console.log(`  - 📦 订单：${testOrders.length} 个`);
-  console.log(`  - 📋 询价单：${testRFQs.length} 个`);
+  console.log(`  - 📋 询价单：${testXJs.length} 个`);
   console.log(`  - 💰 报价单：${testQuotations.length} 个`);
   console.log(`  - 💵 应收账款：${testARs.length} 个`);
   console.log(`  - 🔔 通知：${testNotifications.length} 个`);
@@ -367,7 +367,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
   
   return {
     orders: testOrders.length,
-    rfqs: testRFQs.length,
+    rfqs: testXJs.length,
     quotations: testQuotations.length,
     accountsReceivable: testARs.length,
     notifications: testNotifications.length

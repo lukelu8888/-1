@@ -60,7 +60,7 @@ export default function SupplierMessages() {
       name: '报价回复',
       templates: [
         '已收到询价单，预计{hours}小时内提供详细报价。',
-        '关于XJ-{rfq_id}，我们可以提供有竞争力的报价，详细报价已在报价模块提交。',
+        '关于XJ-{xj_id}，我们可以提供有竞争力的报价，详细报价已在报价模块提交。',
         '该产品我们有现成的生产线，可以给予{discount}%的价格优惠。',
       ]
     },
