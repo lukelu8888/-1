@@ -36,8 +36,8 @@ export async function createQuotationFromXJ(
   let items: SupplierQuotationItem[] = [];
 
   if (xj.products && Array.isArray(xj.products) && xj.products.length > 0) {
-    items = xj.products.map((product: any, index: number) => ({
-      id: `item-${Date.now()}-${index}`,
+    items = xj.products.map((product: any, _index: number) => ({
+      id: product.id && /^[0-9a-f-]{36}$/.test(product.id) ? product.id : crypto.randomUUID(),
       productName: product.productName || '产品名称',
       modelNo: product.modelNo || '',
       specification: product.specification || '',
@@ -52,7 +52,7 @@ export async function createQuotationFromXJ(
     }));
   } else {
     items = [{
-      id: `item-${Date.now()}`,
+      id: crypto.randomUUID(),
       productName: xj.productName || '产品名称',
       modelNo: xj.modelNo || '',
       specification: xj.specification || '',
@@ -70,9 +70,12 @@ export async function createQuotationFromXJ(
   const totalAmount = items.reduce((sum, item) => sum + (item.amount || 0), 0);
 
   const quotation: SupplierQuotation = {
-    id: `quotation-${Date.now()}`,
+    id: crypto.randomUUID(),             // 合法 UUID → toSQRow 幂等 upsert
     quotationNo,
+    quotationNumber: quotationNo,        // toSQRow 读 quotationNumber，补充别名
+    bjNumber: quotationNo,               // bj_number 列别名
     sourceXJ: xj.supplierXjNo || xj.xjNumber,
+    sourceXJNumber: xj.supplierXjNo || xj.xjNumber,  // toSQRow 读 sourceXJNumber
     sourceQR: xj.requirementNo,
     sourceXJId: xj.id,
     customerName: 'COSUN采购',

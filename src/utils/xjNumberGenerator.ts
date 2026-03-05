@@ -33,7 +33,7 @@ export async function nextQRNumber(region = 'NA'): Promise<string> {
 
 export async function nextXJNumber(): Promise<string> {
   try {
-    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'XJ', p_region_code: 'UNKNOWN', p_customer_id: null });
+    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'XJ', p_region_code: 'GLOBAL', p_customer_id: null });
     if (error) throw error;
     return data as string;
   } catch (e) {
@@ -44,7 +44,7 @@ export async function nextXJNumber(): Promise<string> {
 
 export async function nextBJNumber(): Promise<string> {
   try {
-    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'BJ', p_region_code: 'UNKNOWN', p_customer_id: null });
+    const { data, error } = await supabase.rpc('next_number_ex', { p_doc_type: 'BJ', p_region_code: 'GLOBAL', p_customer_id: null });
     if (error) throw error;
     return data as string;
   } catch (e) {
