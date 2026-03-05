@@ -909,6 +909,14 @@ export function toUUID(id: string | null | undefined): string {
   return crypto.randomUUID();
 }
 
+/** UUID 或 null（用于可空的 uuid 外键列） */
+export function toUUIDOrNull(id: string | null | undefined): string | null {
+  if (id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return id;
+  }
+  return null;
+}
+
 /** 日期转 ISO 格式 YYYY-MM-DD */
 export function toIsoDate(v: any): string | null {
   if (!v) return null;
@@ -1001,43 +1009,54 @@ function fromQTRow(r: any) {
 // ============================================================
 // supplier_xjs 服务
 // ============================================================
+// COSUN 单租户固定 ID（对标 Supabase tenants 表）
+const COSUN_TENANT_ID = '3683e7c6-8c05-4074-8a58-5e9e599ff4b9';
+
 function toXJRow(x: any) {
+  // 严格对标 supplier_xjs 表实际列（Supabase-first）
+  // NOT NULL: id, tenant_id, xj_number, supplier_code, supplier_name,
+  //           supplier_email, products, status, created_by
+  const xjNumber = x.xjNumber || x.xj_number || x.supplierXjNo || x.supplier_xj_no || '';
   return {
     id: toUUID(x.id),
-    xj_number: x.xjNumber || x.xj_number || '',
+    tenant_id: x.tenant_id || COSUN_TENANT_ID,               // NOT NULL，固定单租户
+    xj_number: xjNumber,                                      // NOT NULL，唯一约束键
     supplier_xj_no: x.supplierXjNo || x.supplier_xj_no || null,
     supplier_quotation_no: x.supplierQuotationNo || x.supplier_quotation_no || null,
     source_qr_number: x.sourceQRNumber || x.source_qr_number || null,
-    source_inquiry_id: x.sourceInquiryId || x.source_inquiry_id || null,
+    source_inquiry_id: toUUIDOrNull(x.sourceInquiryId || x.source_inquiry_id),
     source_inquiry_number: x.sourceInquiryNumber || x.source_inquiry_number || null,
     requirement_no: x.requirementNo || x.requirement_no || null,
     source_ref: x.sourceRef || x.source_ref || null,
     region_code: toRegionCode(x.region || x.region_code),
     customer_name: x.customerName || x.customer_name || null,
     customer_region: x.customerRegion || x.customer_region || null,
+    supplier_company_id: toUUIDOrNull(x.supplierCompanyId || x.supplier_company_id),
     supplier_code: x.supplierCode || x.supplier_code || '',
     supplier_name: x.supplierName || x.supplier_name || '',
     supplier_contact: x.supplierContact || x.supplier_contact || null,
     supplier_email: x.supplierEmail || x.supplier_email || '',
     products: x.products || [],
-    product_name: x.productName || x.product_name || '',
-    model_no: x.modelNo || x.model_no || '',
+    product_name: x.productName || x.product_name || null,
+    model_no: x.modelNo || x.model_no || null,
     specification: x.specification || null,
-    quantity: x.quantity || 0,
-    unit: x.unit || 'pcs',
+    quantity: x.quantity ?? null,
+    unit: x.unit || null,
     target_price: x.targetPrice ?? x.target_price ?? null,
     currency: x.currency || 'USD',
     expected_date: toIsoDate(x.expectedDate || x.expected_date),
     quotation_deadline: toIsoDate(x.quotationDeadline || x.quotation_deadline),
-    priority: x.priority || 'medium',
+    due_date: toIsoDate(x.dueDate || x.due_date || x.quotationDeadline || x.quotation_deadline),
+    priority: x.priority || 'normal',                         // DB default 是 'normal'
     status: x.status || 'pending',
     quotes: x.quotes || [],
     document_data: x.documentData || x.document_data || null,
     remarks: x.remarks || null,
     created_by: x.createdBy || x.created_by || '',
-    supplier_company_id: x.supplierCompanyId || x.supplier_company_id || null,
-    due_date: toIsoDate(x.dueDate || x.due_date || x.quotationDeadline || x.quotation_deadline),
-    display_number: x.xjNumber || x.xj_number || x.display_number || null,
+    source_doc_id: toUUIDOrNull(x.sourceDocId || x.source_doc_id),
+    sales_contract_id: toUUIDOrNull(x.salesContractId || x.sales_contract_id),
+    root_sales_contract_id: toUUIDOrNull(x.rootSalesContractId || x.root_sales_contract_id),
+    display_number: x.displayNumber || x.display_number || xjNumber || null,
   };
 }
 
@@ -1045,6 +1064,7 @@ function fromXJRow(r: any) {
   if (!r) return null;
   return {
     id: r.id,
+    tenantId: r.tenant_id,
     xjNumber: r.xj_number,
     supplierXjNo: r.supplier_xj_no,
     supplierQuotationNo: r.supplier_quotation_no,
@@ -1056,6 +1076,7 @@ function fromXJRow(r: any) {
     region: fromRegionCode(r.region_code),
     customerName: r.customer_name,
     customerRegion: r.customer_region,
+    supplierCompanyId: r.supplier_company_id,
     supplierCode: r.supplier_code,
     supplierName: r.supplier_name,
     supplierContact: r.supplier_contact,
@@ -1070,14 +1091,16 @@ function fromXJRow(r: any) {
     currency: r.currency,
     expectedDate: r.expected_date,
     quotationDeadline: r.quotation_deadline,
+    dueDate: r.due_date,
     priority: r.priority,
     status: r.status,
     quotes: r.quotes || [],
     documentData: r.document_data,
     remarks: r.remarks,
     createdBy: r.created_by,
-    supplierCompanyId: r.supplier_company_id,
-    dueDate: r.due_date,
+    sourceDocId: r.source_doc_id,
+    salesContractId: r.sales_contract_id,
+    rootSalesContractId: r.root_sales_contract_id,
     displayNumber: r.display_number,
     createdDate: r.created_at,
     updatedAt: r.updated_at,
@@ -1097,8 +1120,27 @@ export const xjService = {
   },
   async upsert(x: any) {
     const row = toXJRow(x);
-    const { data, error } = await supabase.from('supplier_xjs').upsert(row, { onConflict: 'id' }).select().single();
-    if (error) return handleError(error, 'upsert supplier_xj');
+    // onConflict 同时覆盖 id 和 (tenant_id, xj_number) 两个唯一约束
+    const { data, error } = await supabase
+      .from('supplier_xjs')
+      .upsert(row, { onConflict: 'id' })
+      .select()
+      .single();
+    if (error) {
+      // 若 id 冲突策略未命中（xj_number 唯一约束触发），尝试按 xj_number 更新
+      if (error.code === '23505') {
+        const { data: updated, error: updateError } = await supabase
+          .from('supplier_xjs')
+          .update(row)
+          .eq('xj_number', row.xj_number)
+          .eq('tenant_id', row.tenant_id)
+          .select()
+          .single();
+        if (updateError) return handleError(updateError, 'upsert supplier_xj (update fallback)');
+        return fromXJRow(updated);
+      }
+      return handleError(error, 'upsert supplier_xj');
+    }
     return fromXJRow(data);
   },
   async delete(id: string) {
