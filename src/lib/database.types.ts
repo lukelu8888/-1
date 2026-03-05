@@ -460,12 +460,11 @@ export interface Database {
           id: string;
           email: string | null;
           name: string | null;
-          role: string | null;
-          type: string | null;
+          portal_role: string | null;
+          rbac_role: string | null;
           region: string | null;
           company: string | null;
           phone: string | null;
-          avatar_url: string | null;
           created_at: string;
           updated_at: string;
         };
