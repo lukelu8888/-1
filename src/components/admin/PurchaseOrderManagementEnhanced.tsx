@@ -1503,7 +1503,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           createdDate: new Date().toISOString().split('T')[0],
 
           // 🔥 保存完整的询价单文档数据（供供应商Portal显示）
-          documentData: rfqDocumentData as any
+          documentData: xjDocumentData as any
         };
 
         const savedXJ = await xjService.upsert(rfq).catch(() => null);
