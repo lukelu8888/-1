@@ -32,6 +32,19 @@ export async function createQuotationFromXJ(
   const supplierAddress = supplierUser?.address || '供应商地址';
   const supplierPhone = supplierUser?.phone || supplierUser?.tel || '';
   const supplierCode = supplierUser?.code || supplierUser?.companyId || supplierEmail;
+  const xjTerms = xj?.documentData?.terms || {};
+
+  const paymentTerms =
+    options.paymentTerms ||
+    xjTerms.paymentTerms ||
+    'T/T 30天';
+  const deliveryTerms =
+    options.deliveryTerms ||
+    xjTerms.deliveryTerms ||
+    'FOB 厦门';
+  const packagingTerms =
+    xjTerms.packaging ||
+    '标准出口包装';
 
   let items: SupplierQuotationItem[] = [];
 
@@ -91,9 +104,9 @@ export async function createQuotationFromXJ(
     validUntil,
     currency: 'CNY',
     totalAmount,
-    paymentTerms: options.paymentTerms || 'T/T 30天',
-    deliveryTerms: options.deliveryTerms || 'FOB 厦门',
-    packingTerms: '标准出口包装',
+    paymentTerms,
+    deliveryTerms,
+    packingTerms: packagingTerms,
     generalRemarks: '',
     items,
     status: options.status || 'draft',
@@ -149,13 +162,13 @@ export async function createQuotationFromXJ(
     terms: {
       paymentTerms: quotation.paymentTerms,
       deliveryTerms: quotation.deliveryTerms,
-      deliveryTime: '收到订单后30天内',
-      deliveryAddress: '福建省福州市仓山区金山工业区',
-      moq: `${options.moq || 1000} ${xj.unit || 'pcs'}`,
-      qualityStandard: '符合国家标准',
-      warranty: '12个月',
+      deliveryTime: xjTerms.deliveryRequirement || '收到订单后30天内',
+      deliveryAddress: xjTerms.deliveryAddress || '福建省福州市仓山区金山工业区',
+      moq: xjTerms.moq || `${options.moq || 1000} ${xj.unit || 'pcs'}`,
+      qualityStandard: xjTerms.qualityStandard || '符合国家标准',
+      warranty: xjTerms.warranty || '12个月',
       packaging: quotation.packingTerms,
-      shippingMarks: '中性唛头',
+      shippingMarks: xjTerms.shippingMarks || '中性唛头',
       remarks: originalInquiryDescription
         ? `【原始询价说明】\n${originalInquiryDescription}\n\n${quotation.generalRemarks || ''}`.trim()
         : quotation.generalRemarks

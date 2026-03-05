@@ -879,8 +879,8 @@ export default function SupplierOrderManagementCenter() {
                                   unitPrice: 0,
                                   leadTime: 30,
                                   moq: 1000,
-                                  paymentTerms: 'T/T 30天',
-                                  deliveryTerms: 'FOB 厦门',
+                                  paymentTerms: xj?.documentData?.terms?.paymentTerms || 'T/T 30天',
+                                  deliveryTerms: xj?.documentData?.terms?.deliveryTerms || 'FOB 厦门',
                                   status: 'draft'
                                 }
                               );
