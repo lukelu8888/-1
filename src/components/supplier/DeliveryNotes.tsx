@@ -223,32 +223,37 @@ export default function DeliveryNotes() {
                   <div style={{ fontSize: '13px' }}>{note.deliveryDate}</div>
                 </td>
                 <td className="px-3 py-2.5">
-                  <div className="space-y-0.5">
-                    {note.products.slice(0, 2).map((p, i) => (
-                      <div key={i} style={{ fontSize: '12px' }}>
-                        <span className="font-medium">{p.code}</span>
-                        <span className="text-gray-500 ml-1">{p.name}</span>
+                  {(() => {
+                    const first = note.products?.[0];
+                    return (
+                      <div className="space-y-0.5">
+                        <div style={{ fontSize: '12px' }}>
+                          <span className="font-medium">{first?.code || '-'}</span>
+                          <span className="text-gray-500 ml-1">{first?.name || 'N/A'}</span>
+                        </div>
+                        <div className="text-xs text-gray-400">共 {Math.max(note.products?.length || 0, 1)} 个产品</div>
                       </div>
-                    ))}
-                    {note.products.length > 2 && (
-                      <div className="text-xs text-gray-400">+{note.products.length - 2} 更多...</div>
-                    )}
-                  </div>
+                    );
+                  })()}
                 </td>
                 <td className="px-3 py-2.5">
-                  <div className="space-y-0.5">
-                    {note.products.map((p, i) => (
-                      <div key={i} style={{ fontSize: '12px' }}>
-                        <span className="font-medium">{p.delivered.toLocaleString()}</span>
-                        <span className="text-gray-500 ml-1">{p.unit}</span>
-                        {p.delivered !== p.ordered && (
-                          <span className="text-xs text-orange-600 ml-1">
-                            (订{p.ordered.toLocaleString()})
-                          </span>
+                  {(() => {
+                    const products = Array.isArray(note.products) ? note.products : [];
+                    const totalDelivered = products.reduce((sum, p) => sum + (Number(p.delivered) || 0), 0);
+                    const totalOrdered = products.reduce((sum, p) => sum + (Number(p.ordered) || 0), 0);
+                    const unit = products[0]?.unit || '';
+                    return (
+                      <div className="space-y-0.5" style={{ fontSize: '12px' }}>
+                        <div>
+                          <span className="font-medium">{totalDelivered.toLocaleString()}</span>
+                          <span className="text-gray-500 ml-1">{unit}</span>
+                        </div>
+                        {totalDelivered !== totalOrdered && (
+                          <div className="text-xs text-orange-600">(订{totalOrdered.toLocaleString()})</div>
                         )}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })()}
                 </td>
                 <td className="px-3 py-2.5">
                   {note.shippingMode === 'fcl' ? (

@@ -221,21 +221,22 @@ export function PurchaseOrderGroupView({ orderGroup, onClose }: PurchaseOrderGro
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="space-y-1">
-                        {order.items.slice(0, 2).map((item, idx) => (
-                          <div key={idx} className="text-sm">
-                            <span className="font-medium">{item.productName}</span>
-                            <span className="text-slate-500 ml-2">
-                              {item.quantity} {item.unit}
-                            </span>
+                      {(() => {
+                        const items = Array.isArray(order.items) ? order.items : [];
+                        const first = items[0];
+                        const totalQty = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+                        const unit = first?.unit || '';
+                        return (
+                          <div className="space-y-1">
+                            <div className="text-sm">
+                              <span className="font-medium">{first?.productName || 'N/A'}</span>
+                            </div>
+                            <p className="text-xs text-slate-500">
+                              共 {Math.max(items.length, 1)} 个产品 · {totalQty.toLocaleString()} {unit}
+                            </p>
                           </div>
-                        ))}
-                        {order.items.length > 2 && (
-                          <p className="text-xs text-slate-400">
-                            +{order.items.length - 2} 个产品
-                          </p>
-                        )}
-                      </div>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div>

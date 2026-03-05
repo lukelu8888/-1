@@ -1,7 +1,7 @@
 // 🔥 供应商订单管理中心 V2 - 完整台湾大厂风格
 // 参考图片布局：订单全盘 → 询价管理 → 报价管理 → 订单管理 → 收款管理
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -21,6 +21,7 @@ import { useUser } from '../../contexts/UserContext';
 import { useXJs } from '../../contexts/XJContext';
 import { SimpleQuoteForm } from './SimpleQuoteForm';
 import XJDocumentViewer from './XJDocumentViewer';
+import { supplierQuotationService } from '../../lib/supabaseService';
 
 // 🔥 供应商报价单接口
 interface SupplierQuotation {
@@ -62,20 +63,29 @@ export default function SupplierOrderManagementCenterV2() {
   const [documentRFQ, setDocumentRFQ] = useState<any>(null);
   const [selectedRFQIds, setSelectedRFQIds] = useState<string[]>([]);
 
-  // 🔥 从localStorage读取供应商报价单
-  const [supplierQuotations] = useState<SupplierQuotation[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('supplierQuotations');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          return [];
-        }
+  // Supabase-first: 报价单仅从 supplier_quotations 读取
+  const [supplierQuotations, setSupplierQuotations] = useState<SupplierQuotation[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadQuotations = async () => {
+      if (!user?.email) {
+        setSupplierQuotations([]);
+        return;
       }
-    }
-    return [];
-  });
+
+      const rows = await supplierQuotationService.getBySupplierEmail(user.email);
+      if (!cancelled) {
+        setSupplierQuotations((rows || []) as SupplierQuotation[]);
+      }
+    };
+
+    loadQuotations();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.email]);
 
   // 🔥 获取当前供应商的数据
   const myXJs = useMemo(() => {

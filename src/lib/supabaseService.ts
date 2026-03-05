@@ -1144,7 +1144,28 @@ export const xjService = {
     return fromXJRow(data);
   },
   async delete(id: string) {
-    const { error } = await supabase.from('supplier_xjs').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentEmail = String(session?.user?.email || '').trim().toLowerCase();
+    if (currentEmail) {
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('portal_role, rbac_role')
+        .eq('id', session?.user?.id || '')
+        .maybeSingle();
+      const portalRole = String((profile as any)?.portal_role || '').toLowerCase();
+      if (portalRole === 'supplier') {
+        return handleError(new Error('supplier cannot delete supplier_xjs'), 'delete supplier_xj forbidden');
+      }
+    }
+    const operatorEmail = session?.user?.email || null;
+    const { error } = await supabase
+      .from('supplier_xjs')
+      .update({
+        deleted_at: new Date().toISOString(),
+        deleted_by: operatorEmail,
+        deleted_reason: 'manual-delete-ui',
+      })
+      .eq('id', id);
     if (error) return handleError(error, 'delete supplier_xj');
   },
 };

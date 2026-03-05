@@ -240,6 +240,37 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     if (s === 'partial') return 'partial';
     return 'pending';
   };
+
+  const getXJKey = (xj: any) => String(xj?.supplierXjNo || xj?.xjNumber || '').trim();
+  const getQuotationXJKey = (q: any) => String(q?.sourceXJ || q?.sourceXJNumber || '').trim();
+
+  const hasDownstreamQuotationForXJ = React.useCallback((xj: any, quotationList?: any[]) => {
+    const key = getXJKey(xj);
+    if (!key) return false;
+    const list = Array.isArray(quotationList) ? quotationList : supplierQuotationSnapshot;
+    return list.some((q: any) => getQuotationXJKey(q) === key);
+  }, [supplierQuotationSnapshot]);
+
+  const hasDownstreamXJForRequirement = React.useCallback((req: PurchaseRequirement, xjList?: XJ[]) => {
+    const reqNo = String(req?.requirementNo || '').trim();
+    const list = Array.isArray(xjList) ? xjList : xjs;
+    if (!reqNo) return false;
+    return list.some((x) => String(x?.requirementNo || '').trim() === reqNo);
+  }, [xjs]);
+
+  const recomputeRequirementStatusByXJ = React.useCallback((reqNoList: string[], xjList?: XJ[]) => {
+    const list = Array.isArray(xjList) ? xjList : xjs;
+    const uniqueReqNos = Array.from(new Set(reqNoList.map((r) => String(r || '').trim()).filter(Boolean)));
+    uniqueReqNos.forEach((reqNo) => {
+      const req = requirements.find((r) => String(r.requirementNo || '').trim() === reqNo);
+      if (!req) return;
+      const activeXJCount = list.filter((x) => String(x?.requirementNo || '').trim() === reqNo).length;
+      const nextStatus: PurchaseRequirement['status'] = activeXJCount > 0 ? 'processing' : 'pending';
+      if ((req.status as any) !== nextStatus) {
+        updateRequirement(req.id, { status: nextStatus });
+      }
+    });
+  }, [requirements, updateRequirement, xjs]);
   
   // 🔥 供应商报价数据 - Supabase-first
   const [supplierQuotations, setSupplierQuotations] = useState<any[]>([]);
@@ -1569,14 +1600,24 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const confirmMessage = `确定要删除选中的 ${selectedXJIds.length} 个询价单吗？\n\n⚠️ 此操作不可恢复！`;
     
     if (window.confirm(confirmMessage)) {
-      selectedXJIds.forEach(id => {
-        deleteXJ(id);
+      const targetXJs = xjs.filter((x) => selectedXJIds.includes(x.id));
+      const lockedXJs = targetXJs.filter((x) => hasDownstreamQuotationForXJ(x));
+      const deletableXJs = targetXJs.filter((x) => !hasDownstreamQuotationForXJ(x));
+
+      if (lockedXJs.length > 0) {
+        toast.error(`有 ${lockedXJs.length} 条询价已生成下游报价(BJ)，不可删除`);
+      }
+
+      deletableXJs.forEach((x) => {
+        deleteXJ(x.id);
       });
-      
-      toast.success(`已删除 ${selectedXJIds.length} 个询价单`, {
-        duration: 3000
-      });
-      
+
+      if (deletableXJs.length > 0) {
+        const remainingXJs = xjs.filter((x) => !deletableXJs.some((d) => d.id === x.id));
+        recomputeRequirementStatusByXJ(deletableXJs.map((x) => String(x.requirementNo || '')), remainingXJs);
+        toast.success(`已删除 ${deletableXJs.length} 个询价单`, { duration: 3000 });
+      }
+
       setSelectedRFQIds([]);
     }
   };
@@ -1591,14 +1632,20 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const confirmMessage = `确定要删除选中的 ${selectedRequirementIds.length} 个采购需求吗？\n\n⚠️ 此操作不可恢复！`;
     
     if (window.confirm(confirmMessage)) {
-      selectedRequirementIds.forEach(id => {
-        deleteRequirement(id);
-      });
-      
-      toast.success(`已删除 ${selectedRequirementIds.length} 个采购需求`, {
-        duration: 3000
-      });
-      
+      const targets = requirements.filter((r) => selectedRequirementIds.includes(r.id));
+      const locked = targets.filter((r) => hasDownstreamXJForRequirement(r));
+      const deletable = targets.filter((r) => !hasDownstreamXJForRequirement(r));
+
+      if (locked.length > 0) {
+        toast.error(`有 ${locked.length} 条采购需求已生成下游询价(XJ)，不可删除`);
+      }
+
+      deletable.forEach((r) => deleteRequirement(r.id));
+
+      if (deletable.length > 0) {
+        toast.success(`已删除 ${deletable.length} 个采购需求`, { duration: 3000 });
+      }
+
       setSelectedRequirementIds([]);
     }
   };
@@ -1613,6 +1660,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     if (!window.confirm(confirmMessage)) return;
 
     const ids = [...selectedQuotationIds];
+    const deletedQuotationRows = supplierQuotationSnapshot.filter((q: any) => ids.includes(String(q.id)));
     const results = await Promise.allSettled(
       ids.map((id) => supplierQuotationService.delete(String(id)))
     );
@@ -1627,6 +1675,26 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         reason: 'manual-delete-admin-supplier-quotation',
         deletedBy: user?.email || 'admin',
       });
+
+      // 下游(BJ)删除后：上游(XJ)立即恢复为可编辑/可下推（状态从 quoted 回滚到 sent）
+      const successIds = ids.filter((_, idx) => results[idx].status === 'fulfilled');
+      const successRows = deletedQuotationRows.filter((q: any) => successIds.includes(String(q.id)));
+      const remainingQuotationList = supplierQuotationSnapshot.filter((q: any) => !successIds.includes(String(q.id)));
+      await Promise.all(successRows.map(async (q: any) => {
+        const key = getQuotationXJKey(q);
+        if (!key) return;
+        const xj = xjs.find((r) => getXJKey(r) === key);
+        if (!xj) return;
+        const stillHasDownstream = remainingQuotationList.some((rq: any) => getQuotationXJKey(rq) === key);
+        if (!stillHasDownstream) {
+          const filteredQuotes = (xj.quotes || []).filter((qt: any) => String(qt?.quotationNo || '').trim() !== String(q?.quotationNo || '').trim());
+          await updateXJ(xj.id, {
+            status: 'sent' as any,
+            supplierQuotationNo: '',
+            quotes: filteredQuotes,
+          });
+        }
+      }));
     }
 
     if (failedCount > 0) {
@@ -1728,12 +1796,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 提交询价单给供应商 - Supabase-first: 状态改为 pending，供应商通过 XJContext getByEmail 可见
   const handleSubmitXJToSupplier = async (xj: XJ) => {
-    // 检查是否已经提交过（sent/quoted/completed 才算已下推，pending 是待下推）
-    if (xj.status === 'sent' || xj.status === 'quoted' || xj.status === 'completed') {
+    if (hasDownstreamQuotationForXJ(xj) || xj.status === 'completed') {
       toast.error(
         <div className="space-y-1">
-          <p className="font-semibold">⚠️ 已下推供应商</p>
-          <p className="text-sm">该询价单已下推给供应商，无需重复操作</p>
+          <p className="font-semibold">⚠️ 已生成下游报价单</p>
+          <p className="text-sm">该询价单已存在下游(BJ)，不可重复下推</p>
         </div>
       );
       return;
@@ -2514,6 +2581,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                       
                       // 🔥 动态计算状态
                       const dynamicStatus = calculateRequirementStatus(req);
+                      const hasLinkedXJ = hasDownstreamXJForRequirement(req);
                       
                       // 🔥 区域标签配置
                       // region 统一用 Supabase 存储的 code（NA/SA/EA）
@@ -2620,14 +2688,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     duration: 2000
                                   });
                                 }}
-                                className="h-6 text-[12px] px-2 border-blue-300 text-blue-600 hover:bg-blue-50 gap-1"
+                                disabled={hasLinkedXJ}
+                                className={`h-6 text-[12px] px-2 gap-1 ${
+                                  hasLinkedXJ
+                                    ? 'border-gray-200 text-gray-300 cursor-not-allowed'
+                                    : 'border-blue-300 text-blue-600 hover:bg-blue-50'
+                                }`}
                                 title="编辑采购需求"
                               >
                                 <Edit className="w-3 h-3" />
                                 <span>编辑</span>
                               </Button>
                               
-                              {(dynamicStatus === 'pending' || dynamicStatus === 'partial') && (
+                              {!hasLinkedXJ && (dynamicStatus === 'pending' || dynamicStatus === 'partial') && (
                                 <>
                                   <Button
                                     size="sm"
@@ -2682,6 +2755,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 size="sm"
                                 variant="outline"
                                 onClick={() => {
+                                  if (hasLinkedXJ) {
+                                    toast.error('该采购需求已生成下游询价(XJ)，不可删除');
+                                    return;
+                                  }
                                   if (window.confirm(`确定要删除采购需求 "${req.requirementNo}" 吗？\n\n产品: ${req.productName}\n数量: ${req.quantity} ${req.unit}`)) {
                                     deleteRequirement(req.id);
                                     toast.success('采购需求已删除', {
@@ -2690,7 +2767,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     });
                                   }
                                 }}
-                                className="h-6 text-[12px] px-2 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                                disabled={hasLinkedXJ}
+                                className={`h-6 text-[12px] px-2 ${
+                                  hasLinkedXJ
+                                    ? 'border-gray-200 text-gray-300 cursor-not-allowed'
+                                    : 'border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400'
+                                }`}
                                 title="删除采购需求"
                               >
                                 <Trash2 className="w-3 h-3" />
@@ -2804,6 +2886,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                         const xjStatus = (xj.status as any);
                         const isDraft = xjStatus === 'draft';
                         const isSent = xjStatus === 'sent';
+                        const lockedByQuotation = hasDownstreamQuotationForXJ(xj);
                         
                         return (
                           <tr key={xj.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
@@ -2881,14 +2964,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   <Eye className="w-3 h-3 mr-1" />
                                   查看
                                 </Button>
-                                {/* 编辑按钮：已下推（sent/quoted/completed）后禁用 */}
+                                {/* 编辑按钮：存在下游(BJ)后禁用 */}
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleEditXJ(xj)}
-                                  disabled={isSent || xj.status === 'quoted' || xj.status === 'completed'}
+                                  disabled={lockedByQuotation || xj.status === 'completed'}
                                   className={`h-6 text-[12px] px-2 ${
-                                    isSent || xj.status === 'quoted' || xj.status === 'completed'
+                                    lockedByQuotation || xj.status === 'completed'
                                       ? 'border-gray-200 text-gray-300 cursor-not-allowed'
                                       : 'border-gray-300 text-gray-600 hover:bg-gray-50'
                                   }`}
@@ -2896,15 +2979,15 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   <Edit className="w-3 h-3 mr-1" />
                                   编辑
                                 </Button>
-                                {/* 下推按钮：已下推后变灰禁用 */}
-                                {isSent || xj.status === 'quoted' || xj.status === 'completed' ? (
+                                {/* 下推按钮：存在下游(BJ)后变灰禁用 */}
+                                {lockedByQuotation || xj.status === 'completed' ? (
                                   <Button
                                     size="sm"
                                     disabled
                                     className="h-6 text-[12px] px-2 bg-gray-200 text-gray-400 cursor-not-allowed"
                                   >
                                     <Send className="w-3 h-3 mr-1" />
-                                    已下推
+                                    已锁定
                                   </Button>
                                 ) : (
                                   <Button
@@ -2913,7 +2996,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
                                   >
                                     <Send className="w-3 h-3 mr-1" />
-                                    下推供应商
+                                    {isSent ? '重新下推' : '下推供应商'}
                                   </Button>
                                 )}
                               </div>

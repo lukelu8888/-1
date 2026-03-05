@@ -11,10 +11,11 @@ import { useUser } from '../../contexts/UserContext';
 import { SimpleQuoteForm } from './SimpleQuoteForm';
 import XJDocumentViewer from './XJDocumentViewer';
 import { nextBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
+import { supplierQuotationService } from '../../lib/supabaseService';
 
 export default function SupplierQuotationsSimple() {
   const { user } = useUser();
-  const { xjs, getXJsBySupplier, addQuoteToXJ, deleteXJ, updateXJ } = useXJs();
+  const { xjs, getXJsBySupplier, addQuoteToXJ, updateXJ } = useXJs();
   
   const [activeTab, setActiveTab] = useState('pending');
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
@@ -147,10 +148,12 @@ export default function SupplierQuotationsSimple() {
         version: 1
       };
       
-      // 🔥 保存到localStorage的supplierQuotations
-      const storedQuotations = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
-      storedQuotations.push(bjQuotation);
-      localStorage.setItem('supplierQuotations', JSON.stringify(storedQuotations));
+      // Supabase-first: BJ 业务数据只落 supplier_quotations 表
+      const saved = await supplierQuotationService.upsert(bjQuotation);
+      if (!saved) {
+        toast.error('报价提交失败：未写入Supabase，请重试');
+        return;
+      }
       
       console.log('✅ [SupplierQuotationsSimple] 创建BJ报价单:', bjQuotation);
       console.log('  - BJ编号:', supplierQuotationNo);
@@ -175,16 +178,7 @@ export default function SupplierQuotationsSimple() {
 
   // 🔥 删除询价单
   const handleDeleteXJ = (xj: any) => {
-    if (window.confirm(`确定要删除询价单 ${xj.xjNumber} 吗？\n\n⚠️ 此操作不可恢复！`)) {
-      deleteXJ(xj.id);
-      toast.success(
-        <div className="space-y-1">
-          <p className="font-semibold">🗑️ 询价单已删除</p>
-          <p className="text-sm">采购询价编号: {xj.xjNumber}</p>
-        </div>,
-        { duration: 3000 }
-      );
-    }
+    toast.warning(`已禁用删除：${xj.xjNumber || xj.supplierXjNo || xj.id}`);
   };
 
   // 🔥 批量删除功能
@@ -210,24 +204,8 @@ export default function SupplierQuotationsSimple() {
       toast.error('请先选择要删除的询价单');
       return;
     }
-
-    const confirmMessage = `确定要删除选中的 ${selectedRFQIds.length} 条询价单吗？\n\n⚠️ 此操作不可恢复！`;
-    
-    if (window.confirm(confirmMessage)) {
-      selectedRFQIds.forEach(id => {
-        deleteXJ(id);
-      });
-
-      toast.success(
-        <div className="space-y-1">
-          <p className="font-semibold">🗑️ 批量删除成功！</p>
-          <p className="text-sm">已删除 {selectedRFQIds.length} 条询价单</p>
-        </div>,
-        { duration: 3000 }
-      );
-
-      setSelectedRFQIds([]);
-    }
+    toast.warning('供应商侧已禁用批量删除客户需求');
+    setSelectedRFQIds([]);
   };
 
   // 🔥 切换Tab时清空选中状态
@@ -408,44 +386,44 @@ export default function SupplierQuotationsSimple() {
                         </div>
                       </TableCell>
                       <TableCell className="py-3" style={{ fontSize: '14px' }}>
-                        <div>
-                          {/* 🔥 如果有多个产品，显示产品数量 */}
-                          {xj.products && xj.products.length > 1 ? (
-                            <>
+                        {(() => {
+                          const products = Array.isArray(xj.products) ? xj.products : [];
+                          const first = products[0];
+                          const productCount = products.length > 0 ? products.length : 1;
+                          return (
+                            <div>
                               <p className="font-medium text-gray-900">
                                 <Package className="w-3.5 h-3.5 inline mr-1 text-orange-600" />
-                                {xj.products.length} 个产品
+                                {first?.productName || xj.productName || 'N/A'}
                               </p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                {xj.products.map(p => p.productName).slice(0, 2).join(', ')}
-                                {xj.products.length > 2 && '...'}
-                              </p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="font-medium text-gray-900">{xj.productName || 'N/A'}</p>
-                              <p className="text-xs text-gray-500">{xj.modelNo || ''}</p>
-                              {xj.specification && (
-                                <p className="text-xs text-gray-500">{xj.specification}</p>
+                              <p className="text-xs text-gray-500 mt-1">共 {productCount} 个产品</p>
+                              {xj.remarks && (
+                                <p className="text-xs text-orange-600 mt-1">{xj.remarks}</p>
                               )}
-                            </>
-                          )}
-                          {xj.remarks && (
-                            <p className="text-xs text-orange-600 mt-1">{xj.remarks}</p>
-                          )}
-                        </div>
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="py-3 text-right" style={{ fontSize: '14px' }}>
-                        {xj.products && xj.products.length > 1 ? (
-                          <div className="text-xs text-gray-600">
-                            多产品<br/>询价
-                          </div>
-                        ) : (
-                          <>
-                            <span className="font-medium">{xj.quantity?.toLocaleString() || 0}</span>
-                            <span className="text-gray-500 ml-1">{xj.unit || ''}</span>
-                          </>
-                        )}
+                        {(() => {
+                          const products = Array.isArray(xj.products) ? xj.products : [];
+                          if (products.length > 0) {
+                            const totalQty = products.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+                            const unit = products[0]?.unit || 'pcs';
+                            return (
+                              <>
+                                <span className="font-medium">{totalQty.toLocaleString()}</span>
+                                <span className="text-gray-500 ml-1">{unit}</span>
+                              </>
+                            );
+                          }
+                          return (
+                            <>
+                              <span className="font-medium">{xj.quantity?.toLocaleString() || 0}</span>
+                              <span className="text-gray-500 ml-1">{xj.unit || ''}</span>
+                            </>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="py-3" style={{ fontSize: '14px' }}>
                         <span className="text-gray-600">{xj.quotationDeadline}</span>

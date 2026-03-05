@@ -87,9 +87,18 @@ interface OrderStats {
   totalValue: number;
 }
 
+interface ProductSummary {
+  representativeName: string;
+  representativeModel: string;
+  representativeSpec: string;
+  productCount: number;
+  totalQuantity: number;
+  quantityUnit: string;
+}
+
 export default function SupplierOrderManagementCenter() {
   const { user } = useUser();
-  const { xjs, getXJsBySupplier, deleteXJ, updateXJ, addQuoteToXJ, refreshMineFromBackend } = useXJs();
+  const { xjs, getXJsBySupplier, updateXJ, addQuoteToXJ, refreshMineFromBackend } = useXJs();
   
   // 🔥 获取完整的供应商信息（从suppliersDatabase）
   const supplierInfo = useMemo(() => {
@@ -172,6 +181,45 @@ export default function SupplierOrderManagementCenter() {
   
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const formatCompactUtcMinute = React.useCallback((raw: string | undefined) => {
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return raw;
+    const yy = String(d.getUTCFullYear()).slice(-2);
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mi = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${yy}${mm}${dd} UTC ${hh}:${mi}`;
+  }, []);
+
+  // 统一行内产品展示：只显示代表产品 + 总产品数 + 总数量
+  const summarizeProducts = React.useCallback((products?: any[], fallback?: any): ProductSummary => {
+    const list = Array.isArray(products) ? products.filter(Boolean) : [];
+    if (list.length > 0) {
+      const first = list[0] || {};
+      const totalQuantity = list.reduce((sum, p) => sum + (Number(p?.quantity) || 0), 0);
+      const uniqueUnits = Array.from(new Set(list.map(p => String(p?.unit || '').trim()).filter(Boolean)));
+      const quantityUnit = uniqueUnits.length === 1 ? uniqueUnits[0] : 'PCS';
+      return {
+        representativeName: first.productName || first.description || 'N/A',
+        representativeModel: first.modelNo && first.modelNo !== '-' ? first.modelNo : '',
+        representativeSpec: first.specification || '',
+        productCount: list.length,
+        totalQuantity,
+        quantityUnit,
+      };
+    }
+    return {
+      representativeName: fallback?.productName || 'N/A',
+      representativeModel: fallback?.modelNo || '',
+      representativeSpec: fallback?.specification || '',
+      productCount: 1,
+      totalQuantity: Number(fallback?.quantity) || 0,
+      quantityUnit: fallback?.unit || 'PCS',
+    };
+  }, []);
 
   // 🔥 获取当前供应商的询价单
   const myXJs = useMemo(() => {
@@ -639,32 +687,19 @@ export default function SupplierOrderManagementCenter() {
                 <SelectItem value="accepted">已接受</SelectItem>
               </SelectContent>
             </Select>
-            {/* 🔥 批量删除按钮 */}
+            {/* 供应商侧禁止删除 XJ，避免误删导致客户需求池消失 */}
             {selectedIds.length > 0 && (
               <Button 
                 size="sm" 
                 variant="destructive" 
                 className="h-9 gap-2"
                 onClick={() => {
-                  if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个询价单吗？\n\n⚠️ 此操作不可恢复！`)) {
-                    selectedIds.forEach(id => {
-                      deleteXJ(id);
-                    });
-                    
-                    toast.success(
-                      <div className="space-y-1">
-                        <p className="font-semibold">🗑️ 批量删除成功</p>
-                        <p className="text-sm">已删除 {selectedIds.length} 个询价单</p>
-                      </div>,
-                      { duration: 3000 }
-                    );
-                    
-                    setSelectedIds([]);
-                  }
+                  toast.warning('供应商侧已禁用删除客户需求，请联系采购/管理员处理');
+                  setSelectedIds([]);
                 }}
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                批量删除 ({selectedIds.length})
+                删除已禁用
               </Button>
             )}
           </div>
@@ -718,52 +753,29 @@ export default function SupplierOrderManagementCenter() {
                     <TableCell>
                       <div>
                         <p className="text-sm font-medium text-blue-600">{xj.supplierXjNo || xj.xjNumber}</p>
-                        <p className="text-xs text-slate-500">{xj.createdDate}</p>
+                        <p className="text-xs text-slate-500">{formatCompactUtcMinute(xj.createdDate)}</p>
                       </div>
                     </TableCell>
                     <TableCell>
-                      {xj.products && xj.products.length > 0 ? (
-                        <div className="space-y-0.5">
-                          {xj.products.slice(0, 2).map((p: any, i: number) => (
-                            <div key={i}>
-                              <p className="text-sm font-medium text-slate-900 leading-tight">{p.productName || p.description || 'N/A'}</p>
-                              {p.modelNo && p.modelNo !== '-' && (
-                                <p className="text-xs text-slate-500">{p.modelNo}</p>
-                              )}
-                              {p.specification && (
-                                <p className="text-xs text-slate-400 truncate max-w-[200px]">{p.specification}</p>
-                              )}
-                            </div>
-                          ))}
-                          {xj.products.length > 2 && (
-                            <p className="text-xs text-blue-500">+{xj.products.length - 2} 件产品</p>
-                          )}
-                        </div>
-                      ) : (
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">{xj.productName || 'N/A'}</p>
-                          {xj.modelNo && <p className="text-xs text-slate-500">{xj.modelNo}</p>}
-                          {xj.specification && <p className="text-xs text-slate-400">{xj.specification}</p>}
-                        </div>
-                      )}
+                      {(() => {
+                        const s = summarizeProducts(xj.products, xj);
+                        return (
+                          <p className="text-sm font-medium text-slate-900 leading-tight truncate">
+                            {s.representativeName}（共 {s.productCount} 个产品）
+                          </p>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
-                      {xj.products && xj.products.length > 0 ? (
-                        <div className="space-y-0.5">
-                          {xj.products.slice(0, 2).map((p: any, i: number) => (
-                            <div key={i} className="text-right">
-                              <span className="text-sm font-medium">{(p.quantity ?? 0).toLocaleString()}</span>
-                              <span className="text-xs text-slate-500 ml-1">{p.unit || 'PCS'}</span>
-                            </div>
-                          ))}
-                          {xj.products.length > 2 && <div className="h-4" />}
-                        </div>
-                      ) : (
-                        <>
-                          <span className="text-sm font-medium">{xj.quantity?.toLocaleString() || 0}</span>
-                          <span className="text-xs text-slate-500 ml-1">{xj.unit || ''}</span>
-                        </>
-                      )}
+                      {(() => {
+                        const s = summarizeProducts(xj.products, xj);
+                        return (
+                          <>
+                            <span className="text-sm font-medium">{s.totalQuantity.toLocaleString()}</span>
+                            <span className="text-xs text-slate-500 ml-1">{s.quantityUnit}</span>
+                          </>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <span className="text-sm text-slate-600">{xj.quotationDeadline}</span>
@@ -1447,28 +1459,18 @@ export default function SupplierOrderManagementCenter() {
                     <TableCell>
                       <div>
                         <p className="text-sm font-medium text-blue-600">{order.xjNumber}</p>
-                        <p className="text-xs text-slate-500">{order.createdDate}</p>
+                        <p className="text-xs text-slate-500">{formatCompactUtcMinute(order.createdDate)}</p>
                       </div>
                     </TableCell>
                     <TableCell>
-                      {order.products && order.products.length > 0 ? (
-                        <div className="space-y-0.5">
-                          {order.products.slice(0, 2).map((p: any, i: number) => (
-                            <div key={i}>
-                              <p className="text-sm font-medium text-slate-900 leading-tight">{p.productName || p.description || 'N/A'}</p>
-                              <p className="text-xs text-slate-500">{(p.quantity ?? 0).toLocaleString()} {p.unit || 'PCS'}</p>
-                            </div>
-                          ))}
-                          {order.products.length > 2 && (
-                            <p className="text-xs text-blue-500">+{order.products.length - 2} 件产品</p>
-                          )}
-                        </div>
-                      ) : (
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">{order.productName || 'N/A'}</p>
-                          <p className="text-xs text-slate-500">{order.quantity} {order.unit}</p>
-                        </div>
-                      )}
+                      {(() => {
+                        const s = summarizeProducts(order.products, order);
+                        return (
+                          <p className="text-sm font-medium text-slate-900 leading-tight truncate">
+                            {s.representativeName}（共 {s.productCount} 个产品 · {s.totalQuantity.toLocaleString()} {s.quantityUnit}）
+                          </p>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
@@ -1579,7 +1581,14 @@ export default function SupplierOrderManagementCenter() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <p className="text-sm text-slate-600">{order.items?.length || 0} 个产品</p>
+                      {(() => {
+                        const s = summarizeProducts(order.items, order);
+                        return (
+                          <p className="text-sm font-medium text-slate-900 leading-tight truncate">
+                            {s.representativeName}（共 {s.productCount} 个产品）
+                          </p>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <span className="text-sm font-semibold text-slate-900">
@@ -1587,7 +1596,7 @@ export default function SupplierOrderManagementCenter() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm text-slate-600">{order.createdDate}</span>
+                      <span className="text-sm text-slate-600">{formatCompactUtcMinute(order.createdDate)}</span>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-center gap-1">

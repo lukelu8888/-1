@@ -1421,21 +1421,22 @@ export function SalesQuotationManagement({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="space-y-1">
-                        {qt.items.slice(0, 2).map((item, idx) => (
-                          <div key={idx}>
-                            <span className="font-medium">{item.productName}</span>
-                            <span className="text-gray-500 ml-2">
-                              × {item.quantity.toLocaleString()} {item.unit}
-                            </span>
+                      {(() => {
+                        const items = Array.isArray(qt.items) ? qt.items : [];
+                        const first = items[0];
+                        const totalQty = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+                        const unit = first?.unit || '';
+                        return (
+                          <div className="space-y-1">
+                            <div>
+                              <span className="font-medium">{first?.productName || 'N/A'}</span>
+                            </div>
+                            <div className="text-gray-500">
+                              共 {Math.max(items.length, 1)} 个产品 · {totalQty.toLocaleString()} {unit}
+                            </div>
                           </div>
-                        ))}
-                        {qt.items.length > 2 && (
-                          <div className="text-gray-500">
-                            +{qt.items.length - 2} 个产品...
-                          </div>
-                        )}
-                      </div>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="font-medium text-gray-900">{qtyDisplay}</div>

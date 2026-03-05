@@ -742,21 +742,20 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="space-y-1">
-                          {contract.products.slice(0, 2).map((product, idx) => (
-                            <div key={idx}>
-                              <span className="font-medium">{product.productName}</span>
-                              <span className="text-gray-500 ml-2">
-                                × {product.quantity.toLocaleString()} {product.unit}
-                              </span>
+                        {(() => {
+                          const products = Array.isArray(contract.products) ? contract.products : [];
+                          const first = products[0];
+                          const totalQty = products.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+                          const unit = first?.unit || '';
+                          return (
+                            <div className="space-y-1">
+                              <div className="font-medium">{first?.productName || 'N/A'}</div>
+                              <div className="text-gray-500">
+                                共 {Math.max(products.length, 1)} 个产品 · {totalQty.toLocaleString()} {unit}
+                              </div>
                             </div>
-                          ))}
-                          {contract.products.length > 2 && (
-                            <div className="text-gray-500">
-                              +{contract.products.length - 2} 个产品...
-                            </div>
-                          )}
-                        </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="text-right">
                         {(() => {

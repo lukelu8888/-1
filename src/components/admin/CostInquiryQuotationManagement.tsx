@@ -687,16 +687,20 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                         </div>
                       </TableCell>
                       <TableCell className="py-3 max-w-xs" style={{ fontSize: '13px' }}>
-                        <div className="space-y-0.5">
-                          {qr.items.slice(0, 2).map((item: any, idx: number) => (
-                            <div key={idx} className="text-xs text-gray-700 truncate">
-                              {item.productName} × {item.quantity} {item.unit}
+                        {(() => {
+                          const items = Array.isArray(qr.items) ? qr.items : [];
+                          const first = items[0];
+                          return (
+                            <div className="space-y-0.5">
+                              <div className="text-xs text-gray-700 truncate font-medium">
+                                {first?.productName || first?.modelNo || 'N/A'}
+                              </div>
+                              <div className="text-xs text-gray-400">
+                                共 {Math.max(items.length, 1)} 个产品
+                              </div>
                             </div>
-                          ))}
-                          {qr.items.length > 2 && (
-                            <div className="text-xs text-gray-400">还有 {qr.items.length - 2} 个产品...</div>
-                          )}
-                        </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="py-3 max-w-xs" style={{ fontSize: '13px' }}>
                         {qr.specialRequirements ? (
@@ -860,16 +864,13 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
 
               {selectedINQ && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
-                  <div className="text-sm mb-2">📦 品清单预览</div>
-                  <div className="space-y-1">
-                    {selectedINQ.products.slice(0, 3).map((p: any, idx: number) => (
+                  <div className="text-sm mb-2">📦 产品清单（弹窗内全量展开）</div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                    {(selectedINQ.products || []).map((p: any, idx: number) => (
                       <div key={idx} className="text-xs text-gray-700">
                         • {p.productName} - {p.quantity} {p.unit || 'PCS'}
                       </div>
                     ))}
-                    {selectedINQ.products.length > 3 && (
-                      <div className="text-xs text-gray-500">还有 {selectedINQ.products.length - 3} 个产品...</div>
-                    )}
                   </div>
                 </div>
               )}

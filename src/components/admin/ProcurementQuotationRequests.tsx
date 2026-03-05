@@ -235,19 +235,18 @@ export function ProcurementQuotationRequests() {
                     
                     {/* 产品清单 */}
                     <td className="px-4 py-3">
-                      <div className="space-y-1">
-                        {request.items.slice(0, 2).map((item, idx) => (
-                          <div key={idx} className="text-xs">
-                            <span className="text-gray-900">{item.modelNo || item.productName}</span>
-                            <span className="text-gray-500 ml-2">x {item.quantity}</span>
+                      {(() => {
+                        const items = Array.isArray(request.items) ? request.items : [];
+                        const first = items[0];
+                        return (
+                          <div className="space-y-1">
+                            <div className="text-xs">
+                              <span className="text-gray-900">{first?.modelNo || first?.productName || 'N/A'}</span>
+                            </div>
+                            <div className="text-xs text-gray-500">共 {Math.max(items.length, 1)} 个产品</div>
                           </div>
-                        ))}
-                        {request.items.length > 2 && (
-                          <div className="text-xs text-gray-500">
-                            ...还有 {request.items.length - 2} 项
-                          </div>
-                        )}
-                      </div>
+                        );
+                      })()}
                     </td>
                     
                     {/* 总数量 */}

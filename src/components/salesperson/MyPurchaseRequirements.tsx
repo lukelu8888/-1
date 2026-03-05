@@ -259,21 +259,22 @@ export function MyPurchaseRequirements() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <div className="space-y-1">
-                      {qr.items.slice(0, 2).map((item: any, idx: number) => (
-                        <div key={idx} className="text-sm">
-                          <span className="font-medium">{item.productName}</span>
-                          <span className="text-gray-500 ml-2">
-                            × {item.quantity.toLocaleString()} {item.unit}
-                          </span>
+                    {(() => {
+                      const items = Array.isArray(qr.items) ? qr.items : [];
+                      const first = items[0];
+                      const totalQty = items.reduce((sum: number, item: any) => sum + (Number(item.quantity) || 0), 0);
+                      const unit = first?.unit || '';
+                      return (
+                        <div className="space-y-1">
+                          <div className="text-sm">
+                            <span className="font-medium">{first?.productName || 'N/A'}</span>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            共 {Math.max(items.length, 1)} 个产品 · {totalQty.toLocaleString()} {unit}
+                          </div>
                         </div>
-                      ))}
-                      {qr.items.length > 2 && (
-                        <div className="text-xs text-gray-500">
-                          +{qr.items.length - 2} 个产品...
-                        </div>
-                      )}
-                    </div>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-center">
                     {getStatusBadge(qr)}
