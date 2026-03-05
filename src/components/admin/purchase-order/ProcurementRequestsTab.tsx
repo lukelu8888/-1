@@ -21,8 +21,8 @@ type ProcurementRequestsTabProps = {
   getRequirementNoFromPO: (po: PurchaseOrderType) => string;
   handleViewPODocument: (po: PurchaseOrderType) => void;
   openSupplierAllocationDialog: (po: PurchaseOrderType) => void;
-  deletePurchaseOrder: (id: string) => void;
-  toastSuccess: (message: string) => void;
+  hasDownstreamPOForProcurementRequest: (po: PurchaseOrderType) => boolean;
+  handleDeleteProcurementRequest: (po: PurchaseOrderType) => void;
 };
 
 export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
@@ -41,8 +41,8 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
   getRequirementNoFromPO,
   handleViewPODocument,
   openSupplierAllocationDialog,
-  deletePurchaseOrder,
-  toastSuccess,
+  hasDownstreamPOForProcurementRequest,
+  handleDeleteProcurementRequest,
 }) => {
   return (
     <TabsContent value="procurement-requests" className="m-0">
@@ -107,6 +107,7 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
             <tbody>
               {filteredProcurementRequests.map((po, idx) => {
                 const runtimeStatus = getProcurementRequestRuntimeStatus(po);
+                const lockedByDownstream = hasDownstreamPOForProcurementRequest(po);
                 return (
                   <tr key={po.id} className="border-b border-gray-100 hover:bg-gray-50/50">
                     <td className="py-2 px-2 text-center">
@@ -162,13 +163,10 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => {
-                            if (!window.confirm(`确定要删除采购请求 "${po.poNumber}" 吗？\n\n⚠️ 此操作不可恢复！`)) return;
-                            deletePurchaseOrder(po.id);
-                            toastSuccess('采购请求已删除');
-                          }}
-                          className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50"
-                          title="删除采购请求"
+                          onClick={() => handleDeleteProcurementRequest(po)}
+                          disabled={lockedByDownstream}
+                          className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={lockedByDownstream ? '已存在下游采购单(PO)，不可删除上游采购请求' : '删除采购请求'}
                         >
                           <Trash2 className="w-3 h-3" />
                         </Button>

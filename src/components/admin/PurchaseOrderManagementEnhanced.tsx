@@ -450,6 +450,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     });
   }, [purchaseOrders]);
 
+  const hasDownstreamPOForProcurementRequest = React.useCallback((po: PurchaseOrderType) => {
+    if (!isProcurementRequestRecord(po)) return false;
+    return getProcurementChildOrders(po).length > 0;
+  }, [getProcurementChildOrders, isProcurementRequestRecord]);
+
   const getProcurementRequestRuntimeStatus = React.useCallback((po: PurchaseOrderType) => {
     const requestItems = po.items || [];
     const children = getProcurementChildOrders(po);
@@ -1737,13 +1742,34 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const confirmMessage = `确定要删除选中的 ${selectedProcurementRequestIds.length} 个采购请求吗？\n\n⚠️ 此操作不可恢复！`;
     if (!window.confirm(confirmMessage)) return;
 
-    selectedProcurementRequestIds.forEach((id) => {
-      deletePurchaseOrder(id);
+    const rows = purchaseOrders.filter((po) => selectedProcurementRequestIds.includes(po.id));
+    const deletable = rows.filter((po) => !hasDownstreamPOForProcurementRequest(po));
+    const blocked = rows.filter((po) => hasDownstreamPOForProcurementRequest(po));
+
+    deletable.forEach((po) => {
+      deletePurchaseOrder(po.id);
     });
-    toast.success(`已删除 ${selectedProcurementRequestIds.length} 个采购请求`, {
-      duration: 3000,
-    });
+    if (deletable.length > 0) {
+      toast.success(`已删除 ${deletable.length} 个采购请求`, {
+        duration: 3000,
+      });
+    }
+    if (blocked.length > 0) {
+      toast.error(`有 ${blocked.length} 个采购请求已存在下游采购单(PO)，已禁止删除`, {
+        duration: 4000,
+      });
+    }
     setSelectedProcurementRequestIds([]);
+  };
+
+  const handleDeleteProcurementRequest = (po: PurchaseOrderType) => {
+    if (hasDownstreamPOForProcurementRequest(po)) {
+      toast.error('该采购请求已存在下游采购单(PO)，禁止删除上游记录');
+      return;
+    }
+    if (!window.confirm(`确定要删除采购请求 "${po.poNumber}" 吗？\n\n⚠️ 此操作不可恢复！`)) return;
+    deletePurchaseOrder(po.id);
+    toast.success('采购请求已删除');
   };
 
   // 🔥 编辑询价单
@@ -3274,8 +3300,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             getRequirementNoFromPO={getRequirementNoFromPO}
             handleViewPODocument={handleViewPODocument}
             openSupplierAllocationDialog={openSupplierAllocationDialog}
-            deletePurchaseOrder={deletePurchaseOrder}
-            toastSuccess={(message) => toast.success(message)}
+            hasDownstreamPOForProcurementRequest={hasDownstreamPOForProcurementRequest}
+            handleDeleteProcurementRequest={handleDeleteProcurementRequest}
           />
 
           <PurchaseOrdersTab
