@@ -1032,8 +1032,12 @@ function toXJRow(x: any) {
     priority: x.priority || 'medium',
     status: x.status || 'pending',
     quotes: x.quotes || [],
+    document_data: x.documentData || x.document_data || null,
     remarks: x.remarks || null,
     created_by: x.createdBy || x.created_by || '',
+    supplier_company_id: x.supplierCompanyId || x.supplier_company_id || null,
+    due_date: toIsoDate(x.dueDate || x.due_date || x.quotationDeadline || x.quotation_deadline),
+    display_number: x.xjNumber || x.xj_number || x.display_number || null,
   };
 }
 
@@ -1069,8 +1073,12 @@ function fromXJRow(r: any) {
     priority: r.priority,
     status: r.status,
     quotes: r.quotes || [],
+    documentData: r.document_data,
     remarks: r.remarks,
     createdBy: r.created_by,
+    supplierCompanyId: r.supplier_company_id,
+    dueDate: r.due_date,
+    displayNumber: r.display_number,
     createdDate: r.created_at,
     updatedAt: r.updated_at,
   };
