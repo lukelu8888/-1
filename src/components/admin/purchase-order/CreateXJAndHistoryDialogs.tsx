@@ -117,7 +117,11 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
                               checked={selectedProductIds.length === selectedRequirementForRFQ.items?.length && selectedProductIds.length > 0}
                               onChange={(e) => {
                                 if (e.target.checked) {
-                                  setSelectedProductIds(selectedRequirementForRFQ.items?.map((item) => String(item.id)) || []);
+                                  setSelectedProductIds(
+                                    selectedRequirementForRFQ.items?.map((item, idx) =>
+                                      (item.id && item.id !== 'undefined') ? String(item.id) : `item_idx_${idx}`
+                                    ) || []
+                                  );
                                 } else {
                                   setSelectedProductIds([]);
                                 }
@@ -133,19 +137,21 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedRequirementForRFQ.items?.map((item, idx) => (
-                          <tr key={item.id} className="border-t border-gray-100 hover:bg-gray-50">
+                        {selectedRequirementForRFQ.items?.map((item, idx) => {
+                          // 用 idx 作为兜底，防止 item.id 为 undefined 导致所有行共享同一 key/id
+                          const itemKey = (item.id && item.id !== 'undefined') ? String(item.id) : `item_idx_${idx}`;
+                          return (
+                          <tr key={itemKey} className="border-t border-gray-100 hover:bg-gray-50">
                             <td className="py-1.5 px-2 text-center">
                               <input
                                 type="checkbox"
                                 className="w-4 h-4 cursor-pointer"
-                                checked={selectedProductIds.includes(String(item.id))}
+                                checked={selectedProductIds.includes(itemKey)}
                                 onChange={(e) => {
-                                  const itemId = String(item.id);
                                   if (e.target.checked) {
-                                    setSelectedProductIds([...selectedProductIds, itemId]);
+                                    setSelectedProductIds([...selectedProductIds, itemKey]);
                                   } else {
-                                    setSelectedProductIds(selectedProductIds.filter((id) => id !== itemId));
+                                    setSelectedProductIds(selectedProductIds.filter((id) => id !== itemKey));
                                   }
                                 }}
                               />

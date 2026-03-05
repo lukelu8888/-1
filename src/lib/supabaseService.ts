@@ -1435,7 +1435,10 @@ function fromPRRow(r: any) {
     region: r.region,
     urgency: r.urgency || 'medium',
     requiredDate: r.required_date,
-    items: r.items || [],
+    items: (r.items || []).map((item: any, idx: number) => ({
+      ...item,
+      id: (item.id && String(item.id) !== 'undefined') ? item.id : `item_idx_${idx}`,
+    })),
     status: r.status || 'pending',
     notes: r.notes,
     createdBy: r.created_by,   // uuid，不是 email

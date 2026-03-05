@@ -1320,8 +1320,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setRFQDeadline(undefined);
     setRFQRemarks('');
     setSupplierSearchTerm(''); // 🔥 重置供应商搜索
-    // 🔥 默认全选所有产品（ID统一 string，避免 number/string 不匹配导致无法创建）
-    setSelectedProductIds(req.items?.map(item => String(item.id)) || []);
+    // 默认全选所有产品，使用与 fromPRRow 一致的 itemKey 规则
+    setSelectedProductIds(
+      req.items?.map((item: any, idx: number) =>
+        (item.id && String(item.id) !== 'undefined') ? String(item.id) : `item_idx_${idx}`
+      ) || []
+    );
     setShowCreateRFQDialog(true);
   };
 
@@ -1405,10 +1409,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           supplierXjNo
         );
 
-        // 🔥 只包含选中的产品（ID统一 string 匹配）
-        const selectedProducts = requirementItems.filter(item =>
-          selectedProductIds.includes(String(item.id))
-        );
+        // 只包含选中的产品，使用与 fromPRRow/itemKey 一致的规则
+        const selectedProducts = requirementItems.filter((item: any, idx: number) => {
+          const itemKey = (item.id && String(item.id) !== 'undefined') ? String(item.id) : `item_idx_${idx}`;
+          return selectedProductIds.includes(itemKey);
+        });
 
         if (selectedProducts.length === 0) {
           throw new Error('选中的产品为空：请检查产品ID类型/字段是否一致');
@@ -1474,10 +1479,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         addXJ(saved);
       }));
 
-      // 🔥 更新产品的询价历史
-      const updatedItems = requirementItems.map(item => {
+      // 更新产品的询价历史
+      const updatedItems = requirementItems.map((item: any, idx: number) => {
       // 只更新被选中发送询价的产品
-      if (selectedProductIds.includes(String(item.id))) {
+      const itemKey = (item.id && String(item.id) !== 'undefined') ? String(item.id) : `item_idx_${idx}`;
+      if (selectedProductIds.includes(itemKey)) {
         const xjHistory = (item as any).xjHistory || [];
         const newHistoryEntry = {
           batchNo: xjHistory.length + 1,
