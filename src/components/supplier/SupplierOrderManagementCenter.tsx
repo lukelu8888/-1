@@ -99,6 +99,7 @@ interface ProductSummary {
 export default function SupplierOrderManagementCenter() {
   const { user } = useUser();
   const { xjs, getXJsBySupplier, updateXJ, addQuoteToXJ, refreshMineFromBackend } = useXJs();
+  const HIDDEN_XJ_IDS_KEY = 'supplierHiddenXJIds';
   
   // 🔥 获取完整的供应商信息（从suppliersDatabase）
   const supplierInfo = useMemo(() => {
@@ -181,6 +182,7 @@ export default function SupplierOrderManagementCenter() {
   
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [hiddenXJIds, setHiddenXJIds] = useState<Set<string>>(new Set());
 
   const formatCompactUtcMinute = React.useCallback((raw: string | undefined) => {
     if (!raw) return '—';
@@ -193,6 +195,44 @@ export default function SupplierOrderManagementCenter() {
     const mi = String(d.getUTCMinutes()).padStart(2, '0');
     return `${yy}${mm}${dd} UTC ${hh}:${mi}`;
   }, []);
+
+  const loadHiddenXJIds = React.useCallback((email?: string) => {
+    if (!email) return new Set<string>();
+    try {
+      const raw = localStorage.getItem(HIDDEN_XJ_IDS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const ids = Array.isArray(parsed?.[email]) ? parsed[email] : [];
+      return new Set(ids.map((v: any) => String(v)));
+    } catch {
+      return new Set<string>();
+    }
+  }, []);
+
+  const persistHiddenXJIds = React.useCallback((next: Set<string>) => {
+    const email = user?.email;
+    if (!email) return;
+    try {
+      const raw = localStorage.getItem(HIDDEN_XJ_IDS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      parsed[email] = Array.from(next);
+      localStorage.setItem(HIDDEN_XJ_IDS_KEY, JSON.stringify(parsed));
+    } catch {
+      // ignore local persistence failures
+    }
+  }, [user?.email]);
+
+  React.useEffect(() => {
+    setHiddenXJIds(loadHiddenXJIds(user?.email));
+  }, [user?.email, loadHiddenXJIds]);
+
+  const hideXJsForCurrentSupplier = React.useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    const next = new Set(hiddenXJIds);
+    ids.forEach((id) => next.add(String(id)));
+    setHiddenXJIds(next);
+    persistHiddenXJIds(next);
+    setSelectedIds([]);
+  }, [hiddenXJIds, persistHiddenXJIds]);
 
   // 统一行内产品展示：只显示代表产品 + 总产品数 + 总数量
   const summarizeProducts = React.useCallback((products?: any[], fallback?: any): ProductSummary => {
@@ -660,7 +700,7 @@ export default function SupplierOrderManagementCenter() {
 
   // 🔥 渲染询价单列表
   const renderRFQList = () => {
-    const pendingRFQs = categorizedRFQs.pending;
+    const pendingRFQs = categorizedRFQs.pending.filter((xj) => !hiddenXJIds.has(String(xj.id)));
 
     return (
       <div className="space-y-4">
@@ -687,19 +727,22 @@ export default function SupplierOrderManagementCenter() {
                 <SelectItem value="accepted">已接受</SelectItem>
               </SelectContent>
             </Select>
-            {/* 供应商侧禁止删除 XJ，避免误删导致客户需求池消失 */}
+            {/* 批量删除（仅从当前供应商视图隐藏，不影响采购端数据） */}
             {selectedIds.length > 0 && (
               <Button 
                 size="sm" 
                 variant="destructive" 
                 className="h-9 gap-2"
                 onClick={() => {
-                  toast.warning('供应商侧已禁用删除客户需求，请联系采购/管理员处理');
-                  setSelectedIds([]);
+                  const targets = selectedIds.filter((id) => pendingRFQs.some((xj) => xj.id === id));
+                  if (!targets.length) return;
+                  if (!window.confirm(`确定删除选中的 ${targets.length} 条客户需求吗？\n\n仅从当前供应商视图移除，不影响采购端与数据库数据。`)) return;
+                  hideXJsForCurrentSupplier(targets);
+                  toast.success(`已从当前视图删除 ${targets.length} 条客户需求`);
                 }}
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                删除已禁用
+                批量删除 ({selectedIds.length})
               </Button>
             )}
           </div>
@@ -945,6 +988,19 @@ export default function SupplierOrderManagementCenter() {
                             );
                           }
                         })()}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs text-red-600 hover:text-red-700"
+                          onClick={() => {
+                            if (!window.confirm(`确定删除客户需求 ${xj.supplierXjNo || xj.xjNumber} 吗？\n\n仅从当前供应商视图移除，不影响采购端与数据库数据。`)) return;
+                            hideXJsForCurrentSupplier([xj.id]);
+                            toast.success('已从当前视图删除');
+                          }}
+                        >
+                          <Trash2 className="w-3 h-3 mr-1" />
+                          删除
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
