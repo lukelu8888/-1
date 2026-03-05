@@ -3,7 +3,7 @@ import { xjService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 
 // 🔥 采购询价（XJ - 询价）状态
-export type XJStatus = 'pending' | 'quoted' | 'accepted' | 'rejected' | 'expired';
+export type XJStatus = 'pending' | 'sent' | 'quoted' | 'accepted' | 'rejected' | 'expired' | 'cancelled' | 'completed';
 
 // 🔥 产品信息接口
 export interface XJProduct {
