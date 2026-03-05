@@ -86,6 +86,8 @@ import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tom
 
 // 🔥 采购订单类型已从PurchaseOrderContext导入，不再在此定义
 // 🔥 TERMS_OPTIONS已从purchase-order/purchaseOrderConstants.ts导入，不再在此定义
+// UI 缓存键：审批请求在切页时的即时通知缓存，业务数据已写入 Supabase approval_records 表
+// 此 localStorage 仅用于减少切页空窗，可安全删除（不影响 Supabase 中的审批数据）
 const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
 
 const PurchaseOrderManagementEnhanced: React.FC = () => {
@@ -225,39 +227,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   const allSuppliers: Supplier[] = suppliersFromApi.length > 0 ? suppliersFromApi : suppliersDatabase;
   
-  // 🔥 动态计算采购需求的状态
+  // Supabase-first: 直接读 DB status 字段，不在前端重新计算
+  // DB purchase_requirements.status 由业务操作（创建XJ、收到报价等）更新
   const calculateRequirementStatus = (req: PurchaseRequirement): 'pending' | 'partial' | 'processing' | 'completed' => {
-    // 获取该采购需求相关的所有XJ（询价单）
-    const relatedXJs = xjs.filter(xj => 
-      xj.requirementNo === req.requirementNo || 
-      xj.xjNumber === req.requirementNo ||
-      xj.sourceQRNumber === req.requirementNo
-    );
-    
-    if (relatedXJs.length === 0) {
-      // 还未创建任何询价单
-      return 'pending';
-    }
-    
-    // 统计已经创建了询价单的产品
-    const xjProductIds = new Set<string>();
-    relatedXJs.forEach(xj => {
-      xj.products?.forEach((p: any) => {
-        xjProductIds.add(p.id || p.modelNo);
-      });
-    });
-    
-    // 采购需求的产品总数
-    const totalProducts = req.items?.length || 0;
-    const submittedProducts = xjProductIds.size;
-    
-    if (submittedProducts === 0) {
-      return 'pending';
-    } else if (submittedProducts < totalProducts) {
-      return 'partial';
-    } else {
-      return 'processing'; // 全部提交
-    }
+    const s = req.status as string;
+    if (s === 'completed') return 'completed';
+    if (s === 'processing' || s === 'in_progress') return 'processing';
+    if (s === 'partial') return 'partial';
+    return 'pending';
   };
   
   // 🔥 供应商报价数据 - Supabase-first
