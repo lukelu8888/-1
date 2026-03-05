@@ -319,29 +319,31 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     if (!selectedSupplierQuotation) return;
     const qid = selectedSupplierQuotation.id;
     try {
-      await supplierQuotationService.upsert({ id: qid, status: 'accepted' });
+      await supplierQuotationService.upsert({ ...selectedSupplierQuotation, status: 'accepted' });
     } catch (e: any) {
       console.warn('⚠️ 接受报价 Supabase 同步失败:', e?.message);
       toast.error('接受报价失败：Supabase 写入未成功');
       return;
     }
     applyLocalQuotationStatus(qid, 'accepted');
+    await loadSupplierQuotationsFromApi();
     setShowSupplierQuotationDialog(false);
     setAcceptedQuotationNo(selectedSupplierQuotation.quotationNo || qid);
     setShowFeedbackReminderDialog(true);
-  }, [selectedSupplierQuotation, applyLocalQuotationStatus]);
+  }, [selectedSupplierQuotation, applyLocalQuotationStatus, loadSupplierQuotationsFromApi]);
 
   const handleRejectSupplierQuotation = React.useCallback(async () => {
     if (!selectedSupplierQuotation) return;
     const qid = selectedSupplierQuotation.id;
     try {
-      await supplierQuotationService.upsert({ id: qid, status: 'rejected' });
+      await supplierQuotationService.upsert({ ...selectedSupplierQuotation, status: 'rejected' });
     } catch (e: any) {
       console.warn('⚠️ 拒绝报价 Supabase 同步失败:', e?.message);
       toast.error('拒绝报价失败：Supabase 写入未成功');
       return;
     }
     applyLocalQuotationStatus(qid, 'rejected');
+    await loadSupplierQuotationsFromApi();
     setShowSupplierQuotationDialog(false);
     toast.info(
       <div className="space-y-1">
@@ -350,7 +352,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         <p className="text-xs text-gray-500">状态已更新</p>
       </div>,
     );
-  }, [selectedSupplierQuotation, applyLocalQuotationStatus]);
+  }, [selectedSupplierQuotation, applyLocalQuotationStatus, loadSupplierQuotationsFromApi]);
 
   React.useEffect(() => {
     if (activeTab === 'supplier-quotations') {
@@ -3241,13 +3243,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     size="sm"
                                     onClick={async () => {
                                       try {
-                                        await supplierQuotationService.upsert({ id: quotation.id, status: 'accepted' });
+                                        await supplierQuotationService.upsert({ ...quotation, status: 'accepted' });
                                       } catch (e: any) {
                                         console.warn('⚠️ 接受报价 Supabase 同步失败:', e?.message);
                                         toast.error('接受报价失败：Supabase 写入未成功');
                                         return;
                                       }
                                       applyLocalQuotationStatus(quotation.id, 'accepted');
+                                      await loadSupplierQuotationsFromApi();
                                       setAcceptedQuotationNo(quotation.quotationNo || quotation.id);
                                       setShowFeedbackReminderDialog(true);
                                     }}
@@ -3262,13 +3265,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     variant="outline"
                                     onClick={async () => {
                                       try {
-                                        await supplierQuotationService.upsert({ id: quotation.id, status: 'rejected' });
+                                        await supplierQuotationService.upsert({ ...quotation, status: 'rejected' });
                                       } catch (e: any) {
                                         console.warn('⚠️ 拒绝报价 Supabase 同步失败:', e?.message);
                                         toast.error('拒绝报价失败：Supabase 写入未成功');
                                         return;
                                       }
                                       applyLocalQuotationStatus(quotation.id, 'rejected');
+                                      await loadSupplierQuotationsFromApi();
                                       toast.info(
                                         <div className="space-y-1">
                                           <p className="font-semibold">❌ 已拒绝报价</p>

@@ -33,6 +33,7 @@ import { useXJs } from '../../contexts/XJContext';
 import { validateFeedback, calculateSuggestedPrice } from '../../utils/autoPopulateFeedback';
 import { performSmartComparison, SmartComparisonResult } from '../../utils/supplierScoring';
 import { SmartSupplierComparisonForm } from './SmartSupplierComparisonForm';
+import { supplierQuotationService } from '../../lib/supabaseService';
 
 interface PurchaserFeedbackFormProps {
   open: boolean;
@@ -70,12 +71,13 @@ export function PurchaserFeedbackForm({
   }, [open]);
   
   // 🔥 智能比价 - 核心函数
-  const handleSmartComparison = () => {
+  const handleSmartComparison = async () => {
     setLoading(true);
     
     try {
-      // 1. 从localStorage读取所有供应商报价单
-      const supplierQuotations = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
+      // 1. Supabase-first: 读取所有供应商报价单（不再依赖 localStorage）
+      const rows = await supplierQuotationService.getAll();
+      const supplierQuotations = Array.isArray(rows) ? rows : [];
       
       console.log('🔍 开始智能比价...');
       console.log('  QR编号:', qr.requirementNo);
