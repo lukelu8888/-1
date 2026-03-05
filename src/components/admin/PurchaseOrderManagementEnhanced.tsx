@@ -3298,8 +3298,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         setXJDeadline={setRFQDeadline}
         xjRemarks={xjRemarks}
         setRFQRemarks={setRFQRemarks}
-        handleSubmitRFQ={handleSubmitXJ}
-        submittingRFQ={submittingXJ}
+        handleSubmitXJ={handleSubmitXJ}
+        submittingXJ={submittingXJ}
         showRFQHistoryDialog={showXJHistoryDialog}
         setShowRFQHistoryDialog={setShowRFQHistoryDialog}
         selectedProductForHistory={selectedProductForHistory}
