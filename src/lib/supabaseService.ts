@@ -1388,21 +1388,35 @@ export const purchaseOrderService = {
 // purchase_requirements 服务
 // ============================================================
 function toPRRow(p: any) {
-  // 只写 purchase_requirements 表实际存在的列
-  // 兼容前端字段名（camelCase）和 DB 列名（snake_case）两种格式
+  // DB 列类型对照（purchase_requirements）：
+  //   id uuid, requirement_no text, source_inquiry_number text,
+  //   region text, urgency text, required_date date, items jsonb,
+  //   status text, notes text, created_by uuid(!), assigned_to text,
+  //   qr_number text, display_number text, customer_info jsonb
   const reqNo = p.requirementNo || p.requirementNumber || p.requirement_no || p.qr_number || '';
+
+  // created_by 是 uuid 类型，只接受合法 UUID（Supabase user.id）
+  // 如果前端传的是 email 字符串，直接丢弃，由 RLS / DB default 填充
+  const createdByRaw = p.createdBy || p.created_by || null;
+  const createdBy = (createdByRaw && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(createdByRaw))
+    ? createdByRaw : null;
+
+  // required_date 是 date 类型，只传 YYYY-MM-DD
+  const rawDate = p.requiredDate || p.required_date || null;
+  const requiredDate = rawDate ? String(rawDate).split('T')[0] : null;
+
   return {
-    id: toUUID(p.id) || toUUID(`qr_${Date.now()}`),
+    id: toUUID(p.id),                          // toUUID 会对非 UUID 生成新随机 UUID
     requirement_no: reqNo,
     source_inquiry_number: p.sourceInquiryNumber || p.source_inquiry_number || null,
     source_so_number: p.sourceSoNumber || p.source_so_number || null,
     region: p.region || null,
     urgency: p.urgency || 'medium',
-    required_date: p.requiredDate || p.required_date || null,
+    required_date: requiredDate,
     items: p.items || p.products || [],
     status: (['pending','in_progress','completed','cancelled','partial','processing','submitted','quoted','draft'].includes(p.status) ? p.status : 'pending'),
     notes: p.notes || p.specialRequirements || p.special_requirements || null,
-    created_by: p.createdBy || p.created_by || null,
+    created_by: createdBy,
     assigned_to: p.assignedTo || p.assigned_to || null,
     qr_number: reqNo || null,
     display_number: reqNo || null,
@@ -1424,7 +1438,7 @@ function fromPRRow(r: any) {
     items: r.items || [],
     status: r.status || 'pending',
     notes: r.notes,
-    createdBy: r.created_by,
+    createdBy: r.created_by,   // uuid，不是 email
     assignedTo: r.assigned_to,
     createdDate: r.created_at,
     createdAt: r.created_at,

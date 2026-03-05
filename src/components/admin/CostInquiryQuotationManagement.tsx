@@ -122,7 +122,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       const regionCode = inq.region === 'South America' ? 'SA' : inq.region === 'Europe & Africa' ? 'EA' : 'NA';
       const qrNumber = await nextQRNumber(regionCode);
       const newQR = {
-        id: `qr_${Date.now()}`,
+        id: crypto.randomUUID(),
         requirementNo: qrNumber,
         sourceInquiryNumber: inq.inquiryNumber || `INQ-${inq.id}`,
         requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -172,100 +172,33 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     setShowSubmitDialog(true);
   };
 
-  // 🔥 确认提交给采购部门（调用后端API）
+  // 🔥 确认提交给采购部门
   const handleConfirmSubmit = async (data: any) => {
     if (!selectedQR) return;
-    
-    // 🔥 检查是否是本地创建的数据（未同步到后端）
-    const isLocalOnlyData = selectedQR.id && selectedQR.id.startsWith('qr_');
-    
-    if (isLocalOnlyData) {
-      // 本地数据，需要先创建到后端再更新
-      console.log('⚠️ [提交到采购部门] 检测到本地数据，先同步到后端');
-      toast.info('正在同步数据到服务器...');
-      
-      try {
-        // 先创建到后端
-        const createData = {
-          source_inquiry_number: selectedQR.sourceInquiryNumber || selectedQR.requirementNo,
-          region: selectedQR.region || 'North America',
-          required_date: selectedQR.requiredDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          urgency: selectedQR.urgency || 'medium',
-          special_requirements: selectedQR.specialRequirements || '',
-          customer: selectedQR.customer || {
-            companyName: 'N/A',
-            contactPerson: 'N/A',
-            email: 'N/A',
-            phone: 'N/A'
-          },
-          items: (selectedQR.items || []).map((item: any) => ({
-            productName: item.productName || 'Unknown Product',
-            modelNo: item.modelNo || '',
-            specification: item.specification || '',
-            quantity: item.quantity || 1,
-            unit: item.unit || 'PCS',
-            targetPrice: item.targetPrice || 0,
-            targetCurrency: item.targetCurrency || 'USD',
-            hsCode: item.hsCode || '',
-            imageUrl: item.imageUrl || '',
-            remarks: item.remarks || ''
-          }))
-        };
-
-        const createResponse: any = await purchaseRequirementService.upsert(createData) || createData;
-
-        updatePurchaseRequirement(selectedQR.id, {
-          ...selectedQR,
-          id: createResponse.id,
-          requirementNumber: createResponse.requirementNumber || createResponse.requirementNo,
-        });
-        
-        selectedQR.id = createResponse.id;
-        selectedQR.requirementNo = createResponse.requirementNumber || createResponse.requirementNo;
-      } catch (syncError: any) {
-        console.error('❌ [提交到采购部门] 同步失败:', syncError);
-        toast.error(`❌ 数据同步失败: ${syncError.message || '未知错误'}`);
-        return;
-      }
-    }
-    
     try {
-      // 准备请求数据
-      const requestData: any = {
-        status: 'partial',
-        expected_quote_date: data.expectedQuoteDate,
-        delivery_date: data.deliveryDate,
-        payment_terms: data.paymentTerms,
-        trade_terms: data.tradeTerms,
-        target_cost_range: data.targetCostRange,
-        quality_requirements: data.qualityRequirements,
-        packaging_requirements: data.packagingRequirements,
-        remarks: data.remarks,
+      const updatedItems = data.products?.length > 0
+        ? data.products.map((p: any) => ({
+            id: p.id,
+            quantity: p.editableQuantity || p.quantity,
+            remarks: p.editableRemarks || p.remarks
+          }))
+        : undefined;
+
+      const payload: any = {
+        id: selectedQR.id,
+        requirementNo: selectedQR.requirementNo,
+        sourceInquiryNumber: selectedQR.sourceInquiryNumber,
+        region: selectedQR.region,
+        urgency: selectedQR.urgency,
+        requiredDate: selectedQR.requiredDate,
+        customer: selectedQR.customer,
+        items: updatedItems || selectedQR.items,
+        status: 'submitted',
+        notes: data.remarks || selectedQR.notes,
       };
 
-      // 如果产品数量或备注有修改，包含items更新
-      if (data.products && data.products.length > 0) {
-        requestData.items = data.products.map((p: any) => ({
-          id: p.id,
-          quantity: p.editableQuantity || p.quantity,
-          remarks: p.editableRemarks || p.remarks
-        }));
-      }
-      
-      console.log('📤 [提交到采购部门] 发送请求:', {
-        requirementUid: selectedQR.id,
-        requestData
-      });
-      
-      const response: any = await purchaseRequirementService.upsert({ id: selectedQR.id, ...requestData }) || {};
-      
-      const updateData = {
-        status: 'partial' as const,
-        submittedAt: new Date().toISOString(),
-        ...requestData,
-      };
-      
-      updatePurchaseRequirement(selectedQR.id, updateData as any);
+      await purchaseRequirementService.upsert(payload);
+      updatePurchaseRequirement(selectedQR.id, { status: 'submitted' });
       toast.success(`✅ 已提交给采购部门！单号：${selectedQR.requirementNo}`);
       setShowSubmitDialog(false);
       setSelectedQR(null);

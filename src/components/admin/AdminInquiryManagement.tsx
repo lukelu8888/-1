@@ -59,7 +59,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       const regionCode = inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA';
       const qrNumber = await nextQRNumber(regionCode);
       const newQR = {
-        id: `qr_${Date.now()}`,
+        id: crypto.randomUUID(),
         requirementNo: qrNumber,
         sourceInquiryNumber: inquiry.inquiryNumber || inquiry.id,
         requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
