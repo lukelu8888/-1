@@ -315,6 +315,45 @@ export default function SupplierOrderManagementCenter() {
     } as any);
   }, [myXJs, addQuoteToXJ, supplierInfo?.email, supplierInfo?.name, user?.email, user?.name]);
 
+  const getXJRefKey = React.useCallback((xj: any) => {
+    return String(xj?.supplierXjNo || xj?.xjNumber || '').trim();
+  }, []);
+
+  const findActiveQuotationForXJ = React.useCallback((xj: any, quotationList?: any[]) => {
+    const xjKey = getXJRefKey(xj);
+    if (!xjKey) return undefined;
+    const currentUser = String(user?.email || '').trim().toLowerCase();
+    const list = Array.isArray(quotationList) ? quotationList : supplierQuotations;
+    return list.find((q: any) => {
+      const qKey = String(q?.sourceXJ || q?.xjNo || q?.xjNumber || '').trim();
+      const byRef = qKey !== '' && qKey === xjKey;
+      if (!byRef) return false;
+      const bySupplierEmail = String(q?.supplierEmail || '').trim().toLowerCase() === currentUser;
+      const byCreatedBy = String(q?.createdBy || '').trim().toLowerCase() === currentUser;
+      const bySupplierCode = String(q?.supplierCode || '').trim().toLowerCase() === currentUser;
+      return bySupplierEmail || byCreatedBy || bySupplierCode;
+    });
+  }, [getXJRefKey, supplierQuotations, user?.email]);
+
+  const rollbackXJAfterQuotationDelete = React.useCallback(async (deletedRows: any[], remainingRows: any[]) => {
+    if (!Array.isArray(deletedRows) || deletedRows.length === 0) return;
+    for (const quotation of deletedRows) {
+      const sourceXJ = String(quotation?.sourceXJ || quotation?.xjNo || quotation?.xjNumber || '').trim();
+      if (!sourceXJ) continue;
+      const xj = myXJs.find((r) => getXJRefKey(r) === sourceXJ);
+      if (!xj) continue;
+      const stillHasDownstream = remainingRows.some((rq: any) => String(rq?.sourceXJ || rq?.xjNo || rq?.xjNumber || '').trim() === sourceXJ);
+      if (stillHasDownstream) continue;
+      const filteredQuotes = (xj.quotes || []).filter((qt: any) => String(qt?.quotationNo || '').trim() !== String(quotation?.quotationNo || '').trim());
+      await updateXJ(xj.id, {
+        status: 'sent' as any,
+        supplierQuotationNo: '',
+        quotes: filteredQuotes,
+      });
+    }
+    await refreshMineFromBackend({ force: true });
+  }, [getXJRefKey, myXJs, refreshMineFromBackend, updateXJ]);
+
   // 🔥 分类采购询价（客户需求池）
   const categorizedRFQs = useMemo(() => {
     console.log('🔍 [分类采购询价] 开始分类，总采购询价数:', myXJs.length);
@@ -325,14 +364,13 @@ export default function SupplierOrderManagementCenter() {
       const isPendingOrSent = xj.status === 'pending' || xj.status === 'sent' || xj.status === 'quoted';
       // 排除已接受和已拒绝的
       const result = isPendingOrSent && xj.status !== 'accepted' && xj.status !== 'rejected';
-      const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
-      console.log(`  - 采购询价 ${xj.supplierXjNo}: status=${xj.status}, hasQuote=${!!myQuote}, 是否在客户需求=${result}`);
+      const hasActiveQuotation = !!findActiveQuotationForXJ(xj);
+      console.log(`  - 采购询价 ${xj.supplierXjNo}: status=${xj.status}, hasQuote=${hasActiveQuotation}, 是否在客户需求=${result}`);
       return result;
     });
     
     const quoted = myXJs.filter(xj => {
-      const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
-      return myQuote && xj.status !== 'accepted' && xj.status !== 'rejected';
+      return !!findActiveQuotationForXJ(xj) && xj.status !== 'accepted' && xj.status !== 'rejected';
     });
     
     const accepted = myXJs.filter(xj => xj.status === 'accepted');
@@ -340,7 +378,7 @@ export default function SupplierOrderManagementCenter() {
     console.log('📊 [分类结果] 客户需求:', pending.length, '已报价:', quoted.length, '已接受:', accepted.length);
     
     return { pending, quoted, accepted };
-  }, [myXJs, user?.email]);
+  }, [myXJs, user?.email, findActiveQuotationForXJ]);
 
   // 自愈：如果“客户需求”统计有数据但列表被隐藏规则全部挡住，则自动恢复显示
   React.useEffect(() => {
@@ -848,9 +886,9 @@ export default function SupplierOrderManagementCenter() {
                     </TableCell>
                     <TableCell>
                       {(() => {
-                        // 🔥 检查是否已下推报价
-                        const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
-                        if (myQuote) {
+                        // 以 BJ 实际数据为准，避免 XJ 历史 quotes 残留导致状态不回滚
+                        const activeQuotation = findActiveQuotationForXJ(xj);
+                        if (activeQuotation) {
                           return (
                             <Badge className="bg-green-100 text-green-800 border-green-300">
                               已下推
@@ -883,13 +921,9 @@ export default function SupplierOrderManagementCenter() {
                         )}
                         {/* 🔥 根据是否已下推报价显示不同按钮 */}
                         {(() => {
-                          const myQuote = xj.quotes?.find((q: any) => q.supplierCode === user?.email);
-                          const existingQuotation = supplierQuotations.find(q => 
-                            q.sourceXJ === (xj.supplierXjNo || xj.xjNumber) &&
-                            q.supplierEmail === user?.email
-                          );
+                          const existingQuotation = findActiveQuotationForXJ(xj);
                           
-                          if (myQuote || existingQuotation) {
+                          if (existingQuotation) {
                             // 已下推报价，显示"已下推"状态按钮（禁用）
                             return (
                               <Button
@@ -913,10 +947,7 @@ export default function SupplierOrderManagementCenter() {
                             // 🔥 下推报价 - 自动创建报价单并跳转到我的报价
                             try {
                               // 🔥 防止重复创建：检查是否已存在对应的报价单
-                              const existingQuotation = supplierQuotations.find(q => 
-                                q.sourceXJ === (xj.supplierXjNo || xj.xjNumber) &&
-                                q.supplierEmail === user?.email
-                              );
+                              const existingQuotation = findActiveQuotationForXJ(xj);
 
                               if (existingQuotation) {
                                 toast.warning(
@@ -1080,10 +1111,12 @@ export default function SupplierOrderManagementCenter() {
                 className="h-9 gap-2"
                 onClick={async () => {
                   if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个报价单吗？\n\n⚠️ 此操作不可恢复！`)) {
+                    const deletedRows = supplierQuotations.filter(q => selectedIds.includes(q.id));
                     const updatedQuotations = supplierQuotations.filter(q => !selectedIds.includes(q.id));
                     setSupplierQuotations(updatedQuotations);
                     // Supabase-first: 软删除
                     await Promise.all(selectedIds.map(id => supplierQuotationService.delete(id).catch(() => null)));
+                    await rollbackXJAfterQuotationDelete(deletedRows, updatedQuotations);
                     
                     toast.success(
                       <div className="space-y-1">
