@@ -30,7 +30,7 @@ import { createQuotationFromXJ, saveSupplierQuotation } from '../../utils/create
 import { supplierQuotationService } from '../../lib/supabaseService';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
 
-// 🔥 供应商报价单接口（从localStorage读取）
+// 供应商报价单接口（数据源：Supabase supplier_quotations 表）
 interface SupplierQuotationItem {
   id: string;
   productName: string;

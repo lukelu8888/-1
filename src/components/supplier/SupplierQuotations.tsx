@@ -443,13 +443,9 @@ export default function SupplierQuotations() {
           <Button
             onClick={() => {
               if (window.confirm('⚠️ 确定要清空所有询价数据吗？\n\n这将删除：\n- 所有询价单（' + supplierXJs.length + '条）\n- 所有报价记录\n- 所有草稿\n\n此操作不可恢复！清空后请从采购端重新发送询价。')) {
-                localStorage.removeItem('xjs');
-                toast.success('✅ 所有测试数据已清空', {
-                  description: '页面将在2秒后刷新'
+                toast.success('✅ 请前往 Supabase 管理后台手动清空 supplier_xjs 测试数据', {
+                  description: '数据源已迁移至 Supabase，不再使用 localStorage'
                 });
-                setTimeout(() => {
-                  window.location.reload();
-                }, 2000);
               }
             }}
             variant="destructive"

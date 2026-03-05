@@ -122,7 +122,9 @@ function getCurrentDateString(): string {
 }
 
 /**
- * Get or initialize counter data from localStorage
+ * @deprecated 旧本地计数器，仅供 generateDocumentNumber（同步旧函数）使用。
+ * 新编号一律走 Supabase RPC（nextQRNumber/nextXJNumber/nextBJNumber 等）。
+ * 请勿在新代码中调用此函数。
  */
 function getCounterData(): DocumentCounterData {
   try {
@@ -142,7 +144,7 @@ function getCounterData(): DocumentCounterData {
 }
 
 /**
- * Save counter data to localStorage
+ * @deprecated 旧本地计数器写入，配合 getCounterData 使用。勿在新代码中调用。
  */
 function saveCounterData(data: DocumentCounterData): void {
   try {
