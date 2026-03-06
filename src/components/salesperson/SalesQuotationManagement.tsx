@@ -39,6 +39,7 @@ import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 导入�
 import { useOrders } from '../../contexts/OrderContext'; // 🔥 导入订单Context
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context（用于溯源回写）
 import { salesQuotationService, approvalRecordService } from '../../lib/supabaseService';
+import { supabase } from '../../lib/supabase';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
 import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
@@ -274,26 +275,56 @@ export function SalesQuotationManagement({
     return mergeDraftOverrides(readSalesQuotationLocalFallback());
   });
   const [loadingFromApi, setLoadingFromApi] = useState(false);
+  const hasAuthWarningRef = React.useRef(false);
 
   // 🔥 加载数据的函数
   const loadSalesQuotations = React.useCallback(() => {
-    setLoadingFromApi(true);
-    const role = String(currentUser?.userRole || currentUser?.role || '').trim();
-    const email = String(currentUser?.email || '').trim();
-    const canReadAll = ['Admin', 'CEO', 'Boss', 'CFO', 'Sales_Director'].includes(role);
-    const fetchPromise = email && !canReadAll
-      ? salesQuotationService.getBySalesPerson(email)
-      : salesQuotationService.getAll();
+    const run = async () => {
+      setLoadingFromApi(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const sessionEmail = String(session?.user?.email || '').trim();
+        const role = String(currentUser?.userRole || currentUser?.role || '').trim();
+        const canReadAll = ['Admin', 'CEO', 'Boss', 'CFO', 'Sales_Director'].includes(role);
+        const effectiveEmail = String(currentUser?.email || sessionEmail).trim();
 
-    fetchPromise
-      .then((rows) => {
+        if (!sessionEmail) {
+          const existingCache = readSalesQuotationCache(effectiveEmail || currentUser?.email);
+          const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
+          const legacyList = readSalesQuotationLocalFallback();
+          const fallback = existingCache.length > 0
+            ? existingCache
+            : contextList.length > 0
+              ? mergeDraftOverrides(contextList)
+              : legacyList.length > 0
+                ? mergeDraftOverrides(legacyList)
+                : [];
+          setServerQuotations(fallback);
+          if (!hasAuthWarningRef.current) {
+            hasAuthWarningRef.current = true;
+            toast.error('登录状态已失效，请重新登录后再读取 Supabase 报价单');
+          }
+          console.warn('⚠️ [SalesQuotationManagement] Supabase session 不可用，使用 UI 缓存兜底', {
+            currentUserEmail: currentUser?.email,
+            sessionEmail,
+            cacheCount: existingCache.length,
+            contextCount: contextList.length,
+            legacyCount: legacyList.length,
+          });
+          return;
+        }
+
+        hasAuthWarningRef.current = false;
+        const rows = effectiveEmail && !canReadAll
+          ? await salesQuotationService.getBySalesPerson(effectiveEmail)
+          : await salesQuotationService.getAll();
         const quotations: any[] = Array.isArray(rows) ? rows : [];
         if (quotations.length === 0) {
-          const existingCache = readSalesQuotationCache(currentUser?.email);
+          const existingCache = readSalesQuotationCache(effectiveEmail || currentUser?.email);
           const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
           const legacyList = readSalesQuotationLocalFallback();
           console.warn('⚠️ [SalesQuotationManagement] Supabase 返回 0 条，启用本地回显兜底', {
-            user: currentUser?.email,
+            user: effectiveEmail || currentUser?.email,
             cacheCount: existingCache.length,
             contextCount: contextList.length,
             legacyCount: legacyList.length,
@@ -305,9 +336,9 @@ export function SalesQuotationManagement({
               : legacyList.length > 0
                 ? mergeDraftOverrides(legacyList)
                 : [];
+          setServerQuotations(fallback);
           if (fallback.length > 0) {
-            setServerQuotations(fallback);
-            writeSalesQuotationCache(currentUser?.email, fallback);
+            writeSalesQuotationCache(effectiveEmail || currentUser?.email, fallback);
           }
         } else {
           let merged = mergeDraftOverrides(quotations);
@@ -332,10 +363,9 @@ export function SalesQuotationManagement({
             }
           } catch {}
           setServerQuotations(merged);
-          writeSalesQuotationCache(currentUser?.email, merged);
+          writeSalesQuotationCache(effectiveEmail || currentUser?.email, merged);
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error('❌ [SalesQuotationManagement] 加载 sales_quotations 失败:', err);
         const existingCache = readSalesQuotationCache(currentUser?.email);
         const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
@@ -343,14 +373,15 @@ export function SalesQuotationManagement({
         const fallback = existingCache.length > 0 ? existingCache
           : contextList.length > 0 ? mergeDraftOverrides(contextList)
           : legacyList.length > 0 ? mergeDraftOverrides(legacyList) : [];
+        setServerQuotations(fallback);
         if (fallback.length > 0) {
-          setServerQuotations(fallback);
           writeSalesQuotationCache(currentUser?.email, fallback);
         }
-      })
-      .finally(() => {
+      } finally {
         setLoadingFromApi(false);
-      });
+      }
+    };
+    void run();
   }, [currentUser?.email, currentUser?.role, currentUser?.userRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 🔥 初始加载

@@ -462,6 +462,15 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         // Supabase-first: 统一走 Context -> salesQuotationService，禁止本地兜底写入
         await addSalesQuotation(newQuotation);
 
+        // Supabase 强校验：创建后立刻回查，确认已落库
+        const persistedRows = await salesQuotationService.getByQrNumber(newQuotation.qrNumber);
+        const persisted = Array.isArray(persistedRows) && persistedRows.some((row: any) =>
+          String(row?.qtNumber || '') === String(newQuotation.qtNumber)
+        );
+        if (!persisted) {
+          throw new Error(`QT ${newQuotation.qtNumber} 未在 Supabase 查询到，已阻断假成功`);
+        }
+
         // UI 态缓存：用于切页瞬时回显（业务主数据仍以 Supabase 为准）
         try {
           const cacheKey = `sales_quotation_management_cache_v1:${currentUser?.email || 'anonymous'}`;
@@ -1070,6 +1079,30 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
               };
               
               await addSalesQuotation(salesQuotation);
+
+              // Supabase 强校验：确认该 QR 的 QT 已可查询
+              const verifyRows = await salesQuotationService.getByQrNumber(salesQuotation.qrNumber);
+              const persisted = Array.isArray(verifyRows) && verifyRows.some((row: any) =>
+                String(row?.qtNumber || '') === String(salesQuotation.qtNumber)
+              );
+              if (!persisted) {
+                throw new Error(`QT ${salesQuotation.qtNumber} 未在 Supabase 查询到，已阻断假成功`);
+              }
+
+              // UI 态缓存：用于切页瞬时回显（业务主数据以 Supabase 为准）
+              try {
+                const cacheKey = `sales_quotation_management_cache_v1:${currentUser?.email || 'anonymous'}`;
+                const cachedRaw = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                const cachedList = Array.isArray(cachedRaw) ? cachedRaw : [];
+                const mergedCache = [
+                  salesQuotation,
+                  ...cachedList.filter((q: any) =>
+                    String(q?.id || '') !== String(salesQuotation.id) &&
+                    String(q?.qtNumber || '') !== String(salesQuotation.qtNumber)
+                  ),
+                ];
+                localStorage.setItem(cacheKey, JSON.stringify(mergedCache.slice(0, 500)));
+              } catch {}
               
               toast.success('报价已创建！', {
                 description: `报价单号：${quoteData.quoteNo}\n总额：$${quoteData.totalAmount.toFixed(2)}\n利润率：${quoteData.profitMargin.toFixed(1)}%`,
