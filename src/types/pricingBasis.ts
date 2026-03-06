@@ -35,6 +35,12 @@ export function normalizePriceType(value: unknown, currency?: unknown): PriceTyp
   return String(currency || '').toUpperCase() === 'USD' ? 'usd' : 'cny_with_tax';
 }
 
+export function normalizeCurrencyByPriceType(priceType: PriceType, currency?: unknown): string {
+  if (priceType === 'usd') return 'USD';
+  if (priceType === 'cny_no_tax' || priceType === 'cny_with_tax') return 'CNY';
+  return String(currency || 'CNY').toUpperCase();
+}
+
 export function extractIncoterm(value: unknown, fallback: PricingIncoterm = 'FOB'): PricingIncoterm {
   const text = String(value || '').toUpperCase();
   if (text.includes('EXW')) return 'EXW';
@@ -66,13 +72,14 @@ export function buildSourcePricingBasis(input: {
 }): SourcePricingBasis {
   const incoterm = extractIncoterm(input.quoteMode || input.deliveryTerms, 'FOB');
   const priceType = normalizePriceType(input.priceType, input.currency);
+  const normalizedCurrency = normalizeCurrencyByPriceType(priceType, input.currency);
   const taxSettings = input.taxSettings || {};
   const freight = Number(input.sourceFreightUSD);
   const insurance = Number(input.sourceInsuranceUSD);
 
   return {
     unitPrice: Number(input.unitPrice) || 0,
-    currency: String(input.currency || (priceType === 'usd' ? 'USD' : 'CNY') || 'CNY'),
+    currency: normalizedCurrency,
     priceType,
     incoterm,
     incotermLocation: extractIncotermLocation(input.deliveryTerms),

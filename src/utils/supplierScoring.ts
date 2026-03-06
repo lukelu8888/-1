@@ -8,7 +8,7 @@
  * 4. 风险评估
  */
 
-import { buildSourcePricingBasis, normalizePriceType, type PricingTaxSettings, type SourcePricingBasis } from '../types/pricingBasis';
+import { buildSourcePricingBasis, normalizePriceType, normalizeCurrencyByPriceType, type PricingTaxSettings, type SourcePricingBasis } from '../types/pricingBasis';
 
 // 🔥 供应商报价对比项
 export interface SupplierQuotationForComparison {
@@ -461,10 +461,11 @@ export function performSmartComparison(
       
       // 构建报价对象
       const taxSettings = bjItem.taxSettings || bj.taxSettings || undefined;
+      const normalizedPriceType = bjItem.priceType || normalizePriceType(undefined, bjItem.currency || bj.currency);
       const pricingBasis = bjItem.pricingBasis || buildSourcePricingBasis({
         unitPrice: bjItem.unitPrice,
-        currency: bjItem.currency || bj.currency || 'CNY',
-        priceType: bjItem.priceType || normalizePriceType(undefined, bjItem.currency || bj.currency),
+        currency: normalizeCurrencyByPriceType(normalizedPriceType, bjItem.currency || bj.currency || 'CNY'),
+        priceType: normalizedPriceType,
         quoteMode: bjItem.quoteMode || bj.quoteMode,
         deliveryTerms: bj.deliveryTerms,
         sourceDocumentNo: bj.quotationNo,

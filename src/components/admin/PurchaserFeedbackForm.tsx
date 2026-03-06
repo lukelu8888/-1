@@ -266,7 +266,7 @@ ${result.products.map((p, idx) => {
         quantity: selectedQuotation.quantity,
         unit: selectedQuotation.unit,
         costPrice: selectedQuotation.unitPrice,
-        currency: selectedQuotation.currency,
+        currency: sourcePricing.currency,
         // 🔥 价格属性字段，传递到业务员成本核算
         priceType: sourcePricing.priceType,
         quoteMode: sourcePricing.quoteMode || selectedQuotation.quoteMode,
