@@ -65,6 +65,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   // 🔥 智能报价创建弹窗状态
   const [showQuoteCreation, setShowQuoteCreation] = useState(false);
   const [selectedQRForQuote, setSelectedQRForQuote] = useState<any>(null);
+  const [pushingQrId, setPushingQrId] = useState<string | null>(null);
   
 
   // 🔥 筛选业务员自己创建的QR（Admin可以看所有）
@@ -240,6 +241,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   
   // 🔥 新增：下推报价管理（从QR创建业务员销售报价单QT）
   const handlePushToQuotationManagement = async (qr: any) => {
+    if (pushingQrId === qr.id) return;
+    setPushingQrId(qr.id);
     
     try {
       // 🔥 检查是否有采购成本反馈
@@ -512,6 +515,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     } catch (error) {
       console.error('🔥 [错误] 下推报价管理时发生错误:', error);
       toast.error('❌ 下推报价管理时发生错误，请稍后再试');
+    } finally {
+      setPushingQrId((prev) => (prev === qr.id ? null : prev));
     }
   };
   
@@ -841,10 +846,11 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                               size="sm"
                               className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-700"
                               onClick={() => handlePushToQuotationManagement(qr)}
+                              disabled={pushingQrId === qr.id}
                               title={hasPurchaserFeedback ? '按采购反馈下推到报价管理' : '直接下推到报价管理'}
                             >
                               <Package className="w-3 h-3 mr-1" />
-                              下推报价管理
+                              {pushingQrId === qr.id ? '下推中...' : '下推报价管理'}
                             </Button>
                           )}
                         </div>

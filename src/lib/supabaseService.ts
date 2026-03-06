@@ -8,6 +8,43 @@ function handleError(error: any, context: string) {
   return null
 }
 
+function extractMissingColumn(error: any): string | null {
+  const message = String(error?.message || '')
+  const match = message.match(/Could not find the ['"]([^'"]+)['"] column/i)
+  return match?.[1] || null
+}
+
+async function upsertWithSchemaFallback(
+  table: string,
+  row: Record<string, any>,
+  onConflict: string,
+  context: string,
+) {
+  const payload: Record<string, any> = { ...row }
+  const removedColumns: string[] = []
+  for (let i = 0; i < 12; i++) {
+    const { data, error } = await supabase
+      .from(table)
+      .upsert(payload, { onConflict })
+      .select()
+      .single()
+    if (!error) {
+      if (removedColumns.length > 0) {
+        console.warn(`[Supabase] ${context}: schema drift fallback removed columns: ${removedColumns.join(', ')}`)
+      }
+      return { data, error: null }
+    }
+    const missingColumn = extractMissingColumn(error)
+    if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
+      delete payload[missingColumn]
+      removedColumns.push(missingColumn)
+      continue
+    }
+    return { data: null, error }
+  }
+  return { data: null, error: { message: `${context}: too many schema fallback retries` } }
+}
+
 // ============================================================
 // 销售合同
 // ============================================================
@@ -322,11 +359,12 @@ export const salesQuotationService = {
 
   async upsert(quotation: any) {
     const row = toSalesQuotationRow(quotation)
-    const { data, error } = await supabase
-      .from('sales_quotations')
-      .upsert(row, { onConflict: 'id' })
-      .select()
-      .single()
+    const { data, error } = await upsertWithSchemaFallback(
+      'sales_quotations',
+      row,
+      'id',
+      'upsert salesQuotation',
+    )
     if (error) return handleError(error, 'upsert salesQuotation')
     return fromSalesQuotationRow(data)
   },
@@ -1481,7 +1519,12 @@ export const purchaseRequirementService = {
   },
   async upsert(p: any) {
     const row = toPRRow(p)
-    const { data, error } = await supabase.from('purchase_requirements').upsert(row, { onConflict: 'id' }).select().single()
+    const { data, error } = await upsertWithSchemaFallback(
+      'purchase_requirements',
+      row,
+      'id',
+      'upsert purchase_requirement',
+    )
     if (error) return handleError(error, 'upsert purchase_requirement')
     return fromPRRow(data)
   },
