@@ -801,6 +801,7 @@ function toSalesQuotationRow(q: any) {
     customer_notes: q.customerNotes || null,
     internal_notes: q.internalNotes || null,
     trade_terms: q.tradeTerms || null,
+    pricing_defaults: q.pricingDefaults || q.pricing_defaults || q.globalDefaults || null,
     remarks: q.remarks || null,
     sent_at: q.sentAt || null,
     sent_to_customer: q.customerStatus !== 'not_sent',
@@ -847,6 +848,8 @@ function fromSalesQuotationRow(r: any) {
     customerNotes: r.customer_notes,
     internalNotes: r.internal_notes,
     tradeTerms: r.trade_terms,
+    pricingDefaults: r.pricing_defaults || null,
+    globalDefaults: r.pricing_defaults || null, // 兼容旧组件字段名
     remarks: r.remarks,
     sentAt: r.sent_at || r.sent_to_customer_at,
     createdAt: r.created_at,

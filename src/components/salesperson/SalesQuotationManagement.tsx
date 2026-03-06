@@ -54,6 +54,13 @@ const SALES_QUOTATION_DELETED_IDS_KEY = 'sales_quotation_deleted_ids'; // legacy
 const SALES_QUOTATION_CACHE_PREFIX = 'sales_quotation_management_cache_v1';
 const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
 
+const normalizeProfitPercent = (value: unknown, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed > 0 && parsed < 1) return parsed * 100;
+  return parsed;
+};
+
 interface SalesQuotationManagementProps {
   highlightQtNumber?: string; // 🔥 高亮显示的报价单号
   onNavigateToOrders?: () => void; // 🔥 导航到订单管理的回调
@@ -192,7 +199,9 @@ export function SalesQuotationManagement({
     totalAmount: quoteData.totalAmount ?? currentQt?.totalAmount ?? 0,
     totalCost: quoteData.totalCost ?? currentQt?.totalCost ?? 0,
     totalProfit: quoteData.totalProfit ?? currentQt?.totalProfit ?? 0,
-    profitRate: quoteData.profitMargin ?? quoteData.profitRate ?? currentQt?.profitRate ?? 0,
+    profitRate: normalizeProfitPercent(quoteData.profitRate ?? quoteData.profitMargin ?? currentQt?.profitRate ?? 0, 0),
+    pricingDefaults: quoteData.pricingDefaults ?? quoteData.globalDefaults ?? currentQt?.pricingDefaults ?? currentQt?.globalDefaults ?? null,
+    globalDefaults: quoteData.pricingDefaults ?? quoteData.globalDefaults ?? currentQt?.pricingDefaults ?? currentQt?.globalDefaults ?? null,
     validUntil: quoteData.validUntil ?? currentQt?.validUntil ?? null,
     notes: quoteData.approvalNotes ?? currentQt?.notes ?? '',
     items: Array.isArray(quoteData.items)
@@ -205,7 +214,7 @@ export function SalesQuotationManagement({
           unit: item.unit,
           costPrice: item.costPrice ?? item.costUSD ?? 0,
           salesPrice: item.salesPrice ?? item.quotePrice ?? 0,
-          profitMargin: item.profitMargin ?? 0,
+          profitMargin: normalizeProfitPercent(item.profitMargin ?? 0, 0),
           profit: item.profit ?? item.profitUSD ?? 0,
           totalCost: item.totalCost ?? ((item.costPrice ?? item.costUSD ?? 0) * (item.quantity ?? 0)),
           totalPrice: item.totalPrice ?? item.totalAmount ?? ((item.salesPrice ?? item.quotePrice ?? 0) * (item.quantity ?? 0)),
@@ -1637,25 +1646,28 @@ export function SalesQuotationManagement({
           }}
           onSubmit={async (quoteData) => {
             try {
-              await salesQuotationService.upsert({ id: String(selectedQuotation.id), ...quoteData });
+              const fallback = mapQuoteDataToServerLike(quoteData, selectedQuotation);
+              const payload = {
+                ...selectedQuotation,
+                ...fallback,
+                id: String(selectedQuotation.id),
+                qtNumber: selectedQuotation.qtNumber,
+                qrNumber: selectedQuotation.qrNumber,
+                inqNumber: selectedQuotation.inqNumber,
+                salesPerson: selectedQuotation.salesPerson || currentUser?.email || '',
+                salesPersonName: selectedQuotation.salesPersonName || currentUser?.name || '',
+              };
+              const saved = await salesQuotationService.upsert(payload);
+              if (!saved) {
+                throw new Error('Supabase upsert sales quotation failed');
+              }
               toast.success('报价草稿已保存');
               loadSalesQuotations();
               setShowPriceCalculation(false);
               setSelectedQuotation(null);
             } catch (e: any) {
               console.error('❌ 保存报价草稿失败:', e);
-              const fallback = mapQuoteDataToServerLike(quoteData, selectedQuotation);
-              writeDraftOverride(String(selectedQuotation.id), fallback);
-              setServerQuotations(prev =>
-                prev.map(qt =>
-                  String(qt.id) === String(selectedQuotation.id)
-                    ? { ...qt, ...fallback, id: qt.id, qtNumber: qt.qtNumber }
-                    : qt
-                )
-              );
-              toast.success('报价草稿已保存（本地兼容模式）');
-              setShowPriceCalculation(false);
-              setSelectedQuotation(null);
+              toast.error(`保存报价草稿失败：${e?.message || 'Supabase 写入失败'}`);
             }
           }}
         />

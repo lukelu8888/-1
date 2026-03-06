@@ -1047,8 +1047,10 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 totalCost: quoteData.totalCost,
                 totalPrice: quoteData.totalAmount,
                 totalProfit: quoteData.totalProfit,
-                profitRate: quoteData.profitMargin,
+                profitRate: quoteData.profitRate ?? quoteData.profitMargin,
                 totalAmount: quoteData.totalAmount, // 🔥 兼容字段
+                pricingDefaults: quoteData.pricingDefaults ?? quoteData.globalDefaults ?? null,
+                globalDefaults: quoteData.pricingDefaults ?? quoteData.globalDefaults ?? null,
                 
                 currency: 'USD',
                 paymentTerms: '30% T/T in advance, 70% before shipment',

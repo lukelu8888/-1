@@ -299,14 +299,14 @@ export default function QuoteCreationIntelligent({
 
         // 🔥 回填全局默认参数（优先使用已保存的 globalDefaults，其次回退到首个产品参数）
         const firstItem = requirement.items?.[0] || {};
-        const savedGlobal = requirement.globalDefaults || {};
+        const savedGlobal = requirement.pricingDefaults || requirement.globalDefaults || {};
         setGlobalDefaults((prev) => ({
           ...prev,
           priceType: (savedGlobal.priceType || firstItem.priceType || prev.priceType) as PriceType,
           exchangeRate: Number(savedGlobal.exchangeRate ?? firstItem.exchangeRate ?? prev.exchangeRate),
           taxRate: Number(savedGlobal.taxRate ?? firstItem.taxRate ?? prev.taxRate),
           exportRebateRate: Number(savedGlobal.exportRebateRate ?? firstItem.exportRebateRate ?? prev.exportRebateRate),
-          profitMargin: Number(savedGlobal.profitMargin ?? firstItem.profitMargin ?? prev.profitMargin),
+          profitMargin: normalizeProfitMarginPercent(savedGlobal.profitMargin ?? firstItem.profitMargin ?? prev.profitMargin, prev.profitMargin),
           domesticFeesCNY: Number(savedGlobal.domesticFeesCNY ?? firstItem.domesticFeesCNY ?? prev.domesticFeesCNY),
           tradeTerms: (savedGlobal.tradeTerms || firstItem.tradeTerms || prev.tradeTerms) as TradeTerms,
           insuranceRate: Number(savedGlobal.insuranceRate ?? firstItem.insuranceRate ?? prev.insuranceRate),
@@ -363,7 +363,7 @@ export default function QuoteCreationIntelligent({
             taxRate: feedbackTaxSettings?.vatRate || item.taxRate || globalDefaults.taxRate,
             exportRebateRate: feedbackTaxSettings?.hasExportRebate ? (feedbackTaxSettings?.exportRebateRate ?? item.exportRebateRate ?? globalDefaults.exportRebateRate) : (item.exportRebateRate || globalDefaults.exportRebateRate),
             domesticFeesCNY: item.domesticFeesCNY || globalDefaults.domesticFeesCNY,
-            profitMargin: item.profitMargin ?? globalDefaults.profitMargin,
+            profitMargin: normalizeProfitMarginPercent(item.profitMargin ?? globalDefaults.profitMargin, globalDefaults.profitMargin),
             
             tradeTerms: (item.tradeTerms || globalDefaults.tradeTerms) as TradeTerms,
             freight: item.freight || 0,
@@ -586,7 +586,8 @@ export default function QuoteCreationIntelligent({
       requirementNo,
       qrNumber: requirementNo, // 🔥 关联的QR单号
       status: 'draft',
-      globalDefaults: { ...globalDefaults }, // 🔥 持久化弹窗顶部全局参数（含利润率）
+      pricingDefaults: { ...globalDefaults, profitMargin: normalizeProfitMarginPercent(globalDefaults.profitMargin, 20) },
+      globalDefaults: { ...globalDefaults, profitMargin: normalizeProfitMarginPercent(globalDefaults.profitMargin, 20) }, // 兼容旧字段
       
       // 🔥 真实的客户和区域信息
       ...customerInfo,
@@ -636,6 +637,7 @@ export default function QuoteCreationIntelligent({
       totalProfit: actualTotalProfit, // 总利润
       profitMargin: actualProfitMargin, // 利润率
       totalAmount: actualTotalAmount, // 报价总额
+      profitRate: actualProfitMargin, // 兼容落库字段（百分比）
       
       approvalNotes,
       createdAt: new Date().toISOString(),
@@ -687,7 +689,8 @@ export default function QuoteCreationIntelligent({
       requirementNo,
       qrNumber: requirementNo, // 🔥 关联的QR单号
       status: 'pending_supervisor', // 🔥 第一步：待区域主管审核
-      globalDefaults: { ...globalDefaults }, // 🔥 持久化弹窗顶部全局参数（含利润率）
+      pricingDefaults: { ...globalDefaults, profitMargin: normalizeProfitMarginPercent(globalDefaults.profitMargin, 20) },
+      globalDefaults: { ...globalDefaults, profitMargin: normalizeProfitMarginPercent(globalDefaults.profitMargin, 20) }, // 兼容旧字段
       
       // 🔥 真实的客户和区域信息
       ...customerInfo,
@@ -737,6 +740,7 @@ export default function QuoteCreationIntelligent({
       totalProfit: actualTotalProfit, // 总利润
       profitMargin: actualProfitMargin, // 利润率
       totalAmount: actualTotalAmount, // 报价总额
+      profitRate: actualProfitMargin, // 兼容落库字段（百分比）
       
       approvalNotes,
       
@@ -1134,10 +1138,9 @@ export default function QuoteCreationIntelligent({
                       <input
                         type="number"
                         min="0"
-                        max="100"
                         step="0.1"
                         value={globalDefaults.profitMargin}
-                        onChange={(e) => setGlobalDefaults(prev => ({ ...prev, profitMargin: Number(e.target.value) }))}
+                        onChange={(e) => setGlobalDefaults(prev => ({ ...prev, profitMargin: normalizeProfitMarginPercent(e.target.value, prev.profitMargin) }))}
                         className="w-20 px-1.5 py-0.5 border rounded text-xs text-center font-semibold"
                         placeholder="20"
                         title="输入数字代表百分比，如输入20代表20%"
@@ -1487,9 +1490,8 @@ export default function QuoteCreationIntelligent({
                               type="number"
                               step="0.1"
                               min="0"
-                              max="100"
                               value={item.profitMargin}
-                              onChange={(e) => updateItem(item.id, { profitMargin: Number(e.target.value) })}
+                              onChange={(e) => updateItem(item.id, { profitMargin: normalizeProfitMarginPercent(e.target.value, item.profitMargin) })}
                               className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium"
                               placeholder="20"
                               title="输入数字代表百分比，如输入20代表20%"
