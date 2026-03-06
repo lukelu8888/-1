@@ -210,7 +210,7 @@ export function InquiryManagement() {
       return;
     }
 
-    const confirmMessage = `Delete ${selectedInquiryIds.length} selected inquiries? This action cannot be undone.`;
+    const confirmMessage = `Hide ${selectedInquiryIds.length} selected inquiries from your current view? This will not remove the original inquiry record.`;
     
     if (window.confirm(confirmMessage)) {
       selectedInquiryIds.forEach(id => {
@@ -220,7 +220,7 @@ export function InquiryManagement() {
       toast.success(
         <div className="space-y-1">
           <p className="font-semibold">🗑️ Batch Delete Successful!</p>
-          <p className="text-sm">Deleted {selectedInquiryIds.length} inquiries</p>
+          <p className="text-sm">Hidden {selectedInquiryIds.length} inquiries from your current view</p>
         </div>,
         { duration: 3000 }
       );
@@ -863,7 +863,7 @@ export function InquiryManagement() {
               Delete Inquiry
             </DialogTitle>
             <DialogDescription className="text-base">
-              Delete this inquiry? This action cannot be undone.
+              Hide this inquiry from your current view? The original inquiry record will remain available.
             </DialogDescription>
           </DialogHeader>
           
@@ -882,13 +882,13 @@ export function InquiryManagement() {
               onClick={() => {
                 if (deleteInquiryId) {
                   deleteInquiry(deleteInquiryId);
-                  toast.success(`Inquiry deleted successfully!`);
+                  toast.success(`Inquiry hidden from current view!`);
                   setDeleteInquiryId(null);
                 }
               }}
             >
               <Trash2 className="h-4 w-4 mr-2" />
-              Delete
+              Hide
             </Button>
           </div>
         </DialogContent>

@@ -59,6 +59,39 @@ interface InquiryContextType {
 }
 
 const InquiryContext = createContext<InquiryContextType | undefined>(undefined);
+const HIDDEN_INQUIRY_IDS_KEY = 'hidden_inquiry_ids_v1';
+
+const getHiddenInquiryStorageKey = () => {
+  const currentUser = getCurrentUser() as any;
+  const email = String(currentUser?.email || 'anonymous').trim().toLowerCase();
+  const role = String(currentUser?.type || currentUser?.role || 'unknown').trim().toLowerCase();
+  return `${HIDDEN_INQUIRY_IDS_KEY}:${email}:${role}`;
+};
+
+const loadHiddenInquiryMarkers = (): Set<string> => {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(getHiddenInquiryStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.map((v) => String(v)) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const persistHiddenInquiryMarkers = (markers: Set<string>) => {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(getHiddenInquiryStorageKey(), JSON.stringify(Array.from(markers)));
+};
+
+const getInquiryMarkers = (inquiry: Partial<Inquiry>): string[] =>
+  [inquiry.id, inquiry.inquiryNumber].filter(Boolean).map((v) => String(v));
+
+const filterVisibleInquiriesForCurrentUser = (list: Inquiry[]): Inquiry[] => {
+  const hidden = loadHiddenInquiryMarkers();
+  if (hidden.size === 0) return list;
+  return list.filter((inquiry) => !getInquiryMarkers(inquiry).some((marker) => hidden.has(marker)));
+};
 
 const emitInquiryEvent = (
   key: string,
@@ -106,7 +139,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
         ? await inquiryService.getAll()
         : await inquiryService.getByUserEmail(email);
       if (Array.isArray(data)) {
-        setInquiries(data as Inquiry[]);
+        setInquiries(filterVisibleInquiriesForCurrentUser(data as Inquiry[]));
       }
     } catch (err) {
       console.error('❌ [loadFromSupabase] error:', err);
@@ -129,6 +162,18 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const syncVisibleInquiries = () => {
+      setInquiries((prev) => filterVisibleInquiriesForCurrentUser(prev));
+    };
+    window.addEventListener('userChanged', syncVisibleInquiries as EventListener);
+    window.addEventListener('storage', syncVisibleInquiries);
+    return () => {
+      window.removeEventListener('userChanged', syncVisibleInquiries as EventListener);
+      window.removeEventListener('storage', syncVisibleInquiries);
+    };
+  }, []);
+
   const addInquiry = async (inquiry: Inquiry) => {
 
     const result = await inquiryService.upsert(inquiry);
@@ -137,7 +182,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       throw new Error('Failed to save inquiry to database');
     }
 
-    setInquiries(prev => [result as Inquiry, ...prev.filter(i => i.id !== result.id)]);
+    setInquiries(prev => filterVisibleInquiriesForCurrentUser([result as Inquiry, ...prev.filter(i => i.id !== result.id)]));
 
     emitInquiryEvent(ERP_EVENT_KEYS.INQUIRY_CREATED, inquiry, {
       status: inquiry.status,
@@ -169,14 +214,21 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       const next = prev.map(inq => inq.id === id ? { ...inq, ...updatedInquiry } : inq);
       const updated = next.find(i => i.id === id);
       if (updated) void inquiryService.upsert(updated).catch(() => {});
-      return next;
+      return filterVisibleInquiriesForCurrentUser(next);
     });
   };
 
   const deleteInquiry = (id: string) => {
-    void inquiryService.delete(id).catch(() => {});
-    setInquiries(prev => prev.filter(inq => inq.id !== id));
-    emitInquiryEvent(ERP_EVENT_KEYS.INQUIRY_DELETED, { id });
+    const target = inquiries.find((inq) => inq.id === id || inq.inquiryNumber === id);
+    const markers = getInquiryMarkers(target || { id });
+    const hidden = loadHiddenInquiryMarkers();
+    markers.forEach((marker) => hidden.add(marker));
+    persistHiddenInquiryMarkers(hidden);
+    setInquiries(prev => filterVisibleInquiriesForCurrentUser(prev));
+    emitInquiryEvent(ERP_EVENT_KEYS.INQUIRY_DELETED, {
+      id,
+      inquiryNumber: target?.inquiryNumber,
+    }, { hideOnly: true });
   };
 
   const submitInquiry = async (id: string): Promise<boolean> => {
@@ -203,7 +255,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
   };
 
   const getSubmittedInquiries = () => {
-    return inquiries.filter(inq => inq.isSubmitted === true);
+    return filterVisibleInquiriesForCurrentUser(inquiries.filter(inq => inq.isSubmitted === true));
   };
 
   const getInquiriesByRegion = (region: RegionType) => {

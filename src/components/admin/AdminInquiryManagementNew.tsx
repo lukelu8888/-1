@@ -79,12 +79,12 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       return;
     }
 
-    if (window.confirm(`确认要删除选中的 ${visibleSelectedIds.length} 条询价单吗？此操作无法撤销！`)) {
+    if (window.confirm(`确认将选中的 ${visibleSelectedIds.length} 条询价单从当前业务员视图隐藏吗？不会影响客户侧原始询价单。`)) {
       visibleSelectedIds.forEach(id => {
         deleteInquiry(id);
       });
       setSelectedIds(new Set());
-      toast.success(`✅ 已成功删除 ${visibleSelectedIds.length} 条询价单`);
+      toast.success(`✅ 已从当前视图隐藏 ${visibleSelectedIds.length} 条询价单`);
     }
   };
 
