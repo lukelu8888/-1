@@ -761,6 +761,12 @@ function fromARRow(r: any) {
 // SalesQuotation 转换
 function toSalesQuotationRow(q: any) {
   const uuid = toUUID(q.id)
+  const customerResponseValue =
+    q.customerResponse == null
+      ? null
+      : (typeof q.customerResponse === 'string'
+          ? q.customerResponse
+          : JSON.stringify(q.customerResponse));
   return {
     id: uuid,
     qt_number: q.qtNumber || q.qt_number,
@@ -792,7 +798,8 @@ function toSalesQuotationRow(q: any) {
     approval_status: q.approvalStatus || 'draft',
     approval_chain: q.approvalChain || [],
     customer_status: q.customerStatus || 'not_sent',
-    customer_response_data: q.customerResponse || null,
+    // 兼容当前线上表结构：使用 customer_response（text/json 文本）
+    customer_response: customerResponseValue,
     so_number: q.soNumber || null,
     pushed_to_contract: q.pushedToContract || false,
     pushed_contract_number: q.pushedContractNumber || null,
@@ -813,6 +820,19 @@ function toSalesQuotationRow(q: any) {
 
 function fromSalesQuotationRow(r: any) {
   if (!r) return null
+  let parsedCustomerResponse: any = null;
+  const responseRaw = r.customer_response_data ?? r.customer_response;
+  if (responseRaw != null) {
+    if (typeof responseRaw === 'string') {
+      try {
+        parsedCustomerResponse = JSON.parse(responseRaw);
+      } catch {
+        parsedCustomerResponse = responseRaw;
+      }
+    } else {
+      parsedCustomerResponse = responseRaw;
+    }
+  }
   return {
     id: r.id,
     qtNumber: r.qt_number || r.quotation_number,
@@ -839,7 +859,7 @@ function fromSalesQuotationRow(r: any) {
     approvalStatus: r.approval_status || 'draft',
     approvalChain: r.approval_chain || [],
     customerStatus: r.customer_status || 'not_sent',
-    customerResponse: r.customer_response_data,
+    customerResponse: parsedCustomerResponse,
     soNumber: r.so_number,
     pushedToContract: r.pushed_to_contract || false,
     pushedContractNumber: r.pushed_contract_number,

@@ -507,7 +507,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       } catch (err: any) {
         console.error('❌❌❌ POST /api/sales-quotations 调用失败:', err);
         toast.error(`❌ 下推失败: ${err.message || '未知错误'}`);
-        throw err;
+        return;
       }
     } catch (error) {
       console.error('🔥 [错误] 下推报价管理时发生错误:', error);
