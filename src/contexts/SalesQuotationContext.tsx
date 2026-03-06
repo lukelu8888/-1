@@ -136,7 +136,8 @@ interface SalesQuotationContextType {
 const SalesQuotationContext = createContext<SalesQuotationContextType | undefined>(undefined);
 
 const getSalesQuotationMarkers = (quotation: Partial<SalesQuotation>): string[] => {
-  return [quotation.id, quotation.qtNumber, quotation.qrNumber, quotation.inqNumber]
+  // 仅使用报价单自身标识，避免误伤同一 QR/INQ 下后续新建报价单。
+  return [quotation.id, quotation.qtNumber]
     .filter(Boolean)
     .map((v) => String(v));
 };

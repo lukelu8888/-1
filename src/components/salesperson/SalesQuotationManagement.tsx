@@ -265,6 +265,12 @@ export function SalesQuotationManagement({
           const existingCache = readSalesQuotationCache(currentUser?.email);
           const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
           const legacyList = readSalesQuotationLocalFallback();
+          console.warn('⚠️ [SalesQuotationManagement] Supabase 返回 0 条，启用本地回显兜底', {
+            user: currentUser?.email,
+            cacheCount: existingCache.length,
+            contextCount: contextList.length,
+            legacyCount: legacyList.length,
+          });
           const fallback = existingCache.length > 0
             ? existingCache
             : contextList.length > 0

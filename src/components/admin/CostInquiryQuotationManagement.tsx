@@ -419,6 +419,21 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       try {
         // Supabase-first: 统一走 Context -> salesQuotationService，禁止本地兜底写入
         await addSalesQuotation(newQuotation);
+
+        // UI 态缓存：用于切页瞬时回显（业务主数据仍以 Supabase 为准）
+        try {
+          const cacheKey = `sales_quotation_management_cache_v1:${currentUser?.email || 'anonymous'}`;
+          const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+          const list = Array.isArray(cached) ? cached : [];
+          const deduped = [
+            newQuotation,
+            ...list.filter((q: any) =>
+              String(q?.id || '') !== String(newQuotation.id) &&
+              String(q?.qtNumber || '') !== String(newQuotation.qtNumber)
+            ),
+          ];
+          localStorage.setItem(cacheKey, JSON.stringify(deduped.slice(0, 500)));
+        } catch {}
         
         // 🔥 标记QR为已下推
         updatePurchaseRequirement(qr.id, {
