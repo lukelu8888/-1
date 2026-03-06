@@ -873,6 +873,7 @@ function fromARRow(r: any) {
 // SalesQuotation 转换
 function toSalesQuotationRow(q: any) {
   const uuid = toUUID(q.id)
+  const createdBy = toUUIDOrNull(q.createdBy || q.created_by || null)
   const customerResponseValue =
     q.customerResponse == null
       ? null
@@ -931,7 +932,7 @@ function toSalesQuotationRow(q: any) {
     sent_to_customer: q.customerStatus !== 'not_sent',
     sent_to_customer_at: q.sentAt || null,
     status: q.approvalStatus || 'draft',
-    created_by: q.salesPerson || null,
+    created_by: createdBy,
   }
 }
 
