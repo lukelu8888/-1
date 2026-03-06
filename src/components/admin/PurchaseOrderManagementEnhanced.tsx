@@ -2343,7 +2343,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 下推业务员询报（采购侧仅做下推动作，不创建业务员报价）
-  const handlePushToSalesInquiry = (req: PurchaseRequirement) => {
+  const handlePushToSalesInquiry = async (req: PurchaseRequirement) => {
     if (!req.purchaserFeedback) {
       toast.error('请先完成智能对比建议并保存采购反馈');
       return;
@@ -2352,11 +2352,29 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       toast.info('该需求已下推业务员询报');
       return;
     }
-    updateRequirement(req.id, {
+
+    const pushTimestamp = new Date().toISOString();
+    const savedRequirement = await purchaseRequirementService.upsert({
+      ...req,
       pushedToQuotation: true,
-      pushedToQuotationDate: new Date().toISOString(),
+      pushedToQuotationDate: pushTimestamp,
       pushedBy: user?.email || user?.name || 'procurement',
     });
+
+    const persisted = Boolean(savedRequirement?.pushedToQuotation);
+    if (!persisted) {
+      toast.error('❌ 下推业务员询报失败：Supabase 未落库', {
+        description: '请先补齐 purchase_requirements 表的下推字段后再重试',
+      });
+      return;
+    }
+
+    updateRequirement(req.id, {
+      pushedToQuotation: true,
+      pushedToQuotationDate: pushTimestamp,
+      pushedBy: user?.email || user?.name || 'procurement',
+    });
+    await refreshPurchaseRequirementsFromApi();
     toast.success('已下推业务员询报');
   };
 
@@ -2377,7 +2395,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       status: 'completed' // 🔥 同时更新状态为已完成
     });
 
-    if (!savedRequirement) {
+    const persistedFeedbackCount = Array.isArray(savedRequirement?.purchaserFeedback?.products)
+      ? savedRequirement.purchaserFeedback.products.length
+      : 0;
+
+    if (!savedRequirement || persistedFeedbackCount === 0) {
       toast.error('❌ 采购反馈保存失败：Supabase 未落库');
       return;
     }
