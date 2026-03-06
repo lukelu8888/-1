@@ -100,6 +100,7 @@ export default function SupplierOrderManagementCenter() {
   const { user } = useUser();
   const { xjs, getXJsBySupplier, updateXJ, addQuoteToXJ, refreshMineFromBackend } = useXJs();
   const HIDDEN_XJ_IDS_KEY = 'supplierHiddenXJIds';
+  const HIDDEN_QUOTATION_IDS_KEY = 'supplierHiddenQuotationIds';
   
   // 🔥 获取完整的供应商信息（从suppliersDatabase）
   const supplierInfo = useMemo(() => {
@@ -183,6 +184,7 @@ export default function SupplierOrderManagementCenter() {
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [hiddenXJIds, setHiddenXJIds] = useState<Set<string>>(new Set());
+  const [hiddenQuotationIds, setHiddenQuotationIds] = useState<Set<string>>(new Set());
   const hasManualHideInSessionRef = React.useRef(false);
 
   const formatCompactUtcMinute = React.useCallback((raw: string | undefined) => {
@@ -227,6 +229,35 @@ export default function SupplierOrderManagementCenter() {
     hasManualHideInSessionRef.current = false;
   }, [user?.email, loadHiddenXJIds]);
 
+  const loadHiddenQuotationIds = React.useCallback((email?: string) => {
+    if (!email) return new Set<string>();
+    try {
+      const raw = localStorage.getItem(HIDDEN_QUOTATION_IDS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const ids = Array.isArray(parsed?.[email]) ? parsed[email] : [];
+      return new Set(ids.map((v: any) => String(v)));
+    } catch {
+      return new Set<string>();
+    }
+  }, []);
+
+  const persistHiddenQuotationIds = React.useCallback((next: Set<string>) => {
+    const email = user?.email;
+    if (!email) return;
+    try {
+      const raw = localStorage.getItem(HIDDEN_QUOTATION_IDS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      parsed[email] = Array.from(next);
+      localStorage.setItem(HIDDEN_QUOTATION_IDS_KEY, JSON.stringify(parsed));
+    } catch {
+      // ignore local persistence failures
+    }
+  }, [user?.email]);
+
+  React.useEffect(() => {
+    setHiddenQuotationIds(loadHiddenQuotationIds(user?.email));
+  }, [user?.email, loadHiddenQuotationIds]);
+
   const hideXJsForCurrentSupplier = React.useCallback((ids: string[]) => {
     if (!ids.length) return;
     hasManualHideInSessionRef.current = true;
@@ -242,6 +273,15 @@ export default function SupplierOrderManagementCenter() {
     setHiddenXJIds(next);
     persistHiddenXJIds(next);
   }, [persistHiddenXJIds]);
+
+  const hideQuotationsForCurrentSupplier = React.useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    const next = new Set(hiddenQuotationIds);
+    ids.forEach((id) => next.add(String(id)));
+    setHiddenQuotationIds(next);
+    persistHiddenQuotationIds(next);
+    setSelectedIds([]);
+  }, [hiddenQuotationIds, persistHiddenQuotationIds]);
 
   // 统一行内产品展示：只显示代表产品 + 总产品数 + 总数量
   const summarizeProducts = React.useCallback((products?: any[], fallback?: any): ProductSummary => {
@@ -399,12 +439,13 @@ export default function SupplierOrderManagementCenter() {
     if (!user?.email) return [];
     const current = String(user.email || '').trim().toLowerCase();
     return supplierQuotations.filter((q: any) => {
+      if (hiddenQuotationIds.has(String(q?.id || ''))) return false;
       const bySupplierEmail = String(q?.supplierEmail || '').trim().toLowerCase() === current;
       const byCreatedBy = String(q?.createdBy || '').trim().toLowerCase() === current;
       const bySupplierCode = String(q?.supplierCode || '').trim().toLowerCase() === current;
       return bySupplierEmail || byCreatedBy || bySupplierCode;
     });
-  }, [supplierQuotations, user?.email]);
+  }, [hiddenQuotationIds, supplierQuotations, user?.email]);
 
   // 🔥 统计数据
   const stats: OrderStats = useMemo(() => {
@@ -1110,23 +1151,15 @@ export default function SupplierOrderManagementCenter() {
                 variant="destructive" 
                 className="h-9 gap-2"
                 onClick={async () => {
-                  if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个报价单吗？\n\n⚠️ 此操作不可恢复！`)) {
-                    const deletedRows = supplierQuotations.filter(q => selectedIds.includes(q.id));
-                    const updatedQuotations = supplierQuotations.filter(q => !selectedIds.includes(q.id));
-                    setSupplierQuotations(updatedQuotations);
-                    // Supabase-first: 软删除
-                    await Promise.all(selectedIds.map(id => supplierQuotationService.delete(id).catch(() => null)));
-                    await rollbackXJAfterQuotationDelete(deletedRows, updatedQuotations);
-                    
+                  if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个报价单吗？\n\n仅从当前供应商视图隐藏，不影响采购端与 Supabase 业务数据。`)) {
+                    hideQuotationsForCurrentSupplier(selectedIds);
                     toast.success(
                       <div className="space-y-1">
                         <p className="font-semibold">🗑️ 批量删除成功</p>
-                        <p className="text-sm">已删除 {selectedIds.length} 个报价单</p>
+                        <p className="text-sm">已从当前视图隐藏 {selectedIds.length} 个报价单</p>
                       </div>,
                       { duration: 3000 }
                     );
-                    
-                    setSelectedIds([]);
                   }
                 }}
               >
