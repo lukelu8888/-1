@@ -31,6 +31,12 @@ BEGIN
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'sales_quotations'
+      AND column_name = 'quotation_number'
+  ) AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sales_quotations'
       AND column_name = 'qt_number'
   ) THEN
     EXECUTE $sql$
@@ -42,6 +48,12 @@ BEGIN
   END IF;
 
   IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sales_quotations'
+      AND column_name = 'inquiry_number'
+  ) AND EXISTS (
     SELECT 1
     FROM information_schema.columns
     WHERE table_schema = 'public'
@@ -61,6 +73,12 @@ BEGIN
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'sales_quotations'
+      AND column_name = 'total_amount'
+  ) AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sales_quotations'
       AND column_name = 'total_price'
   ) THEN
     EXECUTE $sql$
@@ -75,11 +93,17 @@ BEGIN
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'sales_quotations'
+      AND column_name = 'delivery_time'
+  ) AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sales_quotations'
       AND column_name = 'delivery_date'
   ) THEN
     EXECUTE $sql$
       UPDATE public.sales_quotations
-      SET delivery_time = COALESCE(delivery_time, delivery_date)
+      SET delivery_time = COALESCE(delivery_time, delivery_date::text)
       WHERE delivery_time IS NULL
         AND delivery_date IS NOT NULL
     $sql$;
@@ -90,17 +114,29 @@ BEGIN
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'sales_quotations'
+      AND column_name = 'validity_period'
+  ) AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sales_quotations'
       AND column_name = 'valid_until'
   ) THEN
     EXECUTE $sql$
       UPDATE public.sales_quotations
-      SET validity_period = COALESCE(validity_period, valid_until)
+      SET validity_period = COALESCE(validity_period, valid_until::text)
       WHERE validity_period IS NULL
         AND valid_until IS NOT NULL
     $sql$;
   END IF;
 
   IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sales_quotations'
+      AND column_name = 'status'
+  ) AND EXISTS (
     SELECT 1
     FROM information_schema.columns
     WHERE table_schema = 'public'
@@ -120,6 +156,12 @@ BEGIN
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'sales_quotations'
+      AND column_name = 'sent_to_customer'
+  ) AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sales_quotations'
       AND column_name = 'customer_status'
   ) THEN
     EXECUTE $sql$
@@ -130,6 +172,12 @@ BEGIN
   END IF;
 
   IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'sales_quotations'
+      AND column_name = 'sent_to_customer_at'
+  ) AND EXISTS (
     SELECT 1
     FROM information_schema.columns
     WHERE table_schema = 'public'
