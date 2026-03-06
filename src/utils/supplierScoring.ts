@@ -8,6 +8,8 @@
  * 4. 风险评估
  */
 
+import { buildSourcePricingBasis, normalizePriceType, type PricingTaxSettings, type SourcePricingBasis } from '../types/pricingBasis';
+
 // 🔥 供应商报价对比项
 export interface SupplierQuotationForComparison {
   bjNumber: string;
@@ -32,6 +34,10 @@ export interface SupplierQuotationForComparison {
   paymentTerms: string;
   deliveryTerms?: string;
   warranty?: string;
+  priceType?: 'usd' | 'cny_no_tax' | 'cny_with_tax';
+  quoteMode?: string;
+  taxSettings?: PricingTaxSettings;
+  pricingBasis?: SourcePricingBasis;
   
   // 🔥 评分维度
   priceScore: number;        // 价格得分 (0-100)
@@ -454,6 +460,20 @@ export function performSmartComparison(
       console.log(`    找到供应商报价: ${bj.supplierName || bj.supplierCompany}`);
       
       // 构建报价对象
+      const taxSettings = bjItem.taxSettings || bj.taxSettings || undefined;
+      const pricingBasis = bjItem.pricingBasis || buildSourcePricingBasis({
+        unitPrice: bjItem.unitPrice,
+        currency: bjItem.currency || bj.currency || 'CNY',
+        priceType: bjItem.priceType || normalizePriceType(undefined, bjItem.currency || bj.currency),
+        quoteMode: bjItem.quoteMode || bj.quoteMode,
+        deliveryTerms: bj.deliveryTerms,
+        sourceDocumentNo: bj.quotationNo,
+        supplierQuotationNo: bj.quotationNo,
+        taxSettings,
+        sourceFreightUSD: bjItem.costBreakdown?.seaFreight,
+        sourceInsuranceUSD: bjItem.costBreakdown?.insurance,
+      });
+
       const quotation = {
         bjNumber: bj.quotationNo,
         xjNumber: bj.sourceXJ,
@@ -475,6 +495,10 @@ export function performSmartComparison(
         paymentTerms: bj.paymentTerms || 'T/T 30% 定金，70% 发货前',
         deliveryTerms: bj.deliveryTerms,
         warranty: bj.warrantyTerms,
+        priceType: pricingBasis.priceType,
+        quoteMode: pricingBasis.quoteMode || bjItem.quoteMode || bj.quoteMode,
+        taxSettings,
+        pricingBasis,
         
         // 初始化评分字段
         priceScore: 0,

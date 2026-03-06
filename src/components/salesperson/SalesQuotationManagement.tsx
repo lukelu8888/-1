@@ -220,6 +220,7 @@ export function SalesQuotationManagement({
           totalCost: item.totalCost ?? ((item.costPrice ?? item.costUSD ?? 0) * (item.quantity ?? 0)),
           totalPrice: item.totalPrice ?? item.totalAmount ?? ((item.salesPrice ?? item.quotePrice ?? 0) * (item.quantity ?? 0)),
           currency: item.currency ?? 'USD',
+          sourcePricing: item.sourcePricing ?? item.pricingBasis ?? null,
           remarks: item.remarks ?? '',
         }))
       : currentQt?.items ?? [],

@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { supplierQuotationService } from '../../lib/supabaseService';
+import { buildSourcePricingBasis } from '../../types/pricingBasis';
 
 // ─── 带问号 Tooltip 的字段标签 ────────────────────────────────────────────────
 interface FieldLabelProps {
@@ -515,6 +516,18 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
         // FOB_USD / CIF_USD → usd
         const derivedPriceType: 'usd' | 'cny_with_tax' | 'cny_no_tax' =
           quoteMode === 'FOB_USD' || quoteMode === 'CIF_USD' ? 'usd' : 'cny_with_tax';
+        const pricingBasis = buildSourcePricingBasis({
+          unitPrice: price,
+          currency: currencyCode,
+          priceType: derivedPriceType,
+          quoteMode,
+          deliveryTerms,
+          sourceDocumentNo: quotation.quotationNo,
+          supplierQuotationNo: quotation.quotationNo,
+          taxSettings: tax,
+          sourceFreightUSD: itemCosts[item.id]?.seaFreight,
+          sourceInsuranceUSD: itemCosts[item.id]?.insurance,
+        });
 
         return {
           ...item,
@@ -525,6 +538,7 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
           priceType: derivedPriceType,
           quoteMode,          // 原始贸易术语（EXW_CNY / FOB_USD 等）
           taxSettings: tax,   // 完整税务参数（含税率、退税率、汇率）
+          pricingBasis,       // 结构化价格语义，供下游锁定源条款
           leadTime: n(leadTime),
           moq: n(moq),
           simpleCost: pricingMode === 'simple' ? n(simpleCosts[item.id]) : undefined,

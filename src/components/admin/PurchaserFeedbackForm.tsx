@@ -34,6 +34,7 @@ import { validateFeedback, calculateSuggestedPrice } from '../../utils/autoPopul
 import { performSmartComparison, SmartComparisonResult } from '../../utils/supplierScoring';
 import { SmartSupplierComparisonForm } from './SmartSupplierComparisonForm';
 import { supplierQuotationService } from '../../lib/supabaseService';
+import { buildSourcePricingBasis } from '../../types/pricingBasis';
 
 interface PurchaserFeedbackFormProps {
   open: boolean;
@@ -247,16 +248,16 @@ ${result.products.map((p, idx) => {
         throw new Error(`产品 ${product.productName} 未选择供应商`);
       }
       
-      // 🔥 读取供应商报价时携带的价格属性，优先级：item.priceType > item.quoteMode 推断 > currency 推断
-      const itemPriceType: string =
-        selectedQuotation.priceType ||
-        (selectedQuotation.quoteMode === 'FOB_USD' || selectedQuotation.quoteMode === 'CIF_USD'
-          ? 'usd'
-          : selectedQuotation.quoteMode === 'FOB_CNY' || selectedQuotation.quoteMode === 'EXW_CNY'
-            ? 'cny_with_tax'
-            : (selectedQuotation.currency || '').toUpperCase() === 'USD'
-              ? 'usd'
-              : 'cny_with_tax');
+      const sourcePricing = selectedQuotation.pricingBasis || buildSourcePricingBasis({
+        unitPrice: selectedQuotation.unitPrice,
+        currency: selectedQuotation.currency,
+        priceType: selectedQuotation.priceType,
+        quoteMode: selectedQuotation.quoteMode,
+        deliveryTerms: selectedQuotation.deliveryTerms,
+        sourceDocumentNo: selectedQuotation.bjNumber,
+        supplierQuotationNo: selectedQuotation.bjNumber,
+        taxSettings: selectedQuotation.taxSettings,
+      });
 
       return {
         productId: product.productId,
@@ -267,9 +268,10 @@ ${result.products.map((p, idx) => {
         costPrice: selectedQuotation.unitPrice,
         currency: selectedQuotation.currency,
         // 🔥 价格属性字段，传递到业务员成本核算
-        priceType: itemPriceType,
-        quoteMode: selectedQuotation.quoteMode,
+        priceType: sourcePricing.priceType,
+        quoteMode: sourcePricing.quoteMode || selectedQuotation.quoteMode,
         taxSettings: selectedQuotation.taxSettings,
+        sourcePricing,
         amount: selectedQuotation.totalAmount,
         moq: selectedQuotation.moq,
         leadTime: `${selectedQuotation.leadTime}天`,
@@ -316,6 +318,14 @@ ${result.products.map((p, idx) => {
     if (!validation.valid) {
       toast.error('反馈数据不完整', {
         description: validation.errors.join('; ')
+      });
+      return;
+    }
+
+    const missingSourcePricing = feedback.products.find((product) => !product.sourcePricing);
+    if (missingSourcePricing) {
+      toast.error('反馈数据缺少源价格基准', {
+        description: `${missingSourcePricing.productName} 未携带 BJ 价格语义，已阻止下推`,
       });
       return;
     }

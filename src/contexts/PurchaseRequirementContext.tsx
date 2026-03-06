@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { purchaseRequirementService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
+import type { PricingTaxSettings, SourcePricingBasis } from '../types/pricingBasis';
 
 
 // 🔥 采购需求产品项接口
@@ -31,13 +32,8 @@ export interface PurchaserFeedbackProduct {
   // 🔥 价格属性（随供应商报价全程传递，决定下游核算逻辑）
   priceType?: 'usd' | 'cny_with_tax' | 'cny_no_tax'; // 供货单价类型
   quoteMode?: string;     // 供应商报价模式（EXW_CNY/FOB_CNY/FOB_USD/CIF_USD）
-  taxSettings?: {         // 供应商报价时的税务参数
-    vatRate: number;
-    exportRebateRate: number;
-    hasExportRebate: boolean;
-    usdRate: number;
-    eurRate: number;
-  };
+  taxSettings?: PricingTaxSettings; // 供应商报价时的税务参数
+  sourcePricing?: SourcePricingBasis; // 上游 BJ 的价格基准，不允许下游再猜
   amount: number; // 总成本 = costPrice × quantity
   moq?: number; // 最小起订量
   leadTime?: string; // 交货期（如："30天"）

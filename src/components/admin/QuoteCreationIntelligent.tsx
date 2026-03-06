@@ -6,6 +6,13 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Resizable } from 're-resizable';
 import { toast } from 'sonner@2.0.3';
+import {
+  buildSourcePricingBasis,
+  extractIncoterm,
+  normalizePriceType,
+  type PriceType,
+  type SourcePricingBasis,
+} from '../../types/pricingBasis';
 
 /**
  * 🎯 智能报价创建页面 - 外贸价格核算专家系统
@@ -23,9 +30,6 @@ import { toast } from 'sonner@2.0.3';
  * - 含税CNY：含税价 → 不含税价 → 退税额 → 实际成本USD → FOB
  * - CFR/CIF：基于FOB加运费/保险
  */
-
-// 供货价类型
-type PriceType = 'usd' | 'cny_no_tax' | 'cny_with_tax';
 
 // 贸易术语
 type TradeTerms = 'FOB' | 'CFR' | 'CIF';
@@ -50,6 +54,7 @@ interface QuoteItem {
   exportRebateRate: number; // 出口退税率（如13%，输入13）
   domesticFeesCNY: number; // 🔥 国内费用CNY（包装、内陆运输、报关等）
   profitMargin: number; // 利润率（%，如20表示20%）
+  sourcePricing?: SourcePricingBasis | null; // 上游 BJ 的原始价格语义
   
   // 🔥 贸易术语与运费
   tradeTerms: TradeTerms;
@@ -201,6 +206,80 @@ export default function QuoteCreationIntelligent({
     return raw;
   };
 
+  const resolveSourcePricing = (item: any, fallbackDocumentNo?: string): SourcePricingBasis | null => {
+    const existing = item?.sourcePricing || item?.pricingBasis || null;
+    if (existing && typeof existing === 'object') {
+      return buildSourcePricingBasis({
+        unitPrice: existing.unitPrice ?? item?.supplierPrice ?? item?.costPrice ?? item?.unitPrice,
+        currency: existing.currency ?? item?.currency,
+        priceType: existing.priceType ?? item?.priceType,
+        quoteMode: existing.quoteMode ?? item?.quoteMode,
+        deliveryTerms: `${existing.incoterm || ''} ${existing.incotermLocation || ''}`.trim() || item?.deliveryTerms,
+        sourceDocumentNo: existing.sourceDocumentNo ?? fallbackDocumentNo,
+        supplierQuotationNo: existing.supplierQuotationNo ?? fallbackDocumentNo,
+        taxSettings: {
+          vatRate: existing.vatRate ?? item?.taxSettings?.vatRate,
+          exportRebateRate: existing.exportRebateRate ?? item?.taxSettings?.exportRebateRate,
+          hasExportRebate: existing.hasExportRebate ?? item?.taxSettings?.hasExportRebate,
+          usdRate: existing.exchangeRate ?? item?.taxSettings?.usdRate,
+          eurRate: item?.taxSettings?.eurRate,
+        },
+        sourceFreightUSD: existing.sourceFreightUSD,
+        sourceInsuranceUSD: existing.sourceInsuranceUSD,
+      });
+    }
+
+    if (
+      item?.priceType ||
+      item?.quoteMode ||
+      item?.taxSettings ||
+      item?.supplierPrice != null ||
+      item?.costPrice != null
+    ) {
+      return buildSourcePricingBasis({
+        unitPrice: item?.supplierPrice ?? item?.costPrice ?? item?.unitPrice ?? 0,
+        currency: item?.currency,
+        priceType: item?.priceType,
+        quoteMode: item?.quoteMode,
+        deliveryTerms: item?.deliveryTerms,
+        sourceDocumentNo: fallbackDocumentNo,
+        supplierQuotationNo: fallbackDocumentNo,
+        taxSettings: item?.taxSettings,
+        sourceFreightUSD: item?.freight ?? item?.costBreakdown?.seaFreight,
+        sourceInsuranceUSD: item?.insuranceRate ?? item?.costBreakdown?.insurance,
+      });
+    }
+
+    return null;
+  };
+
+  const deriveQuoteTradeTerms = (sourcePricing: SourcePricingBasis | null, fallback: unknown): TradeTerms => {
+    const sourceIncoterm = sourcePricing?.incoterm;
+    if (sourceIncoterm === 'FOB' || sourceIncoterm === 'CFR' || sourceIncoterm === 'CIF') {
+      return sourceIncoterm;
+    }
+    const parsed = extractIncoterm(fallback, 'FOB');
+    return parsed === 'EXW' ? 'FOB' : parsed;
+  };
+
+  const hasLockedSourcePricing = (item: QuoteItem) => Boolean(item.sourcePricing?.sourceDocumentNo || item.sourcePricing?.incoterm);
+
+  const getSourcePricingSummary = (sourcePricing: SourcePricingBasis | null) => {
+    if (!sourcePricing) return null;
+    const taxLabel = sourcePricing.priceType === 'cny_with_tax'
+      ? '含税'
+      : sourcePricing.priceType === 'cny_no_tax'
+        ? '不含税'
+        : 'USD';
+    const location = sourcePricing.incotermLocation ? ` ${sourcePricing.incotermLocation}` : '';
+    return {
+      basisLabel: `${sourcePricing.incoterm}${location}`,
+      taxLabel,
+      priceLabel: `${sourcePricing.currency} ${Number(sourcePricing.unitPrice || 0).toFixed(4)}`,
+      sourceLabel: sourcePricing.sourceDocumentNo || sourcePricing.supplierQuotationNo || 'BJ',
+    };
+  };
+
   const normalizeItem = (item: QuoteItem): QuoteItem => {
     const exchangeRate = toSafeNumber(item.exchangeRate, 7.2);
     const safeExchangeRate = exchangeRate > 0 ? exchangeRate : 7.2;
@@ -221,36 +300,40 @@ export default function QuoteCreationIntelligent({
 
   const calculatePrice = React.useCallback((item: QuoteItem): QuoteItem => {
     const safeItem = normalizeItem(item);
+    const sourcePricing = safeItem.sourcePricing || null;
     let costUSD = 0;
     let rebateAmountCNY = 0; // 🔥 退税金额CNY
     
-    // 步骤1：计算实际成本USD
+    // 步骤1：计算源价格本身的 USD 成本
     if (safeItem.priceType === 'usd') {
-      // 情况1：供货价已经是美金
       costUSD = safeItem.supplierPrice;
     } else if (safeItem.priceType === 'cny_no_tax') {
-      // 情况2：供货价是不含税人民币
       costUSD = safeItem.supplierPrice / safeItem.exchangeRate;
     } else if (safeItem.priceType === 'cny_with_tax') {
-      // 情况3：供货价是含税人民币（需计算退税）
       const taxRateDecimal = safeItem.taxRate / 100;
       const rebateRateDecimal = safeItem.exportRebateRate / 100;
-      
-      // 含税价 → 不含税价
       const priceNoTax = safeItem.supplierPrice / (1 + taxRateDecimal);
-      
-      // 退税额（CNY）
       rebateAmountCNY = priceNoTax * rebateRateDecimal;
-      
-      // 实际成本 = 含税价 - 退税额
       const actualCostCNY = safeItem.supplierPrice - rebateAmountCNY;
-      
-      // 转为USD
       costUSD = actualCostCNY / safeItem.exchangeRate;
     }
-    
-    // 步骤2：加上国内费用
-    const totalCost = costUSD + safeItem.domesticFeesCNY / safeItem.exchangeRate;
+
+    const sourceIncoterm = sourcePricing?.incoterm || 'EXW';
+    const sourceFreightUSD = Number(sourcePricing?.sourceFreightUSD || 0);
+    const sourceInsuranceUSD = Number(sourcePricing?.sourceInsuranceUSD || 0);
+    const domesticFeesUSD = safeItem.domesticFeesCNY / safeItem.exchangeRate;
+
+    // 步骤2：把源价格统一折算为 FOB 基准，避免 EXW/FOB/CIF 被重复加费
+    let fobBaseUSD = costUSD;
+    if (sourceIncoterm === 'EXW') {
+      fobBaseUSD = costUSD + domesticFeesUSD;
+    } else if (sourceIncoterm === 'CFR') {
+      fobBaseUSD = Math.max(costUSD - sourceFreightUSD, 0);
+    } else if (sourceIncoterm === 'CIF') {
+      fobBaseUSD = Math.max(costUSD - sourceFreightUSD - sourceInsuranceUSD, 0);
+    }
+
+    const totalCost = fobBaseUSD;
     
     // 步骤3：计算利润
     const profitUSD = totalCost * (safeItem.profitMargin / 100);
@@ -299,16 +382,21 @@ export default function QuoteCreationIntelligent({
 
         // 🔥 回填全局默认参数（优先使用已保存的 globalDefaults，其次回退到首个产品参数）
         const firstItem = requirement.items?.[0] || {};
+        const firstSourcePricing = resolveSourcePricing(firstItem, requirement.purchaserFeedback?.linkedBJ);
         const savedGlobal = requirement.pricingDefaults || requirement.globalDefaults || {};
         setGlobalDefaults((prev) => ({
           ...prev,
-          priceType: (savedGlobal.priceType || firstItem.priceType || prev.priceType) as PriceType,
-          exchangeRate: Number(savedGlobal.exchangeRate ?? firstItem.exchangeRate ?? prev.exchangeRate),
-          taxRate: Number(savedGlobal.taxRate ?? firstItem.taxRate ?? prev.taxRate),
-          exportRebateRate: Number(savedGlobal.exportRebateRate ?? firstItem.exportRebateRate ?? prev.exportRebateRate),
+          priceType: (firstSourcePricing?.priceType || savedGlobal.priceType || firstItem.priceType || prev.priceType) as PriceType,
+          exchangeRate: Number(firstSourcePricing?.exchangeRate ?? savedGlobal.exchangeRate ?? firstItem.exchangeRate ?? prev.exchangeRate),
+          taxRate: Number(firstSourcePricing?.vatRate ?? savedGlobal.taxRate ?? firstItem.taxRate ?? prev.taxRate),
+          exportRebateRate: Number(firstSourcePricing?.exportRebateRate ?? savedGlobal.exportRebateRate ?? firstItem.exportRebateRate ?? prev.exportRebateRate),
           profitMargin: normalizeProfitMarginPercent(savedGlobal.profitMargin ?? firstItem.profitMargin ?? prev.profitMargin, prev.profitMargin),
-          domesticFeesCNY: Number(savedGlobal.domesticFeesCNY ?? firstItem.domesticFeesCNY ?? prev.domesticFeesCNY),
-          tradeTerms: (savedGlobal.tradeTerms || firstItem.tradeTerms || prev.tradeTerms) as TradeTerms,
+          domesticFeesCNY: Number(
+            firstSourcePricing?.incoterm === 'EXW'
+              ? (savedGlobal.domesticFeesCNY ?? firstItem.domesticFeesCNY ?? prev.domesticFeesCNY)
+              : 0,
+          ),
+          tradeTerms: deriveQuoteTradeTerms(firstSourcePricing, savedGlobal.tradeTerms || firstItem.tradeTerms || requirement.purchaserFeedback?.deliveryTerms || prev.tradeTerms),
           insuranceRate: Number(savedGlobal.insuranceRate ?? firstItem.insuranceRate ?? prev.insuranceRate),
         }));
         
@@ -319,30 +407,31 @@ export default function QuoteCreationIntelligent({
             (fp: any) => fp.productId === item.id
           );
           
-          // 🔥 多重兼容：从多个可能的字段读取供货单价
-          const supplierPrice = feedbackProduct?.costPrice 
-            || feedbackProduct?.supplierPrice 
+          const sourcePricing = resolveSourcePricing(
+            feedbackProduct || item,
+            feedbackProduct?.sourcePricing?.sourceDocumentNo || requirement.purchaserFeedback?.linkedBJ,
+          );
+
+          // 🔥 多重兼容：优先使用结构化价格基准，其次回退旧字段
+          const supplierPrice = sourcePricing?.unitPrice
+            || feedbackProduct?.costPrice
+            || feedbackProduct?.supplierPrice
             || feedbackProduct?.price
             || item.supplierPrice
             || item.costPrice
-            || item.targetPrice 
+            || item.targetPrice
             || item.price
             || 0;
-            
-          // 🔥 直接读取供应商报价携带的 priceType，不再靠 currency 猜测
-          const feedbackPriceType = feedbackProduct?.priceType || item.priceType;
-          const feedbackTaxSettings = feedbackProduct?.taxSettings || item.taxSettings;
-          const currency = feedbackProduct?.currency || item.currency || 'CNY';
 
-          // 推断 priceType（优先使用明确传递的值）
-          const resolvedPriceType: PriceType = feedbackPriceType
-            ? feedbackPriceType as PriceType
-            : currency.toUpperCase() === 'USD' ? 'usd' : 'cny_with_tax';
+          const feedbackTaxSettings = feedbackProduct?.taxSettings || item.taxSettings;
+          const currency = (sourcePricing?.currency || feedbackProduct?.currency || item.currency || 'CNY') as 'USD' | 'CNY';
+          const resolvedPriceType: PriceType = sourcePricing?.priceType || normalizePriceType(feedbackProduct?.priceType || item.priceType, currency);
 
           console.log(`🔍 [编辑QT-加载产品${index + 1}] ${item.productName}:`, {
             '最终供货单价': supplierPrice,
             '最终priceType': resolvedPriceType,
             '来源taxSettings': feedbackTaxSettings,
+            'sourcePricing': sourcePricing,
           });
           
           const existingItem: QuoteItem = {
@@ -358,14 +447,15 @@ export default function QuoteCreationIntelligent({
             priceType: resolvedPriceType,
             supplierPrice: supplierPrice,
             currency: currency as 'USD' | 'CNY',
+            sourcePricing,
             // 优先使用供应商报价时的汇率/税率（保证计算一致性）
-            exchangeRate: feedbackTaxSettings?.usdRate || item.exchangeRate || globalDefaults.exchangeRate,
-            taxRate: feedbackTaxSettings?.vatRate || item.taxRate || globalDefaults.taxRate,
-            exportRebateRate: feedbackTaxSettings?.hasExportRebate ? (feedbackTaxSettings?.exportRebateRate ?? item.exportRebateRate ?? globalDefaults.exportRebateRate) : (item.exportRebateRate || globalDefaults.exportRebateRate),
-            domesticFeesCNY: item.domesticFeesCNY || globalDefaults.domesticFeesCNY,
+            exchangeRate: sourcePricing?.exchangeRate ?? feedbackTaxSettings?.usdRate ?? item.exchangeRate ?? globalDefaults.exchangeRate,
+            taxRate: sourcePricing?.vatRate ?? feedbackTaxSettings?.vatRate ?? item.taxRate ?? globalDefaults.taxRate,
+            exportRebateRate: sourcePricing?.exportRebateRate ?? (feedbackTaxSettings?.hasExportRebate ? (feedbackTaxSettings?.exportRebateRate ?? item.exportRebateRate ?? globalDefaults.exportRebateRate) : (item.exportRebateRate ?? globalDefaults.exportRebateRate)),
+            domesticFeesCNY: sourcePricing?.incoterm === 'EXW' ? (item.domesticFeesCNY || globalDefaults.domesticFeesCNY) : 0,
             profitMargin: normalizeProfitMarginPercent(item.profitMargin ?? globalDefaults.profitMargin, globalDefaults.profitMargin),
             
-            tradeTerms: (item.tradeTerms || globalDefaults.tradeTerms) as TradeTerms,
+            tradeTerms: deriveQuoteTradeTerms(sourcePricing, item.tradeTerms || requirement.purchaserFeedback?.deliveryTerms || globalDefaults.tradeTerms),
             freight: item.freight || 0,
             insuranceRate: item.insuranceRate || globalDefaults.insuranceRate,
             
@@ -404,6 +494,20 @@ export default function QuoteCreationIntelligent({
         })();
         
         // 导入产品（从采购反馈中获取成本价）
+        const firstFeedbackProduct = requirement.purchaserFeedback?.products?.[0];
+        const firstNewSourcePricing = resolveSourcePricing(firstFeedbackProduct || requirement.items?.[0], requirement.purchaserFeedback?.linkedBJ);
+        if (firstNewSourcePricing) {
+          setGlobalDefaults((prev) => ({
+            ...prev,
+            priceType: firstNewSourcePricing.priceType,
+            exchangeRate: Number(firstNewSourcePricing.exchangeRate ?? prev.exchangeRate),
+            taxRate: Number(firstNewSourcePricing.vatRate ?? prev.taxRate),
+            exportRebateRate: Number(firstNewSourcePricing.exportRebateRate ?? prev.exportRebateRate),
+            domesticFeesCNY: firstNewSourcePricing.incoterm === 'EXW' ? prev.domesticFeesCNY : 0,
+            tradeTerms: deriveQuoteTradeTerms(firstNewSourcePricing, requirement.purchaserFeedback?.deliveryTerms || prev.tradeTerms),
+          }));
+        }
+
         const initialItems: QuoteItem[] = requirement.items.map((item: any, index: number) => {
           // 查找采购反馈中的产品
           const feedbackProduct = requirement.purchaserFeedback?.products?.find(
@@ -417,17 +521,14 @@ export default function QuoteCreationIntelligent({
             '供货价': feedbackProduct?.costPrice || feedbackProduct?.supplierPrice || item.targetPrice || item.costPrice || 0
           });
           
-          // 🔥 从采购反馈中读取供货价和价格属性
-          const supplierPrice = feedbackProduct?.costPrice || feedbackProduct?.supplierPrice || item.targetPrice || item.costPrice || 0;
-          const currency = feedbackProduct?.currency || item.currency || 'CNY';
-          const supplierName = feedbackProduct?.supplierName || '供应商';
-
-          // 🔥 直接读取 priceType，不再靠 currency 猜测
-          const feedbackPriceType2 = feedbackProduct?.priceType;
+          const sourcePricing = resolveSourcePricing(
+            feedbackProduct || item,
+            feedbackProduct?.sourcePricing?.sourceDocumentNo || requirement.purchaserFeedback?.linkedBJ,
+          );
+          const supplierPrice = sourcePricing?.unitPrice || feedbackProduct?.costPrice || feedbackProduct?.supplierPrice || item.targetPrice || item.costPrice || 0;
+          const currency = (sourcePricing?.currency || feedbackProduct?.currency || item.currency || 'CNY') as 'USD' | 'CNY';
           const feedbackTaxSettings2 = feedbackProduct?.taxSettings;
-          const resolvedPriceType2: PriceType = feedbackPriceType2
-            ? feedbackPriceType2 as PriceType
-            : currency.toUpperCase() === 'USD' ? 'usd' : 'cny_with_tax';
+          const resolvedPriceType2: PriceType = sourcePricing?.priceType || normalizePriceType(feedbackProduct?.priceType, currency);
           
           const newItem: QuoteItem = {
             id: item.id || `item-${index}`,
@@ -442,13 +543,14 @@ export default function QuoteCreationIntelligent({
             priceType: resolvedPriceType2,
             supplierPrice: supplierPrice,
             currency: currency as 'USD' | 'CNY',
-            exchangeRate: feedbackTaxSettings2?.usdRate || globalDefaults.exchangeRate,
-            taxRate: feedbackTaxSettings2?.vatRate || globalDefaults.taxRate,
-            exportRebateRate: feedbackTaxSettings2?.hasExportRebate ? (feedbackTaxSettings2?.exportRebateRate ?? globalDefaults.exportRebateRate) : globalDefaults.exportRebateRate,
-            domesticFeesCNY: globalDefaults.domesticFeesCNY,
+            exchangeRate: sourcePricing?.exchangeRate ?? feedbackTaxSettings2?.usdRate ?? globalDefaults.exchangeRate,
+            taxRate: sourcePricing?.vatRate ?? feedbackTaxSettings2?.vatRate ?? globalDefaults.taxRate,
+            exportRebateRate: sourcePricing?.exportRebateRate ?? (feedbackTaxSettings2?.hasExportRebate ? (feedbackTaxSettings2?.exportRebateRate ?? globalDefaults.exportRebateRate) : globalDefaults.exportRebateRate),
+            domesticFeesCNY: sourcePricing?.incoterm === 'EXW' ? globalDefaults.domesticFeesCNY : 0,
             profitMargin: globalDefaults.profitMargin,
+            sourcePricing,
             
-            tradeTerms: globalDefaults.tradeTerms,
+            tradeTerms: deriveQuoteTradeTerms(sourcePricing, requirement.purchaserFeedback?.deliveryTerms || globalDefaults.tradeTerms),
             freight: 0,
             insuranceRate: globalDefaults.insuranceRate,
             
@@ -512,24 +614,27 @@ export default function QuoteCreationIntelligent({
   const applyGlobalDefaults = () => {
     const sourceItems = latestItemsRef.current;
     const updatedItems = sourceItems.map(item => {
+        const lockedBySource = hasLockedSourcePricing(item);
         const newRate = globalDefaults.exchangeRate;
         const newTaxRate = globalDefaults.taxRate;
-        const newSupplierPrice = convertSupplierPrice(
-          item.supplierPrice,
-          item.priceType,
-          globalDefaults.priceType,
-          newRate,
-          newTaxRate,
-        );
+        const newSupplierPrice = lockedBySource
+          ? item.supplierPrice
+          : convertSupplierPrice(
+              item.supplierPrice,
+              item.priceType,
+              globalDefaults.priceType,
+              newRate,
+              newTaxRate,
+            );
         const updated = {
           ...item,
-          priceType: globalDefaults.priceType,
+          priceType: lockedBySource ? item.priceType : globalDefaults.priceType,
           supplierPrice: newSupplierPrice,
-          exchangeRate: newRate,
-          taxRate: newTaxRate,
-          exportRebateRate: globalDefaults.exportRebateRate,
+          exchangeRate: lockedBySource ? item.exchangeRate : newRate,
+          taxRate: lockedBySource ? item.taxRate : newTaxRate,
+          exportRebateRate: lockedBySource ? item.exportRebateRate : globalDefaults.exportRebateRate,
           profitMargin: globalDefaults.profitMargin,
-          domesticFeesCNY: globalDefaults.domesticFeesCNY,
+          domesticFeesCNY: item.sourcePricing?.incoterm === 'EXW' ? globalDefaults.domesticFeesCNY : 0,
           tradeTerms: globalDefaults.tradeTerms,
           insuranceRate: globalDefaults.insuranceRate
         };
@@ -606,6 +711,7 @@ export default function QuoteCreationIntelligent({
         priceType: item.priceType,
         supplierPrice: item.supplierPrice,
         currency: item.currency,
+        sourcePricing: item.sourcePricing ?? null,
         exchangeRate: item.exchangeRate,
         taxRate: item.taxRate,
         exportRebateRate: item.exportRebateRate,
@@ -709,6 +815,7 @@ export default function QuoteCreationIntelligent({
         priceType: item.priceType,
         supplierPrice: item.supplierPrice,
         currency: item.currency,
+        sourcePricing: item.sourcePricing ?? null,
         exchangeRate: item.exchangeRate,
         taxRate: item.taxRate,
         exportRebateRate: item.exportRebateRate,
@@ -1257,16 +1364,35 @@ export default function QuoteCreationIntelligent({
                           <Calculator className="w-3.5 h-3.5" />
                           成本核算参数
                         </h4>
+
+                        {getSourcePricingSummary(item.sourcePricing || null) && (
+                          <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-blue-800">
+                              <span className="font-semibold">源价格基准</span>
+                              <Badge variant="outline" className="h-5 border-blue-300 bg-white text-blue-700">
+                                {(getSourcePricingSummary(item.sourcePricing || null) as any).basisLabel}
+                              </Badge>
+                              <Badge variant="outline" className="h-5 border-blue-300 bg-white text-blue-700">
+                                {(getSourcePricingSummary(item.sourcePricing || null) as any).taxLabel}
+                              </Badge>
+                              <span>源单价 {(getSourcePricingSummary(item.sourcePricing || null) as any).priceLabel}</span>
+                              <span>来源 {(getSourcePricingSummary(item.sourcePricing || null) as any).sourceLabel}</span>
+                            </div>
+                            <div className="mt-1 text-[10px] text-blue-700">
+                              供应商源价格语义已锁定，业务员只能在此基础上补国内费用、利润率和对客报价条款。
+                            </div>
+                          </div>
+                        )}
                         
                         {/* 第一行：供货价配置（紧凑单行布局） */}
                         <div className="flex items-end gap-3 mb-2">
                           <div className="flex-none w-36">
                             <label className="block text-xs text-slate-600 mb-1">
                               供货单价类型
-                              {item.priceType && (item as any).taxSettings ? (
+                              {hasLockedSourcePricing(item) ? (
                                 <span
                                   className="text-amber-500 ml-1 text-[10px] font-normal"
-                                  title={`来源：供应商报价（${(item as any).quoteMode || ''}），税率${(item as any).taxSettings?.vatRate ?? ''}%，汇率${(item as any).taxSettings?.usdRate ?? ''}`}
+                                  title={`来源：${item.sourcePricing?.sourceDocumentNo || 'BJ'} / ${item.sourcePricing?.incoterm || ''}`}
                                 >
                                   🔒 供应商已定
                                 </span>
@@ -1276,6 +1402,7 @@ export default function QuoteCreationIntelligent({
                             </label>
                             <select
                               value={item.priceType}
+                              disabled={hasLockedSourcePricing(item)}
                               onChange={(e) => {
                                 const newType = e.target.value as PriceType;
                                 const oldType = item.priceType;
@@ -1307,7 +1434,7 @@ export default function QuoteCreationIntelligent({
                                   supplierPrice: Math.round(newPrice * 10000) / 10000,
                                 });
                               }}
-                              className="w-full px-2 py-1.5 border rounded text-xs bg-white border-orange-300 focus:ring-2 focus:ring-orange-500"
+                              className="w-full px-2 py-1.5 border rounded text-xs bg-white border-orange-300 focus:ring-2 focus:ring-orange-500 disabled:bg-slate-100 disabled:text-slate-500"
                             >
                               <option value="usd">美金</option>
                               <option value="cny_no_tax">不含税CNY</option>
@@ -1324,8 +1451,9 @@ export default function QuoteCreationIntelligent({
                               type="number"
                               step="0.01"
                               value={item.supplierPrice}
+                              disabled={hasLockedSourcePricing(item)}
                               onChange={(e) => updateItem(item.id, { supplierPrice: Number(e.target.value) })}
-                              className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium bg-white border-orange-300 focus:ring-2 focus:ring-orange-500"
+                              className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium bg-white border-orange-300 focus:ring-2 focus:ring-orange-500 disabled:bg-slate-100 disabled:text-slate-500"
                             />
                           </div>
 
@@ -1336,8 +1464,9 @@ export default function QuoteCreationIntelligent({
                                 type="number"
                                 step="0.01"
                                 value={item.exchangeRate}
+                                disabled={hasLockedSourcePricing(item)}
                                 onChange={(e) => updateItem(item.id, { exchangeRate: Number(e.target.value) })}
-                                className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium"
+                                className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium disabled:bg-slate-100 disabled:text-slate-500"
                               />
                             </div>
                           )}
@@ -1349,8 +1478,9 @@ export default function QuoteCreationIntelligent({
                                 <input
                                   type="number"
                                   value={item.taxRate}
+                                  disabled={hasLockedSourcePricing(item)}
                                   onChange={(e) => updateItem(item.id, { taxRate: Number(e.target.value) })}
-                                  className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium"
+                                  className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium disabled:bg-slate-100 disabled:text-slate-500"
                                 />
                               </div>
                               
@@ -1359,8 +1489,9 @@ export default function QuoteCreationIntelligent({
                                 <input
                                   type="number"
                                   value={item.exportRebateRate}
+                                  disabled={hasLockedSourcePricing(item)}
                                   onChange={(e) => updateItem(item.id, { exportRebateRate: Number(e.target.value) })}
-                                  className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium"
+                                  className="w-full px-2 py-1.5 border rounded text-xs text-right font-medium disabled:bg-slate-100 disabled:text-slate-500"
                                 />
                               </div>
                               
