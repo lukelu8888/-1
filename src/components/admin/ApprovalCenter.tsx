@@ -273,12 +273,12 @@ export function ApprovalCenter() {
     setLoading(true);
     Promise.resolve()
       .then(() => {
-        // 使用 bridge/cache 作为主数据源（Supabase approval_records 在后续迭代接入）
+        // Supabase approval_records 作为主数据源（localStorage 仅做短暂 UI 缓存）
         const latestCache = readApprovalCenterCache(currentUserEmail);
-        const serverPending: ApprovalRequest[] = [];
-        const serverApproved: ApprovalRequest[] = [];
-        const serverRejected: ApprovalRequest[] = [];
-        const serverSubmitted: ApprovalRequest[] = [];
+        const serverPending: ApprovalRequest[] = localApprovalView.pending || [];
+        const serverApproved: ApprovalRequest[] = localApprovalView.approved || [];
+        const serverRejected: ApprovalRequest[] = localApprovalView.rejected || [];
+        const serverSubmitted: ApprovalRequest[] = localApprovalView.submitted || [];
 
         // 在 API 返回后再读一次 bridge，强制合并（防止竞态导致 bridge 数据被覆盖丢失）
         let liveBridgePending: ApprovalRequest[] = [];

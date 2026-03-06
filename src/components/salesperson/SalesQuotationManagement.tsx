@@ -38,7 +38,7 @@ import { useInquiry } from '../../contexts/InquiryContext'; // 🔥 导入询价
 import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 导入客户报价Context
 import { useOrders } from '../../contexts/OrderContext'; // 🔥 导入订单Context
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context（用于溯源回写）
-import { salesQuotationService } from '../../lib/supabaseService';
+import { salesQuotationService, approvalRecordService } from '../../lib/supabaseService';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
 import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
@@ -91,17 +91,31 @@ export function SalesQuotationManagement({
     }
   };
 
-  const pushApprovalBridgeItem = (item: any) => {
+  const pushApprovalBridgeItem = async (item: any) => {
+    const request = item?.request || {};
+    const currentApprover = item?.currentApprover || request?.currentApprover || '';
+    const currentApproverRole = request?.currentApproverRole || '';
+
+    // 业务审批记录必须先落 Supabase，localStorage 仅保留 UI 过渡缓存。
+    const saved = await approvalRecordService.upsert({
+      ...request,
+      currentApprover,
+      currentApproverRole,
+    });
+    if (!saved) {
+      throw new Error('approval_records upsert failed');
+    }
+
     try {
       const raw = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
       const list = raw ? JSON.parse(raw) : [];
       const queue = Array.isArray(list) ? list : [];
-      const dedupKey = `${item?.request?.type}:${item?.request?.relatedDocumentId}:${item?.currentApprover}`;
+      const dedupKey = `${request?.type}:${request?.relatedDocumentId}:${currentApprover}`;
       const next = queue.filter((x: any) => {
         const k = `${x?.request?.type}:${x?.request?.relatedDocumentId}:${x?.currentApprover}`;
         return k !== dedupKey;
       });
-      next.unshift(item);
+      next.unshift({ ...item, request: { ...request, currentApprover, currentApproverRole } });
       localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(next.slice(0, 200)));
     } catch {}
   };
@@ -498,7 +512,8 @@ export function SalesQuotationManagement({
       const submitKey = qt.qtNumber || qt.id;
       await salesQuotationService.updateStatus(submitKey, 'pending_approval', { approval_chain: approvalChain });
     } catch (e: any) {
-      console.warn('⚠️ [申请复核] Supabase 同步失败，降级本地模式:', e?.message);
+      toast.error(`❌ 申请复核失败：${e?.message || 'Supabase 写入失败'}`);
+      return;
     }
 
     // ─── 2. 更新本地状态 ───
@@ -531,7 +546,7 @@ export function SalesQuotationManagement({
       : '客户拒绝报价，申请主管复核定价。';
 
     const baseReviewRequest = {
-      id: `bridge-review-${qt.id}-${now.getTime()}`,
+      id: qt.id,
       type: 'quotation' as const,
       relatedDocumentId: qt.qtNumber || qt.id,
       relatedDocumentType: '销售报价单（复核申请）',
@@ -558,16 +573,10 @@ export function SalesQuotationManagement({
       nextApproverRole: requiresDirectorReview ? '销售总监' : null,
     };
 
-    pushApprovalBridgeItem({
+    await pushApprovalBridgeItem({
       currentApprover: managerEmail,
       request: { ...baseReviewRequest, currentApprover: managerEmail, currentApproverRole: '区域业务主管' },
     });
-    if (requiresDirectorReview) {
-      pushApprovalBridgeItem({
-        currentApprover: directorEmail,
-        request: { ...baseReviewRequest, currentApprover: directorEmail, currentApproverRole: '销售总监' },
-      });
-    }
 
     toast.success('✅ 复核申请已提交给主管！', {
       description: `主管将收到复核请求。${declineReason ? `\n客户拒绝理由：${declineReason}` : ''}`,
@@ -642,7 +651,6 @@ export function SalesQuotationManagement({
     ];
 
     // ─── 1. 同步到 Supabase ───
-    let backendSynced = false;
     try {
       const submitKey = qt.qtNumber || qt.id;
       await salesQuotationService.updateStatus(submitKey, 'pending_approval', {
@@ -650,9 +658,9 @@ export function SalesQuotationManagement({
         items: qt.items,
         total_price: amount,
       });
-      backendSynced = true;
     } catch (e: any) {
-      console.warn('⚠️ [提交审批] Supabase 同步失败，降级本地模式:', e?.message);
+      toast.error(`❌ 提交审批失败：${e?.message || 'Supabase 写入失败'}`);
+      return;
     }
 
     // ─── 2. 无论后端是否成功，都在本地更新状态 ───
@@ -677,7 +685,7 @@ export function SalesQuotationManagement({
       const now = new Date();
       const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       const baseRequest = {
-        id: `bridge-${qt.id}-${now.getTime()}`,
+        id: qt.id,
         type: 'quotation',
         relatedDocumentId: qt.qtNumber || qt.id,
         relatedDocumentType: '销售报价单',
@@ -703,7 +711,7 @@ export function SalesQuotationManagement({
       };
 
       // 注入到主管审批中心（切页可立即看到）
-      pushApprovalBridgeItem({
+      await pushApprovalBridgeItem({
         currentApprover: managerEmail,
         request: {
           ...baseRequest,
@@ -712,20 +720,8 @@ export function SalesQuotationManagement({
         },
       });
 
-      // 金额较大时也注入到总监审批中心（用于主管批准后的连续切换场景）
-      if (requiresDirectorReview) {
-        pushApprovalBridgeItem({
-          currentApprover: directorEmail,
-          request: {
-            ...baseRequest,
-            currentApprover: directorEmail,
-            currentApproverRole: '销售总监',
-          },
-        });
-      }
-
-      // 提交后刷新列表（后端同步时才刷新，避免状态回滚）
-      if (backendSynced) loadSalesQuotations();
+      // 提交后刷新列表，确保以 Supabase 实际状态回流
+      loadSalesQuotations();
     } catch (e: any) {
       console.error('❌ bridge 注入失败:', e);
     }
@@ -1064,7 +1060,6 @@ export function SalesQuotationManagement({
       'SA': 'carlos.silva@cosun.com',        // 南美区主管：陈明华
       'South America': 'carlos.silva@cosun.com',
       'EA': 'hans.mueller@cosun.com',      // 欧非区主管：赵国强
-      'EA': 'hans.mueller@cosun.com',
       'Europe & Africa': 'hans.mueller@cosun.com',
       'Other': 'john.smith@cosun.com',       // 默认使用北美主管
     };

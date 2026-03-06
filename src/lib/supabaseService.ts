@@ -928,82 +928,6 @@ export function toIsoDate(v: any): string | null {
   return String(v);
 }
 
-// ============================================================
-// sales_quotations 服务
-// ============================================================
-function toQTRow(q: any) {
-  return {
-    id: toUUID(q.id),
-    qt_number: q.qtNumber || q.qt_number || '',
-    qr_number: q.qrNumber || q.qr_number || null,
-    inq_number: q.inqNumber || q.inq_number || null,
-    inquiry_id: toUUID(q.inquiryId || q.inquiry_id) === q.inquiryId ? q.inquiryId : null,
-    region_code: toRegionCode(q.region || q.region_code),
-    customer_name: q.customerName || q.customer_name || '',
-    customer_email: q.customerEmail || q.customer_email || '',
-    customer_company: q.customerCompany || q.customer_company || '',
-    sales_person: q.salesPerson || q.sales_person || '',
-    sales_person_name: q.salesPersonName || q.sales_person_name || '',
-    items: q.items || [],
-    total_cost: q.totalCost ?? q.total_cost ?? 0,
-    total_price: q.totalPrice ?? q.total_price ?? 0,
-    total_profit: q.totalProfit ?? q.total_profit ?? 0,
-    profit_rate: q.profitRate ?? q.profit_rate ?? 0,
-    currency: q.currency || 'USD',
-    payment_terms: q.paymentTerms || q.payment_terms || '',
-    delivery_terms: q.deliveryTerms || q.delivery_terms || '',
-    delivery_date: toIsoDate(q.deliveryDate || q.delivery_date),
-    approval_status: q.approvalStatus || q.approval_status || 'draft',
-    approval_chain: q.approvalChain || q.approval_chain || [],
-    customer_status: q.customerStatus || q.customer_status || 'not_sent',
-    customer_response: q.customerResponse || q.customer_response || null,
-    so_number: q.soNumber || q.so_number || null,
-    pushed_to_contract: q.pushedToContract ?? q.pushed_to_contract ?? false,
-    pushed_contract_number: q.pushedContractNumber || q.pushed_contract_number || null,
-    internal_notes: q.internalNotes || q.internal_notes || null,
-    customer_notes: q.customerNotes || q.customer_notes || null,
-  };
-}
-
-function fromQTRow(r: any) {
-  if (!r) return null;
-  return {
-    id: r.id,
-    qtNumber: r.qt_number,
-    qrNumber: r.qr_number,
-    inqNumber: r.inq_number,
-    inquiryId: r.inquiry_id,
-    region: fromRegionCode(r.region_code),
-    customerName: r.customer_name,
-    customerEmail: r.customer_email,
-    customerCompany: r.customer_company,
-    salesPerson: r.sales_person,
-    salesPersonName: r.sales_person_name,
-    items: r.items || [],
-    totalCost: r.total_cost || 0,
-    totalPrice: r.total_price || 0,
-    totalProfit: r.total_profit || 0,
-    profitRate: r.profit_rate || 0,
-    currency: r.currency || 'USD',
-    paymentTerms: r.payment_terms || '',
-    deliveryTerms: r.delivery_terms || '',
-    deliveryDate: r.delivery_date,
-    approvalStatus: r.approval_status || 'draft',
-    approvalChain: r.approval_chain || [],
-    customerStatus: r.customer_status || 'not_sent',
-    customerResponse: r.customer_response,
-    soNumber: r.so_number,
-    pushedToContract: r.pushed_to_contract || false,
-    pushedContractNumber: r.pushed_contract_number,
-    pushedContractAt: r.pushed_contract_at,
-    pushedBy: r.pushed_by,
-    internalNotes: r.internal_notes,
-    customerNotes: r.customer_notes,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  };
-}
-
 // (salesQuotationService defined above at line ~283, kept there with full methods)
 
 // ============================================================
@@ -1485,6 +1409,11 @@ function toPRRow(p: any) {
     })),
     status: (['pending','in_progress','completed','cancelled','partial','processing','submitted','quoted','draft'].includes(p.status) ? p.status : 'pending'),
     notes: p.notes || p.specialRequirements || p.special_requirements || null,
+    purchaser_feedback: p.purchaserFeedback || p.purchaser_feedback || null,
+    pushed_to_quotation: p.pushedToQuotation ?? p.pushed_to_quotation ?? false,
+    pushed_to_quotation_at: p.pushedToQuotationDate || p.pushed_to_quotation_at || null,
+    pushed_by: p.pushedBy || p.pushed_by || null,
+    quotation_number: p.quotationNumber || p.quotation_number || null,
     created_by: createdBy,
     assigned_to: p.assignedTo || p.assigned_to || null,
     qr_number: reqNo || null,
@@ -1507,6 +1436,11 @@ function fromPRRow(r: any) {
     items: r.items || [],
     status: r.status || 'pending',
     notes: r.notes,
+    purchaserFeedback: r.purchaser_feedback || null,
+    pushedToQuotation: r.pushed_to_quotation || false,
+    pushedToQuotationDate: r.pushed_to_quotation_at || null,
+    pushedBy: r.pushed_by || null,
+    quotationNumber: r.quotation_number || null,
     createdBy: r.created_by,   // uuid，不是 email
     assignedTo: r.assigned_to,
     createdDate: r.created_at,
