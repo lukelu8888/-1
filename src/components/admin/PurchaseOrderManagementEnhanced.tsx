@@ -2628,7 +2628,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                       <th className="text-left py-1.5 px-2 font-medium text-gray-700">要求日期</th>
                       <th className="text-left py-1.5 px-2 font-medium text-gray-700">紧急程度</th>
                       <th className="text-left py-1.5 px-2 font-medium text-gray-700">状态</th>
-                      <th className="text-center py-1.5 px-2 font-medium text-gray-700">操作 ✨NEW</th>
+                      <th className="text-center py-1.5 px-2 font-medium text-gray-700">操作</th>
                     </tr>
                   </thead>
                   <tbody>
