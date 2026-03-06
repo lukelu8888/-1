@@ -48,7 +48,7 @@ import { useUser } from '../../contexts/UserContext'; // 🔥 用户Context
 import { useApproval } from '../../contexts/ApprovalContext';
 import { generateXJNumber, nextXJNumber } from '../../utils/xjNumberGenerator'; // 🔥 XJ编号生成器
 import { generateCGNumber, nextCGNumberAsync, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
-import { contractService, xjService, supplierQuotationService, companyService } from '../../lib/supabaseService';
+import { contractService, xjService, supplierQuotationService, companyService, purchaseRequirementService } from '../../lib/supabaseService';
 import { TERMS_OPTIONS } from './purchase-order/purchaseOrderConstants'; // 🔥 从常量文件导入
 import { PurchaseOrderEditDialog } from './purchase-order/PurchaseOrderEditDialog';
 import { PurchaseOrderCreateDialogs } from './purchase-order/PurchaseOrderCreateDialogs';
@@ -93,7 +93,7 @@ const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
 const PurchaseOrderManagementEnhanced: React.FC = () => {
   
   // 🔥 使用采购需求Context - 添加deleteRequirement
-  const { requirements, updateRequirement, deleteRequirement } = usePurchaseRequirements();
+  const { requirements, updateRequirement, deleteRequirement, refreshPurchaseRequirementsFromApi } = usePurchaseRequirements();
   // 🔥 使用采购订单Context
   const { purchaseOrders, addPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder } = usePurchaseOrders();
   // 🔥 使用XJ Context - 获取rfqs列表用于计算状态
@@ -2361,7 +2361,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 保存采购反馈（仅保存，不在此处下推）
-  const handleSubmitFeedback = (feedback: PurchaserFeedback) => {
+  const handleSubmitFeedback = async (feedback: PurchaserFeedback) => {
     if (!feedbackRequirement) return;
     
     console.log('🔥 [采购反馈] 提交反馈，QR信息:', {
@@ -2371,13 +2371,23 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       feedbackData: feedback
     });
     
-    // 更新QR，添加采购反馈
-    updateRequirement(feedbackRequirement.id, {
+    const savedRequirement = await purchaseRequirementService.upsert({
+      ...feedbackRequirement,
       purchaserFeedback: feedback,
       status: 'completed' // 🔥 同时更新状态为已完成
     });
-    
-    
+
+    if (!savedRequirement) {
+      toast.error('❌ 采购反馈保存失败：Supabase 未落库');
+      return;
+    }
+
+    updateRequirement(feedbackRequirement.id, {
+      purchaserFeedback: feedback,
+      status: 'completed'
+    });
+    await refreshPurchaseRequirementsFromApi();
+
     toast.success('✅ 采购反馈已保存', {
       description: '请在操作区点击“下推业务员询报”完成流转',
       duration: 4000

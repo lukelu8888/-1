@@ -38,7 +38,7 @@ import { useInquiry } from '../../contexts/InquiryContext'; // 🔥 导入询价
 import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 导入客户报价Context
 import { useOrders } from '../../contexts/OrderContext'; // 🔥 导入订单Context
 import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context（用于溯源回写）
-import { salesQuotationService, approvalRecordService } from '../../lib/supabaseService';
+import { salesQuotationService, approvalRecordService, purchaseRequirementService } from '../../lib/supabaseService';
 import { supabase } from '../../lib/supabase';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
@@ -232,7 +232,7 @@ export function SalesQuotationManagement({
   const { inquiries } = useInquiry();
   const { addQuotation: addCustomerQuotation } = useQuotations(); // 🔥 导入客户报价Context
   const { orders, addOrder } = useOrders(); // 🔥 获取订单和添加订单函数
-  const { purchaseRequirements, updatePurchaseRequirement } = usePurchaseRequirements(); // 🔥 获取采购需求和更新函数
+  const { purchaseRequirements, updatePurchaseRequirement, refreshPurchaseRequirementsFromApi } = usePurchaseRequirements(); // 🔥 获取采购需求和更新函数
   const [currentUser, setCurrentUser] = useState<any>(() => getCurrentUser());
 
   useEffect(() => {
@@ -468,6 +468,47 @@ export function SalesQuotationManagement({
       setSelectedIds(selectedIds.filter(selectedId => selectedId !== id));
     }
   };
+
+  const syncRequirementsAfterQuotationDelete = async (deletedQuotations: any[], remainingQuotations: any[]) => {
+    const impactedQrNumbers = Array.from(new Set(
+      deletedQuotations
+        .map((qt) => String(qt?.qrNumber || ''))
+        .filter(Boolean),
+    ));
+
+    let changed = false;
+    for (const qrNumber of impactedQrNumbers) {
+      const stillHasQuotation = remainingQuotations.some((qt) => String(qt?.qrNumber || '') === qrNumber);
+      if (stillHasQuotation) continue;
+
+      const requirement = purchaseRequirements.find((req: any) =>
+        String(req?.requirementNo || '') === qrNumber || String(req?.qrNumber || '') === qrNumber,
+      );
+      if (!requirement) continue;
+
+      const saved = await purchaseRequirementService.upsert({
+        ...requirement,
+        pushedToQuotation: false,
+        pushedToQuotationDate: null,
+        pushedBy: null,
+        quotationNumber: null,
+        updatedAt: new Date().toISOString(),
+      });
+      if (!saved) continue;
+
+      updatePurchaseRequirement(requirement.id, {
+        pushedToQuotation: false,
+        pushedToQuotationDate: null,
+        pushedBy: null,
+        quotationNumber: null,
+      });
+      changed = true;
+    }
+
+    if (changed) {
+      await refreshPurchaseRequirementsFromApi();
+    }
+  };
   
   // 🔥 新增：批量删除
   const handleBatchDelete = async () => {
@@ -478,6 +519,7 @@ export function SalesQuotationManagement({
     
     if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个报价单吗？此操作不可恢复！`)) {
       const ids = selectedIds.map((id) => String(id));
+      const deletedQuotations = myQuotations.filter((qt) => ids.includes(String(qt.id)));
       let deletedCount = 0;
       for (const id of ids) {
         try {
@@ -488,7 +530,9 @@ export function SalesQuotationManagement({
       if (deletedCount < ids.length) appendDeletedIds(ids);
 
       removeDraftOverrideByIds(ids);
+      const remainingQuotations = effectiveQuotations.filter((qt) => !ids.includes(String(qt.id)));
       setServerQuotations((prev) => prev.filter((qt) => !ids.includes(String(qt.id))));
+      await syncRequirementsAfterQuotationDelete(deletedQuotations, remainingQuotations);
       setSelectedIds([]);
       toast.success(`成功删除 ${ids.length} 个报价单！`);
       if (deletedCount > 0) loadSalesQuotations();
