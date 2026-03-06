@@ -46,8 +46,31 @@ function shouldDowngradeProfitRate(error: any, payload: Record<string, any>, adj
 function normalizeProfitRatePercent(value: any): number {
   const raw = Number(value)
   if (!Number.isFinite(raw)) return 0
-  if (raw > 0 && raw < 1) return raw * 100
+  if (raw !== 0 && Math.abs(raw) <= 1) return raw * 100
   return raw
+}
+
+function normalizeProfitRateForStorage(input: any, totalProfit?: any, totalCost?: any): number {
+  const raw = Number(input)
+  if (!Number.isFinite(raw)) return 0
+
+  const numericTotalProfit = Number(totalProfit)
+  const numericTotalCost = Number(totalCost)
+  const derivedRatio = Number.isFinite(numericTotalProfit) && Number.isFinite(numericTotalCost) && numericTotalCost > 0
+    ? numericTotalProfit / numericTotalCost
+    : null
+  const derivedPercent = derivedRatio == null ? null : derivedRatio * 100
+
+  // 优先用 totals 判断当前值是“百分比”还是“decimal ratio”。
+  if (derivedPercent != null && Math.abs(raw - derivedPercent) < 0.0001) {
+    return Number(derivedRatio!.toFixed(6))
+  }
+  if (derivedRatio != null && Math.abs(raw - derivedRatio) < 0.0001) {
+    return Number(derivedRatio.toFixed(6))
+  }
+
+  // 无法判定时兼容旧库：>= 1 视为百分比（18 => 0.18），< 1 视为旧 decimal。
+  return Math.abs(raw) >= 1 ? Number((raw / 100).toFixed(6)) : raw
 }
 
 async function upsertWithSchemaFallback(
@@ -856,6 +879,11 @@ function toSalesQuotationRow(q: any) {
       : (typeof q.customerResponse === 'string'
           ? q.customerResponse
           : JSON.stringify(q.customerResponse));
+  const profitRateValue = normalizeProfitRateForStorage(
+    q.profitRate ?? q.profit_rate,
+    q.totalProfit ?? q.total_profit,
+    q.totalCost ?? q.total_cost,
+  )
   return {
     id: uuid,
     qt_number: q.qtNumber || q.qt_number,
@@ -874,7 +902,7 @@ function toSalesQuotationRow(q: any) {
     total_price: q.totalPrice || 0,
     total_amount: q.totalPrice || 0,
     total_profit: q.totalProfit || 0,
-    profit_rate: q.profitRate || 0,
+    profit_rate: profitRateValue,
     currency: q.currency || 'USD',
     payment_terms: q.paymentTerms || null,
     delivery_terms: q.deliveryTerms || null,
