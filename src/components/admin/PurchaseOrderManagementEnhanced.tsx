@@ -2345,7 +2345,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 下推业务员询报（采购侧仅做下推动作，不创建业务员报价）
   const handlePushToSalesInquiry = (req: PurchaseRequirement) => {
     if (!req.purchaserFeedback) {
-      toast.error('请先完成智能对比建议并提交采购反馈');
+      toast.error('请先完成智能对比建议并保存采购反馈');
       return;
     }
     if (req.pushedToQuotation) {
@@ -2360,7 +2360,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     toast.success('已下推业务员询报');
   };
 
-  // 🔥 提交采购反馈
+  // 🔥 保存采购反馈（仅保存，不在此处下推）
   const handleSubmitFeedback = (feedback: PurchaserFeedback) => {
     if (!feedbackRequirement) return;
     
@@ -2378,8 +2378,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     });
     
     
-    toast.success('✅ 采购反馈已提交', {
-      description: `业务员 ${feedbackRequirement.createdBy} 将收到成本信息通知`,
+    toast.success('✅ 采购反馈已保存', {
+      description: '请在操作区点击“下推业务员询报”完成流转',
       duration: 4000
     });
     
@@ -2804,7 +2804,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 }`}
                                 title={
                                   !req.purchaserFeedback
-                                    ? '请先完成智能对比建议并提交采购反馈'
+                                    ? '请先完成智能对比建议并保存采购反馈'
                                     : req.pushedToQuotation
                                       ? '已下推业务员询报'
                                       : '下推业务员询报'

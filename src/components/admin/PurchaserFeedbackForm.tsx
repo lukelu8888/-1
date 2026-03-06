@@ -232,7 +232,7 @@ ${result.products.map((p, idx) => {
     toast.success('✅ 比价结果已确认');
   };
   
-  // 🔥 提交反馈
+  // 🔥 保存反馈（下推动作在操作区单独执行）
   const handleSubmit = () => {
     if (!comparisonResult) {
       toast.error('请先完成智能比价');
@@ -323,8 +323,8 @@ ${result.products.map((p, idx) => {
     // 🔥 提交反馈并同步采购员建议到QR单据
     onSubmit(feedback);
     
-    toast.success('✅ 采购反馈已提交', {
-      description: `业务员 ${qr.createdBy} 将收到成本信息和您的专业建议`,
+    toast.success('✅ 采购反馈已保存', {
+      description: '请在操作区点击“下推业务员询报”完成流转',
       duration: 4000
     });
     onOpenChange(false);
@@ -508,7 +508,7 @@ ${result.products.map((p, idx) => {
                 </Button>
                 <Button onClick={handleSubmit} className="bg-orange-600 hover:bg-orange-700">
                   <CheckCircle className="mr-2 h-4 w-4" />
-                  提交反馈给业务员
+                  保存反馈
                 </Button>
               </>
             )}
