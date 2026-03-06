@@ -85,6 +85,23 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     await refreshPurchaseRequirementsFromApi();
   };
 
+  const clearStaleQuotationPushState = async (qr: any) => {
+    const savedRequirement = await purchaseRequirementService.upsert({
+      ...qr,
+      pushedToQuotation: false,
+      pushedToQuotationDate: null,
+      pushedBy: null,
+      quotationNumber: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    if (!savedRequirement) {
+      throw new Error(`QR ${qr.requirementNo} 失效下推标记清理失败`)
+    }
+
+    await refreshPurchaseRequirementsFromApi();
+  };
+
   // 🔥 筛选业务员自己创建的QR（Admin可以看所有）
   const myQRs = useMemo(() => {
     // Admin可以看所有QR，业务员只能看自己创建的且在自己负责区域的
@@ -313,7 +330,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         } else {
           // 有标记但没有QT，说明之前创建失败，允许重新下推
           console.warn('⚠️ 检测到pushedToQuotation标记，但未找到对应的QT，允许重新下推');
-          toast.info('检测到之前下推失败，正在重新创建销售报价单...');
+          await clearStaleQuotationPushState(qr);
         }
       }
       
