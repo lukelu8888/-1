@@ -310,8 +310,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
             : rawCostPrice; // 其他货币原样保留，如有需要可扩展
 
         // 🔥 默认利润率18%计算销售价（基于 USD 成本）
-        const defaultMargin = 0.18;
-        const salesPrice = costPriceUSD * (1 + defaultMargin);
+        const defaultMarginPercent = 18;
+        const salesPrice = costPriceUSD * (1 + defaultMarginPercent / 100);
         const profit = salesPrice - costPriceUSD;
         
         // 总成本和总价（均为 USD）
@@ -324,7 +324,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           feedbackCurrency,
           costPriceUSD: costPriceUSD.toFixed(4),
           salesPrice: salesPrice.toFixed(4),
-          margin: (defaultMargin * 100) + '%'
+          margin: `${defaultMarginPercent}%`
         });
         
         return {
@@ -336,7 +336,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           unit: item.unit || 'PCS',
           costPrice: costPriceUSD,
           salesPrice: salesPrice,
-          profitMargin: defaultMargin,
+          profitMargin: defaultMarginPercent,
           profit: profit,
           totalCost: totalCost,
           totalPrice: totalPrice,
@@ -355,7 +355,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       const totalCost = quotationItems.reduce((sum: number, item: any) => sum + item.totalCost, 0);
       const totalPrice = quotationItems.reduce((sum: number, item: any) => sum + item.totalPrice, 0);
       const totalProfit = totalPrice - totalCost;
-      const profitRate = totalCost > 0 ? totalProfit / totalCost : 0;
+      const profitRate = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0;
       
       // 🔥 创建销售报价单（QT）- draft状态
       const newQuotation = {

@@ -194,6 +194,13 @@ export default function QuoteCreationIntelligent({
     return Number.isFinite(parsed) ? parsed : fallback;
   };
 
+  // 兼容旧数据：历史版本曾把利润率按小数保存（0.18），这里统一转成百分比（18）
+  const normalizeProfitMarginPercent = (value: unknown, fallback = 0) => {
+    const raw = toSafeNumber(value, fallback);
+    if (raw > 0 && raw < 1) return raw * 100;
+    return raw;
+  };
+
   const normalizeItem = (item: QuoteItem): QuoteItem => {
     const exchangeRate = toSafeNumber(item.exchangeRate, 7.2);
     const safeExchangeRate = exchangeRate > 0 ? exchangeRate : 7.2;
@@ -205,7 +212,7 @@ export default function QuoteCreationIntelligent({
       taxRate: toSafeNumber(item.taxRate, 0),
       exportRebateRate: toSafeNumber(item.exportRebateRate, 0),
       domesticFeesCNY: toSafeNumber(item.domesticFeesCNY, 0),
-      profitMargin: toSafeNumber(item.profitMargin, 0),
+      profitMargin: normalizeProfitMarginPercent(item.profitMargin, 0),
       freight: toSafeNumber(item.freight, 0),
       insuranceRate: toSafeNumber(item.insuranceRate, 0),
       quantity: toSafeNumber(item.quantity, 0)
