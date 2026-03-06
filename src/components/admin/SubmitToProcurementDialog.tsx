@@ -6,6 +6,7 @@ import { Label } from '../ui/label';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner@2.0.3';
+import { TRADE_TERMS_PRESETS, isPresetTradeTerm, resolveInitialTradeTerms } from '../../utils/tradeTerms';
 
 // 🔥 预设选项配置
 const PAYMENT_TERMS_PRESETS = [
@@ -66,7 +67,7 @@ export function SubmitToProcurementDialog({
   const [expectedQuoteDate, setExpectedQuoteDate] = useState(getDefaultQuoteDate()); // 🔥 默认：3天后
   const [remarks, setRemarks] = useState('');
   
-  const [tradeTerms, setTradeTerms] = useState('FOB');
+  const [tradeTerms, setTradeTerms] = useState(resolveInitialTradeTerms());
   const [paymentTerms, setPaymentTerms] = useState(PAYMENT_TERMS_PRESETS[0]); // 🔥 默认：第一条付款条款
   const [deliveryDate, setDeliveryDate] = useState(getDefaultDeliveryDate()); // 🔥 默认：30天后
   const [targetCostRange, setTargetCostRange] = useState('');
@@ -75,6 +76,7 @@ export function SubmitToProcurementDialog({
 
   // 🔥 控制是否使用自定义输入
   const [isCustomPayment, setIsCustomPayment] = useState(false);
+  const [isCustomTradeTerms, setIsCustomTradeTerms] = useState(false);
   const [isCustomQuality, setIsCustomQuality] = useState(false);
   const [isCustomPackaging, setIsCustomPackaging] = useState(false);
 
@@ -113,14 +115,20 @@ export function SubmitToProcurementDialog({
       setPaymentTerms(PAYMENT_TERMS_PRESETS[0]);
       setQualityRequirements(QUALITY_REQUIREMENTS_PRESETS[0]);
       setPackagingRequirements(PACKAGING_REQUIREMENTS_PRESETS[0]);
-      setTradeTerms('FOB');
+      const initialTradeTerms = resolveInitialTradeTerms(
+        requirement?.tradeTerms,
+        requirement?.deliveryTerms,
+        requirement?.sourcePricing?.incoterm,
+      );
+      setTradeTerms(initialTradeTerms);
       setTargetCostRange('');
       setRemarks('');
       setIsCustomPayment(false);
+      setIsCustomTradeTerms(!isPresetTradeTerm(initialTradeTerms));
       setIsCustomQuality(false);
       setIsCustomPackaging(false);
     }
-  }, [open]);
+  }, [open, requirement]);
 
   const handleSubmit = async () => {
     // 验证必填字段
@@ -134,6 +142,10 @@ export function SubmitToProcurementDialog({
     }
     if (!paymentTerms) {
       toast.error('请填写付款条款');
+      return;
+    }
+    if (!tradeTerms.trim()) {
+      toast.error('请填写明确的贸易条款');
       return;
     }
 
@@ -157,7 +169,7 @@ export function SubmitToProcurementDialog({
       setExpectedQuoteDate('');
       setDeliveryDate('');
       setPaymentTerms('');
-      setTradeTerms('FOB');
+      setTradeTerms(resolveInitialTradeTerms());
       setTargetCostRange('');
       setQualityRequirements('');
       setPackagingRequirements('');
@@ -437,17 +449,51 @@ export function SubmitToProcurementDialog({
                         <Label className="text-xs uppercase tracking-wide text-gray-700">
                           贸易条款 *
                         </Label>
-                        <select
-                          value={tradeTerms}
-                          onChange={(e) => setTradeTerms(e.target.value)}
-                          className="w-full text-xs border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:border-black"
-                        >
-                          <option value="FOB">FOB</option>
-                          <option value="CIF">CIF</option>
-                          <option value="EXW">EXW</option>
-                          <option value="CNF">CNF</option>
-                          <option value="DDP">DDP</option>
-                        </select>
+                        {!isCustomTradeTerms ? (
+                          <select
+                            value={isPresetTradeTerm(tradeTerms) ? tradeTerms : '自定义...'}
+                            onChange={(e) => {
+                              if (e.target.value === '自定义...') {
+                                setIsCustomTradeTerms(true);
+                                setTradeTerms('');
+                              } else {
+                                setTradeTerms(e.target.value);
+                              }
+                            }}
+                            className="w-full text-xs border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:border-black"
+                          >
+                            {TRADE_TERMS_PRESETS.map((preset) => (
+                              <option key={preset} value={preset}>{preset}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="flex flex-col gap-2">
+                            <Input
+                              placeholder="例如：EXW（不含13%增值税，工厂交货）/ FOB 厦门港（含13%增值税）"
+                              value={tradeTerms}
+                              onChange={(e) => setTradeTerms(e.target.value)}
+                              className="text-xs border-gray-300 focus:border-black"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const fallbackTradeTerms = resolveInitialTradeTerms(
+                                  requirement?.tradeTerms,
+                                  requirement?.deliveryTerms,
+                                  requirement?.sourcePricing?.incoterm,
+                                );
+                                setIsCustomTradeTerms(false);
+                                setTradeTerms(isPresetTradeTerm(fallbackTradeTerms) ? fallbackTradeTerms : TRADE_TERMS_PRESETS[0]);
+                              }}
+                              className="px-2 py-1 text-xs border border-gray-300 hover:bg-gray-50 self-start"
+                            >
+                              返回
+                            </button>
+                          </div>
+                        )}
+                        <p className="text-[10px] text-gray-500 leading-relaxed">
+                          请明确写清税态与地点，例如“EXW（不含13%增值税，工厂交货）”或“FOB 厦门港（含13%增值税）”。
+                        </p>
                       </div>
 
                       <div className="space-y-2">
