@@ -23,7 +23,7 @@ export interface SalesQuotationItem {
   
   // 销售报价
   salesPrice: number; // 销售价格
-  profitMargin: number; // 利润率 (0.18 = 18%)
+  profitMargin: number; // 利润率百分比（18 = 18%）
   profit: number; // 利润金额
   
   hsCode?: string;
@@ -219,11 +219,10 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
 
   const addQuotation = async (quotation: SalesQuotation) => {
     const saved = await salesQuotationService.upsert(quotation);
-    if (saved) {
-      setQuotations(prev => [saved as SalesQuotation, ...prev]);
-    } else {
-      setQuotations(prev => [quotation, ...prev]);
+    if (!saved) {
+      throw new Error('Supabase upsert sales quotation failed');
     }
+    setQuotations(prev => [saved as SalesQuotation, ...prev]);
     emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, quotation, {
       approvalStatus: quotation.approvalStatus,
       customerStatus: quotation.customerStatus,
@@ -234,7 +233,10 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
     const currentQuotation = quotations.find((qt) => qt.id === id);
     const merged = { ...currentQuotation, ...updates, updatedAt: new Date().toISOString() } as SalesQuotation;
     const saved = await salesQuotationService.upsert(merged);
-    setQuotations(prev => prev.map(qt => qt.id === id ? (saved as SalesQuotation || merged) : qt));
+    if (!saved) {
+      throw new Error('Supabase update sales quotation failed');
+    }
+    setQuotations(prev => prev.map(qt => qt.id === id ? (saved as SalesQuotation) : qt));
     if (updates.customerStatus === 'sent' || updates.customerStatus === 'viewed') {
       emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_SENT, { id, qtNumber: String(currentQuotation?.qtNumber || id) }, { customerStatus: updates.customerStatus });
     }

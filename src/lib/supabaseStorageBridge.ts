@@ -2,6 +2,15 @@ import { supabase } from './supabase';
 
 const STORAGE_TABLE = 'client_kv_store';
 const AUTH_STORAGE_KEY = 'cosun_supabase_auth';
+const BUSINESS_STORAGE_KEY_PATTERNS = [
+  /^salesQuotations$/i,
+  /^sales_quotation_management_cache_v1:/i,
+  /^sales_quotation_draft_overrides$/i,
+  /^customer_quotations_bridge$/i,
+  /^customer_decline_bridge$/i,
+  /^approval_center_pending_bridge_v1$/i,
+  /^salesContracts$/i,
+];
 
 type NativeStorage = {
   getItem: (key: string) => string | null;
@@ -24,6 +33,26 @@ let hasBackfilledCurrentScope = false;
 
 function isAuthStorageKey(key: string) {
   return key === AUTH_STORAGE_KEY;
+}
+
+function isBusinessStorageKey(key: string) {
+  return BUSINESS_STORAGE_KEY_PATTERNS.some((pattern) => pattern.test(key));
+}
+
+function reportBusinessStorageViolation(action: 'setItem' | 'removeItem', key: string) {
+  if (!isBusinessStorageKey(key)) return;
+  console.warn(`[SupabaseStorageBridge] Business storage key detected via ${action}: ${key}. Auto-syncing to Supabase KV.`);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('erp:business-storage-violation', {
+        detail: {
+          action,
+          key,
+          occurredAt: new Date().toISOString(),
+        },
+      }),
+    );
+  }
 }
 
 async function resolveScopeId(): Promise<string | null> {
@@ -167,6 +196,7 @@ function patchStoragePrototype() {
       nativeStorage.setItem(key, value);
       return;
     }
+    reportBusinessStorageViolation('setItem', key);
     cache.set(key, value);
     pendingDeletes.delete(key);
     pendingUpserts.set(key, value);
@@ -179,6 +209,7 @@ function patchStoragePrototype() {
       nativeStorage.removeItem(key);
       return;
     }
+    reportBusinessStorageViolation('removeItem', key);
     cache.delete(key);
     pendingUpserts.delete(key);
     pendingDeletes.add(key);

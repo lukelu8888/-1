@@ -68,6 +68,7 @@
       },
       "scripts": {
           "dev": "vite",
-          "build": "vite build"
+          "build": "vite build",
+          "guard:business-storage": "node ./scripts/guard-business-storage.mjs"
       }
   }

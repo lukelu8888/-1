@@ -16,7 +16,7 @@ import { useInquiry } from '../../contexts/InquiryContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：销售报价Context
 import { nextQRNumber, nextQTNumber } from '../../utils/xjNumberGenerator'; // 🔥 新增：生成QT/QR编号
 import { getCurrentUser } from '../../utils/dataIsolation';
-import { purchaseRequirementService, salesQuotationService } from '../../lib/supabaseService';
+import { purchaseRequirementService } from '../../lib/supabaseService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { formatDocumentNumber, getDocumentLevel, getDocumentColorClass } from '../../utils/documentNumbering'; // 🔥 新增：7级编号体系辅助函数
 
@@ -416,12 +416,9 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       };
       
       
-      // 🔥 调用后端接口创建报价单
-      
       try {
-        await salesQuotationService.upsert(newQuotation);
-        
-        addSalesQuotation(newQuotation);
+        // Supabase-first: 统一走 Context -> salesQuotationService，禁止本地兜底写入
+        await addSalesQuotation(newQuotation);
         
         // 🔥 标记QR为已下推
         updatePurchaseRequirement(qr.id, {
@@ -970,57 +967,62 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
             setShowQuoteCreation(false);
             setSelectedQRForQuote(null);
           }}
-          onSubmit={(quoteData) => {
-            
-            // 🔥 转换为 SalesQuotation 格式并保存到 Context
-            const salesQuotation = {
-              id: `sq-${Date.now()}`,
-              qtNumber: quoteData.qtNumber || quoteData.quoteNo,
-              qrNumber: quoteData.qrNumber || quoteData.requirementNo,
-              inqNumber: quoteData.inquiryNo || '',
+          onSubmit={async (quoteData) => {
+            try {
+              // 🔥 转换为 SalesQuotation 格式并保存到 Context
+              const salesQuotation = {
+                id: `sq-${Date.now()}`,
+                qtNumber: quoteData.qtNumber || quoteData.quoteNo,
+                qrNumber: quoteData.qrNumber || quoteData.requirementNo,
+                inqNumber: quoteData.inquiryNo || '',
+                
+                region: quoteData.region || 'NA',
+                customerName: quoteData.customerName || '',
+                customerEmail: quoteData.customerEmail || '',
+                customerCompany: quoteData.customerName || '',
+                
+                salesPerson: currentUser?.email || '',
+                salesPersonName: currentUser?.name || '',
+                
+                items: quoteData.items || [],
+                
+                // 🔥 财务汇总数据（使用智能核算的准确数据）
+                totalCost: quoteData.totalCost,
+                totalPrice: quoteData.totalAmount,
+                totalProfit: quoteData.totalProfit,
+                profitRate: quoteData.profitMargin,
+                totalAmount: quoteData.totalAmount, // 🔥 兼容字段
+                
+                currency: 'USD',
+                paymentTerms: '30% T/T in advance, 70% before shipment',
+                deliveryTerms: 'FOB Xiamen',
+                deliveryDate: '',
+                
+                approvalStatus: 'draft' as const,
+                approvalChain: [],
+                customerStatus: 'not_sent' as const,
+                
+                validUntil: new Date(Date.now() + quoteData.validityDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                version: 1,
+                
+                createdAt: quoteData.createdAt || new Date().toISOString(),
+                updatedAt: quoteData.updatedAt || new Date().toISOString(),
+                notes: quoteData.approvalNotes || ''
+              };
               
-              region: quoteData.region || 'NA',
-              customerName: quoteData.customerName || '',
-              customerEmail: quoteData.customerEmail || '',
-              customerCompany: quoteData.customerName || '',
+              await addSalesQuotation(salesQuotation);
               
-              salesPerson: currentUser?.email || '',
-              salesPersonName: currentUser?.name || '',
-              
-              items: quoteData.items || [],
-              
-              // 🔥 财务汇总数据（使用智能核算的准确数据）
-              totalCost: quoteData.totalCost,
-              totalPrice: quoteData.totalAmount,
-              totalProfit: quoteData.totalProfit,
-              profitRate: quoteData.profitMargin,
-              totalAmount: quoteData.totalAmount, // 🔥 兼容字段
-              
-              currency: 'USD',
-              paymentTerms: '30% T/T in advance, 70% before shipment',
-              deliveryTerms: 'FOB Xiamen',
-              deliveryDate: '',
-              
-              approvalStatus: 'draft' as const,
-              approvalChain: [],
-              customerStatus: 'not_sent' as const,
-              
-              validUntil: new Date(Date.now() + quoteData.validityDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              version: 1,
-              
-              createdAt: quoteData.createdAt || new Date().toISOString(),
-              updatedAt: quoteData.updatedAt || new Date().toISOString(),
-              notes: quoteData.approvalNotes || ''
-            };
-            
-            addSalesQuotation(salesQuotation);
-            
-            toast.success('报价已创建！', {
-              description: `报价单号：${quoteData.quoteNo}\n总额：$${quoteData.totalAmount.toFixed(2)}\n利润率：${quoteData.profitMargin.toFixed(1)}%`,
-              duration: 3000
-            });
-            setShowQuoteCreation(false);
-            setSelectedQRForQuote(null);
+              toast.success('报价已创建！', {
+                description: `报价单号：${quoteData.quoteNo}\n总额：$${quoteData.totalAmount.toFixed(2)}\n利润率：${quoteData.profitMargin.toFixed(1)}%`,
+                duration: 3000
+              });
+              setShowQuoteCreation(false);
+              setSelectedQRForQuote(null);
+            } catch (err: any) {
+              toast.error('创建报价失败', {
+                description: err?.message || 'Supabase 写入失败',
+              });
+            }
           }}
         />
       )}
