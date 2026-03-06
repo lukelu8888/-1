@@ -8,10 +8,46 @@ function handleError(error: any, context: string) {
   return null
 }
 
+function buildSupabaseError(
+  context: string,
+  error: any,
+  options: {
+    removedColumns?: string[]
+    adjustedProfitRate?: boolean
+  } = {},
+) {
+  const details: string[] = []
+  const rawMessage = String(error?.message || error || 'Unknown Supabase error').trim()
+  if (rawMessage) details.push(rawMessage)
+  if (options.removedColumns?.length) {
+    details.push(`schema fallback removed columns: ${options.removedColumns.join(', ')}`)
+  }
+  if (options.adjustedProfitRate) {
+    details.push('profit_rate auto-converted from percent to decimal for old schema')
+  }
+  return new Error(`${context} failed${details.length ? `: ${details.join(' | ')}` : ''}`)
+}
+
 function extractMissingColumn(error: any): string | null {
   const message = String(error?.message || '')
   const match = message.match(/Could not find the ['"]([^'"]+)['"] column/i)
   return match?.[1] || null
+}
+
+function shouldDowngradeProfitRate(error: any, payload: Record<string, any>, adjustedProfitRate: boolean) {
+  if (adjustedProfitRate) return false
+  if (!Object.prototype.hasOwnProperty.call(payload, 'profit_rate')) return false
+  const profitRate = Number(payload.profit_rate)
+  if (!Number.isFinite(profitRate) || profitRate <= 1) return false
+  const message = String(error?.message || '')
+  return /numeric field overflow|value overflows numeric format/i.test(message)
+}
+
+function normalizeProfitRatePercent(value: any): number {
+  const raw = Number(value)
+  if (!Number.isFinite(raw)) return 0
+  if (raw > 0 && raw < 1) return raw * 100
+  return raw
 }
 
 async function upsertWithSchemaFallback(
@@ -22,6 +58,7 @@ async function upsertWithSchemaFallback(
 ) {
   const payload: Record<string, any> = { ...row }
   const removedColumns: string[] = []
+  let adjustedProfitRate = false
   for (let i = 0; i < 12; i++) {
     const { data, error } = await supabase
       .from(table)
@@ -32,6 +69,9 @@ async function upsertWithSchemaFallback(
       if (removedColumns.length > 0) {
         console.warn(`[Supabase] ${context}: schema drift fallback removed columns: ${removedColumns.join(', ')}`)
       }
+      if (adjustedProfitRate) {
+        console.warn(`[Supabase] ${context}: profit_rate downgraded to decimal for old schema compatibility`)
+      }
       return { data, error: null }
     }
     const missingColumn = extractMissingColumn(error)
@@ -40,9 +80,20 @@ async function upsertWithSchemaFallback(
       removedColumns.push(missingColumn)
       continue
     }
-    return { data: null, error }
+    if (shouldDowngradeProfitRate(error, payload, adjustedProfitRate)) {
+      payload.profit_rate = Number((Number(payload.profit_rate) / 100).toFixed(6))
+      adjustedProfitRate = true
+      continue
+    }
+    return {
+      data: null,
+      error: buildSupabaseError(context, error, { removedColumns, adjustedProfitRate }),
+    }
   }
-  return { data: null, error: { message: `${context}: too many schema fallback retries` } }
+  return {
+    data: null,
+    error: buildSupabaseError(context, { message: `${context}: too many schema fallback retries` }, { removedColumns, adjustedProfitRate }),
+  }
 }
 
 // ============================================================
@@ -365,7 +416,7 @@ export const salesQuotationService = {
       'id',
       'upsert salesQuotation',
     )
-    if (error) return handleError(error, 'upsert salesQuotation')
+    if (error) throw (error instanceof Error ? error : buildSupabaseError('upsert salesQuotation', error))
     return fromSalesQuotationRow(data)
   },
 
@@ -886,7 +937,7 @@ function fromSalesQuotationRow(r: any) {
     totalCost: r.total_cost || 0,
     totalPrice: r.total_price || r.total_amount || 0,
     totalProfit: r.total_profit || 0,
-    profitRate: r.profit_rate || 0,
+    profitRate: normalizeProfitRatePercent(r.profit_rate || 0),
     currency: r.currency || 'USD',
     paymentTerms: r.payment_terms,
     deliveryTerms: r.delivery_terms,

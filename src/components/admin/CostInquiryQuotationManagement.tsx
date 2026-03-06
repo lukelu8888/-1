@@ -67,6 +67,23 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   const [selectedQRForQuote, setSelectedQRForQuote] = useState<any>(null);
   const [pushingQrId, setPushingQrId] = useState<string | null>(null);
   
+  const persistQuotationPushState = async (qr: any, qtNumber: string) => {
+    const pushTimestamp = new Date().toISOString();
+    const savedRequirement = await purchaseRequirementService.upsert({
+      ...qr,
+      pushedToQuotation: true,
+      pushedToQuotationDate: pushTimestamp,
+      pushedBy: currentUser?.email || '',
+      quotationNumber: qtNumber,
+      updatedAt: pushTimestamp,
+    });
+
+    if (!savedRequirement) {
+      throw new Error(`QR ${qr.requirementNo} 已创建 QT，但回写 QR 下推状态失败`)
+    }
+
+    await refreshPurchaseRequirementsFromApi();
+  };
 
   // 🔥 筛选业务员自己创建的QR（Admin可以看所有）
   const myQRs = useMemo(() => {
@@ -489,13 +506,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           localStorage.setItem(cacheKey, JSON.stringify(deduped.slice(0, 500)));
         } catch {}
         
-        // 🔥 标记QR为已下推
-        updatePurchaseRequirement(qr.id, {
-          pushedToQuotation: true,
-          pushedToQuotationDate: new Date().toISOString(),
-          pushedBy: currentUser?.email || '',
-          quotationNumber: newQuotation.qtNumber
-        });
+        // Supabase-first：业务流转关系必须真实落库后才算成功
+        await persistQuotationPushState(qr, newQuotation.qtNumber);
         
         
         toast.success(`✅ 成功下推到报价管理！销售报价单号：${newQuotation.qtNumber}`, {
@@ -1099,6 +1111,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 ];
                 localStorage.setItem(cacheKey, JSON.stringify(mergedCache.slice(0, 500)));
               } catch {}
+
+              await persistQuotationPushState(selectedQRForQuote, salesQuotation.qtNumber);
               
               toast.success('报价已创建！', {
                 description: `报价单号：${quoteData.quoteNo}\n总额：$${quoteData.totalAmount.toFixed(2)}\n利润率：${quoteData.profitMargin.toFixed(1)}%`,
