@@ -1138,7 +1138,7 @@ export default function QuoteCreationIntelligent({
                         step="0.1"
                         value={globalDefaults.profitMargin}
                         onChange={(e) => setGlobalDefaults(prev => ({ ...prev, profitMargin: Number(e.target.value) }))}
-                        className="w-12 px-1.5 py-0.5 border rounded text-xs text-center font-semibold"
+                        className="w-20 px-1.5 py-0.5 border rounded text-xs text-center font-semibold"
                         placeholder="20"
                         title="输入数字代表百分比，如输入20代表20%"
                       />
@@ -1312,7 +1312,7 @@ export default function QuoteCreationIntelligent({
                             </select>
                           </div>
                           
-                          <div className="flex-none w-20">
+                          <div className="flex-none w-32">
                             <label className="block text-xs text-slate-600 mb-1">
                               供货单价 
                               <span className="text-green-500 ml-1" title="已解锁，可手动修改">🔓</span>

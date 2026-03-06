@@ -223,7 +223,18 @@ export function SalesQuotationManagement({
   const { addQuotation: addCustomerQuotation } = useQuotations(); // 🔥 导入客户报价Context
   const { orders, addOrder } = useOrders(); // 🔥 获取订单和添加订单函数
   const { purchaseRequirements, updatePurchaseRequirement } = usePurchaseRequirements(); // 🔥 获取采购需求和更新函数
-  const currentUser = getCurrentUser();
+  const [currentUser, setCurrentUser] = useState<any>(() => getCurrentUser());
+
+  useEffect(() => {
+    const syncCurrentUser = () => setCurrentUser(getCurrentUser());
+    syncCurrentUser();
+    window.addEventListener('userChanged', syncCurrentUser as EventListener);
+    window.addEventListener('storage', syncCurrentUser);
+    return () => {
+      window.removeEventListener('userChanged', syncCurrentUser as EventListener);
+      window.removeEventListener('storage', syncCurrentUser);
+    };
+  }, []);
 
   // 一次性修复：把 salesPerson=admin@cosun.com 的本地报价单更正为当前登录用户
   React.useEffect(() => {
@@ -258,7 +269,14 @@ export function SalesQuotationManagement({
   // 🔥 加载数据的函数
   const loadSalesQuotations = React.useCallback(() => {
     setLoadingFromApi(true);
-    salesQuotationService.getAll()
+    const role = String(currentUser?.userRole || currentUser?.role || '').trim();
+    const email = String(currentUser?.email || '').trim();
+    const canReadAll = ['Admin', 'CEO', 'Boss', 'CFO', 'Sales_Director'].includes(role);
+    const fetchPromise = email && !canReadAll
+      ? salesQuotationService.getBySalesPerson(email)
+      : salesQuotationService.getAll();
+
+    fetchPromise
       .then((rows) => {
         const quotations: any[] = Array.isArray(rows) ? rows : [];
         if (quotations.length === 0) {
@@ -324,7 +342,7 @@ export function SalesQuotationManagement({
       .finally(() => {
         setLoadingFromApi(false);
       });
-  }, [currentUser?.email]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentUser?.email, currentUser?.role, currentUser?.userRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 🔥 初始加载
   useEffect(() => {

@@ -25,20 +25,30 @@ export function getCurrentUser(): AuthUser | null {
   if (typeof window === 'undefined') return null;
 
   try {
-    // 1. 优先读取 Supabase Auth 写入的 cosun_auth_user
+    // 1. 读取旧 RBAC 用户（用于补齐 role/name/region）
+    const rbacUserStr = localStorage.getItem('cosun_current_user');
+    const rbacUser = rbacUserStr ? JSON.parse(rbacUserStr) : null;
+
+    // 2. 优先读取 Supabase Auth 写入的 cosun_auth_user
     const authUserStr = localStorage.getItem('cosun_auth_user');
     if (authUserStr) {
       const authUser = JSON.parse(authUserStr);
       // 验证格式有效（必须有 email 和 type）
       if (authUser?.email && authUser?.type) {
-        return authUser as AuthUser;
+        const sameEmail = rbacUser?.email && rbacUser.email === authUser.email;
+        return {
+          ...authUser,
+          id: authUser.id ?? (sameEmail ? rbacUser.id : undefined),
+          name: authUser.name ?? (sameEmail ? rbacUser.name : undefined),
+          role: authUser.role ?? (sameEmail ? rbacUser.role : undefined),
+          userRole: authUser.userRole ?? (sameEmail ? (rbacUser.userRole || rbacUser.role) : undefined),
+          region: authUser.region ?? (sameEmail ? rbacUser.region : undefined),
+        } as AuthUser;
       }
     }
 
-    // 2. 降级：读取旧 RBAC cosun_current_user
-    const rbacUserStr = localStorage.getItem('cosun_current_user');
+    // 3. 降级：读取旧 RBAC cosun_current_user
     if (rbacUserStr) {
-      const rbacUser = JSON.parse(rbacUserStr);
       if (!rbacUser?.email) return null;
 
       // 根据 role 推断 type（兼容大小写）

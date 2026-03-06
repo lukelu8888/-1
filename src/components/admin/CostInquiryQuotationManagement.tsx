@@ -16,7 +16,7 @@ import { useInquiry } from '../../contexts/InquiryContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：销售报价Context
 import { nextQRNumber, nextQTNumber } from '../../utils/xjNumberGenerator'; // 🔥 新增：生成QT/QR编号
 import { getCurrentUser } from '../../utils/dataIsolation';
-import { purchaseRequirementService } from '../../lib/supabaseService';
+import { purchaseRequirementService, salesQuotationService } from '../../lib/supabaseService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { formatDocumentNumber, getDocumentLevel, getDocumentColorClass } from '../../utils/documentNumbering'; // 🔥 新增：7级编号体系辅助函数
 
@@ -34,11 +34,22 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   const updatePurchaseRequirement = purchaseContext.updateRequirement;
   const deleteRequirement = purchaseContext.deleteRequirement;
   const refreshPurchaseRequirementsFromApi = purchaseContext.refreshPurchaseRequirementsFromApi;
-  const currentUser = getCurrentUser();
+  const [currentUser, setCurrentUser] = useState<any>(() => getCurrentUser());
   const [refreshing, setRefreshing] = useState(false);
   
   // 🔥 新增：销售报价Context
   const { addQuotation: addSalesQuotation, updateQuotation: updateSalesQuotation, quotations: allSalesQuotations } = useSalesQuotations();
+
+  useEffect(() => {
+    const syncCurrentUser = () => setCurrentUser(getCurrentUser());
+    syncCurrentUser();
+    window.addEventListener('userChanged', syncCurrentUser as EventListener);
+    window.addEventListener('storage', syncCurrentUser);
+    return () => {
+      window.removeEventListener('userChanged', syncCurrentUser as EventListener);
+      window.removeEventListener('storage', syncCurrentUser);
+    };
+  }, []);
 
   const [filterStatus, setFilterStatus] = useState<TabType>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -240,13 +251,44 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       
       // 🔥 智能检查是否已经下推过（检查标记 AND 是否真的有QT）
       if (qr.pushedToQuotation) {
-        // 检查是否真的有对应的QT
-        const existingQT = allSalesQuotations.find(qt => qt.qrNumber === qr.requirementNo);
+        // 检查是否真的有对应的QT（以 Supabase 为准）
+        const existingRows = await salesQuotationService.getByQrNumber(qr.requirementNo);
+        const existingQT = (Array.isArray(existingRows) && existingRows.length > 0)
+          ? existingRows[0]
+          : allSalesQuotations.find(qt => qt.qrNumber === qr.requirementNo);
         
         if (existingQT) {
+          const activeEmail = String(currentUser?.email || '').toLowerCase();
+          const ownerEmail = String(existingQT.salesPerson || '').toLowerCase();
+
+          // 兼容历史错归属：如果该 QR 属于当前业务员，但 QT 归属被写成他人，自动修正到当前业务员
+          if (
+            activeEmail &&
+            ownerEmail &&
+            ownerEmail !== activeEmail &&
+            String(qr.createdBy || '').toLowerCase() === activeEmail
+          ) {
+            const repaired = await salesQuotationService.upsert({
+              ...existingQT,
+              salesPerson: currentUser?.email || existingQT.salesPerson,
+              salesPersonName: currentUser?.name || existingQT.salesPersonName || '',
+            });
+            if (!repaired) {
+              throw new Error('修复 QT 归属失败：Supabase upsert 失败');
+            }
+            toast.success(`✅ 已修复历史归属：${existingQT.qtNumber} 归属到 ${currentUser?.email}`);
+            if (onSwitchToQuotationManagement) {
+              onSwitchToQuotationManagement(existingQT.qtNumber);
+            }
+            return;
+          }
+
           // 真的有QT，不允许重复下推
           console.warn('⚠️ 此采购需求已下推过，且找到对应的QT:', existingQT.qtNumber);
           toast.info(`ℹ️ 此采购需求已下推到报价管理，QT单号：${existingQT.qtNumber}，请前往报价管理模块查看`);
+          if (onSwitchToQuotationManagement) {
+            onSwitchToQuotationManagement(existingQT.qtNumber);
+          }
           return;
         } else {
           // 有标记但没有QT，说明之前创建失败，允许重新下推
