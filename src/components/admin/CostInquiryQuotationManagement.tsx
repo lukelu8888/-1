@@ -715,6 +715,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                   const config = getStatusConfig(qr.status);
                   // 🔥 修复：检查采购反馈数据（purchaserFeedback）而不是selectedSupplier
                   const hasPurchaserFeedback = qr.purchaserFeedback && qr.purchaserFeedback.status === 'quoted';
+                  const canPushByStatus = ['submitted', 'partial', 'processing', 'completed'].includes(String(qr.status || ''));
+                  const showPushButton = canPushByStatus || hasPurchaserFeedback;
                   const isSelected = selectedIds.has(qr.id);
 
                   return (
@@ -833,25 +835,13 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                             </Button>
                           )}
 
-                          {/* 已提交状态：已有成本反馈时显示"下推报价管理"，否则同时显示状态提示和下推按钮 */}
-                          {qr.status === 'partial' && !hasPurchaserFeedback && (
+                          {/* 可下推状态：显示“下推报价管理”（完成态也允许下推） */}
+                          {showPushButton && (
                             <Button
                               size="sm"
                               className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-700"
                               onClick={() => handlePushToQuotationManagement(qr)}
-                              title="跳过采购反馈，直接下推到报价管理"
-                            >
-                              <Package className="w-3 h-3 mr-1" />
-                              下推报价管理
-                            </Button>
-                          )}
-
-                          {/* 🔥 已反馈成本：下推到报价管理 */}
-                          {hasPurchaserFeedback && (
-                            <Button
-                              size="sm"
-                              className="h-7 px-2 text-xs bg-blue-600 hover:bg-blue-700"
-                              onClick={() => handlePushToQuotationManagement(qr)}
+                              title={hasPurchaserFeedback ? '按采购反馈下推到报价管理' : '直接下推到报价管理'}
                             >
                               <Package className="w-3 h-3 mr-1" />
                               下推报价管理
