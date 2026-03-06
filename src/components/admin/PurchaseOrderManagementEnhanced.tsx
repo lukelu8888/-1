@@ -77,7 +77,7 @@ import {
   desensitizeFeedback,
   generateXJDocumentData
 } from './purchase-order/purchaseOrderUtils'; // 🔥 从工具函数文件导入
-import { addTombstones } from '../../lib/erp-core/deletion-tombstone';
+import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 
 /**
  * 🔥 采购订单管理 - 台湾大厂风格
@@ -218,6 +218,15 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [showFeedbackReminderDialog, setShowFeedbackReminderDialog] = useState(false);
   const [acceptedQuotationNo, setAcceptedQuotationNo] = useState<string>('');
   const [salesContractsLite, setSalesContractsLite] = useState<any[]>([]);
+  const getQuotationMarkers = React.useCallback((q: any) => {
+    return [
+      q?.id,
+      q?.quotationNo,
+      q?.quotationNumber,
+      q?.bjNumber,
+      q?.displayNumber,
+    ].filter(Boolean).map((v) => String(v));
+  }, []);
 
   // Supabase-first: 供应商数据从 companies 表读取，静态 suppliersDatabase 仅作加载失败兜底
   const [suppliersFromApi, setSuppliersFromApi] = useState<Supplier[]>([]);
@@ -301,12 +310,13 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     try {
       const rows = await supplierQuotationService.getAll();
       const apiList: any[] = Array.isArray(rows) ? rows : [];
-      setSupplierQuotations(apiList);
+      const visibleList = filterNotDeleted('quotation', apiList, (q: any) => getQuotationMarkers(q));
+      setSupplierQuotations(visibleList);
     } catch (e: any) {
       console.warn('⚠️ [loadSupplierQuotations] Supabase 读取失败:', e?.message);
       setSupplierQuotations([]);
     }
-  }, []);
+  }, [getQuotationMarkers]);
 
   // Apply status change to local state after Supabase success
   const applyLocalQuotationStatus = React.useCallback((id: string, status: 'accepted' | 'rejected') => {
@@ -1679,46 +1689,36 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
     const ids = [...selectedQuotationIds];
     const deletedQuotationRows = supplierQuotations.filter((q: any) => ids.includes(String(q.id)));
-    const results = await Promise.allSettled(
-      ids.map((id) => supplierQuotationService.delete(String(id)))
+    // 采购侧删除采用“视图墓碑删除”：不删除 Supabase 原始 BJ，避免影响供应商侧“我的报价”
+    const tombstoneMarkers = Array.from(
+      new Set(
+        deletedQuotationRows.flatMap((q: any) => getQuotationMarkers(q))
+      )
     );
+    addTombstones('quotation', tombstoneMarkers, {
+      reason: 'manual-hide-admin-supplier-quotation',
+      deletedBy: user?.email || 'admin',
+    });
 
-    const successCount = results.filter((r) => r.status === 'fulfilled').length;
-    const failedCount = ids.length - successCount;
-    const failedIds = ids.filter((_, idx) => results[idx].status === 'rejected');
+    toast.success(`已从采购侧列表删除 ${ids.length} 条供应商报价`, { duration: 3000 });
 
-    if (successCount > 0) {
-      toast.success(`已永久删除 ${successCount} 条供应商报价`, { duration: 3000 });
-      addTombstones('quotation', ids, {
-        reason: 'manual-delete-admin-supplier-quotation',
-        deletedBy: user?.email || 'admin',
-      });
-
-      // 下游(BJ)删除后：上游(XJ)立即恢复为可编辑/可下推（状态从 quoted 回滚到 sent）
-      const successIds = ids.filter((_, idx) => results[idx].status === 'fulfilled');
-      const successRows = deletedQuotationRows.filter((q: any) => successIds.includes(String(q.id)));
-      const remainingQuotationList = supplierQuotations.filter((q: any) => !successIds.includes(String(q.id)));
-      await Promise.all(successRows.map(async (q: any) => {
-        const key = getQuotationXJKey(q);
-        if (!key) return;
-        const xj = xjs.find((r) => getXJKey(r) === key);
-        if (!xj) return;
-        const stillHasDownstream = remainingQuotationList.some((rq: any) => getQuotationXJKey(rq) === key);
-        if (!stillHasDownstream) {
-          const filteredQuotes = (xj.quotes || []).filter((qt: any) => String(qt?.quotationNo || '').trim() !== String(q?.quotationNo || '').trim());
-          await updateXJ(xj.id, {
-            status: 'sent' as any,
-            supplierQuotationNo: '',
-            quotes: filteredQuotes,
-          });
-        }
-      }));
-    }
-
-    if (failedCount > 0) {
-      toast.error(`删除失败 ${failedCount} 条，请重试`, { duration: 4000 });
-      console.warn('⚠️ [BatchDeleteSupplierQuotation] failed ids:', failedIds);
-    }
+    // 下游(BJ)删除后：上游(XJ)立即恢复为可编辑/可下推（状态从 quoted 回滚到 sent）
+    const remainingQuotationList = supplierQuotations.filter((q: any) => !ids.includes(String(q.id)));
+    await Promise.all(deletedQuotationRows.map(async (q: any) => {
+      const key = getQuotationXJKey(q);
+      if (!key) return;
+      const xj = xjs.find((r) => getXJKey(r) === key);
+      if (!xj) return;
+      const stillHasDownstream = remainingQuotationList.some((rq: any) => getQuotationXJKey(rq) === key);
+      if (!stillHasDownstream) {
+        const filteredQuotes = (xj.quotes || []).filter((qt: any) => String(qt?.quotationNo || '').trim() !== String(q?.quotationNo || '').trim());
+        await updateXJ(xj.id, {
+          status: 'sent' as any,
+          supplierQuotationNo: '',
+          quotes: filteredQuotes,
+        });
+      }
+    }));
 
     await loadSupplierQuotationsFromApi();
     setSelectedQuotationIds([]);
@@ -2775,51 +2775,44 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   </Button>
                                 </>
                               )}
-                              {/* 🔥 智能采购反馈按钮 - 当有XJ询价单时显示 */}
-                              {(dynamicStatus === 'processing' || dynamicStatus === 'partial') && !req.purchaserFeedback && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleSmartFeedback(req)}
-                                  className="h-6 text-[12px] bg-green-600 hover:bg-green-700 px-2 gap-1"
-                                  title="智能提取BJ报价，反馈给业务员"
-                                >
-                                  <Calculator className="w-3 h-3" />
-                                  <span>智能反馈</span>
-                                </Button>
-                              )}
-                              {/* 🔥 已反馈标识 */}
-                              {req.purchaserFeedback && (
-                                <>
-                                  <Badge className="h-6 px-2 bg-green-100 text-green-700 border-green-300 text-[12px]">
-                                    ✓ 已反馈
-                                  </Badge>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleSmartFeedback(req)}
-                                    className="h-6 text-[12px] bg-emerald-600 hover:bg-emerald-700 px-2 gap-1"
-                                    title="重新查看/调整智能对比建议"
-                                  >
-                                    <Calculator className="w-3 h-3" />
-                                    <span>智能对比建议</span>
-                                  </Button>
+                              {/* 采购侧固定显示智能对比建议按钮，避免在某些状态下“消失” */}
+                              <Button
+                                size="sm"
+                                onClick={() => handleSmartFeedback(req)}
+                                className="h-6 text-[12px] bg-emerald-600 hover:bg-emerald-700 px-2 gap-1"
+                                title={req.purchaserFeedback ? '重新查看/调整智能对比建议' : '智能提取BJ报价，生成对比建议'}
+                              >
+                                <Calculator className="w-3 h-3" />
+                                <span>智能对比建议</span>
+                              </Button>
 
-                                  {/* 采购侧只保留下推业务员询报，不再显示“创建报价” */}
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handlePushToSalesInquiry(req)}
-                                    disabled={!!req.pushedToQuotation}
-                                    className={`h-6 text-[12px] px-2 gap-1 ${
-                                      req.pushedToQuotation
-                                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                                        : 'bg-orange-500 hover:bg-orange-600 text-white'
-                                    }`}
-                                    title={req.pushedToQuotation ? '已下推业务员询报' : '下推业务员询报'}
-                                  >
-                                    <Calculator className="w-3 h-3" />
-                                    <span>{req.pushedToQuotation ? '已下推业务员询报' : '下推业务员询报'}</span>
-                                  </Button>
-                                </>
+                              {req.purchaserFeedback && (
+                                <Badge className="h-6 px-2 bg-green-100 text-green-700 border-green-300 text-[12px]">
+                                  ✓ 已反馈
+                                </Badge>
                               )}
+
+                              {/* 采购侧只保留下推业务员询报，不再显示“创建报价” */}
+                              <Button
+                                size="sm"
+                                onClick={() => handlePushToSalesInquiry(req)}
+                                disabled={!req.purchaserFeedback || !!req.pushedToQuotation}
+                                className={`h-6 text-[12px] px-2 gap-1 ${
+                                  !req.purchaserFeedback || req.pushedToQuotation
+                                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                    : 'bg-orange-500 hover:bg-orange-600 text-white'
+                                }`}
+                                title={
+                                  !req.purchaserFeedback
+                                    ? '请先完成智能对比建议并提交采购反馈'
+                                    : req.pushedToQuotation
+                                      ? '已下推业务员询报'
+                                      : '下推业务员询报'
+                                }
+                              >
+                                <Calculator className="w-3 h-3" />
+                                <span>{req.pushedToQuotation ? '已下推业务员询报' : '下推业务员询报'}</span>
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
