@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useRef, useState, ReactNode, useEffect } from 'react';
 import { xjService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
+import type { XJData } from '../components/documents/templates/XJDocument';
 
 // 🔥 采购询价（XJ - 询价）状态
 export type XJStatus = 'pending' | 'sent' | 'quoted' | 'accepted' | 'rejected' | 'expired' | 'cancelled' | 'completed';
@@ -15,6 +16,10 @@ export interface XJProduct {
   unit: string;
   targetPrice?: number;
   currency: string;
+  customerProductId?: string;
+  projectId?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
 }
 
 // 🔥 采购询价接口
@@ -31,6 +36,15 @@ export interface XJ {
   sourceInquiryNumber?: string;
   customerName?: string;
   customerRegion?: string;
+  projectId?: string | null;
+  projectCode?: string | null;
+  projectName?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
+  projectRevisionStatus?: string | null;
+  finalRevisionId?: string | null;
+  finalQuotationId?: string | null;
+  finalQuotationNumber?: string | null;
 
   requirementNo?: string;
   sourceRef?: string;
@@ -81,6 +95,11 @@ export interface XJ {
   }>;
 
   documentData?: any;
+  templateId?: string | null;
+  templateVersionId?: string | null;
+  templateSnapshot?: any;
+  documentDataSnapshot?: XJData;
+  documentRenderMeta?: any;
 }
 
 export type XJQuote = NonNullable<XJ['quotes']>[number];
@@ -99,6 +118,18 @@ interface XJContextType {
 }
 
 const XJContext = createContext<XJContextType | undefined>(undefined);
+
+const assertXJWritePayload = (xj: Partial<XJ>) => {
+  if (!xj.templateSnapshot || !xj.documentDataSnapshot) {
+    throw new Error(`XJ ${xj.xjNumber || xj.id || ''} 缺少模板快照数据，已阻止写入`);
+  }
+};
+
+const assertXJPersistedBinding = (xj: Partial<XJ>) => {
+  if (!xj.templateId || !xj.templateVersionId || !xj.templateSnapshot || !xj.documentDataSnapshot) {
+    throw new Error(`XJ ${xj.xjNumber || xj.id || ''} 缺少模板绑定字段，Supabase 返回结果不完整`);
+  }
+};
 
 export const XJProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [xjs, setXJs] = useState<XJ[]>([]);
@@ -143,19 +174,26 @@ export const XJProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   }, [loadFromSupabase]);
 
   const addXJ = async (xj: XJ) => {
+    assertXJWritePayload(xj);
     const saved = await xjService.upsert(xj);
-    if (saved) {
-      setXJs(prev => [saved as XJ, ...prev]);
-    } else {
-      setXJs(prev => [xj, ...prev]);
+    if (!saved) {
+      throw new Error(`XJ ${xj.xjNumber || xj.id} 写入 Supabase 失败`);
     }
+    assertXJPersistedBinding(saved as XJ);
+    setXJs(prev => [saved as XJ, ...prev.filter(item => item.id !== saved.id)]);
   };
 
   const updateXJ = async (id: string, updates: Partial<XJ>) => {
     const current = xjs.find(x => x.id === id);
+    if (!current) return;
     const merged = { ...current, ...updates, updatedDate: new Date().toISOString() } as XJ;
+    assertXJWritePayload(merged);
     const saved = await xjService.upsert(merged);
-    setXJs(prev => prev.map(x => x.id === id ? (saved as XJ || merged) : x));
+    if (!saved) {
+      throw new Error(`XJ ${current.xjNumber || id} 更新 Supabase 失败`);
+    }
+    assertXJPersistedBinding(saved as XJ);
+    setXJs(prev => prev.map(x => x.id === id ? saved as XJ : x));
   };
 
   const deleteXJ = async (id: string) => {

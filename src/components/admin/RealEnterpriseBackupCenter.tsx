@@ -150,7 +150,7 @@ export default function RealEnterpriseBackupCenter() {
         
         // 或者key名称包含业务相关词汇
         const businessPatterns = [
-          'cosun', 'inquiry', 'quotation', 'contract', 'order', 'purchase',
+          'cosun', 'ing', 'qt', 'contract', 'order', 'purchase',
           'customer', 'supplier', 'product', 'shipping', 'receivable', 'payable',
           'business', 'workflow', 'permission', 'role'
         ];

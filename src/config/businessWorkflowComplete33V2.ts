@@ -140,7 +140,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "inquiry",
+                  "target": "ing",
                   "new_status": "pending",
                   "display": "待处理"
                 }
@@ -169,7 +169,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "pending_finance",
                   "display": "财务审核中"
                 }
@@ -197,7 +197,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "finance_approved",
                   "display": "财务已批准"
                 }
@@ -213,7 +213,7 @@ export const businessWorkflowConfigV2 = {
               "triggers": [
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "draft",
                   "display": "草稿"
                 }
@@ -263,7 +263,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "pending_approval",
                   "display": "待审批"
                 }
@@ -291,7 +291,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "approved_by_regional_manager",
                   "display": "区域主管已批准"
                 }
@@ -320,7 +320,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "rejected_by_regional_manager",
                   "display": "区域主管已拒绝"
                 }
@@ -348,7 +348,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "approved_by_sales_director",
                   "display": "销售总监已批准"
                 }
@@ -377,7 +377,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "rejected_by_sales_director",
                   "display": "销售总监已拒绝"
                 }
@@ -411,7 +411,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "sent",
                   "display": "已发送"
                 }
@@ -439,7 +439,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "accepted",
                   "display": "客户已接受"
                 }
@@ -461,7 +461,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "negotiating",
                   "display": "议价中"
                 }
@@ -483,7 +483,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "rejected_by_customer",
                   "display": "客户已拒绝"
                 }
@@ -504,7 +504,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "revised",
                   "display": "已修订"
                 }
@@ -525,7 +525,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "revised_approved",
                   "display": "修订已批准"
                 }
@@ -547,7 +547,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "revised_rejected",
                   "display": "修订已拒绝"
                 }
@@ -568,7 +568,7 @@ export const businessWorkflowConfigV2 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "inquiry",
+                  "target": "ing",
                   "new_status": "closed",
                   "display": "已关闭"
                 }

@@ -4,6 +4,7 @@ import { emitErpEvent } from '../lib/erp-core/event-bus';
 import { filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
 import { salesQuotationService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
+import type { QuotationData } from '../components/documents/templates/QuotationDocument';
 
 // 🎯 销售报价单（QT）- 业务员创建，需要审批
 
@@ -14,6 +15,10 @@ export interface SalesQuotationItem {
   specification?: string;
   quantity: number;
   unit: string;
+  customerProductId?: string;
+  projectId?: string;
+  projectRevisionId?: string;
+  projectRevisionCode?: string;
   
   // 成本信息（从供应商报价BJ获取）
   costPrice: number;
@@ -43,6 +48,14 @@ export interface SalesQuotation {
   customerName: string;
   customerEmail: string;
   customerCompany: string;
+  projectId?: string | null;
+  projectCode?: string | null;
+  projectName?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
+  projectRevisionStatus?: 'working' | 'quoted' | 'superseded' | 'final' | 'cancelled' | null;
+  finalRevisionId?: string | null;
+  quotationRole?: 'budgetary' | 'technical_review' | 'commercial_offer' | 'final_offer' | 'accepted';
   
   // 业务员信息
   salesPerson: string; // 业务员邮箱
@@ -119,6 +132,11 @@ export interface SalesQuotation {
     inspection?: string;
   };
   remarks?: string; // ✅ 给客户看的备注说明
+  templateId?: string | null;
+  templateVersionId?: string | null;
+  templateSnapshot?: any;
+  documentDataSnapshot?: QuotationData;
+  documentRenderMeta?: any;
 }
 
 interface SalesQuotationContextType {
@@ -135,6 +153,18 @@ interface SalesQuotationContextType {
 
 const SalesQuotationContext = createContext<SalesQuotationContextType | undefined>(undefined);
 
+const assertSalesQuotationWritePayload = (quotation: Partial<SalesQuotation>) => {
+  if (!quotation.templateSnapshot || !quotation.documentDataSnapshot) {
+    throw new Error(`QT ${quotation.qtNumber || quotation.id || ''} 缺少模板快照数据，已阻止写入`);
+  }
+};
+
+const assertSalesQuotationPersistedBinding = (quotation: Partial<SalesQuotation>) => {
+  if (!quotation.templateId || !quotation.templateVersionId || !quotation.templateSnapshot || !quotation.documentDataSnapshot) {
+    throw new Error(`QT ${quotation.qtNumber || quotation.id || ''} 缺少模板绑定字段，Supabase 返回结果不完整`);
+  }
+};
+
 const getSalesQuotationMarkers = (quotation: Partial<SalesQuotation>): string[] => {
   // 仅使用报价单自身标识，避免误伤同一 QR/INQ 下后续新建报价单。
   return [quotation.id, quotation.qtNumber]
@@ -150,7 +180,7 @@ const emitSalesQuotationEvent = (
   emitErpEvent({
     id: `evt-sales-quotation-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     key: key as any,
-    domain: 'quotation',
+    domain: 'qt',
     recordId: String(quotation.id),
     internalNo: String(quotation.qtNumber || quotation.id),
     source: 'admin',
@@ -168,7 +198,7 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
     if (!session) return;
     const data = await salesQuotationService.getAll();
     if (data && Array.isArray(data)) {
-      const filtered = filterNotDeleted('quotation', data as SalesQuotation[], (q) => getSalesQuotationMarkers(q));
+      const filtered = filterNotDeleted('qt', data as SalesQuotation[], (q) => getSalesQuotationMarkers(q));
       setQuotations(filtered);
     }
   };
@@ -219,10 +249,12 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
   }, []);
 
   const addQuotation = async (quotation: SalesQuotation) => {
+    assertSalesQuotationWritePayload(quotation);
     const saved = await salesQuotationService.upsert(quotation);
     if (!saved) {
       throw new Error('Supabase upsert sales quotation failed');
     }
+    assertSalesQuotationPersistedBinding(saved as SalesQuotation);
     setQuotations(prev => [saved as SalesQuotation, ...prev]);
     emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, quotation, {
       approvalStatus: quotation.approvalStatus,
@@ -232,11 +264,16 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
 
   const updateQuotation = async (id: string, updates: Partial<SalesQuotation>) => {
     const currentQuotation = quotations.find((qt) => qt.id === id);
+    if (!currentQuotation) {
+      throw new Error(`Sales quotation ${id} not found`);
+    }
     const merged = { ...currentQuotation, ...updates, updatedAt: new Date().toISOString() } as SalesQuotation;
+    assertSalesQuotationWritePayload(merged);
     const saved = await salesQuotationService.upsert(merged);
     if (!saved) {
       throw new Error('Supabase update sales quotation failed');
     }
+    assertSalesQuotationPersistedBinding(saved as SalesQuotation);
     setQuotations(prev => prev.map(qt => qt.id === id ? (saved as SalesQuotation) : qt));
     if (updates.customerStatus === 'sent' || updates.customerStatus === 'viewed') {
       emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_SENT, { id, qtNumber: String(currentQuotation?.qtNumber || id) }, { customerStatus: updates.customerStatus });

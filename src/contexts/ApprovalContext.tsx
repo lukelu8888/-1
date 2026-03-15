@@ -3,7 +3,7 @@ import { approvalRecordService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 
 // 🎯 审批类型
-export type ApprovalType = 'quotation' | 'order' | 'payment' | 'contract' | 'sales_contract' | 'price_change';
+export type ApprovalType = 'qt' | 'order' | 'payment' | 'contract' | 'sales_contract' | 'price_change';
 
 // 🎯 审批状态
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'forwarded';
@@ -71,7 +71,7 @@ interface ApprovalContextType {
   getApprovalByDocument: (documentId: string) => ApprovalRequest | undefined;
 }
 
-const ApprovalContext = createContext<ApprovalContextType | undefined>(undefined);
+export const ApprovalContext = createContext<ApprovalContextType | undefined>(undefined);
 
 export function ApprovalProvider({ children }: { children: ReactNode }) {
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
@@ -290,4 +290,8 @@ export function useApproval() {
   const context = useContext(ApprovalContext);
   if (!context) throw new Error('useApproval must be used within ApprovalProvider');
   return context;
+}
+
+export function useOptionalApproval() {
+  return useContext(ApprovalContext);
 }

@@ -2,7 +2,7 @@ import React from 'react';
 import { AlertCircle, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { Supplier } from '../../../data/suppliersData';
-import { PurchaseRequirement } from '../../../contexts/PurchaseRequirementContext';
+import { QuoteRequirement } from '../../../contexts/QuoteRequirementContext';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import {
@@ -18,11 +18,12 @@ import { Label } from '../../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { Textarea } from '../../ui/textarea';
 import { CreateOrderFormState } from './purchaseOrderEditConfig';
+import { getFormalBusinessModelNo } from '../../../utils/productModelDisplay';
 
 type PurchaseOrderCreateDialogsProps = {
   showCreateOrderDialog: boolean;
   setShowCreateOrderDialog: React.Dispatch<React.SetStateAction<boolean>>;
-  selectedRequirement: PurchaseRequirement | null;
+  selectedRequirement: QuoteRequirement | null;
   createOrderForm: CreateOrderFormState;
   setCreateOrderForm: React.Dispatch<React.SetStateAction<CreateOrderFormState>>;
   productPrices: { [itemId: string]: string };
@@ -120,7 +121,7 @@ export const PurchaseOrderCreateDialogs: React.FC<PurchaseOrderCreateDialogsProp
                           <tr key={item.id} className="border-b border-gray-100">
                             <td className="py-2 px-2 text-gray-600">{idx + 1}</td>
                             <td className="py-2 px-2 font-medium text-gray-900">{item.productName}</td>
-                            <td className="py-2 px-2 text-gray-700 text-[9px]">{item.modelNo}</td>
+                            <td className="py-2 px-2 text-gray-700 text-[9px]">{getFormalBusinessModelNo(item)}</td>
                             <td className="py-2 px-2 text-right font-semibold text-gray-900">{item.quantity.toLocaleString()}</td>
                             <td className="py-2 px-2 text-gray-700">{item.unit}</td>
                             <td className="py-2 px-2">

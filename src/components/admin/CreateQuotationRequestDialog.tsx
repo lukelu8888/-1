@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext'; // 🔥 导入报价请求单 Context（QR 语义层）
 import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 导入获取当前用户工具
 import { getSession } from '../../data/authorizedUsers'; // 🔥 导入获取用户session工具
 import { nextQRNumber, type RegionType } from '../../utils/xjNumberGenerator';
 import { TRADE_TERMS_PRESETS, isPresetTradeTerm, resolveInitialTradeTerms } from '../../utils/tradeTerms';
+import {
+  buildCustomerRequirementsSnapshot,
+  buildProcurementRequestNotes,
+  DEFAULT_DOWNSTREAM_VISIBILITY,
+} from '../../utils/procurementRequestContext';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import { Calendar } from 'lucide-react';
 import {
   Dialog,
@@ -19,6 +25,9 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
+import {
+  type QuoteRequirementDocumentData,
+} from '../documents/templates/QuoteRequirementDocument';
 
 /**
  * 📋 向采购员请求报价对话框
@@ -73,7 +82,7 @@ export function CreateQuotationRequestDialog({
   inquiry
 }: CreateQuotationRequestDialogProps) {
   const { addQuotationRequest } = useQuotationRequests();
-  const { addRequirement } = usePurchaseRequirements(); // 🔥 使用采购需求Context - 正确的函数名是addRequirement
+  const { addRequirement: addQuoteRequirement } = useQuoteRequirements(); // 🔥 通过 QR 语义层写入主承载表
   
   // 🔥 计算默认日期：期望报价日期 = 今天 + 3天，期望交期 = 今天 + 30天
   const getDefaultQuoteDate = () => {
@@ -113,7 +122,7 @@ export function CreateQuotationRequestDialog({
       
       const processedProducts = inquiry.products.map((p: any) => ({
         ...p,
-        modelNo: p.modelNo || p.color || 'N/A', // 🔥 确保包含 modelNo
+        modelNo: getFormalBusinessModelNo(p) || p.color || 'N/A',
         editableQuantity: p.quantity || 0,
         editableRemarks: p.remarks || ''
       }));
@@ -149,6 +158,14 @@ export function CreateQuotationRequestDialog({
 
   const handleSubmit = async () => {
     if (!inquiry) return;
+
+    const sourceTemplateSnapshot = inquiry.templateSnapshot || inquiry.template_snapshot || null;
+    const sourceTemplateVersion = sourceTemplateSnapshot?.version || null;
+    const sourceDocumentData = inquiry.documentDataSnapshot || inquiry.document_data_snapshot || null;
+    if (!sourceTemplateVersion || !sourceDocumentData) {
+      toast.error('该 ING 未绑定模板中心版本快照，无法下推 QR');
+      return;
+    }
 
     if (!expectedQuoteDate) {
       toast.error('请设置期望报价日期');
@@ -186,15 +203,28 @@ export function CreateQuotationRequestDialog({
         inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA'
       );
 
+      const commercialTerms = {
+        expectedQuoteDate,
+        deliveryDate,
+        tradeTerms: tradeTerms.trim(),
+        paymentTerms: paymentTerms.trim(),
+        targetCostRange: targetCostRange.trim() || undefined,
+        qualityRequirements: qualityRequirements.trim() || undefined,
+        packagingRequirements: packagingRequirements.trim() || undefined,
+        remarks: remarks.trim() || undefined,
+      };
+      const customerRequirements = buildCustomerRequirementsSnapshot(inquiry, editableProducts);
+      const flowNotes = buildProcurementRequestNotes(commercialTerms);
+
       const items = editableProducts?.map((product: any) => ({
         id: product.id || `item_${Date.now()}_${Math.random()}`,
         productName: product.productName,
-        modelNo: product.modelNo || product.color || 'N/A', // 🔥 修复：优先使用 modelNo，如果没有才用 color 作为备选
+        modelNo: getFormalBusinessModelNo(product) || product.color || 'N/A',
         specification: product.specification,
         quantity: product.editableQuantity,
         unit: 'pcs',
-        targetPrice: product.unitPrice,
-        currency: 'USD',
+        // 客户公开价不能继续下游流转给采购/供应商
+        currency: 'N/A',
         remarks: product.editableRemarks || (product.material ? `材质: ${product.material}` : '')
       })) || [];
 
@@ -214,26 +244,62 @@ export function CreateQuotationRequestDialog({
         expectedQuoteDate: expectedQuoteDate,
         
         items: items,
-        
-        tradeTerms: tradeTerms,
-        paymentTerms: paymentTerms,
-        deliveryDate: deliveryDate,
-        targetCostRange: targetCostRange || undefined,
-        qualityRequirements: qualityRequirements || undefined,
-        packagingRequirements: packagingRequirements || undefined,
+
+        tradeTerms: commercialTerms.tradeTerms,
+        paymentTerms: commercialTerms.paymentTerms,
+        deliveryDate: commercialTerms.deliveryDate,
+        targetCostRange: commercialTerms.targetCostRange,
+        qualityRequirements: commercialTerms.qualityRequirements,
+        packagingRequirements: commercialTerms.packagingRequirements,
         
         status: 'pending' as const,
         remarks: remarks,
+        notes: flowNotes,
         createdDate: new Date().toISOString().split('T')[0],
         rfqCount: 0, // 🔥 初始化下推计数，创建时未下推
       };
 
       console.log('📤 [CreateQuotationRequestDialog] 提交报价请求:', quotationRequest);
-      addQuotationRequest(quotationRequest);
+      await addQuotationRequest(quotationRequest);
       console.log('✅ [CreateQuotationRequestDialog] 报价请求已添加到Context');
 
-      // 🔥 同时创建采购需求，让采购需求池能够看到
-      const purchaseRequirement = {
+      const qrDocumentData: QuoteRequirementDocumentData = {
+        requirementNo: requestNumber,
+        requirementDate: new Date().toISOString().split('T')[0],
+        sourceInquiryNo: inquiry.id,
+        requiredResponseDate: expectedQuoteDate,
+        requiredDeliveryDate: deliveryDate,
+        customer: {
+          companyName: inquiry.buyerInfo?.companyName || inquiry.customerName || 'N/A',
+          contactPerson: inquiry.buyerInfo?.contactPerson || inquiry.buyerInfo?.name || salesRepName,
+          email: inquiry.userEmail || inquiry.buyerInfo?.email || '',
+          phone: inquiry.buyerInfo?.phone || '',
+          address: inquiry.buyerInfo?.address || '',
+          region: inquiry.region || '',
+        },
+        products: items.map((item: any, index: number) => ({
+          no: index + 1,
+          productName: item.productName,
+          modelNo: getFormalBusinessModelNo(item),
+          specification: item.specification || '',
+          quantity: item.quantity,
+          unit: item.unit,
+          remarks: item.remarks,
+        })),
+        customerRequirements: {
+          deliveryTerms: commercialTerms.tradeTerms,
+          paymentTerms: commercialTerms.paymentTerms,
+          qualityStandard: commercialTerms.qualityRequirements,
+          packaging: commercialTerms.packagingRequirements,
+          specialRequirements: remarks.trim() || undefined,
+        },
+        salesDeptNotes: flowNotes,
+        urgency: 'medium',
+        createdBy: salesRepName,
+      };
+
+      // 🔥 同时创建 QR 主承载记录，让采购侧 QR 池能够看到
+      const quoteRequirement = {
         id: `pr_${Date.now()}_${random}`,
         requirementNo: requestNumber, // 使用相同的编号
         source: '报价请求', // 来源是报价请求
@@ -243,40 +309,40 @@ export function CreateQuotationRequestDialog({
         status: 'pending' as const,
         createdBy: salesRepName,
         createdDate: new Date().toISOString().split('T')[0],
-        specialRequirements: [
-          `贸易条款: ${tradeTerms}`,
-          `付款条款: ${paymentTerms}`,
-          targetCostRange ? `目标成本: ${targetCostRange}` : '',
-          qualityRequirements ? `验货要求: ${qualityRequirements}` : '',
-          packagingRequirements ? `包装要求: ${packagingRequirements}` : '',
-          remarks ? `备注: ${remarks}` : ''
-        ].filter(Boolean).join(' | '),
+        expectedQuoteDate: commercialTerms.expectedQuoteDate,
+        deliveryDate: commercialTerms.deliveryDate,
+        tradeTerms: commercialTerms.tradeTerms,
+        paymentTerms: commercialTerms.paymentTerms,
+        targetCostRange: commercialTerms.targetCostRange,
+        qualityRequirements: commercialTerms.qualityRequirements,
+        packagingRequirements: commercialTerms.packagingRequirements,
+        remarks: commercialTerms.remarks,
+        commercialTerms,
+        customerRequirements,
+        downstreamVisibility: DEFAULT_DOWNSTREAM_VISIBILITY,
+        specialRequirements: flowNotes,
         salesOrderNo: inquiry.id,
-        // ❌ 采购员不能看到客户信息 - 权限隔离
-        // customerName: inquiry.buyerInfo?.companyName || inquiry.customerName || 'N/A',
-        // salesPerson: salesRep.name,
-        region: inquiry.region, // 🔥 区域信息（用于市场区分，不涉及客户隐私）
+        region: inquiry.region,
         items: items.map((item: any) => ({
           id: item.id,
           productName: item.productName,
-          modelNo: item.modelNo,
+          modelNo: getFormalBusinessModelNo(item),
           specification: item.specification,
           quantity: item.quantity,
           unit: item.unit,
-          targetPrice: item.targetPrice,
-          targetCurrency: item.currency,
           remarks: item.remarks
-        }))
+        })),
+        documentDataSnapshot: qrDocumentData,
       };
 
-      console.log('📤 [CreateQuotationRequestDialog] 同时创建采购需求:', purchaseRequirement);
+      console.log('📤 [CreateQuotationRequestDialog] 同时创建 QR 主承载记录:', quoteRequirement);
       console.log('🔍 数据流转说明:');
       console.log(`  ├─ 业务员询价单号: ${inquiry.id} (INQ)`);
-      console.log(`  ├─ 采购需求编号: ${requestNumber} (QR)`);
+      console.log(`  ├─ QR 编号: ${requestNumber}`);
       console.log(`  ├─ 来源单号: ${inquiry.id} (追溯业务源头)`);
       console.log(`  └─ 区域: ${inquiry.region || '未设置'}`);
-      addRequirement(purchaseRequirement);
-      console.log('✅ [CreateQuotationRequestDialog] 采购需求已添加到Context');
+      await addQuoteRequirement(quoteRequirement);
+      console.log('✅ [CreateQuotationRequestDialog] QR 主承载记录已添加到 Context');
 
       toast.success(`报价请求已发送 - ${requestNumber}`);
 
@@ -379,7 +445,7 @@ export function CreateQuotationRequestDialog({
                           {/* Model No. */}
                           <td className="px-4 py-3">
                             <span className="text-xs font-mono text-black">
-                              {product.modelNo || product.color || product.productName?.slice(0, 12) || '-'}
+                              {getFormalBusinessModelNo(product) || product.color || product.productName?.slice(0, 12) || '-'}
                             </span>
                           </td>
                           

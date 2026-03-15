@@ -3,11 +3,13 @@ import { Download, FileText, Printer } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../ui/dialog';
 import { XJDocument, XJData } from '../../documents/templates/XJDocument';
+import type { ProjectExecutionBaseline } from './purchaseOrderUtils';
 
 type XJPreviewDialogProps = {
   showXJPreview: boolean;
   setShowRFQPreview: React.Dispatch<React.SetStateAction<boolean>>;
   currentXJData: XJData | null;
+  projectExecutionBaseline?: ProjectExecutionBaseline | null;
   xjDocRef: React.RefObject<HTMLDivElement>;
   handleExportRFQPDF: (download: boolean) => void;
 };
@@ -16,6 +18,7 @@ export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
   showXJPreview,
   setShowRFQPreview,
   currentXJData,
+  projectExecutionBaseline,
   xjDocRef,
   handleExportRFQPDF,
 }) => {
@@ -30,6 +33,22 @@ export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
           <DialogDescription style={{ fontSize: '12px' }}>
             Procurement Inquiry Preview - 可直接发送给供应商的询价单文档
           </DialogDescription>
+          {(projectExecutionBaseline?.projectCode || projectExecutionBaseline?.projectName || projectExecutionBaseline?.projectRevisionCode) && (
+            <div className="mt-3 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-700">
+              执行基线：
+              <span className="ml-1 font-medium">
+                {projectExecutionBaseline.projectCode || projectExecutionBaseline.projectName || '项目'}
+              </span>
+              <span className="mx-1">/</span>
+              <span className="font-medium">{projectExecutionBaseline.projectRevisionCode || 'Rev'}</span>
+              {projectExecutionBaseline.finalQuotationNumber && (
+                <>
+                  <span className="mx-1">/</span>
+                  <span className="font-medium">{projectExecutionBaseline.finalQuotationNumber}</span>
+                </>
+              )}
+            </div>
+          )}
         </DialogHeader>
 
         <div className="flex-1 overflow-auto bg-gray-100 p-6">

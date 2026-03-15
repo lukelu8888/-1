@@ -12,6 +12,10 @@ interface OrderProduct {
   totalPrice: number;
   specs: string;
   produced?: number;
+  customerProductId?: string;
+  projectId?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
 }
 
 interface Order {
@@ -57,6 +61,8 @@ export default function ViewOrderDialog({
 
   if (!order) return null;
 
+  const primaryProjectItem = order.products.find((item) => Boolean(item?.projectRevisionId));
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
@@ -65,6 +71,15 @@ export default function ViewOrderDialog({
             <div>
               <DialogTitle className="text-base">查看訂單</DialogTitle>
               <p className="text-xs text-gray-500 mt-1">Order Number: {order.orderNumber}</p>
+              {primaryProjectItem && (
+                <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                  <span className="font-medium text-slate-900">Execution Baseline</span>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-slate-500">
+                    <span>Revision: {primaryProjectItem.projectRevisionCode || '-'}</span>
+                    <span>Quotation: {order.quotationNumber || '-'}</span>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2 print:hidden">
               <Button

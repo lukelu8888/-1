@@ -73,6 +73,6 @@ export const statusConfig: Record<string, StepStatus> = {
   partial: { type: 'partial', label: '部分完成', icon: '◐', color: '#3B82F6' },
 };
 
-// 🔥 这个函数将从V5组件导出，返回完整的102个步骤
-// 由于数据太大，我们将从原V5文件中导入
-export { allSteps } from './FullProcessDemoV5';
+// [SANDBOX] Step data re-exported from the sandbox file — not a real ERP module
+// Source: src/sandbox/demo/FullProcessSandboxV5.tsx
+export { allSteps } from '../../sandbox/demo/FullProcessSandboxV5';

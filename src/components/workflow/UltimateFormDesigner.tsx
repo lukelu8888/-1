@@ -452,8 +452,8 @@ export function UltimateFormDesigner({ onClose }: { onClose?: () => void }) {
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center gap-3">
                         <div className={`h-12 w-12 rounded-lg flex items-center justify-center bg-gradient-to-br ${
-                          template.type === 'inquiry' ? 'from-blue-400 to-blue-600' :
-                          template.type === 'quotation' ? 'from-purple-400 to-purple-600' :
+                          template.type === 'ing' ? 'from-blue-400 to-blue-600' :
+                          template.type === 'qt' ? 'from-purple-400 to-purple-600' :
                           template.type === 'sales_contract' ? 'from-red-400 to-red-600' :
                           template.type === 'purchase_contract' ? 'from-cyan-400 to-cyan-600' :
                           template.type === 'invoice' ? 'from-green-400 to-green-600' :

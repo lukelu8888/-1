@@ -1,9 +1,10 @@
 import React, { forwardRef } from 'react';
 import { ImageWithFallback } from '../../figma/ImageWithFallback';
 import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
 
 /**
- * 💰 业务员报价单文档模板
+ * 💰 销售报价单文档模板
  * 
  * 业务场景：
  * 1. 业务员收到询价后进行成本核算
@@ -97,10 +98,11 @@ export interface QuotationData {
 interface QuotationDocumentProps {
   data?: QuotationData;
   quotation?: QuotationData; // 🔥 支持两种prop名称
+  layoutConfig?: DocumentLayoutConfig;
 }
 
 export const QuotationDocument = forwardRef<HTMLDivElement, QuotationDocumentProps>(
-  ({ data, quotation }, ref) => {
+  ({ data, quotation, layoutConfig }, ref) => {
     // 🔥 兼容两种prop名称
     const quotationData = quotation || data;
     
@@ -122,18 +124,33 @@ export const QuotationDocument = forwardRef<HTMLDivElement, QuotationDocumentPro
     };
     
     const tradeTerm = extractTradeTerm(quotationData.tradeTerms.incoterms);
+    const documentWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
+    const documentMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
+    const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '10pt';
+    const lineHeight = layoutConfig?.lineHeight ?? 1.5;
+    const contentPaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '20mm';
+    const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '20mm';
 
     return (
       <div 
         ref={ref}
-        className="bg-white w-[794px] min-h-[1123px] mx-auto shadow-lg"
+        className="bg-white mx-auto shadow-lg"
         style={{ 
+          width: documentWidth,
+          minHeight: documentMinHeight,
           fontFamily: 'Arial, "Helvetica Neue", sans-serif',
-          fontSize: '10pt',
-          lineHeight: '1.5'
+          fontSize,
+          lineHeight
         }}
       >
-        <div className="p-[20mm]">
+        <div
+          style={{
+            paddingTop: contentPaddingTop,
+            paddingBottom: contentPaddingBottom,
+            paddingLeft: '20mm',
+            paddingRight: '20mm',
+          }}
+        >
           {/* Header - Taiwan Enterprise Compact Style */}
           <div className="mb-3">
             {/* First Row: Logo + QUOTATION Title + Quotation Info */}

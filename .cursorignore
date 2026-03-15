@@ -4,3 +4,20 @@ build/
 dist/
 .git/
 *.zip
+*.tar.gz
+# 后端依赖与运行产物：体积大，当前前端模板/流程工作不需要纳入 Cursor 上下文
+backend/api/vendor/
+backend/api/storage/
+backend/api/bootstrap/cache/
+# 编辑器与缓存目录
+.idea/
+backend/.idea/
+.cache/
+
+# 文档与演示目录：当前模板/流程改造通常不依赖，先从 Cursor 上下文中排除
+docs/
+src/components/demo/
+backend/api/composer.phar
+
+# 临时整体排除备用 Laravel 后端，降低 Cursor/agent 检索负担
+backend/

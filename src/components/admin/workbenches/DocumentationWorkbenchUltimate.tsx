@@ -246,8 +246,8 @@ const DOCUMENT_CHECKLIST = [
 
 // 业务节点定义
 const BUSINESS_STAGES = [
-  { id: 'inquiry', name: '询价', color: 'bg-gray-100 text-gray-800', icon: MessageSquare },
-  { id: 'quotation', name: '报价', color: 'bg-blue-100 text-blue-800', icon: FileText },
+  { id: 'ing', name: '询价', color: 'bg-gray-100 text-gray-800', icon: MessageSquare },
+  { id: 'qt', name: '报价', color: 'bg-blue-100 text-blue-800', icon: FileText },
   { id: 'contract', name: '合同签订', color: 'bg-purple-100 text-purple-800', icon: FileSignature },
   { id: 'procurement', name: '采购', color: 'bg-yellow-100 text-yellow-800', icon: Package },
   { id: 'production', name: '生产/验货', color: 'bg-orange-100 text-orange-800', icon: Activity },

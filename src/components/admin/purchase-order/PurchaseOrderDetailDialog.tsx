@@ -1,8 +1,10 @@
 import React from 'react';
 import { Eye } from 'lucide-react';
 import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOrderContext';
+import { getFormalBusinessModelNo } from '../../../utils/productModelDisplay';
 import { Button } from '../../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/dialog';
+import { extractProjectExecutionBaseline } from './purchaseOrderUtils';
 
 type PurchaseOrderDetailDialogProps = {
   showOrderDialog: boolean;
@@ -21,6 +23,7 @@ export const PurchaseOrderDetailDialog: React.FC<PurchaseOrderDetailDialogProps>
   resolveInquirySourceRef,
   handleViewPODocument,
 }) => {
+  const projectBaseline = viewOrder ? extractProjectExecutionBaseline(viewOrder) : null;
   return (
     <Dialog open={showOrderDialog} onOpenChange={setShowOrderDialog}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -69,6 +72,22 @@ export const PurchaseOrderDetailDialog: React.FC<PurchaseOrderDetailDialogProps>
                     <span className="text-gray-600">区域：</span>
                     <span className="ml-2">{viewOrder.region}</span>
                   </div>
+                )}
+                {projectBaseline && (
+                  <>
+                    <div>
+                      <span className="text-gray-600">项目：</span>
+                      <span className="ml-2">{projectBaseline.projectCode ? `${projectBaseline.projectCode} · ` : ''}{projectBaseline.projectName || 'Project'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">执行版本：</span>
+                      <span className="ml-2">Rev {projectBaseline.projectRevisionCode || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">最终报价：</span>
+                      <span className="ml-2">{projectBaseline.finalQuotationNumber || '-'}</span>
+                    </div>
+                  </>
                 )}
               </div>
             </div>
@@ -122,7 +141,7 @@ export const PurchaseOrderDetailDialog: React.FC<PurchaseOrderDetailDialogProps>
                             <div className="font-medium">{item.productName}</div>
                             {item.specification && <div className="text-[11px] text-gray-500">{item.specification}</div>}
                           </td>
-                          <td className="py-2 px-2 text-gray-600">{item.modelNo}</td>
+                          <td className="py-2 px-2 text-gray-600">{getFormalBusinessModelNo(item)}</td>
                           <td className="py-2 px-2 text-right font-medium">
                             {item.quantity} {item.unit}
                           </td>

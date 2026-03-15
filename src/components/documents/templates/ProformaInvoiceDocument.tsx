@@ -1,5 +1,6 @@
 import React, { forwardRef } from 'react';
 import { A4PageContainer } from '../A4PageContainer';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
 
 /**
  * 📄 Proforma Invoice (形式发票) 数据接口
@@ -96,18 +97,46 @@ export interface ProformaInvoiceData {
 /**
  * 📄 Proforma Invoice 文档模板组件
  */
-export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: ProformaInvoiceData }>(
-  ({ data }, ref) => {
+export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: ProformaInvoiceData; layoutConfig?: DocumentLayoutConfig }>(
+  ({ data, layoutConfig }, ref) => {
     // 格式化金额
     const formatAmount = (amount: number, currency: string = 'US$') => {
       return `${currency}${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
+    const pageWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '210mm';
+    const pageMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '297mm';
+    const pagePaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '15mm';
+    const pagePaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '15mm';
+    const pageFontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '9pt';
+    const pageLineHeight = layoutConfig?.lineHeight ?? 1.4;
+    const contentPaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '3rem';
+    const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '3rem';
+    const contentFontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '0.875rem';
+    const contentLineHeight = layoutConfig?.lineHeight ?? 1.25;
 
     return (
       <div ref={ref}>
         {/* 第一页 */}
-        <A4PageContainer>
-          <div className="p-12 text-sm leading-tight" style={{ fontFamily: 'Times New Roman, serif' }}>
+        <A4PageContainer
+          pageWidth={pageWidth}
+          pageMinHeight={pageMinHeight}
+          pagePaddingTop={pagePaddingTop}
+          pagePaddingBottom={pagePaddingBottom}
+          pagePaddingX="15mm"
+          fontSize={pageFontSize}
+          lineHeight={pageLineHeight}
+        >
+          <div
+            style={{
+              paddingTop: contentPaddingTop,
+              paddingBottom: contentPaddingBottom,
+              paddingLeft: '3rem',
+              paddingRight: '3rem',
+              fontFamily: 'Times New Roman, serif',
+              fontSize: contentFontSize,
+              lineHeight: contentLineHeight,
+            }}
+          >
             {/* 页眉：公司Logo和信息 */}
             <div className="mb-6 pb-4">
               <div className="flex items-start justify-between mb-3">
@@ -337,8 +366,26 @@ export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: Profor
         </A4PageContainer>
 
         {/* 第二页：签名页 */}
-        <A4PageContainer>
-          <div className="p-12 text-sm" style={{ fontFamily: 'Times New Roman, serif' }}>
+        <A4PageContainer
+          pageWidth={pageWidth}
+          pageMinHeight={pageMinHeight}
+          pagePaddingTop={pagePaddingTop}
+          pagePaddingBottom={pagePaddingBottom}
+          pagePaddingX="15mm"
+          fontSize={pageFontSize}
+          lineHeight={pageLineHeight}
+        >
+          <div
+            style={{
+              paddingTop: contentPaddingTop,
+              paddingBottom: contentPaddingBottom,
+              paddingLeft: '3rem',
+              paddingRight: '3rem',
+              fontFamily: 'Times New Roman, serif',
+              fontSize: contentFontSize,
+              lineHeight: contentLineHeight,
+            }}
+          >
             {/* 签名区域 */}
             <div className="flex justify-between gap-8 pt-8">
               {/* 买方签名 */}

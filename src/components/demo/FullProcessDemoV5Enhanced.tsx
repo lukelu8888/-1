@@ -35,8 +35,8 @@ import {
   RotateCcw,
 } from 'lucide-react';
 
-// 🔥 导入V5的真实步骤数据
-import { getAllSteps } from './FullProcessDemoV5';
+// [SANDBOX] Step data sourced from sandbox — not a real ERP module
+import { getAllSteps } from '../../sandbox/demo/FullProcessSandboxV5';
 
 // 定义步骤接口
 interface Step {

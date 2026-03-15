@@ -9,6 +9,7 @@ import { Badge } from '../ui/badge';
 import { FileText, ArrowRight, CheckCircle, Calculator } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { createQuotationFromXJ, saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import { useUser } from '../../contexts/UserContext';
 import { useXJs } from '../../contexts/XJContext';
 
@@ -17,6 +18,7 @@ export default function QuickQuotationCreator() {
   const { xjs, getXJsBySupplier, updateXJ } = useXJs();
   
   const [xjNumber, setXjNumber] = useState('XJ-251220-7726');
+  const [supplierModelNo, setSupplierModelNo] = useState('');
   const [unitPrice, setUnitPrice] = useState('');
   const [leadTime, setLeadTime] = useState('30');
   const [moq, setMoq] = useState('1000');
@@ -67,6 +69,7 @@ export default function QuickQuotationCreator() {
         xj,
         { email: user.email, name: user.name || user.email, company: user.company || '供应商公司' },
         {
+          supplierModelNo: supplierModelNo.trim(),
           unitPrice: parseFloat(unitPrice),
           leadTime: parseInt(leadTime),
           moq: parseInt(moq),
@@ -79,15 +82,20 @@ export default function QuickQuotationCreator() {
       await saveSupplierQuotation(quotation);
 
       // Supabase-first: BJ 草稿仅建立关联，提交后才把 XJ 标记为 quoted
-      if (status === 'submitted') {
-        updateXJ(xj.id, {
-          supplierQuotationNo: quotation.quotationNo,
-          status: 'quoted' as any
-        });
-      } else {
-        updateXJ(xj.id, {
-          supplierQuotationNo: quotation.quotationNo
-        });
+      try {
+        if (status === 'submitted') {
+          await updateXJ(xj.id, {
+            supplierQuotationNo: quotation.quotationNo,
+            status: 'quoted' as any
+          });
+        } else {
+          await updateXJ(xj.id, {
+            supplierQuotationNo: quotation.quotationNo
+          });
+        }
+      } catch (error: any) {
+        toast.error(`同步 XJ 状态失败：${error?.message || '未知错误'}`);
+        return;
       }
 
       toast.success(
@@ -176,7 +184,7 @@ export default function QuickQuotationCreator() {
                 </div>
                 <div>
                   <span className="text-blue-700">型号：</span>
-                  <span className="font-medium">{xj.modelNo || 'N/A'}</span>
+                  <span className="font-medium">{getFormalBusinessModelNo(xj) || 'N/A'}</span>
                 </div>
                 <div>
                   <span className="text-blue-700">数量：</span>
@@ -215,6 +223,15 @@ export default function QuickQuotationCreator() {
         <CardContent className="space-y-4">
           {/* 报价详情 */}
           <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>供应商型号</Label>
+              <Input
+                value={supplierModelNo}
+                onChange={(e) => setSupplierModelNo(e.target.value)}
+                placeholder="SUP-REF-001"
+                className="mt-1.5"
+              />
+            </div>
             <div>
               <Label>单价 *</Label>
               <Input

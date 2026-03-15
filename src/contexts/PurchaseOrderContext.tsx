@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect } from
 import { purchaseOrderService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 import { addTombstones, filterNotDeleted, removeTombstones } from '../lib/erp-core/deletion-tombstone';
+import type { PurchaseOrderData } from '../components/documents/templates/PurchaseOrderDocument';
 
 // 🔥 采购订单状态
 export type POStatus = 'pending' | 'confirmed' | 'producing' | 'shipped' | 'completed' | 'cancelled';
@@ -21,6 +22,10 @@ export interface PurchaseOrderItem {
   hsCode?: string;
   packingRequirement?: string;
   remarks?: string;
+  customerProductId?: string;
+  projectId?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
 }
 
 // 🔥 采购订单接口
@@ -30,6 +35,15 @@ export interface PurchaseOrder {
   requirementNo?: string; // 关联的采购需求编号
   sourceRef?: string; // 来源单号（销售订单号等）
   sourceSONumber?: string; // 🔥 新增：关联销售订单编号 SO-xxx
+  projectId?: string | null;
+  projectCode?: string | null;
+  projectName?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
+  projectRevisionStatus?: 'working' | 'quoted' | 'superseded' | 'final' | 'cancelled' | null;
+  finalRevisionId?: string | null;
+  finalQuotationId?: string | null;
+  finalQuotationNumber?: string | null;
   
   // 🔥 订单组信息（用于关联多供应商订单）
   orderGroup?: string; // 订单组号，例如: "PO-GROUP-20251217-001"
@@ -89,19 +103,24 @@ export interface PurchaseOrder {
   createdBy: string;
   createdDate: string;
   updatedDate?: string;
+  templateId?: string | null;
+  templateVersionId?: string | null;
+  templateSnapshot?: any;
+  documentDataSnapshot?: PurchaseOrderData;
+  documentRenderMeta?: any;
 }
 
 interface PurchaseOrderContextType {
   purchaseOrders: PurchaseOrder[];
-  addPurchaseOrder: (order: PurchaseOrder) => void;
-  updatePurchaseOrder: (id: string, updates: Partial<PurchaseOrder>) => void;
-  deletePurchaseOrder: (id: string) => void;
+  addPurchaseOrder: (order: PurchaseOrder) => Promise<void>;
+  updatePurchaseOrder: (id: string, updates: Partial<PurchaseOrder>) => Promise<void>;
+  deletePurchaseOrder: (id: string) => Promise<void>;
   getPurchaseOrderById: (id: string) => PurchaseOrder | undefined;
   getPurchaseOrdersByRequirement: (requirementNo: string) => PurchaseOrder[];
   
   // 🔥 订单组相关方法
   getPurchaseOrdersByGroup: (orderGroup: string) => PurchaseOrder[];
-  addPurchaseOrderBatch: (orders: PurchaseOrder[]) => void; // 批量添加（用于拆单）
+  addPurchaseOrderBatch: (orders: PurchaseOrder[]) => Promise<void>; // 批量添加（用于拆单）
   getOrderGroupStats: (orderGroup: string) => {
     total: number;
     confirmed: number;
@@ -111,6 +130,18 @@ interface PurchaseOrderContextType {
 }
 
 const PurchaseOrderContext = createContext<PurchaseOrderContextType | undefined>(undefined);
+
+const assertPurchaseOrderWritePayload = (order: Partial<PurchaseOrder>) => {
+  if (!order.templateSnapshot || !order.documentDataSnapshot) {
+    throw new Error(`CG/PO ${order.poNumber || order.id || ''} 缺少模板快照数据，已阻止写入`);
+  }
+};
+
+const assertPurchaseOrderPersistedBinding = (order: Partial<PurchaseOrder>) => {
+  if (!order.templateId || !order.templateVersionId || !order.templateSnapshot || !order.documentDataSnapshot) {
+    throw new Error(`CG/PO ${order.poNumber || order.id || ''} 缺少模板绑定字段，Supabase 返回结果不完整`);
+  }
+};
 
 const getPurchaseOrderMarkers = (order: Partial<PurchaseOrder>): string[] =>
   [order.id, order.poNumber].filter(Boolean).map((v) => String(v));
@@ -149,7 +180,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
       const marker = String(t.marker || '').trim().toUpperCase();
       const reason = String(t.reason || '').trim();
       if (reason !== 'manual-delete-purchase-order') return false;
-      return /^(SC-|QT-|RFQ-|INQ-|XJ-|SO-|QR-)/.test(marker);
+      return /^(SC-|QT-|RFQ-|ING-|XJ-|SO-|QR-)/.test(marker);
     });
     if (removedLegacy > 0) {
       console.warn(`⚠️ [PurchaseOrderContext] removed ${removedLegacy} invalid order tombstones`);
@@ -244,37 +275,48 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
   }, []);
 
 
-  const addPurchaseOrder = (order: PurchaseOrder) => {
+  const addPurchaseOrder = async (order: PurchaseOrder) => {
+    assertPurchaseOrderWritePayload(order);
+    const saved = await purchaseOrderService.upsert(order);
+    if (!saved) {
+      throw new Error(`CG/PO ${order.poNumber || order.id} 写入 Supabase 失败`);
+    }
+    assertPurchaseOrderPersistedBinding(saved as PurchaseOrder);
     setPurchaseOrders(prev => {
-      const exists = prev.some(o => o.id === order.id || o.poNumber === order.poNumber);
-      const newOrders = exists ? prev.map(o => (o.id === order.id || o.poNumber === order.poNumber ? order : o)) : [...prev, order];
+      const exists = prev.some(o => o.id === (saved as PurchaseOrder).id || o.poNumber === (saved as PurchaseOrder).poNumber);
+      const newOrders = exists
+        ? prev.map(o => (o.id === (saved as PurchaseOrder).id || o.poNumber === (saved as PurchaseOrder).poNumber ? saved as PurchaseOrder : o))
+        : [...prev, saved as PurchaseOrder];
       return filterVisiblePurchaseOrders(newOrders);
     });
-    purchaseOrderService.upsert(order).catch((e) => console.warn('⚠️ PO upsert failed:', e));
   };
 
-  const updatePurchaseOrder = (id: string, updates: Partial<PurchaseOrder>) => {
+  const updatePurchaseOrder = async (id: string, updates: Partial<PurchaseOrder>) => {
     const target = purchaseOrders.find(o => o.id === id || o.poNumber === id);
-    const poRef = target?.poNumber || target?.id || id;
+    if (!target) return;
+    const merged = { ...target, ...updates, updatedDate: new Date().toISOString() };
+    assertPurchaseOrderWritePayload(merged);
+    const saved = await purchaseOrderService.upsert(merged);
+    if (!saved) {
+      throw new Error(`CG/PO ${target.poNumber || id} 更新 Supabase 失败`);
+    }
+    assertPurchaseOrderPersistedBinding(saved as PurchaseOrder);
     setPurchaseOrders(prev => filterVisiblePurchaseOrders(prev.map(order => (
       (order.id === id || order.poNumber === id)
-        ? { ...order, ...updates, updatedDate: new Date().toISOString() }
+        ? saved as PurchaseOrder
         : order
     ))));
-    const updated = purchaseOrders.find(o => o.id === id || o.poNumber === id);
-    if (updated) purchaseOrderService.upsert({ ...updated, ...updates }).catch((e) => console.warn('⚠️ PO update failed:', e));
   };
 
-  const deletePurchaseOrder = (id: string) => {
+  const deletePurchaseOrder = async (id: string) => {
     const target = purchaseOrders.find(o => o.id === id || o.poNumber === id);
-    const poRef = target?.poNumber || target?.id || id;
+    await purchaseOrderService.delete(id);
     const markers = getPurchaseOrderMarkers(target || { id });
     addTombstones('order', markers, {
       reason: 'manual-delete-purchase-order',
       deletedBy: 'admin',
     });
     setPurchaseOrders(prev => filterVisiblePurchaseOrders(prev.filter(order => order.id !== id && order.poNumber !== id)));
-    purchaseOrderService.delete(id).catch((e) => console.warn('⚠️ PO delete failed:', e));
   };
 
   const getPurchaseOrderById = (id: string) => {
@@ -289,25 +331,26 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
     return purchaseOrders.filter(order => order.orderGroup === orderGroup);
   };
 
-  const addPurchaseOrderBatch = (orders: PurchaseOrder[]) => {
+  const addPurchaseOrderBatch = async (orders: PurchaseOrder[]) => {
+    const savedOrders: PurchaseOrder[] = [];
+    for (const order of orders) {
+      assertPurchaseOrderWritePayload(order);
+      const saved = await purchaseOrderService.upsert(order);
+      if (!saved) {
+        throw new Error(`批量写入采购单 ${order.poNumber || order.id} 到 Supabase 失败`);
+      }
+      assertPurchaseOrderPersistedBinding(saved as PurchaseOrder);
+      savedOrders.push(saved as PurchaseOrder);
+    }
+
     setPurchaseOrders(prev => {
       const byPo = new Map<string, PurchaseOrder>();
       prev.forEach((o) => byPo.set(o.poNumber || o.id, o));
-      orders.forEach((o) => byPo.set(o.poNumber || o.id, o));
+      savedOrders.forEach((o) => byPo.set(o.poNumber || o.id, o));
       const newOrders = Array.from(byPo.values());
       return filterVisiblePurchaseOrders(newOrders);
     });
     window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-    void (async () => {
-      for (const order of orders) {
-        try {
-          await purchaseOrderService.upsert(order);
-        } catch (e) {
-          console.warn('⚠️ [PurchaseOrderContext] addPurchaseOrderBatch Supabase upsert failed:', (order as any).poNumber, e);
-        }
-      }
-      window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
-    })();
   };
 
   const getOrderGroupStats = (orderGroup: string) => {

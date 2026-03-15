@@ -53,6 +53,7 @@ import { RegionalManagerDashboard } from './dashboards/RegionalManagerDashboard'
 import { SalesRepDashboardExpert } from './dashboards/SalesRepDashboardExpert'; // 🔥 业务员工作台专家版
 import { AdminSystemDashboardPro } from './dashboards/AdminSystemDashboardPro'; // 🔥 系统管理员工作台Pro
 import ShippingDocumentManagement from './admin/ShippingDocumentManagement'; // 🔥 发货管理
+import AdminDocumentCenter from './admin/DocumentCenter'; // 🔥 模板中心工作台 / 文档中心源头
 // ❌ 已删除：ShipmentManagementCenterV2 - 组件不存在
 // 🔥 已删除：OrderFlowCenter - 业务流程中心模块
 import FinanceManagement from './admin/FinanceManagement'; // 🔥 财务管理
@@ -68,7 +69,8 @@ import OrderManagementCenterPro from './admin/OrderManagementCenterPro'; // 🔥
 // import LeadConversionWorkbench from './admin/LeadConversionWorkbench'; // 🔥 潜客转化工作台
 // ❌ 已禁用：文件不存在
 // import FullProcessDemo from './admin/FullProcessDemo'; // 🔥 全流程演示
-import FullProcessDemoV5 from './demo/FullProcessDemoV5'; // 🔥 全流程演示 V5（专业紧凑型）
+// [SANDBOX] Mock workflow visualization — not a real ERP module
+import FullProcessSandboxV5 from '../sandbox/demo/FullProcessSandboxV5';
 import { DocumentTestPage } from './documents/DocumentTestPage'; // 📄 文档测试页面
 import { DocumentationOfficerWorkbench } from './admin/workbenches/DocumentationOfficerWorkbench'; // 🔥 单证员工作台
 import { DocumentationOfficerWorkbenchPro } from './admin/workbenches/DocumentationOfficerWorkbenchPro'; // 🔥 单证员工作台 Pro版
@@ -304,20 +306,20 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       badge: 'NEW' as any,
       requiredPermission: 'access:inquiry_management' as Permission // 🔥 业务员、区域主管权限
     },
-    { 
-      id: 'full-process-demo', 
-      label: '🎬 全流程演示', 
-      enLabel: 'Full Process Demo', 
-      icon: Workflow, 
-      badge: 'DEMO' as any,
+    {
+      id: 'full-process-demo',
+      label: '🧪 全流程演示沙盘（Mock）',
+      enLabel: 'Workflow Sandbox (Mock Only)',
+      icon: Workflow,
+      badge: 'MOCK' as any,
       requiredPermission: 'access:dashboard' as Permission
     },
-    { 
-      id: 'full-process-demo-v5', 
-      label: '🎬 全流程演示 V5（专业紧凑型）', 
-      enLabel: 'Full Process Demo V5', 
-      icon: Sparkles, 
-      badge: '紧凑型' as any,
+    {
+      id: 'full-process-demo-v5',
+      label: '🧪 全流程演示沙盘 V5（Mock）',
+      enLabel: 'Workflow Sandbox V5 (Mock Only)',
+      icon: Sparkles,
+      badge: 'MOCK' as any,
       requiredPermission: 'access:dashboard' as Permission
     },
     { 
@@ -344,6 +346,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       icon: FileText, 
       badge: '7种' as any,
       requiredPermission: 'access:dashboard' as Permission // 所有人都能查看
+    },
+    {
+      id: 'template-workbench',
+      label: '模板中心工作台',
+      enLabel: 'Template Workbench',
+      icon: Wand2,
+      badge: 'NEW' as any,
+      requiredPermission: 'access:data_management' as Permission // 🔒 仅系统管理员（Admin）可见
     },
     // 🔥 删除：文档编辑器模块
     { 
@@ -723,13 +733,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           const allowedModules = [
             'overview',                      // ��� 工作台
             'document-test',                 // ✅ 文档中心（仅Admin）
+            'template-workbench',           // ✅ 模板中心工作台
             'form-manager',                  // ✅ 表单管理中心
             'role-permission',               // ✅ 角色权限管理
             'menu-permission-matrix',        // ✅ 菜单权限配置矩阵
             'enterprise-backup-center',      // ✅ 企业级备份中心
             'supabase-diagnostic',           // ✅ Supabase诊断面板
             'multi-language-currency',       // ✅ 多语言/多货币
-            'full-process-demo-v5',          // ✅ 全流程演示 V5（专业紧凑型）
+            'full-process-demo-v5',          // 🧪 全流程演示沙盘 V5（Mock Only）
             'messaging',                     // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
@@ -908,6 +919,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       // },
       case 'document-test': // 📄 文档中心
         return <DocumentTestPage />;
+      case 'template-workbench': // 🔥 模板中心工作台
+        return <AdminDocumentCenter userRole="admin" />;
       case 'documentation-workbench-ultimate': // 🔥 新增：单证管理系统 Ultimate 终极版
         return <DocumentationWorkbenchUltimate />;
       // 🔥 已删除：OrderFlowCenter - 业务流程中心模块
@@ -937,8 +950,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         return <OrderManagementCenterPro />;
       case 'full-process-demo': // 🔥 新增：全流程演示
         return <div className="p-8 text-center text-gray-500">全流程演示组件暂不可用</div>;
-      case 'full-process-demo-v5': // 🔥 新增：全流程演示 V5（专业紧凑型）
-        return <FullProcessDemoV5 />;
+      case 'full-process-demo-v5': // [SANDBOX] 全流程演示沙盘 V5 — Mock Only, not connected to real ERP data
+        return <FullProcessSandboxV5 />;
       case 'lead-conversion': // 🔥 新增：潜在客户转化工作台 - 已禁用（文件不存在）
         return <div className="p-8 text-center text-gray-500">潜客转化工作台组件暂不可用</div>;
       case 'ai-content-studio': // 🔥 新：AI内容生成工作台
@@ -1362,8 +1375,16 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         </header>
 
         {/* 主内容区 - 可滚动 */}
-        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-gray-50" style={{ maxWidth: '100%', width: '100%' }}>
-          <div className="p-6" style={{ maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}>
+        <main
+          className={`flex-1 overflow-x-hidden bg-gray-50 ${
+            activeTab === 'template-workbench' ? 'overflow-hidden' : 'overflow-y-auto'
+          }`}
+          style={{ maxWidth: '100%', width: '100%' }}
+        >
+          <div
+            className={activeTab === 'template-workbench' ? 'h-full min-h-0 p-6' : 'p-6'}
+            style={{ maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}
+          >
             {renderContent()}
           </div>
         </main>

@@ -10,9 +10,9 @@ export type {
 } from '../../../contexts/PurchaseOrderContext';
 
 export type { 
-  PurchaseRequirement, 
-  PurchaserFeedback 
-} from '../../../contexts/PurchaseRequirementContext';
+  QuoteRequirement, 
+  QuoteRequirementFeedback 
+} from '../../../contexts/QuoteRequirementContext';
 
 export type { 
   XJ, 

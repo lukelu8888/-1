@@ -37,30 +37,18 @@ import { SalesContractContext, useSalesContracts } from '../../contexts/SalesCon
 import { useOrders } from '../../contexts/OrderContext';
 import { useApproval } from '../../contexts/ApprovalContext'; // 🔥 添加审批Context
 import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext'; // 🔥 新增：采购订单Context
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { nextPRNumber } from '../../utils/xjNumberGenerator';
-import { purchaseRequirementService } from '../../lib/supabaseService';
 import { toast } from 'sonner@2.0.3';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog'; // 🔥 新增：Dialog组件
 import { SalesContractDocument, SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 新增：销售合同文档模板
-
-const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
-
-const pushContractApprovalBridgeItem = (item: any) => {
-  try {
-    const raw = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    const queue = Array.isArray(list) ? list : [];
-    const dedupKey = `${item?.request?.type}:${item?.request?.relatedDocumentId}:${item?.currentApprover}`;
-    const next = queue.filter((x: any) => {
-      const k = `${x?.request?.type}:${x?.request?.relatedDocumentId}:${x?.currentApprover}`;
-      return k !== dedupKey;
-    });
-    next.unshift(item);
-    localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(next.slice(0, 200)));
-  } catch {}
-};
+import type { DocumentLayoutConfig } from '../documents/A4PageContainer';
+import {
+  buildPurchaseOrderDocumentSnapshot,
+  buildQuoteRequirementDocumentSnapshot,
+} from '../admin/purchase-order/purchaseOrderUtils';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 interface SalesContractManagementProps {
   highlightScNumber?: string; // 🔥 高亮显示的销售合同号
@@ -71,65 +59,101 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   const { orders } = useOrders(); // 🔥 获取订单数据
   const { addApprovalRequest } = useApproval(); // 🔥 审批功能
   const { purchaseOrders, addPurchaseOrder, updatePurchaseOrder } = usePurchaseOrders(); // 🔥 新增：采购订单功能
-  const { addRequirement } = usePurchaseRequirements();
+  const { addRequirement } = useQuoteRequirements();
   const currentUser = getCurrentUser();
-  const persistPurchaseRequest = (contract: any, newPO: any, poNumber: string) => {
-    void (async () => {
-      try {
-        const payload = {
-          cgNumber: poNumber,
-          sourceInquiryNumber: contract.inquiryNumber || contract.quotationNumber || contract.contractNumber,
-          urgency: 'high',
-          specialRequirements: `由业务员下推采购，采购单号: ${poNumber}`,
-          customer: {
-            companyName: contract.customerCompany || contract.customerName || 'Unknown Customer',
-            contactPerson: contract.contactPerson || contract.customerName || '',
-            email: contract.customerEmail || 'unknown@example.com',
-            phone: contract.contactPhone || '',
-            address: contract.customerAddress || ''
-          },
-          items: (newPO?.items || []).map((item: any) => ({
-            productName: item.productName || item.name || 'Unknown Product',
-            modelNo: item.modelNo || item.productName || item.name || '-',
-            specification: item.specification || '',
-            quantity: Number(item.quantity || 0) || 1,
-            unit: item.unit || 'PCS',
-            targetPrice: Number(item.unitPrice || 0) || 0,
-            targetCurrency: item.currency || contract.currency || 'USD',
-            hsCode: item.hsCode || '',
-            remarks: item.remarks || ''
-          }))
-        };
-        const saved = await purchaseRequirementService.upsert(payload);
-        if (saved?.id) {
-          addRequirement(saved as any);
-          toast.success('采购请求已落库', {
-            description: `已生成采购需求 ${(saved as any).requirementNumber}（来源 ${poNumber}）`,
-            duration: 4500
-          });
-          void refreshFromBackend().catch(() => {});
-        }
-      } catch (e: any) {
-        toast.error('采购请求落库失败', {
-          description: e?.message || '请检查后端接口 /api/sales-contracts/{id}/push-to-purchase',
-          duration: 5000
-        });
-      }
-    })();
+  const ensureBoundSalesContractSnapshot = (contract: any) => {
+    const templateSnapshot = contract?.templateSnapshot || contract?.template_snapshot || null;
+    const templateVersion = templateSnapshot?.version || null;
+    const documentData = contract?.documentDataSnapshot || contract?.document_data_snapshot || null;
+    if (!templateVersion || !documentData) {
+      toast.error('该 SC 未绑定模板中心版本快照，无法下推采购');
+      return false;
+    }
+    return true;
+  };
+  const persistPurchaseRequest = async (contract: any, newPO: any, poNumber: string) => {
+    try {
+      const payload = {
+        id: `qr-from-sc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        requirementNo: poNumber,
+        source: 'sales-contract',
+        sourceRef: contract.contractNumber,
+        sourceInquiryNumber: contract.inquiryNumber || contract.quotationNumber || contract.contractNumber,
+        projectId: contract.projectId || null,
+        projectCode: contract.projectCode || null,
+        projectName: contract.projectName || null,
+        projectRevisionId: contract.projectRevisionId || null,
+        projectRevisionCode: contract.projectRevisionCode || null,
+        projectRevisionStatus: contract.projectRevisionStatus || null,
+        finalRevisionId: contract.finalRevisionId || null,
+        finalQuotationId: contract.finalQuotationId || null,
+        finalQuotationNumber: contract.finalQuotationNumber || contract.quotationNumber || null,
+        requiredDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        urgency: 'high',
+        createdBy: currentUser?.email || 'system',
+        createdDate: new Date().toISOString(),
+        specialRequirements: contract.projectRevisionId
+          ? `由业务员下推采购，采购单号: ${poNumber}\nExecution Baseline: ${contract.projectCode ? `${contract.projectCode} · ` : ''}${contract.projectName || 'Project'} / Rev ${contract.projectRevisionCode || '-'} / Final QT ${contract.finalQuotationNumber || contract.quotationNumber || '-'}`
+          : `由业务员下推采购，采购单号: ${poNumber}`,
+        customer: {
+          companyName: contract.customerCompany || contract.customerName || 'Unknown Customer',
+          contactPerson: contract.contactPerson || contract.customerName || '',
+          email: contract.customerEmail || 'unknown@example.com',
+          phone: contract.contactPhone || '',
+          address: contract.customerAddress || ''
+        },
+        items: (newPO?.items || []).map((item: any) => ({
+          id: item.id || `item-${Math.random().toString(36).slice(2, 8)}`,
+          productName: item.productName || item.name || 'Unknown Product',
+          modelNo: getFormalBusinessModelNo(item),
+          specification: item.specification || '',
+          quantity: Number(item.quantity || 0) || 1,
+          unit: item.unit || 'PCS',
+          targetPrice: Number(item.unitPrice || 0) || 0,
+          targetCurrency: item.currency || contract.currency || 'USD',
+          hsCode: item.hsCode || '',
+          remarks: item.remarks || '',
+          customerProductId: item.customerProductId || undefined,
+          projectId: item.projectId || contract.projectId || null,
+          projectRevisionId: item.projectRevisionId || contract.projectRevisionId || null,
+          projectRevisionCode: item.projectRevisionCode || contract.projectRevisionCode || null,
+        }))
+      } as any;
+      payload.documentRenderMeta = contract.projectRevisionId
+        ? {
+            projectExecutionBaseline: {
+              projectId: contract.projectId || null,
+              projectCode: contract.projectCode || null,
+              projectName: contract.projectName || null,
+              projectRevisionId: contract.projectRevisionId || null,
+              projectRevisionCode: contract.projectRevisionCode || null,
+              projectRevisionStatus: contract.projectRevisionStatus || null,
+              finalRevisionId: contract.finalRevisionId || null,
+              finalQuotationId: contract.finalQuotationId || null,
+              finalQuotationNumber: contract.finalQuotationNumber || contract.quotationNumber || null,
+            },
+          }
+        : null;
+      await addRequirement({
+        ...payload,
+        documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(payload as any),
+      });
+      toast.success('采购请求已落库', {
+        description: `已生成采购需求 ${poNumber}（来源 ${contract.contractNumber}）`,
+        duration: 4500
+      });
+      await refreshFromBackend();
+    } catch (e: any) {
+      toast.error('采购请求落库失败', {
+        description: e?.message || 'Supabase 写入失败',
+        duration: 5000
+      });
+      throw e;
+    }
   };
 
   // 🔥 接口化：进入“订单管理”Tab时立刻请求后端（Network 面板能直接看到 /api/sales-contracts）
   React.useEffect(() => {
-    // context 为空但 localStorage 有合同时，强制重新加载（防墓碑误过滤）
-    try {
-      const saved = localStorage.getItem('salesContracts');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0 && contracts.length === 0) {
-          window.dispatchEvent(new CustomEvent('salesContractCreatedLocally'));
-        }
-      }
-    } catch { /* ignore */ }
     void refreshFromBackend().catch((e: any) => {
       console.warn('⚠️ [SalesContractManagement] refreshFromBackend failed:', e?.message || e);
     });
@@ -144,47 +168,6 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     console.log('  - 当前用户:', currentUser);
   }, [contracts]);
   
-  // 一次性修正：用报价单的 salesPrice 纠正合同 products 里错误的 unitPrice
-  // 直接修正 localStorage，不调用 refreshFromBackend（避免触发墓碑过滤清空新合同）
-  React.useEffect(() => {
-    try {
-      const stored: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-      if (!stored.length) return;
-
-      // 收集所有本地报价单（各缓存 key）
-      const allQuotations: any[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i) || '';
-        if (key.startsWith('sales_quotations_')) {
-          try { allQuotations.push(...JSON.parse(localStorage.getItem(key) || '[]')); } catch { /* ignore */ }
-        }
-      }
-
-      let changed = false;
-      const corrected = stored.map((contract: any) => {
-        const qt = allQuotations.find((q: any) => q.qtNumber === contract.quotationNumber);
-        if (!qt?.items?.length) return contract;
-        const newProducts = (contract.products || []).map((p: any, idx: number) => {
-          const item = qt.items[idx];
-          if (!item) return p;
-          const correctPrice = Number(item.salesPrice ?? item.unitPrice ?? item.quotePrice ?? 0);
-          if (correctPrice > 0 && Math.abs(correctPrice - Number(p.unitPrice)) > 0.001) {
-            changed = true;
-            return { ...p, unitPrice: correctPrice, amount: correctPrice * Number(p.quantity || 0) };
-          }
-          return p;
-        });
-        return { ...contract, products: newProducts };
-      });
-
-      if (changed) {
-        // 只更新 localStorage，不触发 refreshFromBackend，避免后端空响应干扰
-        localStorage.setItem('salesContracts', JSON.stringify(corrected));
-      }
-    } catch { /* ignore */ }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // 🔥 高亮状态（3秒后自动消失）
   const [highlightedId, setHighlightedId] = React.useState<string | null>(null);
   
@@ -217,16 +200,25 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
   const [selectedContract, setSelectedContract] = useState<any>(null);
   const requestProcurementFromContract = async (contract: any) => {
+    if (!ensureBoundSalesContractSnapshot(contract)) {
+      return;
+    }
     const livePOs = getLivePurchaseOrdersForContract(contract);
     if (livePOs.length > 0) {
       // 允许业务员“重新激活”已有采购请求，避免按钮长期灰置且请求链路断裂
-      livePOs.forEach((po: any) => {
-        updatePurchaseOrder(po.id, {
+      try {
+        await Promise.all(livePOs.map((po: any) => updatePurchaseOrder(po.id, {
           procurementRequestStatus: 'pending_procurement_assignment',
           status: 'pending',
           updatedDate: new Date().toISOString(),
-        } as any);
-      });
+        } as any)));
+      } catch (error: any) {
+        toast.error('重新激活采购请求失败', {
+          description: error?.message || 'Supabase 写入失败',
+          duration: 5000,
+        });
+        return;
+      }
       toast.success('已重新激活采购请求', {
         description: `采购来源号：${livePOs.map((po: any) => po.poNumber).join(', ')}`,
         duration: 3500
@@ -238,7 +230,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     const items = (contract.products || []).map((product: any, index: number) => ({
       id: String(product?.id || product?.productId || `item-${index + 1}`),
       productName: product?.productName || 'Unknown Product',
-      modelNo: product?.modelNo || product?.productName || '-',
+      modelNo: getFormalBusinessModelNo(product),
       specification: product?.specification || '',
       quantity: Number(product?.quantity || 0),
       unit: product?.unit || 'PCS',
@@ -250,13 +242,22 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       remarks: product?.remarks || ''
     }));
 
-    addPurchaseOrder({
+    const procurementRequestOrder = {
       id: `po-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       poNumber,
       sourceRef: contract.contractNumber,
       sourceSONumber: contract.contractNumber,
       salesContractNumber: contract.contractNumber,
       quotationNumber: contract.quotationNumber,
+      projectId: contract.projectId || null,
+      projectCode: contract.projectCode || null,
+      projectName: contract.projectName || null,
+      projectRevisionId: contract.projectRevisionId || null,
+      projectRevisionCode: contract.projectRevisionCode || null,
+      projectRevisionStatus: contract.projectRevisionStatus || null,
+      finalRevisionId: contract.finalRevisionId || null,
+      finalQuotationId: contract.finalQuotationId || null,
+      finalQuotationNumber: contract.finalQuotationNumber || contract.quotationNumber || null,
       xjNumber: contract.inquiryNumber || '',
       requirementNo: '',
       supplierName: '待采购分配',
@@ -271,13 +272,46 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       expectedDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
       status: 'pending',
       paymentStatus: 'unpaid',
-      remarks: `📋 业务员请求采购（不含供应商信息）\n来源销售合同: ${contract.contractNumber}\n来源询价: ${contract.inquiryNumber || ''}\n待采购员分配供应商`,
+      remarks: contract.projectRevisionId
+        ? `📋 业务员请求采购（不含供应商信息）\n来源销售合同: ${contract.contractNumber}\n来源询价: ${contract.inquiryNumber || ''}\nExecution Baseline: ${contract.projectCode ? `${contract.projectCode} · ` : ''}${contract.projectName || 'Project'} / Rev ${contract.projectRevisionCode || '-'} / Final QT ${contract.finalQuotationNumber || contract.quotationNumber || '-'}\n待采购员分配供应商`
+        : `📋 业务员请求采购（不含供应商信息）\n来源销售合同: ${contract.contractNumber}\n来源询价: ${contract.inquiryNumber || ''}\n待采购员分配供应商`,
       createdBy: currentUser?.email || 'system',
       createdDate: new Date().toISOString(),
       procurementRequestStatus: 'pending_procurement_assignment',
-    } as any);
+    } as any;
+    procurementRequestOrder.documentRenderMeta = contract.projectRevisionId
+      ? {
+          projectExecutionBaseline: {
+            projectId: contract.projectId || null,
+            projectCode: contract.projectCode || null,
+            projectName: contract.projectName || null,
+            projectRevisionId: contract.projectRevisionId || null,
+            projectRevisionCode: contract.projectRevisionCode || null,
+            projectRevisionStatus: contract.projectRevisionStatus || null,
+            finalRevisionId: contract.finalRevisionId || null,
+            finalQuotationId: contract.finalQuotationId || null,
+            finalQuotationNumber: contract.finalQuotationNumber || contract.quotationNumber || null,
+          },
+        }
+      : null;
+    procurementRequestOrder.templateSnapshot = { pendingResolution: true };
+    procurementRequestOrder.documentRenderMeta = null;
+    procurementRequestOrder.documentDataSnapshot = buildPurchaseOrderDocumentSnapshot(procurementRequestOrder);
+    try {
+      await addPurchaseOrder(procurementRequestOrder);
+    } catch (error: any) {
+      toast.error('采购请求落库失败', {
+        description: error?.message || 'Supabase 写入失败',
+        duration: 5000
+      });
+      return;
+    }
 
-    persistPurchaseRequest(contract, { items }, poNumber);
+    try {
+      await persistPurchaseRequest(contract, { items }, poNumber);
+    } catch {
+      return;
+    }
 
     toast.success('✅ 已请求采购', {
       description: `采购单号：${poNumber}（待采购员分配供应商）`,
@@ -309,23 +343,28 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   };
   
   // 🔥 批量删除
-  const handleBatchDelete = () => {
+  const handleBatchDelete = async () => {
     if (selectedIds.length === 0) {
       toast.error('请先选择要删除的合同！');
       return;
     }
     
     if (window.confirm(`确定要删除选中的 ${selectedIds.length} 个合同吗？此操作不可恢复！`)) {
-      selectedIds.forEach(id => {
-        deleteContract(id);
-      });
-      setSelectedIds([]);
-      toast.success(`成功删除 ${selectedIds.length} 个合同！`);
+      try {
+        await Promise.all(selectedIds.map((id) => deleteContract(id)));
+        setSelectedIds([]);
+        toast.success(`成功删除 ${selectedIds.length} 个合同！`);
+      } catch (error: any) {
+        toast.error('删除合同失败', {
+          description: error?.message || '请稍后重试',
+          duration: 4000,
+        });
+      }
     }
   };
   
   // 🔥 提交审批
-  const handleSubmitForApproval = (contract: any) => {
+  const handleSubmitForApproval = async (contract: any) => {
     console.log('📤 [SO] 提交审批:', contract);
     
     // 判断审批流程
@@ -351,7 +390,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       : `${contract.products[0].productName} × ${contract.products[0].quantity} ${contract.products[0].unit} 等 ${productCount} 项产品`;
     
     // 🔥 创建审批请求
-    const approvalRequest = addApprovalRequest({
+    await addApprovalRequest({
       type: 'sales_contract',
       relatedDocumentId: contract.contractNumber,
       relatedDocumentType: '销售合同',
@@ -376,15 +415,9 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       deadline: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(), // 48小时期限
       expiresIn: 48
     });
-    
-    // 写入 bridge，让主管的审批中心立刻看到
-    pushContractApprovalBridgeItem({
-      currentApprover: managerEmail,
-      request: approvalRequest,
-    });
 
     // 🔥 更新销售合同状态
-    submitForApproval(contract.id, `销售合同 ${contract.contractNumber} 已准备好，请审批。`);
+    await submitForApproval(contract.id, `销售合同 ${contract.contractNumber} 已准备好，请审批。`);
     
     // 🔥 显示审批流程提示
     const approvalMessage = requiresDirectorApproval
@@ -396,7 +429,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       duration: 6000
     });
     
-    console.log('✅ [SO] 审批请求创建成功:', approvalRequest);
+    console.log('✅ [SO] 审批请求创建成功:', contract.contractNumber);
   };
   
   // 🔥 发送给客户
@@ -727,6 +760,11 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                           <div className="text-[11px] font-normal text-blue-600">
                             报价单编号：{contract.quotationNumber}
                           </div>
+                          {contract.projectRevisionId && (
+                            <div className="text-[11px] font-normal text-indigo-600">
+                              执行基线：{contract.projectCode ? `${contract.projectCode} · ` : ''}{contract.projectName || 'Project'} / Rev {contract.projectRevisionCode || '-'}
+                            </div>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -840,16 +878,23 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             <Button 
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                updateContract(contract.id, { 
-                                  status: 'customer_confirmed',
-                                  customerConfirmedAt: new Date().toISOString(),
-                                  sentToCustomerAt: contract.sentToCustomerAt || new Date().toISOString()
-                                });
-                                toast.success('✅ 状态已修复为"客户已确认"', {
-                                  description: '现在可以点击"通知采购部"按钮了！',
-                                  duration: 3000
-                                });
+                              onClick={async () => {
+                                try {
+                                  await updateContract(contract.id, { 
+                                    status: 'customer_confirmed',
+                                    customerConfirmedAt: new Date().toISOString(),
+                                    sentToCustomerAt: contract.sentToCustomerAt || new Date().toISOString()
+                                  });
+                                  toast.success('✅ 状态已修复为"客户已确认"', {
+                                    description: '现在可以点击"通知采购部"按钮了！',
+                                    duration: 3000
+                                  });
+                                } catch (error: any) {
+                                  toast.error('状态修复失败', {
+                                    description: error?.message || '请稍后重试',
+                                    duration: 4000,
+                                  });
+                                }
                               }}
                               className="gap-1 h-7 text-[11px] px-2 bg-orange-50 hover:bg-orange-100 border-orange-300"
                               title="临时修复：将状态更新为customer_confirmed"
@@ -938,88 +983,32 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                 📄 销售合同文档 - {selectedContract.contractNumber}
               </DialogTitle>
               <DialogDescription>
-                Sales Contract Document - 福建高盛达富建材有限公司
+                {selectedContract.projectRevisionId
+                  ? `Sales Contract Document · ${selectedContract.projectCode ? `${selectedContract.projectCode} · ` : ''}${selectedContract.projectName || 'Project'} / Rev ${selectedContract.projectRevisionCode || '-'}`
+                  : 'Sales Contract Document - 福建高盛达富建材有限公司'}
               </DialogDescription>
             </DialogHeader>
             
             <div className="overflow-y-auto p-6" style={{ height: 'calc(95vh - 80px)' }}>
+              {(() => {
+                const templateSnapshot = selectedContract.templateSnapshot || selectedContract.template_snapshot || null;
+                const templateVersion = templateSnapshot?.version || null;
+                const contractData = (selectedContract.documentDataSnapshot || selectedContract.document_data_snapshot) as SalesContractData | null;
+                const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
+                if (!templateVersion || !contractData) {
+                  return (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+                      该 SC 未绑定模板中心版本快照，无法预览。
+                    </div>
+                  );
+                }
+                return (
               <SalesContractDocument
-                data={{
-                  // 合同基本信息
-                  contractNo: selectedContract.contractNumber,
-                  contractDate: selectedContract.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0],
-                  quotationNo: selectedContract.quotationNumber,
-                  inquiryNo: selectedContract.inquiryNumber,
-                  region: selectedContract.region,
-                  
-                  // 卖方信息福建高盛达富建材有限公司）
-                  seller: {
-                    name: '福建高盛达富建材有限公司',
-                    nameEn: 'FUJIAN COSUN BUILDING MATERIALS CO., LTD.',
-                    address: '中国福建省厦门市工业园区123号',
-                    addressEn: 'No. 123, Industrial Park, Xiamen, Fujian, China',
-                    tel: '+86-592-1234-5678',
-                    fax: '+86-592-1234-5679',
-                    email: currentUser?.email || 'sales@cosun.com',
-                    legalRepresentative: '张总',
-                    bankInfo: {
-                      bankName: 'Bank of China, Xiamen Branch',
-                      accountName: 'FUJIAN COSUN BUILDING MATERIALS CO., LTD.',
-                      accountNumber: '1234567890123456',
-                      swiftCode: 'BKCHCNBJ950',
-                      bankAddress: 'Xiamen, Fujian, China',
-                      currency: 'USD'
-                    }
-                  },
-                  
-                  // 买方信息（客户）
-                  buyer: {
-                    companyName: selectedContract.customerCompany,
-                    address: selectedContract.customerAddress || 'Customer Address',
-                    country: selectedContract.region === 'NA' ? 'United States' : selectedContract.region === 'SA' ? 'Brazil' : 'Germany',
-                    contactPerson: selectedContract.customerName,
-                    tel: selectedContract.customerPhone || 'N/A',
-                    email: selectedContract.customerEmail
-                  },
-                  
-                  // 产品信息
-                  products: selectedContract.products.map((product: any, index: number) => ({
-                    no: index + 1,
-                    description: product.productName,
-                    specification: product.specification || '',
-                    hsCode: product.hsCode || '',
-                    quantity: product.quantity,
-                    unit: product.unit,
-                    unitPrice: product.unitPrice,
-                    currency: selectedContract.currency,
-                    amount: product.amount,
-                    deliveryTime: product.deliveryTime || selectedContract.deliveryTime || '30-45 days after deposit'
-                  })),
-                  
-                  // 合同条款
-                  terms: {
-                    totalAmount: selectedContract.totalAmount,
-                    currency: selectedContract.currency,
-                    tradeTerms: selectedContract.tradeTerms || 'FOB Xiamen',
-                    paymentTerms: selectedContract.paymentTerms,
-                    depositAmount: selectedContract.depositAmount || selectedContract.totalAmount * 0.3,
-                    balanceAmount: selectedContract.balanceAmount || selectedContract.totalAmount * 0.7,
-                    deliveryTime: selectedContract.deliveryTime || '30-45 days after receiving deposit',
-                    portOfLoading: selectedContract.portOfLoading || 'Xiamen, China',
-                    portOfDestination: selectedContract.portOfDestination || "As per buyer's request",
-                    packing: selectedContract.packing || 'Standard Export Packing',
-                    inspection: 'Buyer inspection or third-party inspection before shipment',
-                    warranty: '1 year warranty for quality issues'
-                  },
-                  
-                  // 签署信息
-                  signature: {
-                    sellerSignatory: currentUser?.name || 'Sales Manager',
-                    buyerSignatory: selectedContract.customerName,
-                    signDate: selectedContract.createdAt?.split('T')[0]
-                  }
-                } as SalesContractData}
+                data={contractData}
+                layoutConfig={layoutConfig || undefined}
               />
+                );
+              })()}
             </div>
           </DialogContent>
         </Dialog>

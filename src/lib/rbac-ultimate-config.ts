@@ -122,8 +122,8 @@ export const BUSINESS_MODULES: Record<BusinessModule, ModuleConfig> = {
     description: '询价单、报价单、合同、订单、销售漏斗',
     category: 'business',
     subModules: [
-      { id: 'inquiry', name: '客户询价', nameEn: 'Inquiry', description: '客户询价单管理' },
-      { id: 'quotation', name: 'Cosun报价', nameEn: 'Quotation', description: 'Cosun报价单管理' },
+      { id: 'ing', name: '客户询价', nameEn: 'Inquiry', description: '客户询价单管理' },
+      { id: 'qt', name: 'Cosun报价', nameEn: 'Quotation', description: 'Cosun报价单管理' },
       { id: 'contract', name: '销售合同', nameEn: 'Contract', description: '销售合同管理' },
       { id: 'order', name: '销售订单', nameEn: 'Order', description: '销售订单跟踪' },
       { id: 'sales_funnel', name: '销售漏斗', nameEn: 'Funnel', description: '销售机会和转化率' },

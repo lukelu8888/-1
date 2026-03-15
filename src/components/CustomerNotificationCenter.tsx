@@ -12,13 +12,19 @@ import {
   SheetTitle,
   SheetDescription,
 } from './ui/sheet';
-import { useNotifications, Notification } from '../contexts/NotificationContext';
+import { useOptionalNotifications, Notification } from '../contexts/NotificationContext';
 import { useRouter } from '../contexts/RouterContext';
 
 export function CustomerNotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
-  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
+  const notificationContext = useOptionalNotifications();
   const { navigateTo } = useRouter();
+
+  if (!notificationContext) {
+    return null;
+  }
+
+  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = notificationContext;
 
   // 按时间排序通知（最新的在前）
   const sortedNotifications = [...notifications].sort((a, b) => b.createdAt - a.createdAt);
@@ -65,10 +71,10 @@ export function CustomerNotificationCenter() {
     }
 
     // 根据通知类型跳转到相应页面
-    if (notification.relatedType === 'quotation') {
+    if (notification.relatedType === 'qt') {
       navigateTo('dashboard');
       setIsOpen(false);
-    } else if (notification.relatedType === 'inquiry') {
+    } else if (notification.relatedType === 'ing') {
       navigateTo('dashboard');
       setIsOpen(false);
     }

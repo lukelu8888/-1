@@ -72,7 +72,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "inquiry",
+                  "target": "ing",
                   "new_status": "pending",
                   "display": "待处理"
                 }
@@ -100,7 +100,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "pending_finance",
                   "display": "财务审核中"
                 }
@@ -128,7 +128,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "finance_approved",
                   "display": "财务已批准"
                 }
@@ -143,7 +143,7 @@ export const businessWorkflowComplete33 = {
               "triggers": [
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "draft",
                   "display": "草稿"
                 }
@@ -170,7 +170,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "pending_manager",
                   "display": "主管审核中"
                 }
@@ -197,7 +197,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "approved",
                   "display": "已批准"
                 }
@@ -225,7 +225,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "rejected_by_manager",
                   "display": "主管已拒绝"
                 }
@@ -265,7 +265,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "sent",
                   "display": "已发送"
                 }
@@ -311,7 +311,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "confirmed",
                   "display": "客户已确认 by {customer_contact}"
                 }
@@ -339,7 +339,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "negotiating",
                   "display": "议价中"
                 }
@@ -373,7 +373,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "rejected",
                   "display": "客户已拒绝 - {rejection_reason} - {timestamp}"
                 }
@@ -407,7 +407,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "negotiation_approved",
                   "display": "议价已批准"
                 }
@@ -441,7 +441,7 @@ export const businessWorkflowComplete33 = {
                 },
                 {
                   "type": "status_change",
-                  "target": "quotation",
+                  "target": "qt",
                   "new_status": "negotiation_rejected",
                   "display": "议价已拒绝"
                 }
@@ -1139,13 +1139,13 @@ export const businessWorkflowComplete33 = {
   },
 
   "status_definitions": {
-    "inquiry": {
+    "ing": {
       "pending": "待处理",
       "quoted": "已报价",
       "accepted": "已接受",
       "rejected": "已拒绝"
     },
-    "quotation": {
+    "qt": {
       "pending_finance": "财务审核中",
       "finance_approved": "财务已批准",
       "draft": "草稿",

@@ -29,17 +29,19 @@ import {
   Info
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { PurchaseRequirement, PurchaserFeedback } from '../../contexts/PurchaseRequirementContext';
+import { QuoteRequirement, QuoteRequirementFeedback } from '../../contexts/QuoteRequirementContext';
 import { SalesQuotation, SalesQuotationItem, useSalesQuotations } from '../../contexts/SalesQuotationContext';
 import { useInquiries } from '../../contexts/InquiryContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { supabase } from '../../lib/supabase';
+import { adaptSalesQuotationToDocumentData } from '../../utils/documentDataAdapters';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 interface CreateQuotationFromFeedbackProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  qr: PurchaseRequirement;
-  feedback: PurchaserFeedback;
+  qr: QuoteRequirement;
+  feedback: QuoteRequirementFeedback;
 }
 
 export function CreateQuotationFromFeedback({
@@ -74,7 +76,7 @@ export function CreateQuotationFromFeedback({
           id: `${Date.now()}-${index}`,
           productName: p.productName,
           specification: p.specification || '',
-          modelNo: p.productName, // 假设产品名称包含型号
+          modelNo: getFormalBusinessModelNo(p) || p.productName,
           quantity: p.quantity,
           unit: p.unit,
           
@@ -182,16 +184,48 @@ export function CreateQuotationFromFeedback({
       inq.products?.some(ip => 
         qr.items.some(qi => 
           qi.productName === ip.productName || 
-          qi.modelNo === ip.productName
+          getFormalBusinessModelNo(qi) === getFormalBusinessModelNo(ip)
         )
       )
     );
   };
   
   const relatedInquiry = findRelatedInquiry();
+
+  const ensureBoundQuoteRequirementSnapshot = () => {
+    const templateSnapshot = (qr as any).templateSnapshot || (qr as any).template_snapshot || null;
+    const templateVersion = templateSnapshot?.version || null;
+    const documentData = (qr as any).documentDataSnapshot || (qr as any).document_data_snapshot || null;
+    if (!templateVersion || !documentData) {
+      toast.error('该 QR 未绑定模板中心版本快照，无法创建 QT');
+      return false;
+    }
+    return true;
+  };
+
+  const ensureBoundBJFeedback = () => {
+    if (!feedback.linkedBJ?.trim()) {
+      toast.error('当前采购反馈未绑定 BJ 结果，无法创建 QT');
+      return false;
+    }
+    const missingSourcePricing = feedback.products.find((product) => !product.sourcePricing);
+    if (missingSourcePricing) {
+      toast.error('当前采购反馈缺少 BJ 价格语义，无法创建 QT', {
+        description: `${missingSourcePricing.productName} 未携带 sourcePricing`,
+      });
+      return false;
+    }
+    return true;
+  };
   
   // 🔥 提交报价单
   const handleSubmit = async () => {
+    if (!ensureBoundQuoteRequirementSnapshot()) {
+      return;
+    }
+    if (!ensureBoundBJFeedback()) {
+      return;
+    }
     if (items.length === 0) {
       toast.error('请至少添加一个产品');
       return;
@@ -277,6 +311,13 @@ export function CreateQuotationFromFeedback({
         inspection: "Seller's factory inspection, buyer has the right to re-inspect upon arrival"
       }
     };
+
+    (quotation as any).documentDataSnapshot = adaptSalesQuotationToDocumentData({
+      ...quotation,
+      customerAddress: (relatedInquiry as any).buyerInfo?.address || (relatedInquiry as any).address || '',
+      customerPhone: (relatedInquiry as any).buyerInfo?.phone || (relatedInquiry as any).phone || '',
+      customerCountry: (relatedInquiry as any).country || '',
+    });
     
     // 🔥 调试：检查报价单数据
     console.log('🔍 [CreateQuotationFromFeedback] 创建报价单数据:', {
@@ -296,7 +337,7 @@ export function CreateQuotationFromFeedback({
     });
     
     // 保存报价单
-    addQuotation(quotation);
+    await addQuotation(quotation);
     
     toast.success(`✅ 客户报价单已创建 - ${qtNumber}`, {
       description: `利润率 ${(profitRate * 100).toFixed(2)}%，利润 ${totalProfit.toLocaleString()} ${feedback.products[0]?.currency}`,

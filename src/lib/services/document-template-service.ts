@@ -7,10 +7,10 @@
  * 3. 支持文档生成、预览、下载
  */
 
-// 🔥 8种核心B2B外贸文档模板
+// 🔥 核心B2B外贸文档模板
 export const DOCUMENT_TEMPLATES = [
   {
-    id: 'inquiry',
+    id: 'ing',
     name: '客户询价单',
     nameEn: 'Customer Inquiry',
     category: 'sales',
@@ -24,18 +24,46 @@ export const DOCUMENT_TEMPLATES = [
     order: 1
   },
   {
-    id: 'quotation',
-    name: '业务员报价单',
-    nameEn: 'Quotation',
+    id: 'qt',
+    name: '销售报价单',
+    nameEn: 'Sales Quotation',
     category: 'sales',
     icon: '💰',
-    description: '业务员向客户提供的正式报价',
+    description: '业务员基于供应链反馈向客户提供的正式报价',
     roles: ['Sales_Rep', 'Sales_Manager', 'CEO'],
     component: 'QuotationDocument',
     dataInterface: 'QuotationData',
     color: '#10B981',
     businessStage: '报价阶段',
     order: 2
+  },
+  {
+    id: 'qr',
+    name: '报价请求单',
+    nameEn: 'Quote Requirement',
+    category: 'procurement',
+    icon: '📋',
+    description: '业务员向采购员发起的内部报价请求',
+    roles: ['Sales_Rep', 'Sales_Manager', 'Procurement', 'CEO'],
+    component: 'QuoteRequirementDocument',
+    dataInterface: 'QuoteRequirementDocumentData',
+    color: '#7C3AED',
+    businessStage: '内部询价阶段',
+    order: 3
+  },
+  {
+    id: 'xj',
+    name: '采购询价单',
+    nameEn: 'Procurement Inquiry',
+    category: 'procurement',
+    icon: '📨',
+    description: '采购员向供应商发出的正式询价单',
+    roles: ['Procurement', 'Sales_Rep', 'Sales_Manager', 'CEO'],
+    component: 'XJDocument',
+    dataInterface: 'XJData',
+    color: '#6366F1',
+    businessStage: '供应商询价阶段',
+    order: 3.5
   },
   {
     id: 'pi',
@@ -49,7 +77,7 @@ export const DOCUMENT_TEMPLATES = [
     dataInterface: 'ProformaInvoiceData',
     color: '#8B5CF6',
     businessStage: '订单确认阶段',
-    order: 3
+    order: 4
   },
   {
     id: 'sc',
@@ -63,21 +91,21 @@ export const DOCUMENT_TEMPLATES = [
     dataInterface: 'SalesContractData',
     color: '#EF4444',
     businessStage: '合同签订阶段',
-    order: 4
+    order: 5
   },
   {
-    id: 'po',
-    name: '采购订单',
-    nameEn: 'Purchase Order',
+    id: 'cg',
+    name: '采购合同',
+    nameEn: 'Purchase Contract',
     category: 'procurement',
     icon: '🛒',
-    description: '向供应商下达的采购订单',
+    description: '公司与供应商确认采购条款的正式采购合同',
     roles: ['Procurement', 'Sales_Rep', 'CEO'],
     component: 'PurchaseOrderDocument',
     dataInterface: 'PurchaseOrderData',
     color: '#F59E0B',
     businessStage: '采购阶段',
-    order: 5
+    order: 6
   },
   {
     id: 'ci',
@@ -91,7 +119,7 @@ export const DOCUMENT_TEMPLATES = [
     dataInterface: 'CommercialInvoiceData',
     color: '#06B6D4',
     businessStage: '出货单证阶段',
-    order: 6
+    order: 7
   },
   {
     id: 'pl',
@@ -105,7 +133,7 @@ export const DOCUMENT_TEMPLATES = [
     dataInterface: 'PackingListData',
     color: '#14B8A6',
     businessStage: '出货单证阶段',
-    order: 7
+    order: 8
   },
   {
     id: 'soa',
@@ -119,7 +147,7 @@ export const DOCUMENT_TEMPLATES = [
     dataInterface: 'StatementOfAccountData',
     color: '#EC4899',
     businessStage: '财务对账阶段',
-    order: 8
+    order: 9
   }
 ] as const;
 

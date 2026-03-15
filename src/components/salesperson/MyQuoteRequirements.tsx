@@ -1,8 +1,8 @@
 /**
- * 🔥 我的采购需求 - 业务员端
+ * 🔥 我的 QR - 业务员端
  * 
  * 功能：
- * 1. 查看自己创建的采购需求（QR）
+ * 1. 查看自己创建的报价请求单（QR）
  * 2. 查看采购员反馈的成本信息
  * 3. 基于采购反馈创建客户报价（QT）
  * 4. 跟踪采购进度
@@ -26,14 +26,21 @@ import {
   Package,
   DollarSign
 } from 'lucide-react';
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { PurchaserFeedbackView } from './PurchaserFeedbackView';
 import { CreateQuotationFromFeedback } from './CreateQuotationFromFeedback';
 import { toast } from 'sonner@2.0.3';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import {
+  QuoteRequirementDocument,
+  type QuoteRequirementDocumentData,
+  buildDefaultQuoteRequirementTextOverrides,
+} from '../documents/templates/QuoteRequirementDocument';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
-export function MyPurchaseRequirements() {
-  const { requirements } = usePurchaseRequirements();
+export function MyQuoteRequirements() {
+  const { requirements: quoteRequirements } = useQuoteRequirements();
   const currentUser = getCurrentUser();
   
   // 🔥 状态管理
@@ -42,10 +49,11 @@ export function MyPurchaseRequirements() {
   const [selectedQR, setSelectedQR] = useState<any>(null);
   const [showFeedbackView, setShowFeedbackView] = useState(false);
   const [showCreateQuotation, setShowCreateQuotation] = useState(false);
+  const [showDocumentPreview, setShowDocumentPreview] = useState(false);
   
-  // 🔥 筛选我的采购需求
+  // 🔥 筛选我的 QR
   const myRequirements = useMemo(() => {
-    return requirements.filter(qr => {
+    return quoteRequirements.filter(qr => {
       // 只显示当前业务员创建的QR
       if (qr.createdBy !== currentUser?.name && qr.createdBy !== currentUser?.email) {
         return false;
@@ -64,17 +72,17 @@ export function MyPurchaseRequirements() {
         const term = searchTerm.toLowerCase();
         return (
           qr.requirementNo.toLowerCase().includes(term) ||
-          qr.sourceInquiryNo?.toLowerCase().includes(term) ||
+          qr.sourceInquiryNumber?.toLowerCase().includes(term) ||
           qr.items.some(item => 
             item.productName.toLowerCase().includes(term) ||
-            item.modelNo?.toLowerCase().includes(term)
+            getFormalBusinessModelNo(item).toLowerCase().includes(term)
           )
         );
       }
       
       return true;
     });
-  }, [requirements, currentUser, filterStatus, searchTerm]);
+  }, [quoteRequirements, currentUser, filterStatus, searchTerm]);
   
   // 🔥 统计信息
   const stats = useMemo(() => {
@@ -88,7 +96,7 @@ export function MyPurchaseRequirements() {
   // 🔥 查看采购反馈
   const handleViewFeedback = (qr: any) => {
     if (!qr.purchaserFeedback) {
-      toast.error('该采购需求尚未收到采购员反馈');
+      toast.error('该 QR 尚未收到采购员反馈');
       return;
     }
     
@@ -100,6 +108,47 @@ export function MyPurchaseRequirements() {
   const handleCreateQuotation = (qr: any, feedback: any) => {
     setSelectedQR(qr);
     setShowCreateQuotation(true);
+  };
+
+  const buildFallbackQrDocumentData = (qr: any): QuoteRequirementDocumentData => ({
+    requirementNo: qr.requirementNo,
+    requirementDate: qr.createdDate || qr.createdAt || new Date().toISOString().split('T')[0],
+    sourceInquiryNo: qr.sourceInquiryNumber || qr.sourceRef || '',
+    requiredResponseDate: qr.expectedQuoteDate || new Date().toISOString().split('T')[0],
+    requiredDeliveryDate: qr.deliveryDate || qr.requiredDate || new Date().toISOString().split('T')[0],
+    customer: {
+      companyName: qr.customerName || 'N/A',
+      contactPerson: qr.createdBy || '',
+      email: qr.customerEmail || '',
+      phone: '',
+      address: '',
+      region: qr.region || '',
+    },
+    products: (qr.items || []).map((item: any, index: number) => ({
+      no: index + 1,
+      modelNo: getFormalBusinessModelNo(item),
+      productName: item.productName || '',
+      specification: item.specification || '',
+      quantity: Number(item.quantity || 0),
+      unit: item.unit || 'pcs',
+      remarks: item.remarks,
+    })),
+    customerRequirements: {
+      deliveryTerms: qr.tradeTerms,
+      paymentTerms: qr.paymentTerms,
+      qualityStandard: qr.qualityRequirements,
+      packaging: qr.packagingRequirements,
+      specialRequirements: qr.remarks || qr.specialRequirements,
+    },
+    salesDeptNotes: qr.notes || qr.specialRequirements,
+    purchaseDeptFeedback: qr.purchaserFeedback?.overallComment || undefined,
+    urgency: 'medium',
+    createdBy: qr.createdBy || '',
+  });
+
+  const handlePreviewDocument = (qr: any) => {
+    setSelectedQR(qr);
+    setShowDocumentPreview(true);
   };
   
   // 🔥 状态标识
@@ -136,7 +185,7 @@ export function MyPurchaseRequirements() {
       {/* 🔥 页面标题 */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">我的采购需求</h2>
+          <h2 className="text-2xl font-bold text-gray-900">我的 QR</h2>
           <p className="text-sm text-gray-600 mt-1">
             查看采购进度，接收采购员反馈，创建客户报价
           </p>
@@ -148,7 +197,7 @@ export function MyPurchaseRequirements() {
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600">总需求数</p>
+              <p className="text-sm text-gray-600">总 QR 数</p>
               <p className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</p>
             </div>
             <FileText className="h-10 w-10 text-blue-600 opacity-20" />
@@ -221,7 +270,7 @@ export function MyPurchaseRequirements() {
         </div>
       </div>
       
-      {/* 🔥 采购需求列表 */}
+      {/* 🔥 QR 列表 */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <Table>
           <TableHeader>
@@ -240,7 +289,7 @@ export function MyPurchaseRequirements() {
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-12 text-gray-500">
                   <AlertCircle className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-                  <p>暂无采购需求</p>
+                  <p>暂无 QR</p>
                   <p className="text-sm mt-1">在客户询价管理中下推 QR 即可在此查看</p>
                 </TableCell>
               </TableRow>
@@ -251,7 +300,7 @@ export function MyPurchaseRequirements() {
                     {qr.requirementNo}
                   </TableCell>
                   <TableCell className="font-mono text-sm text-gray-600">
-                    {qr.sourceInquiryNo || '-'}
+                    {qr.sourceInquiryNumber || '-'}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">
@@ -307,6 +356,15 @@ export function MyPurchaseRequirements() {
                           <Button 
                             variant="outline"
                             size="sm"
+                            onClick={() => handlePreviewDocument(qr)}
+                            className="gap-1"
+                          >
+                            <FileText className="h-3 w-3" />
+                            预览QR
+                          </Button>
+                          <Button 
+                            variant="outline"
+                            size="sm"
                             onClick={() => handleViewFeedback(qr)}
                             className="gap-1"
                           >
@@ -324,9 +382,20 @@ export function MyPurchaseRequirements() {
                         </>
                       )}
                       {!qr.purchaserFeedback && (
-                        <div className="text-xs text-gray-500">
-                          等待采购员反馈...
-                        </div>
+                        <>
+                          <Button 
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handlePreviewDocument(qr)}
+                            className="gap-1"
+                          >
+                            <FileText className="h-3 w-3" />
+                            预览QR
+                          </Button>
+                          <div className="text-xs text-gray-500">
+                            等待采购员反馈...
+                          </div>
+                        </>
                       )}
                     </div>
                   </TableCell>
@@ -358,6 +427,40 @@ export function MyPurchaseRequirements() {
           qr={selectedQR}
           feedback={selectedQR.purchaserFeedback}
         />
+      )}
+
+      {selectedQR && (
+        <Dialog open={showDocumentPreview} onOpenChange={setShowDocumentPreview}>
+          <DialogContent className="max-w-[95vw] h-[95vh] overflow-hidden p-0">
+            <DialogHeader className="border-b px-6 py-4">
+              <DialogTitle>QR 文档预览 - {selectedQR.requirementNo}</DialogTitle>
+            </DialogHeader>
+            <div className="h-[calc(95vh-72px)] overflow-auto bg-[#525659] p-6">
+              {(() => {
+                const templateSnapshot = selectedQR.templateSnapshot || selectedQR.template_snapshot || null;
+                const templateVersion = templateSnapshot?.version || null;
+                const documentData = (selectedQR.documentDataSnapshot || selectedQR.document_data_snapshot) as QuoteRequirementDocumentData | null;
+                if (!templateVersion || !documentData) {
+                  return (
+                    <div className="mx-auto rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+                      该 QR 未绑定模板中心版本快照，无法预览。
+                    </div>
+                  );
+                }
+                const textOverrides = templateVersion.style_tokens?.textOverrides || buildDefaultQuoteRequirementTextOverrides(documentData);
+                return (
+                  <div className="mx-auto" style={{ width: `${(templateVersion?.layout_json?.canvasWidthMm || 210)}mm` }}>
+                    <QuoteRequirementDocument
+                      data={documentData}
+                      layoutConfig={templateVersion?.layout_json || undefined}
+                      textOverrides={textOverrides}
+                    />
+                  </div>
+                );
+              })()}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
       
     </div>

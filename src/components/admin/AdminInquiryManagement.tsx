@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Search, Filter, Eye, Reply, CheckCircle, XCircle, Clock, FileText, AlertCircle, TestTube, ChevronDown, ChevronUp, Send, Trash2 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { CustomerInquiryView } from '../dashboard/CustomerInquiryView'; // 📋 使用文档中心的专业模板
+import { OemInternalProcessingPanel } from './OemInternalProcessingPanel';
 import { useInquiry } from '../../contexts/InquiryContext'; // 🚀 Use unified context
 import { generateDocumentNumber, type RegionType } from '../../utils/xjNumberGenerator';
 import { CompactStatCard } from './CompactStatCard'; // 🎨 导入紧凑型统计卡片
@@ -16,10 +17,13 @@ import { MultiDimensionFilters } from './MultiDimensionFilters'; // 🎯 多维�
 import { CreateXJFromInquiryDialog } from './CreateXJFromInquiryDialog'; // 🔥 导入创建XJ对话框
 import { CreateQuotationRequestDialog } from './CreateQuotationRequestDialog'; // 🔥 导入报价请求对话框
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext'; // 🔥 导入QuotationRequest Context
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext'; // 🔥 导入报价请求单 Context（QR 语义层）
 import { nextQRNumber } from '../../utils/xjNumberGenerator'; // 🔥 导入QR编号生成
 import { useUser } from '../../contexts/UserContext'; // 🔥 从 Supabase Auth 读取当前用户
-import { purchaseRequirementService } from '../../lib/supabaseService';
+import { quoteRequirementService } from '../../lib/supabaseService';
+import { buildQuoteRequirementDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
+import { adaptInquiryToDocumentData } from '../../utils/documentDataAdapters';
+import { getCustomerFacingModelNo } from '../../utils/productModelDisplay';
 
 interface AdminInquiryManagementProps {
   onCreateQuotation?: (inquiry: any) => void;
@@ -41,21 +45,30 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const [filterSalesRep, setFilterSalesRep] = useState('all');
   const [filterCustomer, setFilterCustomer] = useState('all');
   const [filterProduct, setFilterProduct] = useState('all');
+  const [filterOem, setFilterOem] = useState('all');
+  const [filterOemProcessing, setFilterOemProcessing] = useState('all');
   
   // 🚀 Use unified InquiryContext - only show submitted inquiries
-  const { addInquiry, getSubmittedInquiries } = useInquiry();
+  const { addInquiry, getSubmittedInquiries, updateInquiry } = useInquiry();
   const inquiries = getSubmittedInquiries();
   
   // 🔥 获取QuotationRequest数据，用于检查是否已下推
   const { getQuotationRequestsByInquiry } = useQuotationRequests();
   
-  // 🔥 获取采购需求Context，用于下推成本询报
-  const { requirements: purchaseRequirements, addRequirement: addPurchaseRequirement } = usePurchaseRequirements();
+  // 🔥 获取 QR Context，用于下推报价请求单
+  const { requirements: quoteRequirements, addRequirement: addQuoteRequirement } = useQuoteRequirements();
   const { user: currentUser } = useUser();
   
   // 🔥 下推成本询报：从INQ创建QR
   const handlePushToCostInquiry = async (inquiry: any) => {
     try {
+      const sourceTemplateSnapshot = inquiry.templateSnapshot || inquiry.template_snapshot || null;
+      const sourceTemplateVersion = sourceTemplateSnapshot?.version || null;
+      const sourceDocumentData = inquiry.documentDataSnapshot || inquiry.document_data_snapshot || null;
+      if (!sourceTemplateVersion || !sourceDocumentData) {
+        throw new Error('该 ING 未绑定模板中心版本快照，无法下推 QR');
+      }
+
       const regionCode = inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA';
       const qrNumber = await nextQRNumber(regionCode);
       const newQR = {
@@ -81,7 +94,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
         items: inquiry.products.map((p: any) => ({
           id: p.id,
           productName: p.productName || p.name || 'Unnamed Product',
-          modelNo: p.modelNo || p.model || '-',
+          modelNo: getCustomerFacingModelNo(p) || p.model || '-',
           specification: p.specification || '-',
           quantity: p.quantity || 0,
           unit: p.unit || 'PCS',
@@ -92,9 +105,15 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
           remarks: p.notes || ''
         })),
       };
-      const saved = await purchaseRequirementService.upsert(newQR);
-      addPurchaseRequirement(saved || newQR);
-      toast.success(`✅ 成功下推到成本询报！采购需求单号：${qrNumber}`);
+      const saved = await quoteRequirementService.upsert({
+        ...newQR,
+        documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(newQR as any),
+      });
+      if (!saved) {
+        throw new Error('QR 写入 Supabase 失败');
+      }
+      await addQuoteRequirement(saved);
+      toast.success(`✅ 成功下推到成本询报！QR单号：${qrNumber}`);
       if (onSwitchToCostInquiry) setTimeout(() => onSwitchToCostInquiry(), 500);
     } catch (error: any) {
       console.error('❌ [下推成本询报] 失败:', error);
@@ -173,8 +192,11 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       createdAt: Date.now(),
       submittedAt: Date.now()
     };
+    (inquiry as any).templateSnapshot = { pendingResolution: true };
+    (inquiry as any).documentRenderMeta = null;
+    (inquiry as any).documentDataSnapshot = adaptInquiryToDocumentData(inquiry as any);
 
-    addInquiry(inquiry);
+    await addInquiry(inquiry as any);
     return xjId;
   };
 
@@ -192,6 +214,8 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const displayInquiries = regionFilteredInquiries
     .map(inq => ({
       ...inq,
+      oemEnabled: Boolean(inq.oem?.enabled),
+      oemProcessingStatus: inq.oem?.internalProcessing?.anonymizationStatus || 'pending',
       inquiryNumber: inq.inquiryNumber || inq.id,
       customer: {
         name: inq.buyerInfo?.companyName || 'N/A',
@@ -217,6 +241,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const uniqueSalesReps = [...new Set(
     displayInquiries.map(inq => inq.assignedTo).filter(Boolean)
   )]; // 可能为空，因为询价可能未分配
+  const uniqueOemProcessingStatuses = [...new Set(displayInquiries.filter(inq => inq.oemEnabled).map(inq => inq.oemProcessingStatus).filter(Boolean))];
 
   const filteredInquiries = displayInquiries.filter((inquiry) => {
     const matchesSearch = searchTerm === '' || 
@@ -228,7 +253,9 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     const matchesCustomer = filterCustomer === 'all' || inquiry.customer.name === filterCustomer;
     const matchesProduct = filterProduct === 'all' || 
       inquiry.products?.some((p: any) => p.name === filterProduct);
-    return matchesSearch && matchesFilter && matchesRegion && matchesCustomer && matchesProduct;
+    const matchesOem = filterOem === 'all' || (filterOem === 'oem_only' ? inquiry.oemEnabled : !inquiry.oemEnabled);
+    const matchesOemProcessing = filterOemProcessing === 'all' || inquiry.oemProcessingStatus === filterOemProcessing;
+    return matchesSearch && matchesFilter && matchesRegion && matchesCustomer && matchesProduct && matchesOem && matchesOemProcessing;
   });
 
   const handleStatusChange = (newStatus: string) => {
@@ -306,6 +333,11 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
             </div>
             <div className="w-px h-4 bg-gray-300" />
             <div className="flex items-center gap-2">
+              <span className="text-gray-600">OEM:</span>
+              <span className="font-semibold text-indigo-700">{displayInquiries.filter(i => i.oemEnabled).length}</span>
+            </div>
+            <div className="w-px h-4 bg-gray-300" />
+            <div className="flex items-center gap-2">
               <span className="text-gray-600">已报价:</span>
               <span className="font-semibold text-orange-600">{displayInquiries.filter(i => i.status === 'quoted').length}</span>
             </div>
@@ -371,6 +403,31 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                 </SelectContent>
               </Select>
 
+              <Select value={filterOem} onValueChange={setFilterOem}>
+                <SelectTrigger className="w-[120px] h-9 text-xs bg-white">
+                  <SelectValue placeholder="OEM筛选" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" style={{ fontSize: '12px' }}>全部OEM</SelectItem>
+                  <SelectItem value="oem_only" style={{ fontSize: '12px' }}>仅OEM</SelectItem>
+                  <SelectItem value="non_oem" style={{ fontSize: '12px' }}>非OEM</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={filterOemProcessing} onValueChange={setFilterOemProcessing}>
+                <SelectTrigger className="w-[150px] h-9 text-xs bg-white">
+                  <SelectValue placeholder="OEM处理状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" style={{ fontSize: '12px' }}>全部OEM状态</SelectItem>
+                  {uniqueOemProcessingStatuses.map((status) => (
+                    <SelectItem key={status} value={status as string} style={{ fontSize: '12px' }}>
+                      {status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
               {/* 🎯 老板角色显示额外筛选维度 */}
               {(currentUserRole === 'Boss' || currentUserRole === 'CEO' || currentUserRole === 'Sales_Director') && (
                 <>
@@ -418,6 +475,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                 <TableHead className="h-9" style={{ fontSize: '12px' }}>日期</TableHead>
                 <TableHead className="h-9" style={{ fontSize: '12px' }}>优先级</TableHead>
                 <TableHead className="h-9" style={{ fontSize: '12px' }}>状态</TableHead>
+                <TableHead className="h-9" style={{ fontSize: '12px' }}>OEM</TableHead>
                 <TableHead className="h-9 text-center" style={{ fontSize: '12px' }}>操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -430,8 +488,8 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                 const qrs = getQuotationRequestsByInquiry(inquiry.id);
                 const hasXJ = qrs.length > 0; // 只要存在QR，就表示已下推
                 
-                // 🔥 检查是否已创建采购需求（成本询报）
-                const hasQR = purchaseRequirements.some(qr => 
+                // 🔥 检查是否已创建 QR（报价请求单）
+                const hasQR = quoteRequirements.some(qr => 
                   qr.sourceInquiryNumber === (inquiry.inquiryNumber || inquiry.id)
                 );
                 
@@ -448,7 +506,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                             {inquiry.inquiryNumber || inquiry.id}
                           </button>
                         </DialogTrigger>
-                        <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
+                        <DialogContent className="w-[calc(210mm+56px)] max-w-[calc(100vw-2rem)] max-h-[95vh] overflow-hidden border-none bg-[#525659] p-0 gap-0 shadow-2xl [&>button]:hidden">
                           {/* Hidden Title and Description for accessibility */}
                           <DialogTitle className="sr-only">询价单详情</DialogTitle>
                           <DialogDescription className="sr-only">
@@ -498,9 +556,42 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                           </DialogClose>
 
                           {/* INQ Document - Full Screen - 仅展示询价单，无管理操作 */}
-                          <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
+                          <div className="overflow-y-auto max-h-[95vh] bg-[#525659]">
                             {selectedInquiry && (
-                              <CustomerInquiryView inquiry={selectedInquiry} />
+                              <>
+                                <CustomerInquiryView
+                                  inquiry={selectedInquiry}
+                                  audience="internal"
+                                  onUpdateInquiry={async (patch) => {
+                                    await updateInquiry(selectedInquiry.id, patch);
+                                    setSelectedInquiry((prev: any) => (prev ? { ...prev, ...patch } : prev));
+                                  }}
+                                />
+                                <div className="bg-[#525659] pb-8">
+                                  <OemInternalProcessingPanel
+                                    inquiry={selectedInquiry}
+                                    onSave={async (nextOem) => {
+                                      await updateInquiry(selectedInquiry.id, { oem: nextOem });
+                                      setSelectedInquiry((prev: any) => (prev ? { ...prev, oem: nextOem } : prev));
+                                    }}
+                                    onGenerateFactoryVersion={async ({ nextOem, factoryVersion }) => {
+                                      await updateInquiry(selectedInquiry.id, {
+                                        oem: nextOem,
+                                        oemFactoryDispatch: factoryVersion,
+                                      } as any);
+                                      setSelectedInquiry((prev: any) => (
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              oem: nextOem,
+                                              oemFactoryDispatch: factoryVersion,
+                                            }
+                                          : prev
+                                      ));
+                                    }}
+                                  />
+                                </div>
+                              </>
                             )}
                           </div>
                         </DialogContent>
@@ -528,6 +619,20 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                         {statusConfig.label}
                       </Badge>
                     </TableCell>
+                    <TableCell className="py-3">
+                      {inquiry.oemEnabled ? (
+                        <div className="flex flex-col gap-1">
+                          <Badge className="h-5 w-fit px-2 text-xs border bg-indigo-100 text-indigo-800 border-indigo-300">
+                            OEM
+                          </Badge>
+                          <Badge className="h-5 w-fit px-2 text-xs border bg-slate-100 text-slate-700 border-slate-300">
+                            {inquiry.oemProcessingStatus}
+                          </Badge>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">-</span>
+                      )}
+                    </TableCell>
                     <TableCell className="py-3 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <Dialog>
@@ -542,7 +647,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                               查看
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
+                          <DialogContent className="w-[calc(210mm+56px)] max-w-[calc(100vw-2rem)] max-h-[95vh] overflow-hidden border-none bg-[#525659] p-0 gap-0 shadow-2xl [&>button]:hidden">
                             {/* Hidden Title and Description for accessibility */}
                             <DialogTitle className="sr-only">询价单详情</DialogTitle>
                             <DialogDescription className="sr-only">
@@ -592,11 +697,44 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                             </DialogClose>
 
                             {/* INQ Document - Full Screen - 仅展示询价单 */}
-                            <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
-                              {selectedInquiry && (
-                                <CustomerInquiryView inquiry={selectedInquiry} />
-                              )}
-                            </div>
+                          <div className="overflow-y-auto max-h-[95vh] bg-[#525659]">
+                            {selectedInquiry && (
+                              <>
+                                <CustomerInquiryView
+                                  inquiry={selectedInquiry}
+                                  audience="internal"
+                                  onUpdateInquiry={async (patch) => {
+                                    await updateInquiry(selectedInquiry.id, patch);
+                                    setSelectedInquiry((prev: any) => (prev ? { ...prev, ...patch } : prev));
+                                  }}
+                                />
+                                <div className="bg-[#525659] pb-8">
+                                  <OemInternalProcessingPanel
+                                    inquiry={selectedInquiry}
+                                    onSave={async (nextOem) => {
+                                      await updateInquiry(selectedInquiry.id, { oem: nextOem });
+                                      setSelectedInquiry((prev: any) => (prev ? { ...prev, oem: nextOem } : prev));
+                                    }}
+                                    onGenerateFactoryVersion={async ({ nextOem, factoryVersion }) => {
+                                      await updateInquiry(selectedInquiry.id, {
+                                        oem: nextOem,
+                                        oemFactoryDispatch: factoryVersion,
+                                      } as any);
+                                      setSelectedInquiry((prev: any) => (
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              oem: nextOem,
+                                              oemFactoryDispatch: factoryVersion,
+                                            }
+                                          : prev
+                                      ));
+                                    }}
+                                  />
+                                </div>
+                              </>
+                            )}
+                          </div>
                           </DialogContent>
                         </Dialog>
                         

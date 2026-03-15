@@ -102,13 +102,13 @@ export function DocumentTemplateSelector({
   // 根据模板ID渲染对应的文档组件
   const renderDocument = (templateId: string, data: any) => {
     switch (templateId) {
-      case 'inquiry':
+      case 'ing':
         return <CustomerInquiryDocument data={data} />;
-      case 'quotation':
+      case 'qt':
         return <QuotationDocument data={data} />;
       case 'sc':
         return <SalesContractDocument data={data} />;
-      case 'po':
+      case 'cg':
         return <PurchaseOrderDocument data={data} />;
       case 'soa':
         return <StatementOfAccountDocument data={data} />;
@@ -369,9 +369,9 @@ function getSampleDataForTemplate(templateId: string): any {
 
   // 根据不同模板返回对应的示例数据
   switch (templateId) {
-    case 'inquiry':
+    case 'ing':
       return {
-        inquiryNo: 'INQ-NA-20251210-001',
+        inquiryNo: 'ING-NA-20251210-001',
         inquiryDate: '2025-12-10',
         region: 'NA',
         customer: commonData.customer,
@@ -395,12 +395,12 @@ function getSampleDataForTemplate(templateId: string): any {
         }
       };
     
-    case 'quotation':
+    case 'qt':
       return {
         quotationNo: 'QT-NA-20251210-001',
         quotationDate: '2025-12-10',
         validUntil: '2026-01-10',
-        inquiryNo: 'INQ-NA-20251210-001',
+        inquiryNo: 'ING-NA-20251210-001',
         region: 'NA',
         supplier: commonData.company,
         buyer: commonData.customer,
@@ -447,9 +447,9 @@ function getSampleDataForTemplate(templateId: string): any {
         packingRequirements: 'Export standard carton packing'
       };
 
-    case 'po':
+    case 'cg':
       return {
-        poNo: 'PO-20251205-001',
+        poNo: 'CG-20251205-001',
         poDate: '2025-12-05',
         contractNo: 'SC-NA-20251220-001',
         buyer: commonData.company,

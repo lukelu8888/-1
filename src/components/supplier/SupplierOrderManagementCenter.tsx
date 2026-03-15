@@ -26,56 +26,15 @@ import { useXJs } from '../../contexts/XJContext';
 import XJDocumentViewer from './XJDocumentViewer';
 import SupplierQuotationDocumentViewer from './SupplierQuotationDocumentViewer';
 import SupplierQuotationEditor from './SupplierQuotationEditor';
-import { createQuotationFromXJ, saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
+import {
+  createQuotationFromXJ,
+  saveSupplierQuotation,
+  type SupplierQuotation,
+  type SupplierQuotationItem,
+} from '../../utils/createQuotationFromXJ';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import { supplierQuotationService } from '../../lib/supabaseService';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
-
-// 供应商报价单接口（数据源：Supabase supplier_quotations 表）
-interface SupplierQuotationItem {
-  id: string;
-  productName: string;
-  modelNo: string;
-  specification?: string;
-  quantity: number;
-  unit: string;
-  unitPrice?: number;
-  currency?: string;
-  amount?: number;
-  leadTime?: number;
-  moq?: number;
-  remarks?: string;
-}
-
-interface SupplierQuotation {
-  id: string;
-  quotationNo: string;
-  sourceXJ?: string;
-  sourceQR?: string;
-  sourceRFQId?: string;
-  customerName: string;
-  customerCompany: string;
-  customerContact?: string;
-  customerEmail?: string;
-  supplierCode: string;
-  supplierName: string;
-  supplierCompany: string;
-  supplierContact?: string;
-  supplierEmail: string;
-  supplierPhone?: string;
-  quotationDate: string;
-  validUntil: string;
-  currency: string;
-  totalAmount: number;
-  paymentTerms?: string;
-  deliveryTerms?: string;
-  packingTerms?: string;
-  generalRemarks?: string;
-  items: SupplierQuotationItem[];
-  status: 'draft' | 'submitted' | 'accepted' | 'rejected' | 'completed';
-  createdBy: string;
-  createdDate: string;
-  version: number;
-}
 
 // 🔥 统计数据接口
 interface OrderStats {
@@ -144,7 +103,7 @@ export default function SupplierOrderManagementCenter() {
   }, [user?.email]);
   
   // Tab状态
-  const [activeTab, setActiveTab] = useState<'overview' | 'xj' | 'quotation' | 'active-orders' | 'history'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'xj' | 'qt' | 'active-orders' | 'history'>('overview');
 
   // ✅ When supplier opens "客户需求", actively fetch from backend so Network shows the request.
   React.useEffect(() => {
@@ -293,7 +252,7 @@ export default function SupplierOrderManagementCenter() {
       const quantityUnit = uniqueUnits.length === 1 ? uniqueUnits[0] : 'PCS';
       return {
         representativeName: first.productName || first.description || 'N/A',
-        representativeModel: first.modelNo && first.modelNo !== '-' ? first.modelNo : '',
+        representativeModel: getFormalBusinessModelNo(first) || '',
         representativeSpec: first.specification || '',
         productCount: list.length,
         totalQuantity,
@@ -302,13 +261,60 @@ export default function SupplierOrderManagementCenter() {
     }
     return {
       representativeName: fallback?.productName || 'N/A',
-      representativeModel: fallback?.modelNo || '',
+      representativeModel: getFormalBusinessModelNo(fallback) || '',
       representativeSpec: fallback?.specification || '',
       productCount: 1,
       totalQuantity: Number(fallback?.quantity) || 0,
       quantityUnit: fallback?.unit || 'PCS',
     };
   }, []);
+
+  const formatExecutionBaseline = React.useCallback((doc: any) => {
+    const baseline = doc?.documentRenderMeta?.projectExecutionBaseline
+      || doc?.document_render_meta?.projectExecutionBaseline
+      || (doc?.projectRevisionId
+        ? {
+            projectCode: doc?.projectCode || null,
+            projectName: doc?.projectName || null,
+            projectRevisionCode: doc?.projectRevisionCode || null,
+            finalQuotationNumber: doc?.finalQuotationNumber || null,
+          }
+        : null);
+    if (!baseline || !(baseline.projectCode || baseline.projectName || baseline.projectRevisionCode)) {
+      return null;
+    }
+    return `${baseline.projectCode || baseline.projectName || '项目'} / ${baseline.projectRevisionCode || 'Rev'}${baseline.finalQuotationNumber ? ` / ${baseline.finalQuotationNumber}` : ''}`;
+  }, []);
+
+  const resolveProjectExecutionBaseline = React.useCallback((doc: any) => {
+    return doc?.documentRenderMeta?.projectExecutionBaseline
+      || doc?.document_render_meta?.projectExecutionBaseline
+      || (doc?.projectRevisionId
+        ? {
+            projectId: doc?.projectId || null,
+            projectCode: doc?.projectCode || null,
+            projectName: doc?.projectName || null,
+            projectRevisionId: doc?.projectRevisionId || null,
+            projectRevisionCode: doc?.projectRevisionCode || null,
+            projectRevisionStatus: doc?.projectRevisionStatus || null,
+            finalRevisionId: doc?.finalRevisionId || null,
+            finalQuotationId: doc?.finalQuotationId || null,
+            finalQuotationNumber: doc?.finalQuotationNumber || null,
+            quotationRole: doc?.quotationRole || null,
+          }
+        : null);
+  }, []);
+
+  const isFinalExecutionReady = React.useCallback((doc: any) => {
+    const baseline = resolveProjectExecutionBaseline(doc);
+    if (!baseline?.projectRevisionId) return true;
+    return Boolean(
+      baseline.projectRevisionStatus === 'final' &&
+      baseline.finalRevisionId &&
+      baseline.finalRevisionId === baseline.projectRevisionId &&
+      (baseline.finalQuotationNumber || baseline.finalQuotationId)
+    );
+  }, [resolveProjectExecutionBaseline]);
 
   // 🔥 获取当前供应商的询价单
   const myXJs = useMemo(() => {
@@ -899,6 +905,17 @@ export default function SupplierOrderManagementCenter() {
                       <div>
                         <p className="text-sm font-medium text-blue-600">{xj.supplierXjNo || xj.xjNumber}</p>
                         <p className="text-xs text-slate-500">{formatCompactUtcMinute(xj.createdDate)}</p>
+                        {formatExecutionBaseline(xj) && (
+                          <p className="text-xs text-purple-600 font-mono mt-1">{formatExecutionBaseline(xj)}</p>
+                        )}
+                        {resolveProjectExecutionBaseline(xj)?.projectRevisionId && (
+                          <Badge className={`mt-1 ${isFinalExecutionReady(xj)
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : 'bg-amber-100 text-amber-800 border-amber-300'
+                          }`}>
+                            {isFinalExecutionReady(xj) ? 'Final Baseline' : 'Revision Quote'}
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -1003,7 +1020,7 @@ export default function SupplierOrderManagementCenter() {
                                 
                                 // 跳转到我的报价Tab
                                 setTimeout(() => {
-                                  setActiveTab('quotation');
+                                  setActiveTab('qt');
                                 }, 800);
                                 return;
                               }
@@ -1069,7 +1086,7 @@ export default function SupplierOrderManagementCenter() {
 
                               // 跳转到我的报价Tab
                               setTimeout(() => {
-                                setActiveTab('quotation');
+                                setActiveTab('qt');
                               }, 800);
                             } catch (error) {
                               console.error('创建报价单失败:', error);
@@ -1504,7 +1521,7 @@ export default function SupplierOrderManagementCenter() {
                                   ${quotation.items.map((item: any) => `
                                     <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd;">
                                       <p><strong>${item.productName}</strong></p>
-                                      <p>型号: ${item.modelNo}</p>
+                                      <p>型号: ${getFormalBusinessModelNo(item)}</p>
                                       <p>数量: ${item.quantity} ${item.unit}</p>
                                       <p>单价: ¥${item.unitPrice || 0}</p>
                                       <p>金额: ¥${item.amount || 0}</p>
@@ -1605,6 +1622,17 @@ export default function SupplierOrderManagementCenter() {
                       <div>
                         <p className="text-sm font-medium text-blue-600">{order.xjNumber}</p>
                         <p className="text-xs text-slate-500">{formatCompactUtcMinute(order.createdDate)}</p>
+                        {formatExecutionBaseline(order) && (
+                          <p className="text-xs text-purple-600 font-mono mt-1">{formatExecutionBaseline(order)}</p>
+                        )}
+                        {resolveProjectExecutionBaseline(order)?.projectRevisionId && (
+                          <Badge className={`mt-1 ${isFinalExecutionReady(order)
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : 'bg-amber-100 text-amber-800 border-amber-300'
+                          }`}>
+                            {isFinalExecutionReady(order) ? '可执行版本' : '非最终版本'}
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -1717,6 +1745,17 @@ export default function SupplierOrderManagementCenter() {
                       <div>
                         <p className="text-sm font-medium text-blue-600">{order.quotationNo}</p>
                         <p className="text-xs text-slate-500">{order.quotationDate}</p>
+                        {formatExecutionBaseline(order) && (
+                          <p className="text-xs text-purple-600 font-mono mt-1">{formatExecutionBaseline(order)}</p>
+                        )}
+                        {resolveProjectExecutionBaseline(order)?.projectRevisionId && (
+                          <Badge className={`mt-1 ${isFinalExecutionReady(order)
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : 'bg-amber-100 text-amber-800 border-amber-300'
+                          }`}>
+                            {isFinalExecutionReady(order) ? 'Final Execution' : 'Historical Revision'}
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -1815,7 +1854,7 @@ export default function SupplierOrderManagementCenter() {
               <p className="text-xs opacity-75">采购询价 · {stats.pendingRFQs}</p>
             </div>
           </TabsTrigger>
-          <TabsTrigger value="quotation" className="gap-2 py-2.5 data-[state=active]:bg-white">
+          <TabsTrigger value="qt" className="gap-2 py-2.5 data-[state=active]:bg-white">
             <Calculator className="w-4 h-4" />
             <div className="text-left">
               <p className="text-sm font-medium">我的报价</p>
@@ -1846,7 +1885,7 @@ export default function SupplierOrderManagementCenter() {
           {renderRFQList()}
         </TabsContent>
 
-        <TabsContent value="quotation" className="mt-6">
+        <TabsContent value="qt" className="mt-6">
           {renderQuotationList()}
         </TabsContent>
 
@@ -1896,6 +1935,21 @@ export default function SupplierOrderManagementCenter() {
                   <p className="text-xs text-slate-600">有效期至</p>
                   <p className="font-medium">{selectedItem.validUntil}</p>
                 </div>
+                {formatExecutionBaseline(selectedItem) && (
+                  <div className="col-span-2 rounded border border-purple-200 bg-purple-50 px-3 py-2">
+                    <p className="text-xs text-purple-700">执行基线</p>
+                    <p className="font-medium text-sm text-purple-800">{formatExecutionBaseline(selectedItem)}</p>
+                    <p className={`mt-2 inline-flex items-center rounded border px-2 py-1 text-xs ${
+                      isFinalExecutionReady(selectedItem)
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                        : 'border-amber-300 bg-amber-50 text-amber-700'
+                    }`}>
+                      {isFinalExecutionReady(selectedItem)
+                        ? '该项目单据已对齐最终执行版本'
+                        : '该项目单据仍为历史/评审版本，仅用于报价与追溯'}
+                    </p>
+                  </div>
+                )}
               </div>
               
               {/* 产品列表 */}
@@ -1907,7 +1961,7 @@ export default function SupplierOrderManagementCenter() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="font-medium">{item.productName}</p>
-                          <p className="text-xs text-slate-500">{item.modelNo}</p>
+                          <p className="text-xs text-slate-500">{getFormalBusinessModelNo(item)}</p>
                         </div>
                         <div className="text-right">
                           <p className="font-semibold">{item.quantity} {item.unit}</p>

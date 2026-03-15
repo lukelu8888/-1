@@ -17,6 +17,8 @@ import { Card, CardContent } from '../ui/card';
 import { Search, Building2, Mail, Phone, MapPin, Star, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useXJs } from '../../contexts/XJContext';
+import { buildXJDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 /**
  * 📋 下推采购询价（XJ）对话框
@@ -28,7 +30,7 @@ import { useXJs } from '../../contexts/XJContext';
  * 4. 一键推送给所有选中的供应商
  */
 
-interface PurchaseRequirement {
+interface QuoteRequirement {
   id: string;
   requirementNo: string;
   productName: string;
@@ -57,7 +59,7 @@ interface Supplier {
 interface PushToXJDialogProps {
   open: boolean;
   onClose: () => void;
-  requirement: PurchaseRequirement | null;
+  requirement: QuoteRequirement | null;
 }
 
 // 🔥 模拟供应商数据（后续可以从Context或API获取）
@@ -177,7 +179,7 @@ export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogPro
   };
 
   // 提交创建XJ(采购询价)
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!requirement) return;
     
     if (selectedSuppliers.length === 0) {
@@ -189,19 +191,19 @@ export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogPro
 
     try {
       // 为每个选中的供应商创建XJ(采购询价)
-      selectedSuppliers.forEach(supplierId => {
+      await Promise.all(selectedSuppliers.map(async (supplierId) => {
         const supplier = mockSuppliers.find(s => s.id === supplierId);
         if (!supplier) return;
 
         const xjNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
         
-        addXJ({
+        const xjPayload = {
           id: `rfq_${Date.now()}_${supplierId}`,
           xjNumber,
           
           // 🔥 产品信息（来自采购需求）
           productName: requirement.productName,
-          modelNo: requirement.modelNo,
+          modelNo: getFormalBusinessModelNo(requirement),
           quantity: requirement.quantity,
           unit: requirement.unit,
           
@@ -224,14 +226,18 @@ export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogPro
           priority: 'medium',
           
           // 🔥 其他信息
-          remarks: remarks || `来自采购需求 ${requirement.requirementNo}`,
+          remarks: remarks || `来自QR ${requirement.requirementNo}`,
           createdBy: 'admin@cosun.com',
           createdDate: new Date().toISOString().split('T')[0],
           dueDate: expectedDate || requirement.requiredDate,
           
-          quotes: []
-        });
-      });
+          quotes: [],
+          templateSnapshot: { pendingResolution: true }
+        } as any;
+
+        xjPayload.documentDataSnapshot = buildXJDocumentSnapshot(xjPayload);
+        await addXJ(xjPayload);
+      }));
 
       toast.success(
         `✅ 询价已发送！`,
@@ -267,17 +273,17 @@ export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogPro
             下推询价 - 选择供应商
           </DialogTitle>
           <DialogDescription>
-            将采购需求推送给供应商，获取报价
+            将 QR 推送给供应商，获取报价
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-6 py-4">
-          {/* 采购需求信息 */}
+          {/* QR 信息 */}
           <Card className="border-orange-200 bg-orange-50">
             <CardContent className="pt-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
-                  <p className="text-xs text-slate-600 mb-1">需求编号</p>
+                  <p className="text-xs text-slate-600 mb-1">QR编号</p>
                   <p className="font-semibold text-orange-600">{requirement.requirementNo}</p>
                 </div>
                 <div>
@@ -286,10 +292,10 @@ export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogPro
                 </div>
                 <div>
                   <p className="text-xs text-slate-600 mb-1">型号</p>
-                  <p className="font-semibold">{requirement.modelNo}</p>
+                  <p className="font-semibold">{getFormalBusinessModelNo(requirement)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600 mb-1">需求数量</p>
+                  <p className="text-xs text-slate-600 mb-1">数量</p>
                   <p className="font-semibold">{requirement.quantity} {requirement.unit}</p>
                 </div>
               </div>

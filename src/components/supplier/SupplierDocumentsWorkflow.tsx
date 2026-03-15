@@ -8,6 +8,7 @@ import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner@2.0.3';
+import SupplierOemFactoryReleaseCenter from './SupplierOemFactoryReleaseCenter';
 
 /**
  * 🔥 供应商文档中心 - 订单流程视图
@@ -92,7 +93,7 @@ export default function SupplierDocumentsWorkflow() {
     {
       id: 1,
       name: '询价阶段',
-      key: 'inquiry',
+      key: 'ing',
       phase: 'pre-order',
       status: 'completed',
       icon: FileText,
@@ -502,6 +503,8 @@ export default function SupplierDocumentsWorkflow() {
 
   return (
     <div className="space-y-4">
+      <SupplierOemFactoryReleaseCenter />
+
       {/* 页面标题 + 订单选择 */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <div className="flex items-center justify-between mb-4">

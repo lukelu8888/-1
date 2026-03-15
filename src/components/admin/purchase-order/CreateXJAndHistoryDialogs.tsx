@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Building2, Eye, Search } from 'lucide-react';
 import { Supplier } from '../../../data/suppliersData';
-import { PurchaseRequirement } from '../../../contexts/PurchaseRequirementContext';
+import { QuoteRequirement } from '../../../contexts/QuoteRequirementContext';
 import { Button } from '../../ui/button';
 import {
   Dialog,
@@ -15,11 +15,12 @@ import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { DatePicker } from '../../ui/date-picker';
+import { getFormalBusinessModelNo } from '../../../utils/productModelDisplay';
 
 type CreateXJAndHistoryDialogsProps = {
   showCreateRFQDialog: boolean;
   setShowCreateRFQDialog: React.Dispatch<React.SetStateAction<boolean>>;
-  selectedRequirementForRFQ: PurchaseRequirement | null;
+  selectedRequirementForRFQ: QuoteRequirement | null;
   selectedProductIds: string[];
   setSelectedProductIds: React.Dispatch<React.SetStateAction<string[]>>;
   selectedSuppliers: Supplier[];
@@ -152,7 +153,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
                             </td>
                             <td className="py-1.5 px-2 text-center text-gray-600">{idx + 1}</td>
                             <td className="py-1.5 px-2">{item.productName}</td>
-                            <td className="py-1.5 px-2 text-gray-600">{item.modelNo}</td>
+                            <td className="py-1.5 px-2 text-gray-600">{getFormalBusinessModelNo(item)}</td>
                             <td className="py-1.5 px-2 text-right font-semibold">{item.quantity}</td>
                             <td className="py-1.5 px-2 text-gray-600">{item.unit}</td>
                             <td className="py-1.5 px-2 text-center">
@@ -268,7 +269,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
         <DialogContent className="max-w-2xl">
           <DialogHeader className="border-b border-gray-200 pb-4">
             <DialogTitle className="text-base">询价历史记录</DialogTitle>
-            <DialogDescription className="text-xs">{selectedProductForHistory?.productName} - {selectedProductForHistory?.modelNo}</DialogDescription>
+            <DialogDescription className="text-xs">{selectedProductForHistory?.productName} - {getFormalBusinessModelNo(selectedProductForHistory) || '-'}</DialogDescription>
           </DialogHeader>
 
           <div className="py-4">

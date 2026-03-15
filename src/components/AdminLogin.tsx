@@ -6,6 +6,60 @@ import { useUser } from '../contexts/UserContext';
 import { useRouter } from '../contexts/RouterContext';
 import { signInWithEmail, fetchProfile } from '../hooks/useSupabaseAuth';
 
+function readCachedAdminProfile(email: string) {
+  try {
+    const backendUserRaw = localStorage.getItem('cosun_backend_user');
+    if (!backendUserRaw) return null;
+    const backendUser = JSON.parse(backendUserRaw);
+    if (String(backendUser?.email || '').toLowerCase() !== email.toLowerCase()) return null;
+    if (backendUser?.portal_role !== 'admin') return null;
+    return {
+      name: backendUser.username as string | undefined,
+      rbac_role: backendUser.rbac_role as string | null | undefined,
+      region: backendUser.region as string | null | undefined,
+      portal_role: 'admin' as const,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistFallbackAdminState(params: {
+  id: string;
+  email: string;
+  name: string;
+  rbacRole?: string | null;
+  region?: string | null;
+}) {
+  localStorage.setItem('cosun_auth_user', JSON.stringify({
+    id: params.id,
+    email: params.email,
+    name: params.name,
+    type: 'admin',
+    role: params.rbacRole ?? 'Admin',
+    userRole: params.rbacRole ?? 'Admin',
+    region: params.region ?? 'all',
+  }));
+
+  localStorage.setItem('cosun_current_user', JSON.stringify({
+    id: params.id,
+    email: params.email,
+    name: params.name,
+    role: params.rbacRole ?? 'Admin',
+    region: params.region ?? 'all',
+    type: 'admin',
+  }));
+
+  localStorage.setItem('cosun_backend_user', JSON.stringify({
+    id: params.id,
+    email: params.email,
+    username: params.name,
+    portal_role: 'admin',
+    rbac_role: params.rbacRole ?? 'Admin',
+    region: params.region ?? 'all',
+  }));
+}
+
 export default function AdminLogin() {
   const { setUser } = useUser();
   const { navigateTo } = useRouter();
@@ -71,7 +125,15 @@ export default function AdminLogin() {
       if (!session?.user) throw new Error('登录失败，请重试');
 
       // 获取用户 profile（portal_role / rbac_role / region）
-      const profile = await fetchProfile(session.user.id);
+      let degraded = false;
+      let profile = null;
+      try {
+        profile = await fetchProfile(session.user.id);
+      } catch (profileError) {
+        degraded = true;
+        profile = readCachedAdminProfile(session.user.email!);
+        console.warn('[AdminLogin] profile lookup failed, using fallback session.', profileError);
+      }
 
       // 仅允许 admin portal_role 登录此页面
       if (profile && profile.portal_role !== 'admin') {
@@ -97,6 +159,16 @@ export default function AdminLogin() {
         userRole: profile?.rbac_role ?? 'Admin',
         region: profile?.region ?? 'all',
       });
+      persistFallbackAdminState({
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        rbacRole: profile?.rbac_role,
+        region: profile?.region,
+      });
+      if (degraded) {
+        console.warn('[AdminLogin] continuing with fallback admin profile state.');
+      }
 
       // useAuth 会监听 onAuthStateChange 自动同步 RBAC 用户，无需手动写 localStorage
       setIsLoading(false);
@@ -124,12 +196,24 @@ export default function AdminLogin() {
       const { signInWithEmail: signIn, fetchProfile: getProfile } = await import('../hooks/useSupabaseAuth');
       const { session } = await signIn(email, pass);
       if (!session?.user) throw new Error('登录失败，请重试');
-      const profile = await getProfile(session.user.id);
+      let profile = null;
+      try {
+        profile = await getProfile(session.user.id);
+      } catch {
+        profile = readCachedAdminProfile(session.user.email!);
+      }
       if (profile && profile.portal_role !== 'admin') {
         const { signOut } = await import('../hooks/useSupabaseAuth');
         await signOut();
         throw new Error('此账号无管理员权限');
       }
+      persistFallbackAdminState({
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        rbacRole: profile?.rbac_role,
+        region: profile?.region,
+      });
       // useAuth 监听 onAuthStateChange 自动同步 RBAC 用户
     } catch (err: any) {
       setError(err?.message || '快速登录失败');

@@ -11,7 +11,9 @@ import { useUser } from '../../contexts/UserContext';
 import { SimpleQuoteForm } from './SimpleQuoteForm';
 import XJDocumentViewer from './XJDocumentViewer';
 import { nextBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
-import { supplierQuotationService } from '../../lib/supabaseService';
+import { adaptSupplierQuotationToDocumentData } from '../../utils/documentDataAdapters';
+import { saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
+import { getFormalBusinessModelNo, getSupplierPartNo, shouldShowSupplierRefLine } from '../../utils/productModelDisplay';
 
 export default function SupplierQuotationsSimple() {
   const { user } = useUser();
@@ -89,13 +91,22 @@ export default function SupplierQuotationsSimple() {
         remarks: formData.remarks
       };
       
-      addQuoteToXJ(selectedXJ.id, quote);
+      try {
+        await addQuoteToXJ(selectedXJ.id, quote);
+      } catch (error: any) {
+        toast.error(`保存供应商报价失败：${error?.message || '未知错误'}`);
+        return;
+      }
       
-      // 🔥 更新报价单号
-      updateXJ(selectedXJ.id, { 
-        supplierQuotationNo,
-        status: 'quoted' as any
-      });
+      try {
+        await updateXJ(selectedXJ.id, { 
+          supplierQuotationNo,
+          status: 'quoted' as any
+        });
+      } catch (error: any) {
+        toast.error(`同步 XJ 状态失败：${error?.message || '未知错误'}`);
+        return;
+      }
       
       // 🔥 创建独立的BJ供应商报价单对象（用于智能比价）
       const bjQuotation = {
@@ -118,7 +129,8 @@ export default function SupplierQuotationsSimple() {
         items: selectedXJ.products?.map((p: any) => ({
           id: p.id || `item_${Date.now()}`,
           productName: p.productName,
-          modelNo: p.modelNo || 'N/A',
+          modelNo: getFormalBusinessModelNo(p),
+          supplierModelNo: formData.supplierModelNo || '',
           specification: p.specification,
           quantity: p.quantity,
           unit: p.unit || 'pcs',
@@ -131,7 +143,8 @@ export default function SupplierQuotationsSimple() {
         })) || [{
           id: `item_${Date.now()}`,
           productName: selectedXJ.productName,
-          modelNo: selectedXJ.modelNo || 'N/A',
+          modelNo: getFormalBusinessModelNo(selectedXJ),
+          supplierModelNo: formData.supplierModelNo || '',
           specification: selectedXJ.specification,
           quantity: selectedXJ.quantity,
           unit: selectedXJ.unit || 'pcs',
@@ -145,11 +158,42 @@ export default function SupplierQuotationsSimple() {
         status: 'submitted' as const,
         createdBy: user.email,
         createdDate: new Date().toISOString().split('T')[0],
-        version: 1
+        version: 1,
+        templateSnapshot: { pendingResolution: true },
+        documentRenderMeta: null,
       };
+
+      const sourceTemplateSnapshot = selectedXJ?.templateSnapshot || selectedXJ?.template_snapshot || null;
+      const sourceTemplateVersion = sourceTemplateSnapshot?.version || null;
+      const sourceDocumentData = selectedXJ?.documentDataSnapshot || selectedXJ?.document_data_snapshot || selectedXJ?.documentData || null;
+      if (!sourceTemplateVersion || !sourceDocumentData) {
+        toast.error('当前 XJ 未绑定模板中心版本快照，无法提交 BJ');
+        return;
+      }
+
+      (bjQuotation as any).documentDataSnapshot = adaptSupplierQuotationToDocumentData({
+        quotationNo: supplierQuotationNo,
+        quotationDate: bjQuotation.quotationDate,
+        validUntil: bjQuotation.validUntil,
+        sourceXJ: selectedXJ.supplierXjNo || selectedXJ.xjNumber,
+        sourceXJNumber: selectedXJ.supplierXjNo || selectedXJ.xjNumber,
+        inquiryReference: '',
+        supplierCode: bjQuotation.supplierCode,
+        supplierName: bjQuotation.supplierName,
+        supplierCompany: bjQuotation.supplierCompany,
+        supplierEmail: bjQuotation.supplierEmail,
+        supplierPhone: user.phone || '',
+        supplierAddress: user.address || '',
+        items: bjQuotation.items,
+        paymentTerms: bjQuotation.paymentTerms,
+        deliveryTerms: bjQuotation.deliveryTerms,
+        packingTerms: '',
+        generalRemarks: formData.remarks,
+        supplierRemarks: formData.remarks,
+      });
       
       // Supabase-first: BJ 业务数据只落 supplier_quotations 表
-      const saved = await supplierQuotationService.upsert(bjQuotation);
+      const saved = await saveSupplierQuotation(bjQuotation as any);
       if (!saved) {
         toast.error('报价提交失败：未写入Supabase，请重试');
         return;
@@ -597,7 +641,10 @@ export default function SupplierQuotationsSimple() {
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="font-medium">{item.productName}</p>
-                            <p className="text-xs text-gray-500">{item.modelNo}</p>
+                            <p className="text-xs text-gray-500">{getFormalBusinessModelNo(item)}</p>
+                            {shouldShowSupplierRefLine(item) && (
+                              <p className="text-xs text-gray-500">供应商型号: {getSupplierPartNo(item)}</p>
+                            )}
                             {item.specification && (
                               <p className="text-xs text-gray-500 mt-1">{item.specification}</p>
                             )}
@@ -624,7 +671,7 @@ export default function SupplierQuotationsSimple() {
                       </div>
                       <div>
                         <p className="text-xs text-gray-600">型号</p>
-                        <p className="text-sm font-medium">{detailRFQ.modelNo}</p>
+                        <p className="text-sm font-medium">{getFormalBusinessModelNo(detailRFQ)}</p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-600">需求数量</p>

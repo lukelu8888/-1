@@ -116,7 +116,7 @@ export default function CustomerOrders() {
     return config[status] || { label: status, color: 'bg-gray-100 text-gray-800 border-gray-300' };
   };
 
-  const handleConfirmOrder = () => {
+  const handleConfirmOrder = async () => {
     if (!deliveryDate) {
       toast.error('请确认交货日期');
       return;
@@ -124,13 +124,17 @@ export default function CustomerOrders() {
     
     // 🔥 更新Context中的客户订单状态
     if (selectedOrder?.rawPO) {
-      updatePurchaseOrder(selectedOrder.rawPO.id, {
-        status: 'confirmed',
-        actualDate: deliveryDate,
-        updatedDate: new Date().toISOString()
-      });
-      
-      console.log('✅ 客户订单已确认:', selectedOrder.id, '交货日期:', deliveryDate);
+      try {
+        await updatePurchaseOrder(selectedOrder.rawPO.id, {
+          status: 'confirmed',
+          actualDate: deliveryDate,
+          updatedDate: new Date().toISOString()
+        });
+        console.log('✅ 客户订单已确认:', selectedOrder.id, '交货日期:', deliveryDate);
+      } catch (error: any) {
+        toast.error(`确认客户订单失败：${error?.message || '未知错误'}`);
+        return;
+      }
     }
     
     toast.success(`客户订单 ${selectedOrder?.id} 已确认成功！客户COSUN将收到确认通知。`);
@@ -138,7 +142,7 @@ export default function CustomerOrders() {
     setDeliveryDate('');
   };
 
-  const handleRejectOrder = () => {
+  const handleRejectOrder = async () => {
     if (!rejectReason) {
       toast.error('请填写拒绝原因');
       return;
@@ -146,13 +150,17 @@ export default function CustomerOrders() {
     
     // 🔥 更新Context中的客户订单状态
     if (selectedOrder?.rawPO) {
-      updatePurchaseOrder(selectedOrder.rawPO.id, {
-        status: 'cancelled',
-        remarks: `拒绝原因: ${rejectReason}`,
-        updatedDate: new Date().toISOString()
-      });
-      
-      console.log('❌ 客户订单已拒绝:', selectedOrder.id, '原因:', rejectReason);
+      try {
+        await updatePurchaseOrder(selectedOrder.rawPO.id, {
+          status: 'cancelled',
+          remarks: `拒绝原因: ${rejectReason}`,
+          updatedDate: new Date().toISOString()
+        });
+        console.log('❌ 客户订单已拒绝:', selectedOrder.id, '原因:', rejectReason);
+      } catch (error: any) {
+        toast.error(`拒绝客户订单失败：${error?.message || '未知错误'}`);
+        return;
+      }
     }
     
     toast.success(`客户订单 ${selectedOrder?.id} 已拒绝。客户COSUN已收到通知。`);

@@ -13,6 +13,7 @@ import {
   type PriceType,
   type SourcePricingBasis,
 } from '../../types/pricingBasis';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 /**
  * 🎯 智能报价创建页面 - 外贸价格核算专家系统
@@ -438,7 +439,7 @@ export default function QuoteCreationIntelligent({
             id: item.id || `item-${index}`,
             productName: item.productName || '',
             specification: item.specification || '',
-            modelNo: item.modelNo || '',
+            modelNo: getFormalBusinessModelNo(item),
             quantity: item.quantity || 0,
             unit: item.unit || 'PCS',
             imageUrl: item.imageUrl,
@@ -534,7 +535,7 @@ export default function QuoteCreationIntelligent({
             id: item.id || `item-${index}`,
             productName: item.productName || '',
             specification: item.specification || '',
-            modelNo: item.modelNo || '',
+            modelNo: getFormalBusinessModelNo(item),
             quantity: item.quantity || 0,
             unit: item.unit || 'PCS',
             imageUrl: item.imageUrl,
@@ -702,7 +703,7 @@ export default function QuoteCreationIntelligent({
         id: item.id,
         productName: item.productName,
         specification: item.specification,
-        modelNo: item.modelNo,
+        modelNo: getFormalBusinessModelNo(item),
         quantity: item.quantity,
         unit: item.unit,
         imageUrl: item.imageUrl,
@@ -806,7 +807,7 @@ export default function QuoteCreationIntelligent({
         id: item.id,
         productName: item.productName,
         specification: item.specification,
-        modelNo: item.modelNo,
+        modelNo: getFormalBusinessModelNo(item),
         quantity: item.quantity,
         unit: item.unit,
         imageUrl: item.imageUrl,

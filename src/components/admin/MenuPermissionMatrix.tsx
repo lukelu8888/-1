@@ -30,6 +30,7 @@ const ALL_MENU_MODULES = [
   // { id: 'workflow-editor', label: '业务流程编辑器 Pro', category: '技术模块' },
   { id: 'workflow-validation', label: '工作流验证中心', category: '技术模块' },
   { id: 'form-manager', label: '表单管理中心', category: '技术模块' },
+  { id: 'template-workbench', label: '模板中心工作台', category: '技术模块' },
   { id: 'status-flow-simulator', label: '状态流转模拟器', category: '技术模块' },
   { id: 'product-management', label: '产品管理', category: '运营模块' },
   { id: 'product-push', label: '产品推送', category: '运营模块' },
@@ -89,7 +90,7 @@ const DEFAULT_PERMISSIONS: { [role: string]: string[] } = {
     'messaging', 'enterprise-backup-center'
   ],
   Admin: [
-    'overview', 'workflow-validation', 'form-manager',
+    'overview', 'workflow-validation', 'form-manager', 'template-workbench',
     'status-flow-simulator', 'role-permission', 'enterprise-backup-center',
     'supabase-diagnostic', 'multi-language-currency', 'messaging'
   ]

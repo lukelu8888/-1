@@ -6,6 +6,7 @@ import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../ui/dialog';
+import { getFormalBusinessModelNo } from '../../../utils/productModelDisplay';
 
 type SupplierAllocationDialogProps = {
   showAllocationDialog: boolean;
@@ -125,7 +126,7 @@ export const SupplierAllocationDialog: React.FC<SupplierAllocationDialogProps> =
                           </td>
                           <td className="py-2 text-center">{idx + 1}</td>
                           <td className="py-2">{item.productName}</td>
-                          <td className="py-2 text-gray-600">{item.modelNo}</td>
+                          <td className="py-2 text-gray-600">{getFormalBusinessModelNo(item)}</td>
                           <td className="py-2 text-right font-semibold">{item.quantity}</td>
                           <td className="py-2">{item.unit}</td>
                           <td className="py-2 text-center">

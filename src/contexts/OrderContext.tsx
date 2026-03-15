@@ -31,6 +31,10 @@ export interface Order {
     totalPrice?: number;
     specs?: string;
     produced?: number;
+    customerProductId?: string;
+    projectId?: string | null;
+    projectRevisionId?: string | null;
+    projectRevisionCode?: string | null;
   }[];
   paymentStatus: string;
   paymentTerms?: string;
@@ -38,7 +42,7 @@ export interface Order {
   deliveryTerms?: string;
   trackingNumber?: string;
   notes?: string;
-  createdFrom?: 'quotation' | 'manual' | 'import';
+  createdFrom?: 'qt' | 'manual' | 'import';
   createdAt?: string;
   updatedAt?: string;
   confirmed?: boolean; // Admin是否已确认订单
@@ -330,4 +334,3 @@ export function useOrders() {
   }
   return context;
 }
-

@@ -102,13 +102,15 @@ export function DocumentPreview({ document, onClose }: DocumentPreviewProps) {
       case '客户询价单':
         return <CustomerInquiryDocument data={document.data || sampleInquiryData} />;
       case '业务员报价单':
+      case '销售报价单':
         return document.data
           ? <QuotationDocument data={document.data as QuotationData} />
           : <div className="text-center text-gray-500 py-16">缺少报价单数据</div>;
       case '采购订单':
+      case '采购合同':
         return document.data
           ? <PurchaseOrderDocument data={document.data as PurchaseOrderData} />
-          : <div className="text-center text-gray-500 py-16">缺少采购订单数据</div>;
+          : <div className="text-center text-gray-500 py-16">缺少采购合同数据</div>;
       
       // 其他文档类型将陆续添加
       case '形式发票':

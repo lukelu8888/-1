@@ -5,15 +5,15 @@ import type { SyncFieldRule } from './types';
  * - sensitive=true fields must not be sent to the other side unless explicit legal approval is configured.
  */
 export const SYNC_FIELD_POLICY: SyncFieldRule[] = [
-  { domain: 'inquiry', field: 'inquiryNumber', sensitive: false, direction: 'bidirectional' },
-  { domain: 'inquiry', field: 'status', sensitive: false, direction: 'bidirectional' },
-  { domain: 'inquiry', field: 'products', sensitive: false, direction: 'bidirectional' },
+  { domain: 'ing', field: 'inquiryNumber', sensitive: false, direction: 'bidirectional' },
+  { domain: 'ing', field: 'status', sensitive: false, direction: 'bidirectional' },
+  { domain: 'ing', field: 'products', sensitive: false, direction: 'bidirectional' },
 
-  { domain: 'quotation', field: 'qtNumber', sensitive: false, direction: 'bidirectional' },
-  { domain: 'quotation', field: 'customerStatus', sensitive: false, direction: 'bidirectional' },
-  { domain: 'quotation', field: 'totalPrice', sensitive: false, direction: 'bidirectional' },
-  { domain: 'quotation', field: 'costPrice', sensitive: true, direction: 'admin_to_client', notes: 'seller-sensitive' },
-  { domain: 'quotation', field: 'profitRate', sensitive: true, direction: 'admin_to_client', notes: 'seller-sensitive' },
+  { domain: 'qt', field: 'qtNumber', sensitive: false, direction: 'bidirectional' },
+  { domain: 'qt', field: 'customerStatus', sensitive: false, direction: 'bidirectional' },
+  { domain: 'qt', field: 'totalPrice', sensitive: false, direction: 'bidirectional' },
+  { domain: 'qt', field: 'costPrice', sensitive: true, direction: 'admin_to_client', notes: 'seller-sensitive' },
+  { domain: 'qt', field: 'profitRate', sensitive: true, direction: 'admin_to_client', notes: 'seller-sensitive' },
 
   { domain: 'contract', field: 'contractNumber', sensitive: false, direction: 'bidirectional' },
   { domain: 'contract', field: 'status', sensitive: false, direction: 'bidirectional' },
@@ -48,15 +48,15 @@ export interface SyncPolicyTag {
 }
 
 export const SYNC_POLICY_TAGS: SyncPolicyTag[] = [
-  { domain: 'inquiry', field: 'inquiryNumber', tags: ['identity', 'public'] },
-  { domain: 'inquiry', field: 'status', tags: ['operational', 'public'] },
-  { domain: 'inquiry', field: 'products', tags: ['operational'] },
+  { domain: 'ing', field: 'inquiryNumber', tags: ['identity', 'public'] },
+  { domain: 'ing', field: 'status', tags: ['operational', 'public'] },
+  { domain: 'ing', field: 'products', tags: ['operational'] },
 
-  { domain: 'quotation', field: 'qtNumber', tags: ['identity', 'public'] },
-  { domain: 'quotation', field: 'customerStatus', tags: ['operational', 'public'] },
-  { domain: 'quotation', field: 'totalPrice', tags: ['finance', 'public'] },
-  { domain: 'quotation', field: 'costPrice', tags: ['finance', 'sensitive'] },
-  { domain: 'quotation', field: 'profitRate', tags: ['finance', 'sensitive'] },
+  { domain: 'qt', field: 'qtNumber', tags: ['identity', 'public'] },
+  { domain: 'qt', field: 'customerStatus', tags: ['operational', 'public'] },
+  { domain: 'qt', field: 'totalPrice', tags: ['finance', 'public'] },
+  { domain: 'qt', field: 'costPrice', tags: ['finance', 'sensitive'] },
+  { domain: 'qt', field: 'profitRate', tags: ['finance', 'sensitive'] },
 
   { domain: 'contract', field: 'contractNumber', tags: ['identity', 'public'] },
   { domain: 'contract', field: 'status', tags: ['operational', 'public'] },
@@ -85,8 +85,8 @@ export const SYNC_POLICY_TAGS: SyncPolicyTag[] = [
 ];
 
 export const SYNC_DENYLIST: Record<SyncFieldRule['domain'], string[]> = {
-  inquiry: ['internalComment', 'deletedAt'],
-  quotation: ['costPrice', 'profitRate', 'internalApprovalComment', 'deletedAt'],
+  ing: ['internalComment', 'deletedAt'],
+  qt: ['costPrice', 'profitRate', 'internalApprovalComment', 'deletedAt'],
   contract: ['internalApprovalTrail', 'deletedAt'],
   order: ['internalMargin', 'deletedAt'],
   shipment: ['freightCost', 'internalCarrierRate', 'deletedAt'],

@@ -28,6 +28,27 @@ async function safeQuery<T>(
   }
 }
 
+function isMissingColumnError(error: any, column: string): boolean {
+  const message = String(error?.message || '');
+  return error?.code === '42703' || message.includes(column);
+}
+
+function matchesCustomerEmailFallback(row: Record<string, any> | null | undefined, email: string): boolean {
+  if (!row || !email) return false;
+  const normalizedEmail = email.trim().toLowerCase();
+  const candidates = [
+    row.customer_email,
+    row.customerEmail,
+    row.email,
+    row.customer?.email,
+    row.customer?.customer_email,
+    row.contact_email,
+    row.bill_to_email,
+    row.billing_email,
+  ];
+  return candidates.some((candidate) => String(candidate || '').trim().toLowerCase() === normalizedEmail);
+}
+
 // ─── 销售合同 ─────────────────────────────────────────────────
 
 export const salesContractsDb = {
@@ -175,10 +196,35 @@ export const accountsReceivableDb = {
   },
 
   async getByCustomer(email: string): Promise<any[]> {
-    return safeQuery(
-      () => supabase.from('accounts_receivable').select('*').eq('customer_email', email).order('created_at', { ascending: false }),
-      []
-    );
+    if (!isOnline()) return [];
+    try {
+      const { data, error } = await supabase
+        .from('accounts_receivable')
+        .select('*')
+        .eq('customer_email', email)
+        .order('created_at', { ascending: false });
+
+      if (!error) return data ?? [];
+
+      if (isMissingColumnError(error, 'customer_email')) {
+        console.warn('[Supabase] accountsReceivableDb.getByCustomer fallback: customer_email column unavailable');
+        const { data: allRows, error: fallbackError } = await supabase
+          .from('accounts_receivable')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (fallbackError) {
+          console.warn('[Supabase]', fallbackError.message);
+          return [];
+        }
+        return (allRows || []).filter((row) => matchesCustomerEmailFallback(row, email));
+      }
+
+      console.warn('[Supabase]', error.message);
+      return [];
+    } catch (e) {
+      console.warn('[Supabase] query failed:', e);
+      return [];
+    }
   },
 
   async getByOrderNumber(orderNumber: string): Promise<any | null> {

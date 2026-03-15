@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Search, Filter, Eye, Download, Plus, FileText, Calendar, DollarSign, Package, MapPin, Send, Trash2, ChevronDown, CheckCircle, Clock, CheckCircle2, Edit, ExternalLink, Container, MessageCircle, Phone, Copy, Check, Printer, Workflow, CheckSquare, Square } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Label } from '../ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
@@ -14,17 +14,29 @@ import { useInquiry } from '../../contexts/InquiryContext';
 import { useUser } from '../../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
 import { REGION_CODES, type RegionType } from '../../utils/xjNumberGenerator';
-import { nextInquiryNumber } from '../../lib/supabaseService';
 import { getCurrentUser } from '../../data/authorizedUsers';
 import { getCustomerProfile } from './CustomerProfile';
-import { INQDocumentView } from './INQDocumentView';
-import { CustomerInquiryView } from './CustomerInquiryView'; // 📋 使用文档中心的专业模板
+import { CustomerInquiryView } from './CustomerInquiryView';
 import { UnifiedInquiryDialog } from './UnifiedInquiryDialog';
 import { ContainerLoadPlanner } from './ContainerLoadPlanner';
 import WorkflowStatusTracker from '../workflow/WorkflowStatusTracker';
 import { filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { canDeleteInquiry } from '../../lib/erp-core/delete-guard';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
+import { adaptInquiryToDocumentData } from '../../utils/documentDataAdapters';
+import { oemAttachmentStorage } from '../../lib/storageService';
+import { aggregateInquiryOemFromProducts, normalizeOemData, serializeOemDataForPersistence } from '../../types/oem';
+
+const withTimeout = async <T,>(task: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+  return Promise.race([
+    task,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+};
+
+const MY_PRODUCTS_AUTO_OPEN_INQUIRY_KEY = 'my_products_open_new_inquiry';
 
 export function InquiryManagement() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -33,7 +45,6 @@ export function InquiryManagement() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false);
   const [copiedWeChat, setCopiedWeChat] = useState(false);
-  const [rfqZoom, setRfqZoom] = useState(138); // 138% default zoom
   const [isDownloadingPDF, setIsDownloadingPDF] = useState(false);
   const [isSaveLocationDialogOpen, setIsSaveLocationDialogOpen] = useState(false);
   const [isContainerPlannerOpen, setIsContainerPlannerOpen] = useState(false);
@@ -41,12 +52,80 @@ export function InquiryManagement() {
   const [isNewInquiryOpen, setIsNewInquiryOpen] = useState(false);
   const [deleteInquiryId, setDeleteInquiryId] = useState<string | null>(null); // 🗑️ State for delete confirmation
   const [submitInquiryId, setSubmitInquiryId] = useState<string | null>(null); // 🚀 State for submit confirmation
-  
+  const [isSubmittingInquiry, setIsSubmittingInquiry] = useState(false);
   // 🔥 批量删除功能的状态管理
   const [selectedInquiryIds, setSelectedInquiryIds] = useState<string[]>([]);
   
   const { user } = useUser();
-  const { getUserInquiries, getCompanyInquiries, addInquiry, updateInquiry, deleteInquiry, submitInquiry } = useInquiry();
+  const { inquiries: contextInquiries, addInquiry, updateInquiry, deleteInquiry, submitInquiry, refreshInquiries } = useInquiry();
+
+  const resolvedCurrentUser = useMemo(() => {
+    const legacyUser = getCurrentUser() as any;
+    if (legacyUser?.email && legacyUser?.companyId) {
+      return legacyUser;
+    }
+
+    if (typeof window === 'undefined') {
+      return legacyUser ?? null;
+    }
+
+    try {
+      const backendUser = JSON.parse(localStorage.getItem('cosun_backend_user') || 'null');
+      const authUser = JSON.parse(localStorage.getItem('cosun_auth_user') || 'null');
+      const customerProfile = JSON.parse(localStorage.getItem('cosun_customer_profile') || 'null');
+
+      return {
+        ...legacyUser,
+        email: legacyUser?.email || backendUser?.email || user?.email || authUser?.email || '',
+        username: legacyUser?.username || backendUser?.username || authUser?.name || customerProfile?.contactPerson || '',
+        company: legacyUser?.company || customerProfile?.companyName || backendUser?.company || '',
+        companyId:
+          legacyUser?.companyId ||
+          backendUser?.companyId ||
+          authUser?.companyId ||
+          customerProfile?.companyId ||
+          null,
+        region: legacyUser?.region || user?.region || backendUser?.region || authUser?.region || 'North America',
+      };
+    } catch {
+      return {
+        ...legacyUser,
+        email: legacyUser?.email || user?.email || '',
+        username: legacyUser?.username || user?.name || '',
+        companyId: legacyUser?.companyId || null,
+        region: legacyUser?.region || user?.region || 'North America',
+      };
+    }
+  }, [user]);
+
+  React.useEffect(() => {
+    void refreshInquiries().catch(() => {});
+    // `refreshInquiries` is recreated by the provider on each render.
+    // Depending on it here turns the page mount fetch into a render loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  React.useEffect(() => {
+    const tryOpenMyProductsInquiry = () => {
+      try {
+        if (localStorage.getItem(MY_PRODUCTS_AUTO_OPEN_INQUIRY_KEY) !== '1') {
+          return;
+        }
+        localStorage.removeItem(MY_PRODUCTS_AUTO_OPEN_INQUIRY_KEY);
+        setIsNewInquiryOpen(true);
+      } catch {
+        // Keep the flow resilient if storage is unavailable.
+      }
+    };
+
+    tryOpenMyProductsInquiry();
+    window.addEventListener('my-products-open-inquiry-dialog', tryOpenMyProductsInquiry as EventListener);
+    window.addEventListener('storage', tryOpenMyProductsInquiry);
+    return () => {
+      window.removeEventListener('my-products-open-inquiry-dialog', tryOpenMyProductsInquiry as EventListener);
+      window.removeEventListener('storage', tryOpenMyProductsInquiry);
+    };
+  }, []);
 
   // Helper function for copying to clipboard
   const copyToClipboard = (text: string) => {
@@ -70,27 +149,9 @@ export function InquiryManagement() {
     }
   };
 
-  // 🆕 Get inquiries by company ID (shared across all company users)
-  const currentUser = getCurrentUser();
-  const companyId = currentUser?.companyId;
+  const currentUser = resolvedCurrentUser;
+  const inquiries = Array.isArray(contextInquiries) ? contextInquiries : [];
   
-  // Get inquiries (avoid missing items when companyId/userEmail are inconsistent)
-  const byCompany = companyId ? getCompanyInquiries(companyId) : [];
-  const byUser = user ? getUserInquiries(user.email) : [];
-  const inquiries = (() => {
-    const map = new Map<string, any>();
-    for (const inq of [...byCompany, ...byUser]) {
-      if (!inq?.id) continue;
-      map.set(inq.id, inq);
-    }
-    return Array.from(map.values());
-  })();
-  
-  console.log('🔍 InquiryManagement - 当前用户:', user?.email);
-  console.log('🔍 InquiryManagement - 公司ID:', companyId);
-  console.log('🔍 InquiryManagement - 公司询价列表:', inquiries);
-  console.log('🔍 InquiryManagement - inquiries count:', inquiries.length);
-
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'draft':
@@ -108,9 +169,8 @@ export function InquiryManagement() {
     }
   };
 
-  const visibleInquiries = filterNotDeleted('inquiry', inquiries, (inquiry) => [
+  const visibleInquiries = filterNotDeleted('ing', inquiries, (inquiry) => [
     String(inquiry?.id || ''),
-    String((inquiry as any)?.inquiryNumber || ''),
   ]);
 
   const filteredInquiries = visibleInquiries.filter(inquiry => {
@@ -125,6 +185,94 @@ export function InquiryManagement() {
     return matchesSearch && matchesFilter;
   });
 
+  const findInquiryByReference = (referenceId: string | null) => {
+    if (!referenceId) return null;
+    return inquiries.find((inquiry) => {
+      const inquiryNumber = String((inquiry as any)?.inquiryNumber || '');
+      return inquiry.id === referenceId || inquiryNumber === referenceId;
+    }) || null;
+  };
+
+  const getInquiryDisplayReference = (referenceId: string | null) => {
+    const inquiry = findInquiryByReference(referenceId);
+    if (!inquiry) {
+      return {
+        internalNo: referenceId || '-',
+        externalNo: null as string | null,
+      };
+    }
+
+    const internalNo = String((inquiry as any)?.inquiryNumber || inquiry.id);
+    const numberDisplay = resolveDisplayNumber({
+      domain: 'ing',
+      internalNo,
+      companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
+    });
+
+    return {
+      internalNo,
+      externalNo: numberDisplay.externalNo || null,
+    };
+  };
+
+  const deleteInquiryDisplay = getInquiryDisplayReference(deleteInquiryId);
+  const submitInquiryDisplay = getInquiryDisplayReference(submitInquiryId);
+
+  const preparePersistedOemData = async (storageKey: string, oemInput?: any) => {
+    if (!oemInput) return undefined;
+
+    const normalizedOemData = normalizeOemData(oemInput);
+    if (!normalizedOemData.enabled) {
+      return serializeOemDataForPersistence(normalizedOemData);
+    }
+
+    const uploadedFiles = await Promise.all(
+      normalizedOemData.files.map(async (file: any) => {
+        if (!file.fileObject) {
+          return {
+            ...file,
+            uploadStatus: file.storageUrl ? 'uploaded' : file.uploadStatus || 'local',
+            fileObject: null,
+          };
+        }
+
+        const uploadResult = await oemAttachmentStorage.upload(file.fileObject, storageKey, user?.email || 'unknown@customer');
+        return {
+          ...file,
+          uploadStatus: 'uploaded' as const,
+          storageBucket: 'oem-attachments',
+          storagePath: uploadResult.path,
+          storageUrl: uploadResult.url,
+          uploadedAt: uploadResult.uploadedAt,
+          fileObject: null,
+        };
+      }),
+    );
+
+    return serializeOemDataForPersistence({
+      ...normalizedOemData,
+      files: uploadedFiles,
+    });
+  };
+
+  const preparePersistedProductsWithOem = async (storageKey: string, products: any[] = []) => {
+    const persistedProducts = await Promise.all(
+      (products || []).map(async (product) => {
+        if (!product?.oem?.enabled) {
+          return product;
+        }
+
+        const persistedOem = await preparePersistedOemData(storageKey, product.oem);
+        return {
+          ...product,
+          oem: persistedOem,
+        };
+      }),
+    );
+
+    return persistedProducts;
+  };
+
   const handleCreateInquiry = async (products: any[], additionalInfo?: any) => {
     if (!user) {
       toast.error('Please log in to create inquiry');
@@ -136,11 +284,9 @@ export function InquiryManagement() {
     const regionCode = REGION_CODES[userRegion] || 'NA';
     const customerProfile = getCustomerProfile();
 
-    const inquiryNumber = await nextInquiryNumber(regionCode, user?.id ?? undefined);
-
     const newInquiry = {
       id: crypto.randomUUID(),
-      inquiryNumber,
+      inquiryNumber: '',
       date: new Date().toISOString().split('T')[0],
       userEmail: user.email,
       companyId: currentUser?.companyId || null,
@@ -155,11 +301,13 @@ export function InquiryManagement() {
         totalGrossWeight: additionalInfo?.totalGrossWeight || '0',
         totalNetWeight: additionalInfo?.totalNetWeight || '0',
       },
+      requirements: additionalInfo?.requirements || undefined,
+      oem: undefined,
       message: additionalInfo?.notes || '',
       createdAt: Date.now(),
       buyerInfo: customerProfile ? {
-        companyName: customerProfile.companyName || 'N/A',
-        contactPerson: customerProfile.contactPerson || 'N/A',
+        companyName: customerProfile.companyName || currentUser?.company || user.email || 'N/A',
+        contactPerson: customerProfile.contactPerson || currentUser?.username || user.email || 'N/A',
         email: customerProfile.email || user.email || 'N/A',
         phone: customerProfile.phone || 'N/A',
         mobile: customerProfile.mobile,
@@ -175,14 +323,20 @@ export function InquiryManagement() {
         businessType: 'Retailer'
       },
     };
+    (newInquiry as any).templateSnapshot = { pendingResolution: true };
+    (newInquiry as any).documentRenderMeta = null;
 
     try {
-      await addInquiry(newInquiry);
-      toast.success(`Inquiry ${inquiryNumber} created successfully!`);
+      newInquiry.products = await preparePersistedProductsWithOem(newInquiry.id, products);
+      newInquiry.oem = aggregateInquiryOemFromProducts(newInquiry.products);
+      (newInquiry as any).documentDataSnapshot = adaptInquiryToDocumentData(newInquiry as any);
+      const savedInquiry = await addInquiry(newInquiry as any);
+      toast.success(`Inquiry ${savedInquiry.inquiryNumber || savedInquiry.id} created successfully!`);
       setIsNewInquiryOpen(false);
     } catch (err) {
       console.error('❌ handleCreateInquiry failed:', err);
-      toast.error('Failed to create inquiry — check console for details');
+      const message = err instanceof Error ? err.message : 'Failed to create inquiry — check console for details';
+      toast.error(message);
     }
   };
 
@@ -204,7 +358,7 @@ export function InquiryManagement() {
     }
   };
 
-  const handleBatchDelete = () => {
+  const handleBatchDelete = async () => {
     if (selectedInquiryIds.length === 0) {
       toast.error('Please select inquiries to delete');
       return;
@@ -213,26 +367,26 @@ export function InquiryManagement() {
     const confirmMessage = `Hide ${selectedInquiryIds.length} selected inquiries from your current view? This will not remove the original inquiry record.`;
     
     if (window.confirm(confirmMessage)) {
-      selectedInquiryIds.forEach(id => {
-        deleteInquiry(id);
-      });
-
-      toast.success(
-        <div className="space-y-1">
-          <p className="font-semibold">🗑️ Batch Delete Successful!</p>
-          <p className="text-sm">Hidden {selectedInquiryIds.length} inquiries from your current view</p>
-        </div>,
-        { duration: 3000 }
-      );
-
-      setSelectedInquiryIds([]);
+      try {
+        await Promise.all(selectedInquiryIds.map((id) => deleteInquiry(id)));
+        toast.success(
+          <div className="space-y-1">
+            <p className="font-semibold">🗑️ Batch Delete Successful!</p>
+            <p className="text-sm">Hidden {selectedInquiryIds.length} inquiries from your current view</p>
+          </div>,
+          { duration: 3000 }
+        );
+        setSelectedInquiryIds([]);
+      } catch (error: any) {
+        toast.error(error?.message || 'Failed to delete inquiries');
+      }
     }
   };
 
-  // 🔥 切换筛选时清空选中状态
-  useEffect(() => {
+  const handleFilterStatusChange = (status: string) => {
+    setFilterStatus(status);
     setSelectedInquiryIds([]);
-  }, [filterStatus]);
+  };
 
   return (
     <div className="space-y-6 pb-6" style={{ fontFamily: 'var(--hd-font)' }}>
@@ -274,28 +428,28 @@ export function InquiryManagement() {
               )}
               <Button
                 variant={filterStatus === 'all' ? 'default' : 'outline'}
-                onClick={() => setFilterStatus('all')}
+                onClick={() => handleFilterStatusChange('all')}
                 className={filterStatus === 'all' ? 'bg-red-600 hover:bg-red-700' : ''}
               >
                 All
               </Button>
               <Button
                 variant={filterStatus === 'pending' ? 'default' : 'outline'}
-                onClick={() => setFilterStatus('pending')}
+                onClick={() => handleFilterStatusChange('pending')}
                 className={filterStatus === 'pending' ? 'bg-red-600 hover:bg-red-700' : ''}
               >
                 Pending
               </Button>
               <Button
                 variant={filterStatus === 'quoted' ? 'default' : 'outline'}
-                onClick={() => setFilterStatus('quoted')}
+                onClick={() => handleFilterStatusChange('quoted')}
                 className={filterStatus === 'quoted' ? 'bg-red-600 hover:bg-red-700' : ''}
               >
                 Quoted
               </Button>
               <Button
                 variant={filterStatus === 'approved' ? 'default' : 'outline'}
-                onClick={() => setFilterStatus('approved')}
+                onClick={() => handleFilterStatusChange('approved')}
                 className={filterStatus === 'approved' ? 'bg-red-600 hover:bg-red-700' : ''}
               >
                 Approved
@@ -338,7 +492,7 @@ export function InquiryManagement() {
                   
                   const inquiryNo = String((inquiry as any)?.inquiryNumber || inquiry.id);
                   const numberDisplay = resolveDisplayNumber({
-                    domain: 'inquiry',
+                    domain: 'ing',
                     internalNo: inquiryNo,
                     companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
                   });
@@ -478,19 +632,18 @@ export function InquiryManagement() {
         </Card>
       )}
 
-      {/* Inquiry Detail Dialog - 简化版：只显示询价单文档 */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
-          {/* Hidden Title and Description for accessibility */}
+        <DialogContent
+          className="w-[calc(210mm+56px)] max-w-[calc(100vw-2rem)] max-h-[95vh] overflow-hidden border-none bg-[#525659] p-0 gap-0 shadow-2xl [&>button]:hidden"
+        >
           <DialogTitle className="sr-only">询价单详情</DialogTitle>
           <DialogDescription className="sr-only">
             查看完整的询价单信息和产品详情
           </DialogDescription>
-          
-          {/* Header with Print button - Floating on top */}
+
           <div className="absolute top-4 right-16 z-50 flex gap-2 print:hidden">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="sm"
               className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
               onClick={() => {
@@ -501,37 +654,36 @@ export function InquiryManagement() {
                 }, 1000);
               }}
             >
-              <Printer className="w-4 h-4 mr-2" />
-              Print
+              <FileText className="w-4 h-4 mr-2" />
+              打印
             </Button>
           </div>
 
-          {/* Close Button */}
-          <button
-            onClick={() => setIsDetailOpen(false)}
-            className="absolute right-4 top-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition-colors print:hidden"
-            aria-label="Close"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          <DialogClose asChild>
+            <button
+              className="absolute right-4 top-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition-colors print:hidden"
+              aria-label="Close"
             >
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </DialogClose>
 
-          {/* INQ Document - 仅展示询价单，无Tab、无工作流 */}
-          <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
+          <div className="overflow-y-auto max-h-[95vh] bg-[#525659]">
             {selectedInquiry && (
-              <CustomerInquiryView inquiry={selectedInquiry} />
+              <CustomerInquiryView inquiry={selectedInquiry} audience="customer" />
             )}
           </div>
         </DialogContent>
@@ -648,108 +800,8 @@ export function InquiryManagement() {
                 setIsSaveLocationDialogOpen(false);
                 
                 try {
-                  const rfqContent = document.querySelector('[data-rfq-content]');
-                  if (!rfqContent) {
-                    throw new Error('Inquiry content not found');
-                  }
-                  
-                  // Create a print-optimized clone
-                  const printWindow = window.open('', '_blank', 'width=800,height=600');
-                  if (!printWindow) {
-                    throw new Error('Please allow pop-ups');
-                  }
-                  
-                  // Get all stylesheets
-                  const styles = Array.from(document.styleSheets)
-                    .map(styleSheet => {
-                      try {
-                        return Array.from(styleSheet.cssRules)
-                          .map(rule => rule.cssText)
-                          .join('\n');
-                      } catch (e) {
-                        return '';
-                      }
-                    })
-                    .join('\n');
-                  
-                  // Clone the content
-                  const clone = rfqContent.cloneNode(true) as HTMLElement;
-                  
-                  // Remove print:hidden elements
-                  const hiddenElements = clone.querySelectorAll('.print\\:hidden');
-                  hiddenElements.forEach(el => el.remove());
-                  
-                  // Show print:block elements
-                  const printBlockElements = clone.querySelectorAll('.print\\:block');
-                  printBlockElements.forEach(el => {
-                    (el as HTMLElement).style.display = 'block';
-                  });
-                  
-                  // Write to print window
-                  printWindow.document.write(`
-                    <!DOCTYPE html>
-                    <html>
-                      <head>
-                        <meta charset="UTF-8">
-                        <title>${selectedInquiry.id}</title>
-                        <style>
-                          ${styles}
-                          
-                          @page {
-                            size: A4;
-                            margin: 15mm;
-                          }
-                          
-                          body {
-                            margin: 0;
-                            padding: 20mm;
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            background: white;
-                          }
-                          
-                          * {
-                            -webkit-print-color-adjust: exact !important;
-                            print-color-adjust: exact !important;
-                            color-adjust: exact !important;
-                          }
-                          
-                          .print\\:hidden {
-                            display: none !important;
-                          }
-                          
-                          .print\\:block {
-                            display: block !important;
-                          }
-                        </style>
-                      </head>
-                      <body>
-                        ${clone.innerHTML}
-                      </body>
-                    </html>
-                  `);
-                  printWindow.document.close();
-                  
-                  // Wait for content to load
-                  await new Promise(resolve => setTimeout(resolve, 1000));
-                  
-                  // Trigger print (user can save as PDF)
-                  printWindow.print();
-                  
-                  // Show success message
+                  await handlePrintInquiryDocument();
                   toast.success('Print dialog opened! Select "Save as PDF" and choose your local folder.');
-                  
-                  // Close window after print
-                  printWindow.onafterprint = () => {
-                    printWindow.close();
-                  };
-                  
-                  // Auto close after 60 seconds if not printed
-                  setTimeout(() => {
-                    if (!printWindow.closed) {
-                      printWindow.close();
-                    }
-                  }, 60000);
-                  
                 } catch (error) {
                   console.error('PDF generation error:', error);
                   toast.error('Failed to generate PDF. Please try again.');
@@ -812,13 +864,17 @@ export function InquiryManagement() {
         isOpen={isContainerPlannerOpen}
         onClose={() => setIsContainerPlannerOpen(false)}
         inquiry={selectedInquiry}
-        onSaveQuantities={(updatedProducts) => {
+        onSaveQuantities={async (updatedProducts) => {
           if (selectedInquiry) {
             const totalPrice = updatedProducts.reduce((sum, p) => sum + ((p.targetPrice || 0) * (p.quantity || 0)), 0);
-            updateInquiry(selectedInquiry.id, {
-              products: updatedProducts,
-              totalPrice,
-            });
+            try {
+              await updateInquiry(selectedInquiry.id, {
+                products: updatedProducts,
+                totalPrice,
+              });
+            } catch (error: any) {
+              toast.error(error?.message || 'Failed to update inquiry');
+            }
           }
         }}
       />
@@ -833,23 +889,32 @@ export function InquiryManagement() {
         onCreateInquiry={handleCreateInquiry}
         editMode={true}
         existingInquiry={selectedInquiry}
-        onUpdateInquiry={(updatedData) => {
+        onUpdateInquiry={async (updatedData) => {
           if (selectedInquiry) {
             const totalPrice = updatedData.products.reduce(
               (sum: number, p: any) => sum + ((p.targetPrice || 0) * (p.quantity || 0)), 
               0
             );
-            
-            updateInquiry(selectedInquiry.id, {
-              products: updatedData.products,
-              message: updatedData.notes,
-              deliveryAddress: updatedData.deliveryAddress,
-              totalPrice,
-            });
-            
-            toast.success(`Inquiry ${selectedInquiry.id} updated successfully!`);
-            setIsEditMode(false);
-            setSelectedInquiry(null);
+
+            try {
+              const inquiryNumber = selectedInquiry.inquiryNumber || selectedInquiry.id;
+              const persistedProducts = await preparePersistedProductsWithOem(inquiryNumber, updatedData.products);
+              const persistedOemData = aggregateInquiryOemFromProducts(persistedProducts);
+              await updateInquiry(selectedInquiry.id, {
+                products: persistedProducts,
+                requirements: updatedData.requirements,
+                oem: persistedOemData,
+                message: updatedData.notes,
+                deliveryAddress: updatedData.deliveryAddress,
+                totalPrice,
+              });
+
+              toast.success(`Inquiry ${inquiryNumber} updated successfully!`);
+              setIsEditMode(false);
+              setSelectedInquiry(null);
+            } catch (error: any) {
+              throw error instanceof Error ? error : new Error(error?.message || 'Failed to update inquiry');
+            }
           }
         }}
       />
@@ -869,8 +934,13 @@ export function InquiryManagement() {
           
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 my-6">
             <p className="text-sm text-red-800">
-              <strong>Inquiry ID:</strong> {deleteInquiryId}
+              <strong>Inquiry No:</strong> {deleteInquiryDisplay.internalNo}
             </p>
+            {deleteInquiryDisplay.externalNo && (
+              <p className="mt-2 text-sm text-red-700">
+                <strong>Customer ERP No:</strong> {deleteInquiryDisplay.externalNo}
+              </p>
+            )}
           </div>
           
           <div className="flex justify-end gap-3">
@@ -879,11 +949,15 @@ export function InquiryManagement() {
             </Button>
             <Button 
               className="bg-red-600 hover:bg-red-700 text-white"
-              onClick={() => {
+              onClick={async () => {
                 if (deleteInquiryId) {
-                  deleteInquiry(deleteInquiryId);
-                  toast.success(`Inquiry hidden from current view!`);
-                  setDeleteInquiryId(null);
+                  try {
+                    await deleteInquiry(deleteInquiryId);
+                    toast.success(`Inquiry hidden from current view!`);
+                    setDeleteInquiryId(null);
+                  } catch (error: any) {
+                    toast.error(error?.message || 'Failed to hide inquiry');
+                  }
                 }
               }}
             >
@@ -909,8 +983,13 @@ export function InquiryManagement() {
           
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 my-6">
             <p className="text-sm text-blue-800">
-              <strong>Inquiry ID:</strong> {submitInquiryId}
+              <strong>Inquiry No:</strong> {submitInquiryDisplay.internalNo}
             </p>
+            {submitInquiryDisplay.externalNo && (
+              <p className="mt-2 text-sm text-blue-700">
+                <strong>Customer ERP No:</strong> {submitInquiryDisplay.externalNo}
+              </p>
+            )}
           </div>
           
           <div className="flex justify-end gap-3">
@@ -918,21 +997,30 @@ export function InquiryManagement() {
               Cancel
             </Button>
             <Button 
+              disabled={isSubmittingInquiry}
               className="bg-blue-600 hover:bg-blue-700 text-white"
               onClick={async () => {
                 if (submitInquiryId) {
-                  const ok = await submitInquiry(submitInquiryId);
-                  if (ok) {
-                    toast.success(`Inquiry submitted successfully!`);
-                  } else {
-                    toast.error('Inquiry submit failed. Please try again.');
+                  setIsSubmittingInquiry(true);
+                  try {
+                    const ok = await submitInquiry(submitInquiryId);
+                    if (ok) {
+                      toast.success(`Inquiry submitted successfully!`);
+                      setSubmitInquiryId(null);
+                    } else {
+                      toast.error('Inquiry submit failed. Please try again.');
+                    }
+                  } catch (error: any) {
+                    console.error('[InquiryManagement] submit inquiry failed:', error);
+                    toast.error(error?.message || 'Inquiry submit failed. Please try again.');
+                  } finally {
+                    setIsSubmittingInquiry(false);
                   }
-                  setSubmitInquiryId(null);
                 }
               }}
             >
               <Send className="h-4 w-4 mr-2" />
-              Submit
+              {isSubmittingInquiry ? 'Submitting...' : 'Submit'}
             </Button>
           </div>
         </DialogContent>

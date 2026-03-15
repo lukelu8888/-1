@@ -16,6 +16,8 @@ export interface AuthUser {
   region?: string; // 🔥 添加 region 字段
 }
 
+export type PortalRole = 'admin' | 'staff' | 'supplier' | 'customer' | null;
+
 /**
  * 获取当前登录用户
  * 优先读取 UserContext 写入的 cosun_auth_user（Supabase Auth 格式）
@@ -72,6 +74,35 @@ export function getCurrentUser(): AuthUser | null {
   }
 
   return null;
+}
+
+export function getStoredPortalRole(): PortalRole {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const backendUserStr = localStorage.getItem('cosun_backend_user');
+    if (backendUserStr) {
+      const backendUser = JSON.parse(backendUserStr);
+      const portalRole = String(backendUser?.portal_role || '').trim().toLowerCase();
+      if (portalRole === 'admin' || portalRole === 'staff' || portalRole === 'supplier' || portalRole === 'customer') {
+        return portalRole as PortalRole;
+      }
+    }
+
+    const authUser = getCurrentUser();
+    if (authUser?.type === 'admin') return 'admin';
+    if (authUser?.type === 'supplier') return 'supplier';
+    if (authUser?.type === 'customer') return 'customer';
+  } catch (e) {
+    console.error('Failed to get stored portal role:', e);
+  }
+
+  return null;
+}
+
+export function isStoredStaffPortalRole(): boolean {
+  const portalRole = getStoredPortalRole();
+  return portalRole === 'admin' || portalRole === 'staff';
 }
 
 /**

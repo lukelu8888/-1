@@ -148,7 +148,7 @@ async function executeNotificationTrigger(trigger: any, context: WorkflowContext
         title: finalTitle,
         message: finalMessage,
         relatedId: context.quotation_number || context.order_number || context.inquiry_number || '',
-        relatedType: context.quotation_number ? 'quotation' : context.order_number ? 'order' : 'inquiry',
+        relatedType: context.quotation_number ? 'qt' : context.order_number ? 'order' : 'ing',
         sender: context.sales_rep_email || 'system@gaoshengda.com',
         metadata: context
       });

@@ -3,37 +3,51 @@ import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogClose, DialogDescription } from '../ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox';
 import { Search, Filter, Eye, Send, CheckCircle, AlertCircle, Package, FileText, Trash2, Plus, HelpCircle, Clock, TrendingUp, X, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { PurchaseRequirementView } from './PurchaseRequirementView';
 import { SubmitToProcurementDialog } from './SubmitToProcurementDialog';
 import QuoteCreationIntelligent from './QuoteCreationIntelligent'; // 🔥 智能报价创建
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { useInquiry } from '../../contexts/InquiryContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：销售报价Context
 import { nextQRNumber, nextQTNumber } from '../../utils/xjNumberGenerator'; // 🔥 新增：生成QT/QR编号
 import { getCurrentUser } from '../../utils/dataIsolation';
-import { purchaseRequirementService, salesQuotationService } from '../../lib/supabaseService';
+import { salesQuotationService, quoteRequirementService } from '../../lib/supabaseService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { formatDocumentNumber, getDocumentLevel, getDocumentColorClass } from '../../utils/documentNumbering'; // 🔥 新增：7级编号体系辅助函数
+import {
+  buildBilingualTradingRequirementsText,
+  buildCommercialTermsSnapshotFromInquiry,
+  buildCustomerRequirementsSnapshot,
+  buildProcurementRequestNotes,
+  DEFAULT_DOWNSTREAM_VISIBILITY,
+  findRelatedInquiryForProcurementDoc,
+  hydrateProcurementRequirementWithInquiry,
+} from '../../utils/procurementRequestContext';
+import {
+  DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT,
+  QuoteRequirementDocument,
+  type QuoteRequirementDocumentData,
+  type QuoteRequirementPreviewLayout,
+} from '../documents/templates/QuoteRequirementDocument';
+import { buildQuoteRequirementDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 type TabType = 'all' | 'pending' | 'partial' | 'processing' | 'completed';
-
 interface CostInquiryQuotationManagementProps {
   onSwitchToQuotationManagement?: (qtNumber: string) => void; // 🔥 切换到报价管理并高亮指定单号
 }
 
 export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }: CostInquiryQuotationManagementProps = {}) {
   const { inquiries } = useInquiry();
-  const purchaseContext = usePurchaseRequirements();
-  const purchaseRequirements = purchaseContext.requirements;
-  const addPurchaseRequirement = purchaseContext.addRequirement;
-  const updatePurchaseRequirement = purchaseContext.updateRequirement;
-  const deleteRequirement = purchaseContext.deleteRequirement;
-  const refreshPurchaseRequirementsFromApi = purchaseContext.refreshPurchaseRequirementsFromApi;
+  const quoteRequirementContext = useQuoteRequirements();
+  const quoteRequirements = quoteRequirementContext.requirements;
+  const addQuoteRequirement = quoteRequirementContext.addRequirement;
+  const updateQuoteRequirement = quoteRequirementContext.updateRequirement;
+  const deleteQuoteRequirement = quoteRequirementContext.deleteRequirement;
+  const refreshQuoteRequirementsFromApi = quoteRequirementContext.refreshQuoteRequirementsFromApi;
   const [currentUser, setCurrentUser] = useState<any>(() => getCurrentUser());
   const [refreshing, setRefreshing] = useState(false);
   
@@ -58,6 +72,10 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   const [showSubmitDialog, setShowSubmitDialog] = useState(false); // 🔥 提交采购弹窗
   const [selectedQR, setSelectedQR] = useState<any>(null);
   const [selectedINQ, setSelectedINQ] = useState<any>(null);
+  const [viewModalPosition, setViewModalPosition] = useState({ x: 0, y: 8 });
+  const viewModalRef = useRef<HTMLDivElement | null>(null);
+  const [previewLayout, setPreviewLayout] = useState<QuoteRequirementPreviewLayout>(DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT);
+  const [previewDocumentData, setPreviewDocumentData] = useState<QuoteRequirementDocumentData | null>(null);
   
   // 🔥 批量选择和删除状态
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -66,53 +84,130 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   const [showQuoteCreation, setShowQuoteCreation] = useState(false);
   const [selectedQRForQuote, setSelectedQRForQuote] = useState<any>(null);
   const [pushingQrId, setPushingQrId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!showViewModal) return;
+    const frame = window.requestAnimationFrame(() => {
+      const el = viewModalRef.current;
+      if (!el) return;
+      const margin = previewLayout.dialogViewportMarginPx;
+      const x = Math.max(margin, Math.round((window.innerWidth - el.offsetWidth) / 2));
+      const y = Math.max(margin, previewLayout.dialogTopPx);
+      const maxX = Math.max(margin, window.innerWidth - el.offsetWidth - margin);
+      const maxY = Math.max(margin, window.innerHeight - el.offsetHeight - margin);
+      setViewModalPosition((current) => {
+        const next =
+          current.x === 0 && current.y === 8
+            ? { x, y }
+            : current;
+        return {
+          x: Math.min(Math.max(margin, next.x), maxX),
+          y: Math.min(Math.max(margin, next.y), maxY),
+        };
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [showViewModal, selectedQR?.id, previewLayout]);
+
+  useEffect(() => {
+    if (!showViewModal || !selectedQR) return;
+    const relatedInquiry = findRelatedInquiryForProcurementDoc(selectedQR, inquiries);
+    const requirementForView = hydrateProcurementRequirementWithInquiry(selectedQR, relatedInquiry);
+    const nextData = buildQuoteRequirementDocumentSnapshot(requirementForView, currentUser?.role);
+    setPreviewDocumentData(nextData);
+    setPreviewLayout(DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT);
+  }, [showViewModal, selectedQR, inquiries, currentUser?.role]);
+
+  const handleViewDialogDragStart = (event: React.MouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    const el = viewModalRef.current;
+    if (!el) return;
+    event.preventDefault();
+    const origin = { ...viewModalPosition };
+    const start = { x: event.clientX, y: event.clientY };
+    const margin = previewLayout.dialogViewportMarginPx;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - start.x;
+      const deltaY = moveEvent.clientY - start.y;
+      const nextX = origin.x + deltaX;
+      const nextY = origin.y + deltaY;
+      const maxX = Math.max(margin, window.innerWidth - el.offsetWidth - margin);
+      const maxY = Math.max(margin, window.innerHeight - el.offsetHeight - margin);
+      setViewModalPosition({
+        x: Math.min(Math.max(margin, nextX), maxX),
+        y: Math.min(Math.max(margin, nextY), maxY),
+      });
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const updatePreviewLayout = <K extends keyof QuoteRequirementPreviewLayout>(
+    key: K,
+    value: number,
+  ) => {
+    setPreviewLayout((current) => ({
+      ...current,
+      [key]: Number.isFinite(value) ? value : current[key],
+    }));
+  };
+
+  const getFloatingPanelHeight = (topPx: number, bottomMarginPx: number, minHeightPx: number) => {
+    if (typeof window === 'undefined') {
+      return minHeightPx;
+    }
+    return Math.max(minHeightPx, window.innerHeight - topPx - bottomMarginPx);
+  };
+
+  const getFloatingPanelWidth = (desiredWidthPx: number, viewportMarginPx: number, minWidthPx: number) => {
+    if (typeof window === 'undefined') {
+      return desiredWidthPx;
+    }
+    return Math.max(
+      minWidthPx,
+      Math.min(desiredWidthPx, window.innerWidth - viewportMarginPx * 2),
+    );
+  };
   
   const persistQuotationPushState = async (qr: any, qtNumber: string) => {
     const pushTimestamp = new Date().toISOString();
-    const savedRequirement = await purchaseRequirementService.upsert({
-      ...qr,
+    await updateQuoteRequirement(qr.id, {
       pushedToQuotation: true,
       pushedToQuotationDate: pushTimestamp,
       pushedBy: currentUser?.email || '',
       quotationNumber: qtNumber,
-      updatedAt: pushTimestamp,
     });
-
-    if (!savedRequirement) {
-      throw new Error(`QR ${qr.requirementNo} 已创建 QT，但回写 QR 下推状态失败`)
-    }
-
-    await refreshPurchaseRequirementsFromApi();
+    await refreshQuoteRequirementsFromApi();
   };
 
   const clearStaleQuotationPushState = async (qr: any) => {
-    const savedRequirement = await purchaseRequirementService.upsert({
-      ...qr,
+    await updateQuoteRequirement(qr.id, {
       pushedToQuotation: false,
       pushedToQuotationDate: null,
       pushedBy: null,
       quotationNumber: null,
-      updatedAt: new Date().toISOString(),
     });
-
-    if (!savedRequirement) {
-      throw new Error(`QR ${qr.requirementNo} 失效下推标记清理失败`)
-    }
-
-    await refreshPurchaseRequirementsFromApi();
+    await refreshQuoteRequirementsFromApi();
   };
 
   // 🔥 筛选业务员自己创建的QR（Admin可以看所有）
   const myQRs = useMemo(() => {
     // Admin可以看所有QR，业务员只能看自己创建的且在自己负责区域的
     const isAdmin = currentUser?.type === 'admin';
-    if (isAdmin) return purchaseRequirements;
+    if (isAdmin) return quoteRequirements;
 
     const userRegion = currentUser?.region;
-    return purchaseRequirements.filter(qr =>
+    return quoteRequirements.filter(qr =>
       qr.createdBy === currentUser?.email && qr.region === userRegion
     );
-  }, [purchaseRequirements, currentUser]);
+  }, [quoteRequirements, currentUser]);
 
   // 🔥 根据状态和搜索词筛选
   const filteredQRs = useMemo(() => {
@@ -143,10 +238,10 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       if (!inq.isSubmitted) return false;
       
       // 检查是否已经创建过QR
-      const hasQR = purchaseRequirements.some(qr => qr.sourceInquiryNumber === inq.inquiryNumber);
+      const hasQR = quoteRequirements.some(qr => qr.sourceInquiryNumber === inq.inquiryNumber);
       return !hasQR;
     });
-  }, [inquiries, purchaseRequirements]);
+  }, [inquiries, quoteRequirements]);
 
   // 🔥 状态配置
   const statusConfig: Record<string, { label: string; color: string }> = {
@@ -165,47 +260,88 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   // 🔥 创建采购需求（从INQ）
   const handleCreateQRFromINQ = async (inq: any) => {
     try {
+      const sourceTemplateSnapshot = inq.templateSnapshot || inq.template_snapshot || null;
+      const sourceDocumentData = inq.documentDataSnapshot || inq.document_data_snapshot || null;
+      if (!sourceDocumentData) {
+        throw new Error('该 ING 缺少文档数据快照，无法创建 QR');
+      }
+
       const regionCode = inq.region === 'South America' ? 'SA' : inq.region === 'Europe & Africa' ? 'EA' : 'NA';
       const qrNumber = await nextQRNumber(regionCode);
-      const newQR = {
+      const customerRequirements = buildCustomerRequirementsSnapshot(inq, inq.products || []);
+      const commercialTerms = buildCommercialTermsSnapshotFromInquiry(inq);
+      const salesDeptNotes = buildBilingualTradingRequirementsText({
+        tradeTerms: inq.requirements?.tradeTerms,
+        deliveryTime: inq.requirements?.deliveryTime,
+        portOfDestination: inq.requirements?.portOfDestination,
+        paymentTerms: inq.requirements?.paymentTerms,
+        packingRequirements: inq.requirements?.packingRequirements,
+        certifications: inq.requirements?.certifications,
+        otherRequirements: inq.requirements?.otherRequirements,
+      });
+    const newQR = {
         id: crypto.randomUUID(),
         requirementNo: qrNumber,
-        sourceInquiryNumber: inq.inquiryNumber || `INQ-${inq.id}`,
-        requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        urgency: 'medium' as const,
-        status: 'pending' as const,
-        createdBy: currentUser?.email || '',
-        region: inq.region,
-        notes: inq.message || '',
-        customer: {
-          companyName: inq.buyerInfo?.companyName || 'N/A',
-          contactPerson: inq.buyerInfo?.contactPerson || 'N/A',
+      sourceInquiryNumber: inq.inquiryNumber || `ING-${inq.id}`,
+      createdDate: String(
+        inq.createdDate ||
+        inq.createdAt ||
+        inq.created_at ||
+        new Date().toISOString()
+      ),
+      requiredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      urgency: 'medium' as const,
+      status: 'pending' as const,
+      createdBy: currentUser?.email || '',
+      region: inq.region,
+        notes: buildProcurementRequestNotes(commercialTerms || {}) || inq.message || '',
+        expectedQuoteDate: commercialTerms?.expectedQuoteDate,
+        deliveryDate: commercialTerms?.deliveryDate,
+        tradeTerms: commercialTerms?.tradeTerms,
+        paymentTerms: commercialTerms?.paymentTerms,
+        targetCostRange: commercialTerms?.targetCostRange,
+        qualityRequirements: commercialTerms?.qualityRequirements,
+        packagingRequirements: commercialTerms?.packagingRequirements,
+        remarks: commercialTerms?.remarks,
+        commercialTerms,
+        customerRequirements,
+        downstreamVisibility: DEFAULT_DOWNSTREAM_VISIBILITY,
+      salesDeptNotes,
+      customer: {
+        companyName: inq.buyerInfo?.companyName || 'N/A',
+        contactPerson: inq.buyerInfo?.contactPerson || 'N/A',
           email: [inq.buyerInfo?.email, inq.userEmail].find((e: string) => e && e !== 'N/A' && e.includes('@')) || inq.userEmail || '',
-          phone: inq.buyerInfo?.phone || 'N/A',
-          mobile: inq.buyerInfo?.mobile || '',
-          address: inq.buyerInfo?.address || 'N/A',
-          website: inq.buyerInfo?.website || '',
-          businessType: inq.buyerInfo?.businessType || ''
-        },
-        items: inq.products.map((p: any) => ({
-          id: p.id,
+        phone: inq.buyerInfo?.phone || 'N/A',
+        mobile: inq.buyerInfo?.mobile || '',
+        address: inq.buyerInfo?.address || 'N/A',
+        website: inq.buyerInfo?.website || '',
+        businessType: inq.buyerInfo?.businessType || ''
+      },
+      items: inq.products.map((p: any) => ({
+        id: p.id,
           productName: p.productName || p.name || 'Unnamed Product',
-          modelNo: p.modelNo || p.model || '-',
-          specification: p.specification || '-',
+          modelNo: getFormalBusinessModelNo(p) || p.model || '-',
+        specification: p.specification || '-',
           quantity: p.quantity || 0,
-          unit: p.unit || 'PCS',
+        unit: p.unit || 'PCS',
           targetPrice: p.unitPrice || p.price || 0,
-          targetCurrency: 'USD',
-          hsCode: p.hsCode || '',
+        targetCurrency: 'USD',
+        hsCode: p.hsCode || '',
           imageUrl: p.image || p.imageUrl || '',
-          remarks: p.notes || ''
-        })),
+        remarks: p.notes || ''
+      })),
       };
-      const saved = await purchaseRequirementService.upsert(newQR);
-      addPurchaseRequirement(saved || newQR);
-      toast.success(`✅ 成功创建采购需求！单号：${qrNumber}`);
-      setShowCreateModal(false);
-      setSelectedINQ(null);
+      const saved = await quoteRequirementService.upsert({
+        ...newQR,
+        documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(newQR as any, currentUser?.role),
+      });
+      if (!saved) {
+        throw new Error('QR 写入 Supabase 失败');
+      }
+      await addQuoteRequirement(saved);
+      toast.success(`✅ 成功创建 QR！单号：${qrNumber}`);
+    setShowCreateModal(false);
+    setSelectedINQ(null);
     } catch (error: any) {
       console.error('❌ [创建QR] 失败:', error);
       toast.error(`❌ 创建失败: ${error.message || '未知错误'}`);
@@ -224,11 +360,24 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     try {
       const updatedItems = data.products?.length > 0
         ? data.products.map((p: any) => ({
-            id: p.id,
-            quantity: p.editableQuantity || p.quantity,
-            remarks: p.editableRemarks || p.remarks
+          id: p.id,
+          quantity: p.editableQuantity || p.quantity,
+          remarks: p.editableRemarks || p.remarks
           }))
         : undefined;
+
+      const commercialTerms = {
+        ...(selectedQR.commercialTerms || {}),
+        expectedQuoteDate: data.expectedQuoteDate || selectedQR.expectedQuoteDate || selectedQR.commercialTerms?.expectedQuoteDate,
+        deliveryDate: data.deliveryDate || selectedQR.deliveryDate || selectedQR.commercialTerms?.deliveryDate,
+        paymentTerms: data.paymentTerms || selectedQR.paymentTerms || selectedQR.commercialTerms?.paymentTerms,
+        tradeTerms: data.tradeTerms || selectedQR.tradeTerms || selectedQR.commercialTerms?.tradeTerms,
+        targetCostRange: data.targetCostRange || selectedQR.targetCostRange || selectedQR.commercialTerms?.targetCostRange,
+        qualityRequirements: data.qualityRequirements || selectedQR.qualityRequirements || selectedQR.commercialTerms?.qualityRequirements,
+        packagingRequirements: data.packagingRequirements || selectedQR.packagingRequirements || selectedQR.commercialTerms?.packagingRequirements,
+        remarks: data.remarks || selectedQR.remarks || selectedQR.commercialTerms?.remarks,
+      };
+      const flowNotes = buildProcurementRequestNotes(commercialTerms);
 
       const payload: any = {
         id: selectedQR.id,
@@ -240,11 +389,44 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         customer: selectedQR.customer,
         items: updatedItems || selectedQR.items,
         status: 'submitted',
-        notes: data.remarks || selectedQR.notes,
+        notes: flowNotes || data.remarks || selectedQR.notes,
+        expectedQuoteDate: commercialTerms.expectedQuoteDate,
+        deliveryDate: commercialTerms.deliveryDate,
+        paymentTerms: commercialTerms.paymentTerms,
+        tradeTerms: commercialTerms.tradeTerms,
+        targetCostRange: commercialTerms.targetCostRange,
+        qualityRequirements: commercialTerms.qualityRequirements,
+        packagingRequirements: commercialTerms.packagingRequirements,
+        remarks: commercialTerms.remarks,
+        commercialTerms,
+        customerRequirements: selectedQR.customerRequirements || null,
+        downstreamVisibility: selectedQR.downstreamVisibility || DEFAULT_DOWNSTREAM_VISIBILITY,
       };
 
-      await purchaseRequirementService.upsert(payload);
-      updatePurchaseRequirement(selectedQR.id, { status: 'submitted' });
+      const saved = await quoteRequirementService.upsert({
+        ...payload,
+        documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(payload as any, currentUser?.role),
+      });
+      if (!saved) {
+        throw new Error('QR 写入 Supabase 失败');
+      }
+      updateQuoteRequirement(selectedQR.id, {
+        status: 'submitted',
+        notes: payload.notes,
+        expectedQuoteDate: commercialTerms.expectedQuoteDate,
+        deliveryDate: commercialTerms.deliveryDate,
+        paymentTerms: commercialTerms.paymentTerms,
+        tradeTerms: commercialTerms.tradeTerms,
+        targetCostRange: commercialTerms.targetCostRange,
+        qualityRequirements: commercialTerms.qualityRequirements,
+        packagingRequirements: commercialTerms.packagingRequirements,
+        remarks: commercialTerms.remarks,
+        commercialTerms,
+        customerRequirements: selectedQR.customerRequirements || null,
+        downstreamVisibility: selectedQR.downstreamVisibility || DEFAULT_DOWNSTREAM_VISIBILITY,
+        items: updatedItems || selectedQR.items,
+        ...saved,
+      });
       toast.success(`✅ 已提交给采购部门！单号：${selectedQR.requirementNo}`);
       setShowSubmitDialog(false);
       setSelectedQR(null);
@@ -285,6 +467,19 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         toast.error('❌ 采购成本尚未反馈，无法下推到报价管理！');
         return;
       }
+
+      if (!qr.purchaserFeedback.linkedBJ?.trim()) {
+        toast.error('❌ 当前 QR 未绑定 BJ 结果，无法下推到报价管理');
+        return;
+      }
+
+      const missingSourcePricing = qr.purchaserFeedback.products.find((product: any) => !product?.sourcePricing);
+      if (missingSourcePricing) {
+        toast.error('❌ 当前 QR 缺少 BJ 价格语义，无法下推到报价管理', {
+          description: `${missingSourcePricing.productName || '未知产品'} 未携带 sourcePricing`,
+        });
+        return;
+      }
       
       // 🔥 智能检查是否已经下推过（检查标记 AND 是否真的有QT）
       if (qr.pushedToQuotation) {
@@ -305,14 +500,11 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
             ownerEmail !== activeEmail &&
             String(qr.createdBy || '').toLowerCase() === activeEmail
           ) {
-            const repaired = await salesQuotationService.upsert({
+            await updateSalesQuotation(String(existingQT.id), {
               ...existingQT,
               salesPerson: currentUser?.email || existingQT.salesPerson,
               salesPersonName: currentUser?.name || existingQT.salesPersonName || '',
-            });
-            if (!repaired) {
-              throw new Error('修复 QT 归属失败：Supabase upsert 失败');
-            }
+            } as any);
             toast.success(`✅ 已修复历史归属：${existingQT.qtNumber} 归属到 ${currentUser?.email}`);
             if (onSwitchToQuotationManagement) {
               onSwitchToQuotationManagement(existingQT.qtNumber);
@@ -321,8 +513,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           }
 
           // 真的有QT，不允许重复下推
-          console.warn('⚠️ 此采购需求已下推过，且找到对应的QT:', existingQT.qtNumber);
-          toast.info(`ℹ️ 此采购需求已下推到报价管理，QT单号：${existingQT.qtNumber}，请前往报价管理模块查看`);
+          console.warn('⚠️ 此 QR 已下推过，且找到对应的QT:', existingQT.qtNumber);
+          toast.info(`ℹ️ 此 QR 已下推到报价管理，QT单号：${existingQT.qtNumber}，请前往报价管理模块查看`);
           if (onSwitchToQuotationManagement) {
             onSwitchToQuotationManagement(existingQT.qtNumber);
           }
@@ -409,7 +601,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         return {
           id: item.id,
           productName: item.productName,
-          modelNo: item.modelNo || '-',
+          modelNo: getFormalBusinessModelNo(item) || '-',
           specification: item.specification || '-',
           quantity: item.quantity,
           unit: item.unit || 'PCS',
@@ -508,21 +700,6 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           throw new Error(`QT ${newQuotation.qtNumber} 未在 Supabase 查询到，已阻断假成功`);
         }
 
-        // UI 态缓存：用于切页瞬时回显（业务主数据仍以 Supabase 为准）
-        try {
-          const cacheKey = `sales_quotation_management_cache_v1:${currentUser?.email || 'anonymous'}`;
-          const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-          const list = Array.isArray(cached) ? cached : [];
-          const deduped = [
-            newQuotation,
-            ...list.filter((q: any) =>
-              String(q?.id || '') !== String(newQuotation.id) &&
-              String(q?.qtNumber || '') !== String(newQuotation.qtNumber)
-            ),
-          ];
-          localStorage.setItem(cacheKey, JSON.stringify(deduped.slice(0, 500)));
-        } catch {}
-        
         // Supabase-first：业务流转关系必须真实落库后才算成功
         await persistQuotationPushState(qr, newQuotation.qtNumber);
         
@@ -556,16 +733,16 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     );
 
     if (visibleSelectedIds.length === 0) {
-      toast.error('请先选择要删除的采购需求单');
+      toast.error('请先选择要删除的报价请求单');
       return;
     }
 
-    if (window.confirm(`确认要删除选中的 ${visibleSelectedIds.length} 条采购需求单吗？此操作无法撤销！`)) {
+    if (window.confirm(`确认要删除选中的 ${visibleSelectedIds.length} 条报价请求单吗？此操作无法撤销！`)) {
       visibleSelectedIds.forEach(id => {
-        deleteRequirement(id);
+        deleteQuoteRequirement(id);
       });
       setSelectedIds(new Set());
-      toast.success(`✅ 已成功删除 ${visibleSelectedIds.length} 条采购需求单`);
+      toast.success(`✅ 已成功删除 ${visibleSelectedIds.length} 条报价请求单`);
     }
   };
 
@@ -614,7 +791,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
                 <Input
-                  placeholder="搜索采购需求单号、来源询价单号、产品名称..."
+                  placeholder="搜索 QR 编号、来源询价单号、产品名称..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-9 h-9 text-xs"
@@ -631,7 +808,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 onClick={async () => {
                   setRefreshing(true);
                   try {
-                    await refreshPurchaseRequirementsFromApi();
+                    await refreshQuoteRequirementsFromApi();
                     toast.success('已刷新，若有采购员接受的报价会显示在「采购反馈」列');
                   } catch {
                     toast.error('刷新失败，请稍后再试');
@@ -678,7 +855,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 style={{ backgroundColor: '#F96302' }}
               >
                 <Plus className="w-3.5 h-3.5 mr-1" />
-                新建采购需求
+                新建 QR
               </Button>
             </div>
           </div>
@@ -701,7 +878,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 </TableHead>
                 <TableHead className="h-9" style={{ fontSize: '12px' }}>
                   <div className="flex items-center gap-1.5">
-                    <span>采购需求单号</span>
+                    <span>QR编号</span>
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -711,14 +888,14 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-sm">
                           <div className="space-y-2 p-1">
-                            <p className="font-semibold text-sm">📋 采购需求单（QR）定义：</p>
+                            <p className="font-semibold text-sm">📋 报价请求单（QR）定义：</p>
                             <p className="text-xs leading-relaxed">
-                              采购需求单是从客户询价单（INQ）下推生成的内部采购询价单据，用于向采购部门提交成本询价需求。
+                              报价请求单是从客户询价单（INQ）下推生成的内部询价请求单据，用于向采购部门发起报价请求。
                             </p>
                             <div className="text-xs space-y-1 pt-2 border-t border-gray-200">
                               <p><span className="font-medium">• 作用：</span>获取供应商成本价格，为销售报价提供依据</p>
                               <p><span className="font-medium">• 编号规则：</span>QR-{'{区域代码}'}-{'{日期}'}-{'{流水号}'}</p>
-                              <p><span className="font-medium">• 流转关系：</span>INQ → QR → XJ → BJ → QT → SO → PO</p>
+                              <p><span className="font-medium">• 流转关系：</span>INQ → QR → XJ → BJ → QT → SC → CG</p>
                             </div>
                           </div>
                         </TooltipContent>
@@ -740,8 +917,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 <TableRow>
                   <TableCell colSpan={9} className="text-center py-12">
                     <AlertCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                    <p className="text-gray-400 mb-2">暂无采购需求</p>
-                    <p className="text-xs text-gray-400">点击右上角"新建采购需求"开始向采购部门询价</p>
+                    <p className="text-gray-400 mb-2">暂无 QR</p>
+                    <p className="text-xs text-gray-400">点击右上角"新建 QR"开始向采购部门询价</p>
                   </TableCell>
                 </TableRow>
               ) : (
@@ -790,13 +967,13 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                           const items = Array.isArray(qr.items) ? qr.items : [];
                           const first = items[0];
                           return (
-                            <div className="space-y-0.5">
+                        <div className="space-y-0.5">
                               <div className="text-xs text-gray-700 truncate font-medium">
-                                {first?.productName || first?.modelNo || 'N/A'}
-                              </div>
+                                {first?.productName || getFormalBusinessModelNo(first) || 'N/A'}
+                            </div>
                               <div className="text-xs text-gray-400">
                                 共 {Math.max(items.length, 1)} 个产品
-                              </div>
+                        </div>
                             </div>
                           );
                         })()}
@@ -899,7 +1076,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             {/* 标题 */}
             <div className="px-6 py-4 border-b flex items-center justify-between">
-              <h2 className="text-lg" style={{ color: '#F96302' }}>➕ 新建采购需求</h2>
+              <h2 className="text-lg" style={{ color: '#F96302' }}>➕ 新建 QR</h2>
               <button onClick={() => { setShowCreateModal(false); setSelectedINQ(null); }} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
@@ -913,7 +1090,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                   <div className="bg-gray-50 rounded-lg p-6 text-center">
                     <AlertCircle className="w-8 h-8 text-gray-300 mx-auto mb-2" />
                     <p className="text-sm text-gray-400">暂无可用的客户询价单</p>
-                    <p className="text-xs text-gray-400 mt-1">所有询价单已创建采购需求，或无已提交的询价单</p>
+                    <p className="text-xs text-gray-400 mt-1">所有询价单已创建 QR，或无已提交的询价单</p>
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -931,7 +1108,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                         <div className="flex items-start justify-between mb-2">
                           <div>
                             <div className="font-medium text-sm mb-1">
-                              {inq.inquiryNumber || `INQ-${inq.id}`}
+                              {inq.inquiryNumber || `ING-${inq.id}`}
                             </div>
                             <div className="text-xs text-gray-500">
                               客户：{inq.buyerInfo?.companyName || inq.userEmail}
@@ -978,7 +1155,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 className="px-4 py-2 text-white rounded hover:opacity-90 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: '#F96302' }}
               >
-                创建采购需求
+                创建 QR
               </button>
             </div>
           </div>
@@ -995,20 +1172,64 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
 
       {/* 🔥 查看采购需求单详情弹窗 */}
       {showViewModal && selectedQR && (
-        <Dialog open={showViewModal} onOpenChange={() => { setShowViewModal(false); setSelectedQR(null); }}>
-          <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-hidden p-0 gap-0 [&>button]:hidden">
-            {/* Hidden Title and Description for accessibility */}
-            <DialogTitle className="sr-only">采购需求单详情</DialogTitle>
-            <DialogDescription className="sr-only">
-              查看完整的客户询价单信息和产品详情
-            </DialogDescription>
-            
-            {/* Header with Print button - Floating on top */}
-            <div className="absolute top-4 right-16 z-50 flex gap-2 print:hidden">
-              <Button 
-                variant="outline" 
-                size="sm"
-                className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
+        <div className="fixed inset-0 z-50">
+          <style>{`
+            .qr-preview-tuner {
+              font-size: 12px;
+            }
+
+            .qr-preview-tuner .tuner-title-level-1 {
+              font-size: 16px;
+              line-height: 1.35;
+            }
+
+            .qr-preview-tuner .tuner-title-level-2 {
+              font-size: 14px;
+              line-height: 1.4;
+            }
+
+            .qr-preview-tuner .tuner-title-level-3,
+            .qr-preview-tuner label {
+              font-size: 12px;
+              line-height: 1.4;
+            }
+
+            .qr-preview-tuner input,
+            .qr-preview-tuner textarea {
+              font-size: 10px;
+              line-height: 1.4;
+            }
+          `}</style>
+
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => { setShowViewModal(false); setSelectedQR(null); }}
+          />
+
+
+          <div
+            ref={viewModalRef}
+            className="absolute flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
+            style={{
+              width: `min(calc(${previewLayout.canvasWidthMm}mm + ${previewLayout.dialogExtraWidthPx}px), calc(100vw - ${previewLayout.dialogViewportMarginPx}px))`,
+              height: `${getFloatingPanelHeight(viewModalPosition.y, previewLayout.dialogViewportMarginPx, 260)}px`,
+              left: `${viewModalPosition.x}px`,
+              top: `${viewModalPosition.y}px`,
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div
+              className="z-10 flex shrink-0 cursor-move items-center justify-between border-b border-slate-200 bg-white px-3 py-2 print:hidden"
+              onMouseDown={handleViewDialogDragStart}
+            >
+              <div className="text-sm font-medium text-slate-700">
+                报价请求单预览
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="h-8 text-sm bg-white hover:bg-gray-50"
                 onClick={() => {
                   window.print();
                 }}
@@ -1016,13 +1237,10 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 <FileText className="w-4 h-4 mr-2" />
                 打印
               </Button>
-            </div>
-
-            {/* Close Button */}
-            <DialogClose asChild>
               <button
-                className="absolute right-4 top-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition-colors print:hidden"
+                  className="flex h-8 w-8 items-center justify-center rounded-md bg-red-600 text-white transition-colors hover:bg-red-700"
                 aria-label="Close"
+                  onClick={() => { setShowViewModal(false); setSelectedQR(null); }}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1039,14 +1257,21 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                   <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
               </button>
-            </DialogClose>
-
-            {/* Document - Full Screen */}
-            <div className="overflow-y-auto max-h-[95vh] bg-gray-100">
-              <PurchaseRequirementView requirement={selectedQR} />
+              </div>
             </div>
-          </DialogContent>
-        </Dialog>
+
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-gray-100 p-1"
+            >
+              {previewDocumentData && (
+                <QuoteRequirementDocument
+                  data={previewDocumentData}
+                  layoutConfig={previewLayout}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 🔥 智能报价创建弹窗 */}
@@ -1060,49 +1285,49 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           }}
           onSubmit={async (quoteData) => {
             try {
-              // 🔥 转换为 SalesQuotation 格式并保存到 Context
-              const salesQuotation = {
-                id: `sq-${Date.now()}`,
-                qtNumber: quoteData.qtNumber || quoteData.quoteNo,
-                qrNumber: quoteData.qrNumber || quoteData.requirementNo,
-                inqNumber: quoteData.inquiryNo || '',
-                
-                region: quoteData.region || 'NA',
-                customerName: quoteData.customerName || '',
-                customerEmail: quoteData.customerEmail || '',
-                customerCompany: quoteData.customerName || '',
-                
-                salesPerson: currentUser?.email || '',
-                salesPersonName: currentUser?.name || '',
-                
-                items: quoteData.items || [],
-                
-                // 🔥 财务汇总数据（使用智能核算的准确数据）
-                totalCost: quoteData.totalCost,
-                totalPrice: quoteData.totalAmount,
-                totalProfit: quoteData.totalProfit,
+            // 🔥 转换为 SalesQuotation 格式并保存到 Context
+            const salesQuotation = {
+              id: `sq-${Date.now()}`,
+              qtNumber: quoteData.qtNumber || quoteData.quoteNo,
+              qrNumber: quoteData.qrNumber || quoteData.requirementNo,
+              inqNumber: quoteData.inquiryNo || '',
+              
+              region: quoteData.region || 'NA',
+              customerName: quoteData.customerName || '',
+              customerEmail: quoteData.customerEmail || '',
+              customerCompany: quoteData.customerName || '',
+              
+              salesPerson: currentUser?.email || '',
+              salesPersonName: currentUser?.name || '',
+              
+              items: quoteData.items || [],
+              
+              // 🔥 财务汇总数据（使用智能核算的准确数据）
+              totalCost: quoteData.totalCost,
+              totalPrice: quoteData.totalAmount,
+              totalProfit: quoteData.totalProfit,
                 profitRate: quoteData.profitRate ?? quoteData.profitMargin,
-                totalAmount: quoteData.totalAmount, // 🔥 兼容字段
+              totalAmount: quoteData.totalAmount, // 🔥 兼容字段
                 pricingDefaults: quoteData.pricingDefaults ?? quoteData.globalDefaults ?? null,
                 globalDefaults: quoteData.pricingDefaults ?? quoteData.globalDefaults ?? null,
-                
-                currency: 'USD',
-                paymentTerms: '30% T/T in advance, 70% before shipment',
-                deliveryTerms: 'FOB Xiamen',
-                deliveryDate: '',
-                
-                approvalStatus: 'draft' as const,
-                approvalChain: [],
-                customerStatus: 'not_sent' as const,
-                
-                validUntil: new Date(Date.now() + quoteData.validityDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                version: 1,
-                
-                createdAt: quoteData.createdAt || new Date().toISOString(),
-                updatedAt: quoteData.updatedAt || new Date().toISOString(),
-                notes: quoteData.approvalNotes || ''
-              };
               
+              currency: 'USD',
+              paymentTerms: '30% T/T in advance, 70% before shipment',
+              deliveryTerms: 'FOB Xiamen',
+              deliveryDate: '',
+              
+              approvalStatus: 'draft' as const,
+              approvalChain: [],
+              customerStatus: 'not_sent' as const,
+              
+              validUntil: new Date(Date.now() + quoteData.validityDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              version: 1,
+              
+              createdAt: quoteData.createdAt || new Date().toISOString(),
+              updatedAt: quoteData.updatedAt || new Date().toISOString(),
+              notes: quoteData.approvalNotes || ''
+            };
+            
               await addSalesQuotation(salesQuotation);
 
               // Supabase 强校验：确认该 QR 的 QT 已可查询
@@ -1114,29 +1339,14 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                 throw new Error(`QT ${salesQuotation.qtNumber} 未在 Supabase 查询到，已阻断假成功`);
               }
 
-              // UI 态缓存：用于切页瞬时回显（业务主数据以 Supabase 为准）
-              try {
-                const cacheKey = `sales_quotation_management_cache_v1:${currentUser?.email || 'anonymous'}`;
-                const cachedRaw = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-                const cachedList = Array.isArray(cachedRaw) ? cachedRaw : [];
-                const mergedCache = [
-                  salesQuotation,
-                  ...cachedList.filter((q: any) =>
-                    String(q?.id || '') !== String(salesQuotation.id) &&
-                    String(q?.qtNumber || '') !== String(salesQuotation.qtNumber)
-                  ),
-                ];
-                localStorage.setItem(cacheKey, JSON.stringify(mergedCache.slice(0, 500)));
-              } catch {}
-
               await persistQuotationPushState(selectedQRForQuote, salesQuotation.qtNumber);
-              
-              toast.success('报价已创建！', {
-                description: `报价单号：${quoteData.quoteNo}\n总额：$${quoteData.totalAmount.toFixed(2)}\n利润率：${quoteData.profitMargin.toFixed(1)}%`,
-                duration: 3000
-              });
-              setShowQuoteCreation(false);
-              setSelectedQRForQuote(null);
+            
+            toast.success('报价已创建！', {
+              description: `报价单号：${quoteData.quoteNo}\n总额：$${quoteData.totalAmount.toFixed(2)}\n利润率：${quoteData.profitMargin.toFixed(1)}%`,
+              duration: 3000
+            });
+            setShowQuoteCreation(false);
+            setSelectedQRForQuote(null);
             } catch (err: any) {
               toast.error('创建报价失败', {
                 description: err?.message || 'Supabase 写入失败',

@@ -27,14 +27,14 @@ interface DataCategory {
 
 const dataCategories: DataCategory[] = [
   {
-    key: 'inquiry',
+    key: 'ing',
     label: '询价单数据',
     storageKeys: ['cosun_inquiries'],
     description: '客户提交的所有询价单',
     color: 'text-blue-600'
   },
   {
-    key: 'quotation',
+    key: 'qt',
     label: '报价单数据',
     storageKeys: ['cosun_quotations'],
     description: '销售人员创建的所有报价单',
@@ -48,7 +48,7 @@ const dataCategories: DataCategory[] = [
     color: 'text-green-600'
   },
   {
-    key: 'purchase-requirement',
+    key: 'qr',
     label: '采购需求数据',
     storageKeys: ['purchaseRequirements'],
     description: '从销售订单下推的采购需求',
@@ -69,7 +69,7 @@ const dataCategories: DataCategory[] = [
     color: 'text-violet-600'
   },
   {
-    key: 'purchase-order',
+    key: 'cg',
     label: '采购订单数据',
     storageKeys: ['purchaseOrders'],
     description: '向供应商下达的采购订单',

@@ -26,13 +26,13 @@ import {
   AlertTriangle,
   Sparkles
 } from 'lucide-react';
-import { PurchaseRequirement, PurchaserFeedback } from '../../contexts/PurchaseRequirementContext';
+import { QuoteRequirement, QuoteRequirementFeedback } from '../../contexts/QuoteRequirementContext';
 
 interface PurchaserFeedbackViewProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  qr: PurchaseRequirement;
-  onCreateQuotation: (qr: PurchaseRequirement, feedback: PurchaserFeedback) => void;
+  qr: QuoteRequirement;
+  onCreateQuotation: (qr: QuoteRequirement, feedback: QuoteRequirementFeedback) => void;
 }
 
 export function PurchaserFeedbackView({

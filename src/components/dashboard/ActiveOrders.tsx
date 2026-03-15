@@ -33,10 +33,12 @@ import { Textarea } from '../ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox'; // 🔥 新增
 import { useOrders } from '../../contexts/OrderContext';
+import { useSalesContracts } from '../../contexts/SalesContractContext';
 import { useUser } from '../../contexts/UserContext';
 import { sendNotificationToUser } from '../../utils/notificationUtils';
 import { contractService } from '../../lib/supabaseService';
 import { useFinance } from '../../contexts/FinanceContext';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument'; // 🔥 使用文档中心模板
 import { adaptOrderToSalesContract } from '../../utils/documentDataAdapters'; // 🔥 使用数据适配器
 import { PaymentProofDialog } from '../admin/PaymentProofDialog'; // 🔥 用于查看凭证
@@ -78,6 +80,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   const [isPaymentProofOpen, setIsPaymentProofOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
+  const { contracts } = useSalesContracts();
   const [paymentNotes, setPaymentNotes] = useState('');
   const [paymentFile, setPaymentFile] = useState('');
   const [paymentType, setPaymentType] = useState<'deposit' | 'balance'>('deposit'); // 🔥 新增：区分定金还是余款
@@ -97,25 +100,20 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   // 当前客户邮箱：优先从 localStorage 直接读（不依赖 UserContext state 是否同步）
   const customerEmail = (getCurrentUser()?.email || user?.email || '').toLowerCase();
 
-  // 🔥 从 salesContracts 直接读取已发送给当前客户的合同（兜底，不依赖 OrderContext 链路）
   const [contractOrders, setContractOrders] = useState<any[]>([]);
   useEffect(() => {
     const loadContractOrders = () => {
       const email = (getCurrentUser()?.email || '').toLowerCase();
       if (!email) return;
-      try {
-        const allContracts: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-        console.log(`📋 [ActiveOrders] salesContracts 共 ${allContracts.length} 条:`, allContracts.map(c => ({cn: c.contractNumber, status: c.status, cEmail: c.customerEmail})));
-        const SENT_STATUSES = new Set(['sent_to_customer', 'sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'payment_proof_uploaded', 'balance_uploaded']);
-        const sent = allContracts.filter((c: any) => {
-          const isSent = SENT_STATUSES.has(c.status);
-          const cEmail = (c.customerEmail || '').toLowerCase();
-          const isInvalidEmail = !cEmail || cEmail === 'n/a' || !cEmail.includes('@');
-          const emailMatch = cEmail === email || isInvalidEmail;
-          console.log(`  合同 ${c.contractNumber}: status=${c.status} isSent=${isSent} cEmail="${cEmail}" emailMatch=${emailMatch}`);
-          return isSent && emailMatch;
-        });
-        const orders = sent.map((c: any) => ({
+      const SENT_STATUSES = new Set(['sent_to_customer', 'sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'payment_proof_uploaded', 'balance_uploaded']);
+      const sent = contracts.filter((c: any) => {
+        const isSent = SENT_STATUSES.has(c.status);
+        const cEmail = (c.customerEmail || '').toLowerCase();
+        const isInvalidEmail = !cEmail || cEmail === 'n/a' || !cEmail.includes('@');
+        const emailMatch = cEmail === email || isInvalidEmail;
+        return isSent && emailMatch;
+      });
+      const mappedOrders = sent.map((c: any) => ({
           id: c.id,
           orderNumber: c.contractNumber,
           customer: c.customerName,
@@ -152,35 +150,20 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
         }));
-        // 额外从 orders_email key 读取（sendToCustomer 写入的备份）
-        let extraOrders: any[] = [];
-        try {
-          const orderKey = `orders_${email}`;
-          const savedOrders: any[] = JSON.parse(localStorage.getItem(orderKey) || '[]');
-          const existingNums = new Set(orders.map((o: any) => o.orderNumber));
-          extraOrders = savedOrders.filter((o: any) => !existingNums.has(o.orderNumber));
-          if (extraOrders.length > 0) {
-            console.log(`📦 [ActiveOrders] 从 ${orderKey} 额外读到 ${extraOrders.length} 条订单`);
-          }
-        } catch { /* ignore */ }
-
-        const combined = [...orders, ...extraOrders];
+      const combined = [...mappedOrders];
         setContractOrders(combined);
         console.log(`📦 [ActiveOrders] 最终显示 ${combined.length} 条已发送合同 (email: ${email})`);
-      } catch { /* ignore */ }
     };
     loadContractOrders();
     window.addEventListener('userChanged', loadContractOrders);
     window.addEventListener('ordersUpdated', loadContractOrders);
-    window.addEventListener('salesContractCreatedLocally', loadContractOrders);
     return () => {
       window.removeEventListener('userChanged', loadContractOrders);
       window.removeEventListener('ordersUpdated', loadContractOrders);
-      window.removeEventListener('salesContractCreatedLocally', loadContractOrders);
     };
-  }, []);
+  }, [contracts]);
 
-  // 🔥 筛选当前用户的活跃订单（合并 OrderContext + salesContracts 两个来源）
+  // 🔥 筛选当前用户的活跃订单（合并 OrderContext + 合同上下文）
   const contextOrders = allOrders.filter(order =>
     customerEmail &&
     (order.customerEmail || '').toLowerCase() === customerEmail &&
@@ -912,7 +895,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                         totalPrice: toSafeNumber(p.totalPrice) || (quantity * unitPrice),
                         unit: p.unit || 'pcs',
                         hsCode: p.hsCode,
-                        modelNo: p.modelNo,
+                        modelNo: getFormalBusinessModelNo(p),
                         imageUrl: p.imageUrl
                       }}),
                       shippingMethod: selectedOrder.shippingMethod,
@@ -1085,32 +1068,10 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
 
                 const orderId = selectedOrder.id || selectedOrder.orderNumber;
                 try {
-                  // 🔥 先落库：客户确认/协商/取消 写入后端（失败时静默，本地照常处理）
-                  try {
-                    await contractService.updateStatus(orderId, responseType === 'accept' ? 'customer_confirmed' : responseType === 'reject' ? 'cancelled' : 'sent_to_customer', {
-                      customer_feedback: { type: responseType, message: responseMessage.trim(), submittedAt: new Date().toISOString() },
-                    });
-                  } catch (apiErr: any) {
-                    console.warn('⚠️ [ActiveOrders] Supabase 更新失败（本地继续处理）:', apiErr?.message);
-                  }
-                  // 本地立即更新合同状态（不依赖后端）
-                  const now = new Date().toISOString();
-                  const contractNumber = selectedOrder.orderNumber || selectedOrder.id;
-                  const newContractStatus = responseType === 'accept' ? 'customer_confirmed' : responseType === 'reject' ? 'cancelled' : 'sent_to_customer';
-                  try {
-                    const allContracts: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-                    const updated = allContracts.map((c: any) =>
-                      c.contractNumber === contractNumber
-                        ? { ...c, status: newContractStatus, updatedAt: now, customerFeedback: { type: responseType, message: responseMessage.trim(), submittedAt: now } }
-                        : c
-                    );
-                    localStorage.setItem('salesContracts', JSON.stringify(updated));
-                    console.log(`✅ [ActiveOrders] 合同 ${contractNumber} 状态已更新为 ${newContractStatus}`);
-                  } catch { /* ignore */ }
-
-                  // 刷新 contractOrders（重新从 salesContracts 读取）
+                  await contractService.updateStatus(orderId, responseType === 'accept' ? 'customer_confirmed' : responseType === 'reject' ? 'cancelled' : 'sent_to_customer', {
+                    customer_feedback: { type: responseType, message: responseMessage.trim(), submittedAt: new Date().toISOString() },
+                  });
                   window.dispatchEvent(new CustomEvent('ordersUpdated'));
-                  window.dispatchEvent(new CustomEvent('salesContractCreatedLocally'));
 
                   if (responseType === 'accept') {
                     const orderNumber = selectedOrder.orderNumber || selectedOrder.id;

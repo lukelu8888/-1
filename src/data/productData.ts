@@ -10,6 +10,7 @@ export interface ProductSpec {
   name: string;
   model: string;
   image: string;
+  regionCode?: string;
   specifications: {
     [key: string]: string;
   };

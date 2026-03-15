@@ -10,6 +10,7 @@
  */
 
 import { getAllSuppliers, getSuppliersAsPersonnel } from './supplier-store';
+import { DEMO_USERS } from './rbac-config';
 import { 
   routeToSalesRep, 
   getRecommendedRecipientsForStep1 
@@ -42,6 +43,69 @@ export interface Personnel {
   supplierCategory?: string[];
 }
 
+export const normalizePersonnelEmail = (email?: string | null, region?: string | null): string => {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return '';
+
+  if (normalized.endsWith('@cosun.com')) {
+    return normalized;
+  }
+
+  const regionValue = String(region || '').trim().toLowerCase();
+  if (!normalized.endsWith('@gsd.com')) {
+    return normalized;
+  }
+
+  if (normalized === 'zhangwei@gsd.com' || normalized === 'wangjian@gsd.com' || normalized === 'liming@gsd.com' || regionValue === 'north america' || regionValue === 'na' || regionValue === 'north_america' || regionValue === 'north-america' || regionValue === '北美') {
+    return 'zhangwei@cosun.com';
+  }
+  if (normalized === 'lifang@gsd.com' || normalized === 'chenlei@gsd.com' || normalized === 'zhaoting@gsd.com' || regionValue === 'south america' || regionValue === 'sa' || regionValue === 'south_america' || regionValue === 'south-america' || regionValue === '南美') {
+    return 'lifang@cosun.com';
+  }
+  if (normalized === 'wangfang@gsd.com' || normalized === 'zhaoyong@gsd.com' || normalized === 'sunli@gsd.com' || regionValue === 'europe & africa' || regionValue === 'ea' || regionValue === 'emea' || regionValue === 'europe_africa' || regionValue === 'europe-africa' || regionValue === '欧非') {
+    return 'wangfang@cosun.com';
+  }
+
+  return normalized;
+};
+
+const regionToLegacyLabel: Record<'NA' | 'SA' | 'EA', Region> = {
+  NA: 'north_america',
+  SA: 'south_america',
+  EA: 'europe_africa',
+};
+
+const regionToChineseLabel: Record<'NA' | 'SA' | 'EA', string> = {
+  NA: '北美区',
+  SA: '南美区',
+  EA: '欧非区',
+};
+
+const salesManagerByRegion = DEMO_USERS
+  .filter((user) => user.role === 'Sales_Manager' && user.region && user.region !== 'all')
+  .map<Personnel>((user) => ({
+    name: user.name,
+    nameEn: user.name,
+    role: '区域业务主管',
+    roleEn: 'Regional Sales Manager',
+    region: regionToLegacyLabel[user.region as 'NA' | 'SA' | 'EA'],
+    displayName: `${user.name} (${regionToChineseLabel[user.region as 'NA' | 'SA' | 'EA']})`,
+    email: user.email,
+  }));
+
+const salesRepPersonnel = DEMO_USERS
+  .filter((user) => user.role === 'Sales_Rep' && user.region && user.region !== 'all')
+  .map<Personnel>((user) => ({
+    name: user.name,
+    nameEn: user.name,
+    role: '业务员',
+    roleEn: 'Sales Rep',
+    region: regionToLegacyLabel[user.region as 'NA' | 'SA' | 'EA'],
+    displayName: `${user.name} (${regionToChineseLabel[user.region as 'NA' | 'SA' | 'EA']})`,
+    workload: 0,
+    email: user.email,
+  }));
+
 // 完整的人员列表（带区域信息）
 export const personnelList: Personnel[] = [
   // === 客户（每个区域1个测试客户）===
@@ -55,25 +119,16 @@ export const personnelList: Personnel[] = [
   { name: '王强', nameEn: 'Wang Qiang', role: '销售总监', roleEn: 'Sales Director', region: 'china', displayName: '王强' },
   
   // === 北美区团队 ===
-  { name: '刘建国', nameEn: 'Liu Jianguo', role: '区域业务主管', roleEn: 'Regional Sales Manager', region: 'north_america', displayName: '刘建国 (北美区)' },
-  // 北美区业务员（3人）
-  { name: '张伟', nameEn: 'Zhang Wei', role: '业务员', roleEn: 'Sales Rep', region: 'north_america', displayName: '张伟 (北美区)', workload: 5, email: 'zhangwei@gsd.com' },
-  { name: '王建', nameEn: 'Wang Jian', role: '业务员', roleEn: 'Sales Rep', region: 'north_america', displayName: '王建 (北美区)', workload: 3, email: 'wangjian@gsd.com' },
-  { name: '李明', nameEn: 'Li Ming', role: '业务员', roleEn: 'Sales Rep', region: 'north_america', displayName: '李明 (北美区)', workload: 7, email: 'liming@gsd.com' },
+  ...salesManagerByRegion.filter((person) => person.region === 'north_america'),
+  ...salesRepPersonnel.filter((person) => person.region === 'north_america'),
   
   // === 南美区团队 ===
-  { name: '陈明华', nameEn: 'Chen Minghua', role: '区域业务主管', roleEn: 'Regional Sales Manager', region: 'south_america', displayName: '陈明华 (南美区)' },
-  // 南美区业务员（3人）
-  { name: '李芳', nameEn: 'Li Fang', role: '业务员', roleEn: 'Sales Rep', region: 'south_america', displayName: '李芳 (南美区)', workload: 4, email: 'lifang@gsd.com' },
-  { name: '陈磊', nameEn: 'Chen Lei', role: '业务员', roleEn: 'Sales Rep', region: 'south_america', displayName: '陈磊 (南美区)', workload: 6, email: 'chenlei@gsd.com' },
-  { name: '赵婷', nameEn: 'Zhao Ting', role: '业务员', roleEn: 'Sales Rep', region: 'south_america', displayName: '赵婷 (南美区)', workload: 2, email: 'zhaoting@gsd.com' },
+  ...salesManagerByRegion.filter((person) => person.region === 'south_america'),
+  ...salesRepPersonnel.filter((person) => person.region === 'south_america'),
   
   // === 欧非区团队 ===
-  { name: '赵国强', nameEn: 'Zhao Guoqiang', role: '区域业务主管', roleEn: 'Regional Sales Manager', region: 'europe_africa', displayName: '赵国强 (欧非区)' },
-  // 欧非区业务员（3人）
-  { name: '王芳', nameEn: 'Wang Fang', role: '业务员', roleEn: 'Sales Rep', region: 'europe_africa', displayName: '王芳 (欧非区)', workload: 2, email: 'wangfang@gsd.com' },
-  { name: '赵勇', nameEn: 'Zhao Yong', role: '业务员', roleEn: 'Sales Rep', region: 'europe_africa', displayName: '赵勇 (欧非区)', workload: 5, email: 'zhaoyong@gsd.com' },
-  { name: '孙丽', nameEn: 'Sun Li', role: '业务员', roleEn: 'Sales Rep', region: 'europe_africa', displayName: '孙丽 (欧非区)', workload: 8, email: 'sunli@gsd.com' },
+  ...salesManagerByRegion.filter((person) => person.region === 'europe_africa'),
+  ...salesRepPersonnel.filter((person) => person.region === 'europe_africa'),
   
   // === 其他角色（无区域限制）===
   { name: '赵敏', nameEn: 'Zhao Min', role: '财务', roleEn: 'Finance', displayName: '赵敏' },

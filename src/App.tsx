@@ -52,7 +52,8 @@ function PageLoadFallback() {
 }
 import { RouterProvider, useRouter } from './contexts/RouterContext';
 import { CartProvider } from './contexts/CartContext';
-import { UserProvider, useUser } from './contexts/UserContext';
+import { UserProvider, useOptionalUser } from './contexts/UserContext';
+import type { AuthUser as AppAuthUser } from './contexts/UserContext';
 import { RegionProvider, useRegion } from './contexts/RegionContext';
 import { InquiryProvider } from './contexts/InquiryContext';
 import { OrderProvider } from './contexts/OrderContext';
@@ -61,7 +62,7 @@ import { NotificationProvider } from './contexts/NotificationContext';
 import { FinanceProvider } from './contexts/FinanceContext';
 import { PaymentProvider } from './contexts/PaymentContext';
 import { ApprovalProvider } from './contexts/ApprovalContext'; // 🔥 审批工作流
-import { PurchaseRequirementProvider } from './contexts/PurchaseRequirementContext'; // 🔥 采购需求管理
+import { QuoteRequirementProvider } from './contexts/QuoteRequirementContext'; // 🔥 报价请求管理（QR 语义别名层）
 import { PurchaseOrderProvider } from './contexts/PurchaseOrderContext'; // 🔥 采购订单管理
 import { XJProvider } from './contexts/XJContext'; // 🔥 采购询价管理（XJ）
 import { QuotationRequestProvider } from './contexts/QuotationRequestContext'; // 🔥 报价请求管理
@@ -79,11 +80,119 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 // import CategoryDemo from './pages/CategoryDemo';
 // import ShipmentDemo from './pages/ShipmentDemo';
 
-function AppContent() {
+const CUSTOMER_DASHBOARD_PAGES = ['dashboard', 'login', 'register', 'member'] as const;
+
+function shouldUseCustomerBusinessProviders(user: AppAuthUser | null, currentPage: string) {
+  return user?.type === 'customer' && CUSTOMER_DASHBOARD_PAGES.includes(currentPage as (typeof CUSTOMER_DASHBOARD_PAGES)[number]);
+}
+
+function shouldRenderCustomerDashboard(user: AppAuthUser | null, currentPage: string) {
+  return shouldUseCustomerBusinessProviders(user, currentPage);
+}
+
+function FullBusinessProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <AdminOrganizationProvider>
+      <OrganizationProvider>
+        <InquiryProvider>
+          <OrderProvider>
+            <QuotationProvider>
+              <NotificationProvider>
+                <FinanceProvider>
+                  <PaymentProvider>
+                    <ApprovalProvider>
+                      <QuoteRequirementProvider>
+                        <PurchaseOrderProvider>
+                          <XJProvider>
+                            <QuotationRequestProvider>
+                              <SalesQuotationProvider>
+                                <SalesContractProvider>{children}</SalesContractProvider>
+                              </SalesQuotationProvider>
+                            </QuotationRequestProvider>
+                          </XJProvider>
+                        </PurchaseOrderProvider>
+                      </QuoteRequirementProvider>
+                    </ApprovalProvider>
+                  </PaymentProvider>
+                </FinanceProvider>
+              </NotificationProvider>
+            </QuotationProvider>
+          </OrderProvider>
+        </InquiryProvider>
+      </OrganizationProvider>
+    </AdminOrganizationProvider>
+  );
+}
+
+function CustomerBusinessProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <InquiryProvider>
+      <OrderProvider>
+        <NotificationProvider>
+          <FinanceProvider>
+            <SalesQuotationProvider>
+              <SalesContractProvider>{children}</SalesContractProvider>
+            </SalesQuotationProvider>
+          </FinanceProvider>
+        </NotificationProvider>
+      </OrderProvider>
+    </InquiryProvider>
+  );
+}
+
+function AppProviders({
+  children,
+  user,
+  currentPage,
+}: {
+  children: React.ReactNode;
+  user: AppAuthUser | null;
+  currentPage: string;
+}) {
+  const isCustomerBusinessPage = shouldUseCustomerBusinessProviders(user, currentPage);
+
+  return (
+    <RegionProvider>
+      {isCustomerBusinessPage ? (
+        <CustomerBusinessProviders>{children}</CustomerBusinessProviders>
+      ) : user?.type === 'admin' || user?.type === 'supplier' || currentPage === 'dashboard' ? (
+        <FullBusinessProviders>{children}</FullBusinessProviders>
+      ) : (
+        children
+      )}
+    </RegionProvider>
+  );
+}
+
+function AppShell() {
+  const userContext = useOptionalUser();
+  const user = userContext?.user ?? null;
+  const authLoading = userContext?.authLoading ?? false;
+  const logout = userContext?.logout ?? (async () => {});
+  const { currentPage } = useRouter();
+
+  return (
+    <AppProviders user={user} currentPage={currentPage}>
+      <AppErrorBoundary scope="AppContentRoot">
+        <AppContent user={user} authLoading={authLoading} logout={logout} />
+      </AppErrorBoundary>
+    </AppProviders>
+  );
+}
+
+function AppContent({
+  user,
+  authLoading,
+  logout,
+}: {
+  user: AppAuthUser | null;
+  authLoading: boolean;
+  logout: () => Promise<void>;
+}) {
   const { currentPage, categoryParams, navigateTo } = useRouter();
-  const { user, authLoading, logout } = useUser();
   const { setRegion } = useRegion();
   const [showHomeDepotDemo, setShowHomeDepotDemo] = useState(false);
+  const showCustomerDashboard = shouldRenderCustomerDashboard(user, currentPage);
   const isKnownPublicPage =
     [
       'home',
@@ -192,8 +301,8 @@ function AppContent() {
     );
   }
 
-  // If user is logged in as customer and on dashboard page, show dashboard
-  if (user && user.type === 'customer' && currentPage === 'dashboard') {
+  // If customer is logged in, never keep rendering the auth pages.
+  if (showCustomerDashboard) {
     return (
       <Suspense fallback={<PageLoadFallback />}>
         <LazyCustomerDashboard
@@ -295,41 +404,7 @@ export default function App() {
       <RouterProvider>
         <CartProvider>
           <UserProvider>
-            <AdminOrganizationProvider>
-            <OrganizationProvider>
-            <RegionProvider>
-              <InquiryProvider>
-                <OrderProvider>
-                  <QuotationProvider>
-                    <NotificationProvider>
-                      <FinanceProvider>
-                        <PaymentProvider>
-                          <ApprovalProvider>
-                            <PurchaseRequirementProvider>
-                              <PurchaseOrderProvider>
-                                <XJProvider>
-                                  <QuotationRequestProvider>
-                                    <SalesQuotationProvider>
-                                        <SalesContractProvider>
-                                          <AppErrorBoundary scope="AppContentRoot">
-                                            <AppContent />
-                                          </AppErrorBoundary>
-                                        </SalesContractProvider>
-                                    </SalesQuotationProvider>
-                                  </QuotationRequestProvider>
-                                </XJProvider>
-                              </PurchaseOrderProvider>
-                            </PurchaseRequirementProvider>
-                          </ApprovalProvider>
-                        </PaymentProvider>
-                      </FinanceProvider>
-                    </NotificationProvider>
-                  </QuotationProvider>
-                </OrderProvider>
-              </InquiryProvider>
-            </RegionProvider>
-            </OrganizationProvider>
-            </AdminOrganizationProvider>
+            <AppShell />
           </UserProvider>
         </CartProvider>
       </RouterProvider>

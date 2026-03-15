@@ -7,6 +7,7 @@ import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner@2.0.3';
 import { TRADE_TERMS_PRESETS, isPresetTradeTerm, resolveInitialTradeTerms } from '../../utils/tradeTerms';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 // 🔥 预设选项配置
 const PAYMENT_TERMS_PRESETS = [
@@ -261,7 +262,7 @@ export function SubmitToProcurementDialog({
                           {/* Model No. */}
                           <td className="px-4 py-3">
                             <span className="text-xs font-mono text-black">
-                              {product.modelNo || '-'}
+                              {getFormalBusinessModelNo(product) || '-'}
                             </span>
                           </td>
                           

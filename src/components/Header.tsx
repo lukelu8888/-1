@@ -7,7 +7,7 @@ import { ImageWithFallback } from './figma/ImageWithFallback';
 import { useRouter } from '../contexts/RouterContext';
 import { useCart } from '../contexts/CartContext';
 import { useRegion } from '../contexts/RegionContext';
-import { useUser } from '../contexts/UserContext';
+import { useOptionalUser } from '../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
 import { CustomerNotificationCenter } from './CustomerNotificationCenter';
 import {
@@ -62,7 +62,9 @@ export function Header() {
   const { navigateTo, currentPage } = useRouter();
   const { addToCart, getTotalItems } = useCart();
   const { region, setShowRegionSelector } = useRegion();
-  const { user, clearUser, logout } = useUser();
+  const userContext = useOptionalUser();
+  const user = userContext?.user ?? null;
+  const logout = userContext?.logout ?? (async () => {});
 
   // Clear hover states when department menu is closed
   useEffect(() => {

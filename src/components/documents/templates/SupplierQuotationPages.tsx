@@ -162,6 +162,25 @@ function DocHeader({ data }: { data: QuotationDocData }) {
           </p>
         </div>
       )}
+
+      {(data as any).projectExecutionBaseline && (((data as any).projectExecutionBaseline.projectCode) || ((data as any).projectExecutionBaseline.projectName) || ((data as any).projectExecutionBaseline.projectRevisionCode)) && (
+        <div className="bg-purple-50 border border-purple-200 rounded px-2 py-1.5 mb-3">
+          <p className="text-[11px] text-gray-700">
+            <span className="font-semibold text-purple-700">📌 执行基线：</span>
+            <span className="ml-1 font-medium">
+              {(data as any).projectExecutionBaseline.projectCode || (data as any).projectExecutionBaseline.projectName || '项目'}
+            </span>
+            <span className="mx-1">/</span>
+            <span className="font-medium">{(data as any).projectExecutionBaseline.projectRevisionCode || 'Rev'}</span>
+            {(data as any).projectExecutionBaseline.finalQuotationNumber && (
+              <>
+                <span className="mx-1">/</span>
+                <span className="font-medium">{(data as any).projectExecutionBaseline.finalQuotationNumber}</span>
+              </>
+            )}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

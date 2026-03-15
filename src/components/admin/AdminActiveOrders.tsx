@@ -2,9 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Eye, Edit, CheckCircle, XCircle, Truck, Package, Clock, Search, DollarSign, Trash2, Printer, FileText, Download, Send, ShoppingCart, RefreshCw } from 'lucide-react';
 import { useOrders, Order } from '../../contexts/OrderContext';
 import { sendNotificationToUser } from '../../utils/notificationUtils';
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument';
 import { adaptOrderToSalesContract } from '../../utils/documentDataAdapters';
+import { buildQuoteRequirementDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
 import { PaymentProofDialog } from './PaymentProofDialog';
 import { UploadPaymentProofDialog } from './UploadPaymentProofDialog';
 import { Card } from '../ui/card';
@@ -108,7 +109,7 @@ export default function AdminActiveOrders() {
   const { orders: contextOrders, deleteOrder: removeOrder, updateOrder, clearAllOrders } = useOrders();
   
   // 使用采购需求Context
-  const { addRequirement } = usePurchaseRequirements();
+  const { addRequirement } = useQuoteRequirements();
 
   // 🔥 禁用自动生成测试数据（用户要求不要自动创建数据）
   // React.useEffect(() => {
@@ -210,7 +211,15 @@ export default function AdminActiveOrders() {
       customerName: fullOrder.customer,
       salesPerson: fullOrder.customer,
       specialRequirements: fullOrder.notes || '',
-      items: items // 🔥 包含所有产品项
+      items: items, // 🔥 包含所有产品项
+      templateSnapshot: { pendingResolution: true },
+      documentDataSnapshot: buildQuoteRequirementDocumentSnapshot({
+        requirementNo,
+        sourceRef: fullOrder.orderNumber,
+        requiredDate: fullOrder.expectedDelivery,
+        createdBy: `业务员-${fullOrder.customer}`,
+        items,
+      } as any),
     };
     
     console.log(`  📦 合并采购需求:`, requirementNo);
@@ -219,7 +228,7 @@ export default function AdminActiveOrders() {
     
     try {
       console.log(`     🔄 调用 addRequirement...`);
-      addRequirement(requirementData);
+      await addRequirement(requirementData);
       console.log(`     ✅ 采购需求创建成功`);
       
       console.log(`\n✅ ✅ ✅ 下推采购完成！已创建采购需求 ${requirementNo}\n`);

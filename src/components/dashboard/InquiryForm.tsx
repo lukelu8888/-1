@@ -6,7 +6,7 @@ interface InquiryFormProps {
   onClose?: () => void;
 }
 
-export function InquiryForm({ inquiryNumber = 'INQ-2025-001234', onClose }: InquiryFormProps) {
+export function InquiryForm({ inquiryNumber = 'ING-2025-001234', onClose }: InquiryFormProps) {
   const handlePrint = () => {
     window.print();
   };

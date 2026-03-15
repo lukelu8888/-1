@@ -1,5 +1,6 @@
 import React, { forwardRef } from 'react';
 import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
 
 /**
  * 📊 对账单（Statement of Account）
@@ -80,10 +81,11 @@ export interface StatementOfAccountData {
 
 interface StatementOfAccountDocumentProps {
   data: StatementOfAccountData;
+  layoutConfig?: DocumentLayoutConfig;
 }
 
 export const StatementOfAccountDocument = forwardRef<HTMLDivElement, StatementOfAccountDocumentProps>(
-  ({ data }, ref) => {
+  ({ data, layoutConfig }, ref) => {
     
     const totalDebit = data.transactions.reduce((sum, t) => sum + (t.debit || 0), 0);
     const totalCredit = data.transactions.reduce((sum, t) => sum + (t.credit || 0), 0);
@@ -97,18 +99,33 @@ export const StatementOfAccountDocument = forwardRef<HTMLDivElement, StatementOf
         default: return type;
       }
     };
+    const documentWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
+    const documentMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
+    const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '9pt';
+    const lineHeight = layoutConfig?.lineHeight ?? 1.3;
+    const contentPaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '15mm';
+    const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '15mm';
 
     return (
       <div 
         ref={ref}
-        className="bg-white w-[794px] min-h-[1123px] mx-auto shadow-lg"
+        className="bg-white mx-auto shadow-lg"
         style={{ 
+          width: documentWidth,
+          minHeight: documentMinHeight,
           fontFamily: 'Arial, "Helvetica Neue", sans-serif',
-          fontSize: '9pt',
-          lineHeight: '1.3'
+          fontSize,
+          lineHeight
         }}
       >
-        <div className="p-[15mm]">
+        <div
+          style={{
+            paddingTop: contentPaddingTop,
+            paddingBottom: contentPaddingBottom,
+            paddingLeft: '15mm',
+            paddingRight: '15mm',
+          }}
+        >
           {/* Header - Taiwan Enterprise Compact Style */}
           <div className="mb-3">
             {/* Title + Statement Info Table */}

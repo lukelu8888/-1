@@ -67,7 +67,7 @@ export default function NegotiationDialog({
         title: '报价已修订',
         message: `我们已根据您的反馈修订了报价 ${quotation.quotationNumber}`,
         relatedId: quotation.quotationNumber,
-        relatedType: 'quotation',
+        relatedType: 'qt',
         sender: 'admin@cosun.com',
         metadata: {
           quotationNumber: quotation.quotationNumber,

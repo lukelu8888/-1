@@ -367,8 +367,8 @@ export function AdminInquiryManagement() {
 
 | Context名称 | 管理的表单类型 | 文件位置 | 主要功能 |
 |------------|---------------|---------|---------|
-| `InquiryContext` | 询价单（INQ） | `/contexts/InquiryContext.tsx` | 管理询价单的创建、更新、状态变更 |
-| `QuotationContext` | 报价单（Quotation） | `/contexts/QuotationContext.tsx` | 管理报价单的生成、修改、发送 |
+| `InquiryContext` | 询价单（ING） | `/contexts/InquiryContext.tsx` | 管理询价单的创建、更新、状态变更 |
+| `QuotationContext` | 报价单（QT） | `/contexts/QuotationContext.tsx` | 管理报价单的生成、修改、发送 |
 | `OrderContext` | 订单（Order）、销售合同（SC） | `/contexts/OrderContext.tsx` | 管理订单全生命周期 |
 | `PaymentContext` | 付款记录、应收账款 | `/contexts/PaymentContext.tsx` | 管理付款状态与财务流转 |
 | `FinanceContext` | 财务数据、收款管理 | `/contexts/FinanceContext.tsx` | 管理财务审批与记录 |
@@ -404,9 +404,9 @@ export const InquiryProvider = ({ children }) => {
       // 🔥 触发通知（如果需要）
       if (newStatus === 'Submitted') {
         addNotification({
-          type: 'inquiry',
-          title: 'Inquiry Submitted',
-          message: `Inquiry ${inquiryId} has been submitted for review`,
+          type: 'ing',
+          title: 'ING Submitted',
+          message: `ING ${inquiryId} has been submitted for review`,
           recipientRole: 'Marketing_Ops',
           relatedId: inquiryId
         });
@@ -481,7 +481,7 @@ export function AdminInquiryManagement() {
 // 1️⃣ 询价单创建（InquiryContext）
 const createInquiry = (data: InquiryData) => {
   const newInquiry = {
-    id: generateInquiryId(), // INQ-2025-0001
+    id: generateInquiryId(), // ING-2025-0001
     ...data,
     status: 'Draft',
     createdAt: new Date().toISOString()
@@ -504,7 +504,7 @@ const generateQuotationFromInquiry = (inquiryId: string) => {
   if (!inquiry) return;
   
   const newQuotation = {
-    id: generateQuotationId(), // QUO-2025-0001
+    id: generateQuotationId(), // QT-2025-0001
     inquiryId: inquiry.id,
     customer: inquiry.customer,
     products: inquiry.products,
@@ -664,23 +664,23 @@ export function AdminQuotationList() {
 │                          COSUN B2B 全流程数据流转                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-📝 询价单 (INQ - Customer Inquiry)
+📝 询价单 (ING - Customer Inquiry)
 ┌────────────────────────────────────────────────────────────────┐
-│ ID: INQ-2025-0001                                              │
+│ ID: ING-2025-0001                                              │
 │ Status: Draft → Submitted → Under Review → Quoted             │
 │ Context: InquiryContext                                        │
 │ Storage: localStorage['cosun_inquiries']                       │
 │ Visible To: Marketing_Ops, Sales_Manager, Sales_Rep           │
 └────────────────────────────────────────────────────────────────┘
                          ↓ (生成报价单)
-💰 报价单 (Quotation)
+💰 报价单 (QT)
 ┌────────────────────────────────────────────────────────────────┐
-│ ID: QUO-2025-0001                                              │
+│ ID: QT-2025-0001                                               │
 │ Status: Draft → Sent → Negotiating → Accepted → Contract Gen. │
 │ Context: QuotationContext                                      │
 │ Storage: localStorage['cosun_quotations']                      │
 │ Visible To: Sales_Rep, Sales_Manager, CEO                     │
-│ Related: inquiryId = INQ-2025-0001                            │
+│ Related: inquiryId = ING-2025-0001                            │
 └────────────────────────────────────────────────────────────────┘
                          ↓ (客户接受，生成合同)
 📄 销售合同 (Sales Contract)
@@ -690,7 +690,7 @@ export function AdminQuotationList() {
 │ Context: OrderContext                                          │
 │ Storage: localStorage['cosun_contracts']                       │
 │ Visible To: Sales_Rep, Finance, CEO                           │
-│ Related: quotationId = QUO-2025-0001, inquiryId = INQ-2025... │
+│ Related: quotationId = QT-2025-0001, inquiryId = ING-2025... │
 └────────────────────────────────────────────────────────────────┘
                          ↓ (合同签署后，创建订单)
 📦 订单 (Order / Purchase Order)
@@ -752,7 +752,7 @@ export function AdminQuotationList() {
 
 export const statusChangeNotificationRules = {
   // 询价单状态变更通知
-  inquiry: {
+  ing: {
     'Draft → Submitted': {
       notifyRoles: ['Marketing_Ops', 'Sales_Manager'],
       message: 'New inquiry submitted for review',
@@ -760,21 +760,21 @@ export const statusChangeNotificationRules = {
     },
     'Submitted → Under Review': {
       notifyRoles: ['Sales_Manager'],
-      message: 'Inquiry is under review',
+      message: 'ING is under review',
       priority: 'high'
     },
     'Under Review → Quoted': {
       notifyRoles: ['Sales_Rep', 'Marketing_Ops'],
-      message: 'Quotation generated for inquiry',
+      message: 'QT generated for ING',
       priority: 'normal'
     }
   },
   
   // 报价单状态变更通知
-  quotation: {
+  qt: {
     'Draft → Sent': {
       notifyRoles: ['Sales_Manager', 'CEO'],
-      message: 'Quotation sent to customer',
+      message: 'QT sent to customer',
       priority: 'normal'
     },
     'Sent → Accepted': {
@@ -1107,7 +1107,7 @@ export function AdminActiveOrders() {
 ### 4. 数据同步
 
 ✅ **推荐做法：**
-- 使用统一的 ID 生成规则（如 `INQ-2025-0001`）
+- 使用统一的 ID 生成规则（如 `ING-2025-0001`）
 - 表单之间使用 `relatedId` 建立关联
 - 状态变更时同步更新关联表单
 - 使用通知系统告知相关角色

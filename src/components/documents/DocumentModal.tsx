@@ -44,11 +44,13 @@ import { Button } from '../ui/button';
 import { A4_HEIGHT_PX } from './a4/A4Page';
 
 // ─── constants ────────────────────────────────────────────────────────────────
-const ZOOM_STEPS = [60, 80, 100] as const;
-type ZoomLevel = (typeof ZOOM_STEPS)[number];
+const DEFAULT_MIN_ZOOM = 60;
+const DEFAULT_MAX_ZOOM = 100;
+const DEFAULT_ZOOM_STEP = 20;
+const DEFAULT_ZOOM = 80;
 
 // Safe margin from viewport edges (px)
-const VIEWPORT_SAFE = 24;
+const DEFAULT_VIEWPORT_SAFE = 24;
 
 // ─── types ────────────────────────────────────────────────────────────────────
 export interface DocumentModalProps {
@@ -74,6 +76,36 @@ export interface DocumentModalProps {
 
   /** Close when clicking the backdrop (default: true) */
   closeOnBackdrop?: boolean;
+
+  /** Initial zoom percentage for the text layer */
+  defaultZoom?: number;
+
+  /** Minimum zoom percentage */
+  minZoom?: number;
+
+  /** Maximum zoom percentage */
+  maxZoom?: number;
+
+  /** Zoom step percentage */
+  zoomStep?: number;
+
+  /**
+   * Shell width anchor. When set, the modal width stays sized for this zoom
+   * while the document pages continue to zoom independently inside the viewport.
+   */
+  shellZoom?: number;
+
+  /** Fixed top offset in px. Useful when the preview should stay near the top. */
+  topOffset?: number;
+
+  /** Safe viewport margin in px */
+  viewportSafe?: number;
+
+  /** Visual shell style */
+  variant?: 'default' | 'template-center';
+
+  /** Whether pages are already fully-rendered A4 documents */
+  pageRenderMode?: 'wrapped' | 'raw';
 }
 
 // ─── helper: clamp drag position to viewport ─────────────────────────────────
@@ -82,12 +114,37 @@ function clampPosition(
   y: number,
   modalW: number,
   modalH: number,
+  viewportSafe: number,
 ): { x: number; y: number } {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   return {
-    x: Math.max(VIEWPORT_SAFE, Math.min(x, vw - modalW - VIEWPORT_SAFE)),
-    y: Math.max(VIEWPORT_SAFE, Math.min(y, vh - modalH - VIEWPORT_SAFE)),
+    x: Math.max(viewportSafe, Math.min(x, vw - modalW - viewportSafe)),
+    y: Math.max(viewportSafe, Math.min(y, vh - modalH - viewportSafe)),
+  };
+}
+
+function clampOffsetFromAnchor(
+  x: number,
+  y: number,
+  modalW: number,
+  modalH: number,
+  anchorTop: number,
+  viewportSafe: number,
+): { x: number; y: number } {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const baseLeft = (vw - modalW) / 2;
+
+  return {
+    x: Math.max(
+      viewportSafe - baseLeft,
+      Math.min(x, vw - modalW - viewportSafe - baseLeft),
+    ),
+    y: Math.max(
+      viewportSafe - anchorTop,
+      Math.min(y, vh - modalH - viewportSafe - anchorTop),
+    ),
   };
 }
 
@@ -95,7 +152,7 @@ function clampPosition(
 const A4PageWrapper: React.FC<{
   index: number;
   total: number;
-  zoom: ZoomLevel;
+  zoom: number;
   children: React.ReactNode;
 }> = ({ index, total, zoom, children }) => {
   const scale = zoom / 100;
@@ -168,15 +225,30 @@ export function DocumentModal({
   actions,
   fileName = `document_${Date.now()}.pdf`,
   closeOnBackdrop = true,
+  defaultZoom = DEFAULT_ZOOM,
+  minZoom = DEFAULT_MIN_ZOOM,
+  maxZoom = DEFAULT_MAX_ZOOM,
+  zoomStep = DEFAULT_ZOOM_STEP,
+  shellZoom,
+  topOffset,
+  viewportSafe = DEFAULT_VIEWPORT_SAFE,
+  variant = 'default',
+  pageRenderMode = 'wrapped',
 }: DocumentModalProps) {
+  const clampZoom = useCallback(
+    (value: number) => Math.max(minZoom, Math.min(value, maxZoom)),
+    [maxZoom, minZoom],
+  );
+
   // ── zoom ──────────────────────────────────────────────────────────────────
-  const [zoom, setZoom] = useState<ZoomLevel>(80);
-  const zoomIn  = () => { const i = ZOOM_STEPS.indexOf(zoom); if (i < ZOOM_STEPS.length - 1) setZoom(ZOOM_STEPS[i + 1]); };
-  const zoomOut = () => { const i = ZOOM_STEPS.indexOf(zoom); if (i > 0) setZoom(ZOOM_STEPS[i - 1]); };
+  const [zoom, setZoom] = useState<number>(() => clampZoom(defaultZoom));
+  const zoomIn = () => setZoom((current) => clampZoom(current + zoomStep));
+  const zoomOut = () => setZoom((current) => clampZoom(current - zoomStep));
 
   // ── modal dimensions ──────────────────────────────────────────────────────
   // Modal width = A4 scaled width + horizontal chrome
-  const scaledW = useMemo(() => Math.round(794 * (zoom / 100)), [zoom]);
+  const shellScale = (shellZoom ?? zoom) / 100;
+  const scaledW = useMemo(() => Math.round(794 * shellScale), [shellScale]);
   const MODAL_CHROME_H = 56; // toolbar height px
   const MODAL_W = Math.max(scaledW + 64, 680); // 32px side padding each
 
@@ -184,27 +256,48 @@ export function DocumentModal({
   const modalRef   = useRef<HTMLDivElement>(null);
   const dragRef    = useRef({ active: false, startX: 0, startY: 0, origX: 0, origY: 0 });
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Centre on first open
   useEffect(() => {
-    if (open && !pos) {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const modalH = Math.min(vh - VIEWPORT_SAFE * 2, 900);
+    if (!open) return;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const modalH = Math.min(vh - viewportSafe * 2, 900);
+
+    if (variant === 'template-center') {
+      setDragOffset({ x: 0, y: 0 });
+      return;
+    }
+
+    if (topOffset !== undefined || !pos) {
       setPos({
-        x: Math.max(VIEWPORT_SAFE, (vw - MODAL_W) / 2),
-        y: Math.max(VIEWPORT_SAFE, (vh - modalH) / 2),
+        x: Math.max(viewportSafe, (vw - MODAL_W) / 2),
+        y: topOffset ?? Math.max(viewportSafe, (vh - modalH) / 2),
       });
     }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [MODAL_W, open, pos, topOffset, variant, viewportSafe]);
 
   // Re-centre when zoom changes to avoid escaping viewport
   useEffect(() => {
-    if (!pos || !open) return;
     const el = modalRef.current;
     const modalH = el ? el.offsetHeight : 900;
-    setPos(p => p ? clampPosition(p.x, p.y, MODAL_W, modalH) : p);
-  }, [zoom, MODAL_W]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!open) return;
+
+    if (variant === 'template-center') {
+      const anchorTop = topOffset ?? viewportSafe;
+      setDragOffset((current) =>
+        clampOffsetFromAnchor(current.x, current.y, MODAL_W, modalH, anchorTop, viewportSafe),
+      );
+      return;
+    }
+
+    if (!pos) return;
+    setPos((current) =>
+      current ? clampPosition(current.x, current.y, MODAL_W, modalH, viewportSafe) : current,
+    );
+  }, [MODAL_W, open, pos, topOffset, variant, viewportSafe]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     if (!modalRef.current) return;
@@ -212,11 +305,11 @@ export function DocumentModal({
       active: true,
       startX: e.clientX,
       startY: e.clientY,
-      origX: pos?.x ?? 0,
-      origY: pos?.y ?? 0,
+      origX: variant === 'template-center' ? dragOffset.x : (pos?.x ?? 0),
+      origY: variant === 'template-center' ? dragOffset.y : (pos?.y ?? 0),
     };
     document.body.style.userSelect = 'none';
-  }, [pos]);
+  }, [dragOffset.x, dragOffset.y, pos, variant]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -225,12 +318,31 @@ export function DocumentModal({
       const dy = e.clientY - dragRef.current.startY;
       const el = modalRef.current;
       const modalH = el ? el.offsetHeight : 900;
-      setPos(clampPosition(
-        dragRef.current.origX + dx,
-        dragRef.current.origY + dy,
-        MODAL_W,
-        modalH,
-      ));
+
+      if (variant === 'template-center') {
+        const anchorTop = topOffset ?? viewportSafe;
+        setDragOffset(
+          clampOffsetFromAnchor(
+            dragRef.current.origX + dx,
+            dragRef.current.origY + dy,
+            MODAL_W,
+            modalH,
+            anchorTop,
+            viewportSafe,
+          ),
+        );
+        return;
+      }
+
+      setPos(
+        clampPosition(
+          dragRef.current.origX + dx,
+          dragRef.current.origY + dy,
+          MODAL_W,
+          modalH,
+          viewportSafe,
+        ),
+      );
     };
     const onUp = () => {
       dragRef.current.active = false;
@@ -242,7 +354,7 @@ export function DocumentModal({
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [MODAL_W]);
+  }, [MODAL_W, topOffset, variant, viewportSafe]);
 
   // ── keyboard ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -288,17 +400,38 @@ export function DocumentModal({
   if (!open) return null;
 
   const isSmall = window.innerWidth < 768;
+  const isTemplateCenter = variant === 'template-center';
 
   const modalStyle: React.CSSProperties = isSmall
     ? { position: 'fixed', inset: 0, zIndex: 1000 }
-    : {
+    : variant === 'template-center'
+      ? {
+          position: 'fixed',
+          left: '50%',
+          top: topOffset ?? viewportSafe,
+          transform: `translateX(-50%) translate(${dragOffset.x}px, ${dragOffset.y}px)`,
+          width: MODAL_W,
+          maxWidth: `calc(100vw - ${viewportSafe * 2}px)`,
+          maxHeight: `calc(100vh - ${(topOffset ?? viewportSafe) + viewportSafe}px)`,
+          zIndex: 1000,
+          display: 'flex',
+          flexDirection: 'column',
+          borderRadius: 12,
+          overflow: 'hidden',
+          boxShadow:
+            '0 8px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)',
+          background: '#525659',
+        }
+      : {
         position: 'fixed',
         left: pos?.x ?? '50%',
         top:  pos?.y ?? '50%',
         transform: pos ? undefined : 'translate(-50%, -50%)',
         width: MODAL_W,
-        maxWidth: `calc(100vw - ${VIEWPORT_SAFE * 2}px)`,
-        maxHeight: `calc(100vh - ${VIEWPORT_SAFE * 2}px)`,
+        maxWidth: `calc(100vw - ${viewportSafe * 2}px)`,
+        maxHeight: topOffset !== undefined
+          ? `calc(100vh - ${topOffset + viewportSafe}px)`
+          : `calc(100vh - ${viewportSafe * 2}px)`,
         zIndex: 1000,
         display: 'flex',
         flexDirection: 'column',
@@ -306,7 +439,7 @@ export function DocumentModal({
         overflow: 'hidden',
         boxShadow:
           '0 8px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)',
-        background: '#fff',
+        background: isTemplateCenter ? '#525659' : '#fff',
       };
 
   return (
@@ -374,18 +507,18 @@ export function DocumentModal({
           className="doc-modal-toolbar flex items-center gap-3 px-4 select-none shrink-0"
           style={{
             height: MODAL_CHROME_H,
-            background: '#f8fafc',
-            borderBottom: '1px solid #e2e8f0',
+            background: isTemplateCenter ? '#3c3f41' : '#f8fafc',
+            borderBottom: isTemplateCenter ? '1px solid #4b5563' : '1px solid #e2e8f0',
             cursor: 'grab',
           }}
           onMouseDown={onMouseDown}
         >
           {/* Icon + title */}
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            <FileText className="w-4 h-4 text-slate-500 shrink-0" />
-            <span className="text-sm font-semibold text-slate-800 truncate">{title}</span>
+            <FileText className={`w-4 h-4 shrink-0 ${isTemplateCenter ? 'text-gray-300' : 'text-slate-500'}`} />
+            <span className={`text-sm font-semibold truncate ${isTemplateCenter ? 'text-gray-100' : 'text-slate-800'}`}>{title}</span>
             {subtitle && (
-              <span className="text-xs text-slate-500 truncate hidden sm:inline">
+              <span className={`text-xs truncate hidden sm:inline ${isTemplateCenter ? 'text-gray-400' : 'text-slate-500'}`}>
                 {subtitle}
               </span>
             )}
@@ -396,18 +529,22 @@ export function DocumentModal({
             <button
               onClick={e => { e.stopPropagation(); zoomOut(); }}
               onMouseDown={e => e.stopPropagation()}
-              disabled={zoom === ZOOM_STEPS[0]}
-              className="h-7 w-7 rounded flex items-center justify-center text-slate-500 hover:bg-slate-200 disabled:opacity-30 transition-colors"
+              disabled={zoom <= minZoom}
+              className={`h-7 w-7 rounded flex items-center justify-center disabled:opacity-30 transition-colors ${
+                isTemplateCenter ? 'text-gray-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200'
+              }`}
               title="缩小"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="text-xs font-medium text-slate-600 w-8 text-center tabular-nums">{zoom}%</span>
+            <span className={`text-xs font-medium w-8 text-center tabular-nums ${isTemplateCenter ? 'text-gray-300' : 'text-slate-600'}`}>{zoom}%</span>
             <button
               onClick={e => { e.stopPropagation(); zoomIn(); }}
               onMouseDown={e => e.stopPropagation()}
-              disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
-              className="h-7 w-7 rounded flex items-center justify-center text-slate-500 hover:bg-slate-200 disabled:opacity-30 transition-colors"
+              disabled={zoom >= maxZoom}
+              className={`h-7 w-7 rounded flex items-center justify-center disabled:opacity-30 transition-colors ${
+                isTemplateCenter ? 'text-gray-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200'
+              }`}
               title="放大"
             >
               <ZoomIn className="w-3.5 h-3.5" />
@@ -415,7 +552,7 @@ export function DocumentModal({
           </div>
 
           {/* Divider */}
-          <div className="w-px h-5 bg-slate-300 shrink-0" />
+          <div className={`w-px h-5 shrink-0 ${isTemplateCenter ? 'bg-gray-600' : 'bg-slate-300'}`} />
 
           {/* Action buttons */}
           <div
@@ -424,7 +561,7 @@ export function DocumentModal({
           >
             <Button
               variant="outline" size="sm"
-              className="h-8 text-xs gap-1.5 hidden sm:flex"
+              className={`h-8 text-xs gap-1.5 hidden sm:flex ${isTemplateCenter ? 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10 hover:text-white' : ''}`}
               onClick={handleDownloadPdf}
               disabled={downloading}
             >
@@ -433,7 +570,7 @@ export function DocumentModal({
             </Button>
             <Button
               variant="outline" size="sm"
-              className="h-8 text-xs gap-1.5"
+              className={`h-8 text-xs gap-1.5 ${isTemplateCenter ? 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10 hover:text-white' : ''}`}
               onClick={handlePrint}
             >
               <Printer className="w-3.5 h-3.5" />
@@ -446,7 +583,11 @@ export function DocumentModal({
             {/* Close */}
             <button
               onClick={onClose}
-              className="h-8 w-8 rounded flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors ml-1"
+              className={`h-8 w-8 rounded flex items-center justify-center transition-colors ml-1 ${
+                isTemplateCenter
+                  ? 'text-gray-300 hover:bg-white/10 hover:text-white'
+                  : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'
+              }`}
               title="关闭"
             >
               <X className="w-4 h-4" />
@@ -458,8 +599,8 @@ export function DocumentModal({
         <div
           className="doc-modal-scrollarea flex-1 overflow-y-auto overflow-x-auto"
           style={{
-            background: '#e8ecf0',
-            padding: '28px 24px',
+            background: isTemplateCenter ? '#525659' : '#e8ecf0',
+            padding: isTemplateCenter ? '36px 24px 40px' : '28px 24px',
             // Smooth momentum scroll on iOS
             WebkitOverflowScrolling: 'touch',
           }}
@@ -476,9 +617,25 @@ export function DocumentModal({
               </div>
             ) : (
               pages.map((page, i) => (
-                <A4PageWrapper key={i} index={i} total={pages.length} zoom={zoom}>
-                  {page}
-                </A4PageWrapper>
+                pageRenderMode === 'raw' ? (
+                  <div
+                    key={i}
+                    data-a4-page
+                    className="a4-page-wrapper"
+                    style={{
+                      flexShrink: 0,
+                      zoom: `${zoom}%`,
+                      transformOrigin: 'top center',
+                      margin: '0 auto',
+                    }}
+                  >
+                    {page}
+                  </div>
+                ) : (
+                  <A4PageWrapper key={i} index={i} total={pages.length} zoom={zoom}>
+                    {page}
+                  </A4PageWrapper>
+                )
               ))
             )}
           </div>

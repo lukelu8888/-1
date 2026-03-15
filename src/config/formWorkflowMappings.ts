@@ -135,7 +135,7 @@ export const formWorkflowMappings: FormStepMapping[] = [
     postActions: [
       {
         actionType: 'update_status',
-        actionConfig: { target: 'inquiry', newStatus: 'submitted' }
+        actionConfig: { target: 'ing', newStatus: 'submitted' }
       },
       {
         actionType: 'send_notification',
@@ -229,7 +229,7 @@ export const formWorkflowMappings: FormStepMapping[] = [
     postActions: [
       {
         actionType: 'update_status',
-        actionConfig: { target: 'quotation', newStatus: 'pending_approval' }
+        actionConfig: { target: 'qt', newStatus: 'pending_approval' }
       },
       {
         actionType: 'send_notification',

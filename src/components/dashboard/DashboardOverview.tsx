@@ -17,7 +17,21 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 
 interface DashboardOverviewProps {
   userEmail: string;
-  onNavigate: (view: string) => void;
+  onNavigate: (
+    view:
+      | 'overview'
+      | 'profile'
+      | 'my-orders'
+      | 'my-products'
+      | 'rate-request'
+      | 'create-order'
+      | 'analytics'
+      | 'messages'
+      | 'inquiries'
+      | 'documents'
+      | 'profit-analyzer'
+      | 'supplier-evaluation'
+  ) => void;
 }
 
 export function DashboardOverview({ userEmail, onNavigate }: DashboardOverviewProps) {
@@ -33,7 +47,7 @@ export function DashboardOverview({ userEmail, onNavigate }: DashboardOverviewPr
 
   const recentActivities = [
     { id: 1, type: 'order', message: 'Order #ORD-2025-089 has been shipped', time: '2 hours ago', status: 'success' },
-    { id: 2, type: 'inquiry', message: 'New quotation received for Inquiry #INQ-456', time: '5 hours ago', status: 'info' },
+    { id: 2, type: 'ing', message: 'New quotation received for ING #ING-456', time: '5 hours ago', status: 'info' },
     { id: 3, type: 'notification', message: 'New products added to catalog', time: '1 day ago', status: 'warning' },
     { id: 4, type: 'order', message: 'Order #ORD-2025-087 delivered successfully', time: '2 days ago', status: 'success' },
   ];
@@ -45,7 +59,7 @@ export function DashboardOverview({ userEmail, onNavigate }: DashboardOverviewPr
         {/* Active Orders */}
         <div 
           className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all cursor-pointer group" 
-          onClick={() => onNavigate('active-orders')}
+          onClick={() => onNavigate('my-orders')}
         >
           <div className="flex items-start justify-between mb-3">
             <div className="flex-1">
@@ -99,7 +113,7 @@ export function DashboardOverview({ userEmail, onNavigate }: DashboardOverviewPr
         {/* Completed Orders */}
         <div 
           className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-5 hover:border-[#F96302] transition-all cursor-pointer group" 
-          onClick={() => onNavigate('order-history')}
+          onClick={() => onNavigate('my-orders')}
         >
           <div className="flex items-start justify-between mb-3">
             <div className="flex-1">
@@ -282,7 +296,7 @@ export function DashboardOverview({ userEmail, onNavigate }: DashboardOverviewPr
             <Button
               variant="outline"
               className="w-full h-auto py-4 px-6 hover:bg-gray-50 justify-between border-2 hover:border-[#F96302] transition-all group"
-              onClick={() => onNavigate('notifications')}
+              onClick={() => onNavigate('my-products')}
               style={{ fontWeight: 700 }}
             >
               <span className="flex items-center gap-2">

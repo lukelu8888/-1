@@ -6,7 +6,7 @@ import { PackingListDocument } from './templates/PackingListDocument';
 import { ProformaInvoiceDocument } from './templates/ProformaInvoiceDocument';
 import { XJDocument } from './templates/XJDocument'; // 🔥 采购询价单
 import { SupplierQuotationDocument } from './templates/SupplierQuotationDocument'; // 🔥 供应商报价单
-import { PurchaseRequirementDocument } from './templates/PurchaseRequirementDocument'; // 🔥 采购需求单
+import { QuoteRequirementDocument } from './templates/QuoteRequirementDocument'; // 🔥 报价请求单
 import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
 import { QuotationDocument } from './templates/QuotationDocument';
 import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument';
@@ -21,7 +21,7 @@ import type { PackingListData } from './templates/PackingListDocument';
 import type { ProformaInvoiceData } from './templates/ProformaInvoiceDocument';
 import type { XJData } from './templates/XJDocument'; // 🔥 采购询价单类型
 import type { SupplierQuotationData } from './templates/SupplierQuotationDocument'; // 🔥 供应商报价单类型
-import type { PurchaseRequirementDocumentData } from './templates/PurchaseRequirementDocument'; // 🔥 采购需求单类型
+import type { QuoteRequirementDocumentData } from './templates/QuoteRequirementDocument'; // 🔥 报价请求单类型
 
 /**
  * 📄 文档测试页面
@@ -33,11 +33,11 @@ import type { PurchaseRequirementDocumentData } from './templates/PurchaseRequir
  */
 
 export function DocumentTestPage() {
-  const [activeDoc, setActiveDoc] = useState<'inquiry' | 'quotation' | 'sc' | 'po' | 'xj' | 'supplier-quotation' | 'soa' | 'ci' | 'pl' | 'pi' | 'pr' | null>('sc');
+  const [activeDoc, setActiveDoc] = useState<'ing' | 'qt' | 'sc' | 'cg' | 'xj' | 'supplier-quotation' | 'soa' | 'ci' | 'pl' | 'pi' | 'qr' | null>('sc');
 
   // 示例数据：客户询价单
   const sampleInquiryData: CustomerInquiryData = {
-    inquiryNo: 'INQ-NA-20251210-001',
+    inquiryNo: 'ING-NA-20251210-001',
     inquiryDate: '2025-12-10',
     region: 'NA',
     customer: {
@@ -92,12 +92,12 @@ export function DocumentTestPage() {
     remarks: 'This is our first order with your company. We are a well-established distributor in the Los Angeles area with 15 years of experience. Quality and on-time delivery are critical to our business. We are looking for a long-term supplier and expect to place regular orders if this trial order is successful. Please provide your best pricing and confirm your production capacity.'
   };
 
-  // 示例数据：业务员报价单
+  // 示例数据：销售报价单
   const sampleQuotationData: QuotationData = {
     quotationNo: 'QT-NA-20251210-001',
     quotationDate: '2025-12-10',
     validUntil: '2026-01-10',
-    inquiryNo: 'INQ-NA-20251210-001',
+    inquiryNo: 'ING-NA-20251210-001',
     region: 'NA',
     company: {
       name: '福建高盛达富建材有限公司',
@@ -377,7 +377,7 @@ export function DocumentTestPage() {
     }
   };
 
-  // 示例数据：采购订单
+  // 示例数据：采购合同
   const samplePOData: PurchaseOrderData = {
     poNo: 'PO-20251220-001',
     poDate: '2025-12-20',
@@ -457,7 +457,7 @@ export function DocumentTestPage() {
       inspectionMethod: 'Third-party inspection (SGS or equivalent) or buyer inspection at supplier factory',
       // 扩展的专业采购条款
       packaging: '采用出口标准纸箱包装，每箱需标注采购单号、物料编码、数量、毛重净重。外包装需防潮、防震处理。',
-      shippingMarks: '唛头需注明"COSUN"字样、订单编号PO-20251220-001、目的地厦门，并标注"小心轻放"、"防潮"标识。',
+      shippingMarks: '唛头需注明"COSUN"字样、合同编号CG-20251220-001、目的地厦门，并标注"小心轻放"、"防潮"标识。',
       deliveryPenalty: '供应商未能按约定时间交货的，每延误一天，应按延误交货部分货款的0.5%支付违约金，但违约金总额不超过延误交货部分货款的5%。',
       qualityPenalty: '产品质量不符合约定标准的，采购方有权拒收。如已收货发现质量问题，供应商应在7个工作日内无条件退换货，并承担由此产生的一切费用及损失。',
       warrantyPeriod: '12个月（自交货验收合格之日起计算）',
@@ -468,7 +468,7 @@ export function DocumentTestPage() {
       forceMajeure: '因不可抗力（包括但不限于自然灾害、战争、政府行为、疫情等）导致合同无法履行的，受影响方应及时通知对方并提供相关证明，双方可协商延期履行或解除合同，但不承担违约责任。',
       disputeResolution: '因本合同引起的或与本合同有关的任何争议，双方应首先通过友好协商解决。协商不成的，任何一方均可向采购方所在地人民法院提起诉讼。',
       applicableLaw: '中华人民共和国法律（不含冲突法规则）',
-      contractValidity: '本采购订单自双方签章之日起生效，至所有产品交付验收合格且付款完成后自动终止。',
+      contractValidity: '本采购合同自双方签章之日起生效，至所有产品交付验收合格且付款完成后自动终止。',
       modification: '本合同的任何修改或补充必须经双方书面同意并签署补充协议，补充协议与本合同具有同等法律效力。口头承诺不产生法律约束力。',
       termination: '如一方严重违约且在收到守约方书面通知后15日内仍未纠正，守约方有权单方面解除合同并要求违约方承担违约责任及赔偿损失。'
     }
@@ -650,11 +650,11 @@ export function DocumentTestPage() {
     }
   };
 
-  // 🔥 示例数据：采购需求单
-  const samplePRData: PurchaseRequirementDocumentData = {
+  // 🔥 示例数据：报价请求单
+  const samplePRData: QuoteRequirementDocumentData = {
     requirementNo: 'QR-NA-251220-0001',
     requirementDate: '2025-12-20',
-    sourceInquiryNo: 'INQ-NA-251220-0001',
+    sourceInquiryNo: 'ING-NA-251220-0001',
     requiredResponseDate: '2025-12-25',
     requiredDeliveryDate: '2026-01-15',
     
@@ -1043,13 +1043,13 @@ export function DocumentTestPage() {
                 <div style={{ fontSize: 16, fontWeight: 600 }}>请从上方选择文档类型</div>
               </div>
             )}
-            {activeDoc === 'inquiry' && (
+            {activeDoc === 'ing' && (
               <CustomerInquiryDocument data={sampleInquiryData} />
             )}
-            {activeDoc === 'quotation' && (
+            {activeDoc === 'qt' && (
               <QuotationDocument data={sampleQuotationData} />
             )}
-            {activeDoc === 'po' && (
+            {activeDoc === 'cg' && (
               <PurchaseOrderDocument data={samplePOData} />
             )}
             {activeDoc === 'xj' && (
@@ -1058,8 +1058,8 @@ export function DocumentTestPage() {
             {activeDoc === 'supplier-quotation' && (
               <SupplierQuotationDocument data={sampleSupplierQuotationData} />
             )}
-            {activeDoc === 'pr' && (
-              <PurchaseRequirementDocument data={samplePRData} />
+            {activeDoc === 'qr' && (
+              <QuoteRequirementDocument data={samplePRData} />
             )}
             {activeDoc === 'soa' && (
               <StatementOfAccountDocument data={sampleSOAData} />

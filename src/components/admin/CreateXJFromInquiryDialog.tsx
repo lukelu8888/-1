@@ -16,6 +16,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Search, Building2, Mail, Phone, Star, Send, Package, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useXJs } from '../../contexts/XJContext';
+import { buildXJDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 /**
  * 📋 从客户询价创建供应商采购询价（XJ）对话框
@@ -266,7 +268,7 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
   );
 
   // 提交创建RFQ
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!inquiry) return;
     
     if (totalRFQCount === 0) {
@@ -285,16 +287,16 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
       let xjCount = 0;
 
       // 🔥 为每个产品的每个供应商创建独立的采购询价（XJ）
-      inquiry.items.forEach(item => {
+      await Promise.all(inquiry.items.map(async (item) => {
         const selectedSuppliers = selectedSuppliersByProduct[item.id] || [];
         
-        selectedSuppliers.forEach(supplierId => {
+        await Promise.all(selectedSuppliers.map(async (supplierId) => {
           const supplier = mockSuppliers.find(s => s.id === supplierId);
           if (!supplier) return;
 
           const xjNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
           
-          addXJ({
+          const xjPayload = {
             id: `rfq_${Date.now()}_${supplierId}_${item.id}`,
             xjNumber,
             
@@ -305,7 +307,7 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
             
             // 🔥 产品信息（单个产品）
             productName: item.productName,
-            modelNo: item.modelNo,
+            modelNo: getFormalBusinessModelNo(item),
             specification: item.specification,
             quantity: item.quantity,
             unit: item.unit,
@@ -332,12 +334,16 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
             createdDate: new Date().toISOString().split('T')[0],
             dueDate: quotationDeadline,
             
-            quotes: []
-          });
+            quotes: [],
+            templateSnapshot: { pendingResolution: true }
+          } as any;
+
+          xjPayload.documentDataSnapshot = buildXJDocumentSnapshot(xjPayload);
+          await addXJ(xjPayload);
 
           xjCount++;
-        });
-      });
+        }));
+      }));
 
       toast.success(
         `✅ 询价单已创建！`,
@@ -442,7 +448,7 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <p className="text-xs text-slate-600 mb-1">型号</p>
-                      <p className="font-semibold">{currentProduct.modelNo}</p>
+                      <p className="font-semibold">{getFormalBusinessModelNo(currentProduct) || '-'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-600 mb-1">数量</p>

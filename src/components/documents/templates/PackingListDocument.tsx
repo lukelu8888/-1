@@ -1,5 +1,6 @@
 import React, { forwardRef } from 'react';
 import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
 
 /**
  * 📦 包装清单（Packing List）
@@ -57,10 +58,11 @@ export interface PackingListData {
 
 interface PackingListDocumentProps {
   data: PackingListData;
+  layoutConfig?: DocumentLayoutConfig;
 }
 
 export const PackingListDocument = forwardRef<HTMLDivElement, PackingListDocumentProps>(
-  ({ data }, ref) => {
+  ({ data, layoutConfig }, ref) => {
     
     // 计算总计
     const totals = data.packages.reduce(
@@ -72,18 +74,33 @@ export const PackingListDocument = forwardRef<HTMLDivElement, PackingListDocumen
       }),
       { cartons: 0, nw: 0, gw: 0, cbm: 0 }
     );
+    const documentWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
+    const documentMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
+    const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '9pt';
+    const lineHeight = layoutConfig?.lineHeight ?? 1.3;
+    const contentPaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '15mm';
+    const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '15mm';
 
     return (
       <div 
         ref={ref}
-        className="bg-white w-[794px] min-h-[1123px] mx-auto shadow-lg"
+        className="bg-white mx-auto shadow-lg"
         style={{ 
+          width: documentWidth,
+          minHeight: documentMinHeight,
           fontFamily: 'Arial, "Helvetica Neue", sans-serif',
-          fontSize: '9pt',
-          lineHeight: '1.3'
+          fontSize,
+          lineHeight
         }}
       >
-        <div className="p-[15mm]">
+        <div
+          style={{
+            paddingTop: contentPaddingTop,
+            paddingBottom: contentPaddingBottom,
+            paddingLeft: '15mm',
+            paddingRight: '15mm',
+          }}
+        >
           {/* Header - Taiwan Enterprise Compact Style */}
           <div className="mb-3">
             {/* Title + P/L Info Table */}

@@ -3,6 +3,7 @@ import { Button } from '../ui/button';
 import { Download, Printer, FileText } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { XJDocument, XJData } from '../documents/templates/XJDocument';
+import type { DocumentLayoutConfig } from '../documents/A4PageContainer';
 
 interface XJDocumentViewerProps {
   xj: any; // 采购询价对象，包含documentData字段
@@ -28,21 +29,24 @@ export default function XJDocumentViewer({ xj }: XJDocumentViewerProps) {
   };
 
   // 检查是否有文档数据
-  if (!xj.documentData) {
+  const templateSnapshot = xj.templateSnapshot || xj.template_snapshot || null;
+  const templateVersion = templateSnapshot?.version || null;
+  const documentData = (xj.documentDataSnapshot || xj.document_data_snapshot) as XJData | null;
+  const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
+
+  if (!templateVersion || !documentData) {
     return (
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
-        <FileText className="w-12 h-12 text-yellow-600 mx-auto mb-3" />
-        <h3 className="font-semibold text-yellow-900 mb-2">暂无询价单文档</h3>
-        <p className="text-sm text-yellow-700">
-          此询价单可能是较早创建的，尚未生成完整文档。
+      <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+        <FileText className="w-12 h-12 text-red-600 mx-auto mb-3" />
+        <h3 className="font-semibold text-red-900 mb-2">XJ 模板快照缺失</h3>
+        <p className="text-sm text-red-700">
+          此采购询价单未绑定模板中心版本快照，无法预览。
           <br />
-          请联系COSUN采购员重新发送询价单。
+          请从模板中心绑定后重新生成。
         </p>
       </div>
     );
   }
-
-  const documentData: XJData = xj.documentData;
 
   return (
     <div className="space-y-4">
@@ -83,7 +87,7 @@ export default function XJDocumentViewer({ xj }: XJDocumentViewerProps) {
       {/* 🔥 文档预览区域 */}
       <div className="bg-white border border-gray-300 rounded-lg overflow-hidden">
         <div className="max-h-[600px] overflow-y-auto">
-          <XJDocument ref={documentRef} data={documentData} />
+          <XJDocument ref={documentRef} data={documentData} layoutConfig={layoutConfig || undefined} />
         </div>
       </div>
 

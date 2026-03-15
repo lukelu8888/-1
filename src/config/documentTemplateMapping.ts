@@ -21,28 +21,30 @@
  */
 export const DOCUMENT_TEMPLATE_MAPPING = {
   // 🔥 客户询价单模板
-  'customer-inquiry': {
-    templateId: 'customer-inquiry',
+  ing: {
+    templateId: 'ing',
     templateName: '客户询价单',
     templateNameEn: 'Customer Inquiry Form',
     templateComponent: '@/components/documents/templates/CustomerInquiryDocument',
     dataInterface: 'CustomerInquiryData',
+    canonicalDocumentCode: 'ING',
     usedInModules: [
       { 
         module: 'customer-portal', 
-        subModule: 'inquiry',
+        subModule: 'ing',
         description: '客户端 - 询价模块'
       }
     ]
   },
   
   // 🔥 业务员报价单模板
-  'quotation': {
-    templateId: 'quotation',
+  qt: {
+    templateId: 'qt',
     templateName: '业务员报价单',
     templateNameEn: 'Quotation / Proforma Invoice',
     templateComponent: '@/components/documents/templates/QuotationDocument',
     dataInterface: 'QuotationData',
+    canonicalDocumentCode: 'QT',
     usedInModules: [
       { 
         module: 'admin-portal', 
@@ -58,8 +60,8 @@ export const DOCUMENT_TEMPLATE_MAPPING = {
   },
   
   // 🔥 销售合同模板
-  'sales-contract': {
-    templateId: 'sales-contract',
+  sc: {
+    templateId: 'sc',
     templateName: '销售合同',
     templateNameEn: 'Sales Contract',
     templateComponent: '@/components/documents/templates/SalesContractDocument',
@@ -83,34 +85,80 @@ export const DOCUMENT_TEMPLATE_MAPPING = {
     ]
   },
   
-  // 🔥 采购订单模板
-  'purchase-order': {
-    templateId: 'purchase-order',
-    templateName: '采购订单',
-    templateNameEn: 'Purchase Order',
+  // 🔥 采购合同模板（兼容旧 purchase-order 键）
+  cg: {
+    templateId: 'cg',
+    templateName: '采购合同',
+    templateNameEn: 'Purchase Contract',
     templateComponent: '@/components/documents/templates/PurchaseOrderDocument',
     dataInterface: 'PurchaseOrderData',
+    canonicalDocumentCode: 'CG',
     usedInModules: [
       { 
         module: 'procurement-portal', 
         subModule: 'purchase-management',
-        description: '采购员 - 采购管理'
+        description: '采购员 - 采购合同管理'
       },
       {
         module: 'supplier-portal',
         subModule: 'order-reception',
-        description: '供应商端 - 订单接收'
+        description: '供应商端 - 合同接收'
+      }
+    ]
+  },
+  
+  // 🔥 报价请求单模板（QR）
+  qr: {
+    templateId: 'qr',
+    templateName: '报价请求单',
+    templateNameEn: 'Quote Requirement',
+    templateComponent: '@/components/documents/templates/QuoteRequirementDocument',
+    dataInterface: 'QuoteRequirementDocumentData',
+    canonicalDocumentCode: 'QR',
+    usedInModules: [
+      {
+        module: 'admin-portal',
+        subModule: 'cost-inquiry-quotation-management',
+        description: '销售端 - 业务员请求采购员报价'
+      },
+      {
+        module: 'procurement-portal',
+        subModule: 'quotation-request-pool',
+        description: '采购端 - 报价请求池'
+      }
+    ]
+  },
+
+  // 🔥 采购询价单模板（XJ）
+  xj: {
+    templateId: 'xj',
+    templateName: '采购询价单',
+    templateNameEn: 'Procurement Inquiry',
+    templateComponent: '@/components/documents/templates/XJDocument',
+    dataInterface: 'XJData',
+    canonicalDocumentCode: 'XJ',
+    usedInModules: [
+      {
+        module: 'procurement-portal',
+        subModule: 'quotation-management',
+        description: '采购端 - 询价管理'
+      },
+      {
+        module: 'supplier-portal',
+        subModule: 'supplier-documents-workflow',
+        description: '供应商端 - 收取询价单'
       }
     ]
   },
   
   // 🔥 商业发票模板
-  'commercial-invoice': {
-    templateId: 'commercial-invoice',
+  ci: {
+    templateId: 'ci',
     templateName: '商业发票',
     templateNameEn: 'Commercial Invoice',
     templateComponent: '@/components/documents/templates/CommercialInvoiceDocument',
     dataInterface: 'CommercialInvoiceData',
+    canonicalDocumentCode: 'CI',
     usedInModules: [
       { 
         module: 'admin-portal', 
@@ -126,12 +174,13 @@ export const DOCUMENT_TEMPLATE_MAPPING = {
   },
   
   // 🔥 装箱单模板
-  'packing-list': {
-    templateId: 'packing-list',
+  pl: {
+    templateId: 'pl',
     templateName: '装箱单',
     templateNameEn: 'Packing List',
     templateComponent: '@/components/documents/templates/PackingListDocument',
     dataInterface: 'PackingListData',
+    canonicalDocumentCode: 'PL',
     usedInModules: [
       { 
         module: 'admin-portal', 
@@ -168,12 +217,13 @@ export const DOCUMENT_TEMPLATE_MAPPING = {
   },
   
   // 🔥 形式发票模板（同报价单）
-  'proforma-invoice': {
-    templateId: 'proforma-invoice',
+  pi: {
+    templateId: 'pi',
     templateName: '形式发票',
     templateNameEn: 'Proforma Invoice',
     templateComponent: '@/components/documents/templates/ProformaInvoiceDocument',
     dataInterface: 'ProformaInvoiceData',
+    canonicalDocumentCode: 'PI',
     usedInModules: [
       { 
         module: 'admin-portal', 
@@ -189,12 +239,13 @@ export const DOCUMENT_TEMPLATE_MAPPING = {
   },
   
   // 🔥 对账单模板
-  'statement-of-account': {
-    templateId: 'statement-of-account',
+  soa: {
+    templateId: 'soa',
     templateName: '对账单',
     templateNameEn: 'Statement of Account',
     templateComponent: '@/components/documents/templates/StatementOfAccountDocument',
     dataInterface: 'StatementOfAccountData',
+    canonicalDocumentCode: 'SOA',
     usedInModules: [
       { 
         module: 'finance-portal', 
@@ -207,7 +258,7 @@ export const DOCUMENT_TEMPLATE_MAPPING = {
         description: '客户端 - 付款中心'
       }
     ]
-  }
+  },
 } as const;
 
 /**
@@ -253,13 +304,15 @@ export function logTemplateSync(log: TemplateSyncLog) {
  * 模板版本管理（用于追踪模板更新历史）
  */
 export const TEMPLATE_VERSIONS = {
-  'customer-inquiry': '1.0.0',
-  'quotation': '1.0.0',
-  'sales-contract': '1.0.0',
-  'purchase-order': '1.0.0',
-  'commercial-invoice': '1.0.0',
-  'packing-list': '1.0.0',
+  ing: '1.0.0',
+  qt: '1.0.0',
+  sc: '1.0.0',
+  cg: '1.0.0',
+  qr: '1.0.0',
+  xj: '1.0.0',
+  ci: '1.0.0',
+  pl: '1.0.0',
   'shipping-notice': '1.0.0',
-  'proforma-invoice': '1.0.0',
-  'statement-of-account': '1.0.0'
+  pi: '1.0.0',
+  soa: '1.0.0'
 } as const;

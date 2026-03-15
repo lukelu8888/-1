@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Printer, Download, X, ArrowRight } from 'lucide-react';
 import { Quotation } from './QuotationManagement';
 import { QuotationDocument, QuotationData } from '../documents/templates/QuotationDocument'; // 🔥 使用文档中心的专业模板
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 interface ViewQuotationDialogProps {
   open: boolean;
@@ -32,6 +33,17 @@ export default function ViewQuotationDialog({
   };
 
   if (!quotation) return null;
+
+  const quotationRoleLabel = (() => {
+    const labels: Record<string, string> = {
+      budgetary: 'Budgetary',
+      technical_review: 'Technical Review',
+      commercial_offer: 'Commercial Offer',
+      final_offer: 'Final Offer',
+      accepted: 'Accepted',
+    };
+    return labels[String(quotation.quotationRole || '')] || 'Standard';
+  })();
 
   // 🔥 转换数据格式：Quotation → QuotationData
   const quotationData: QuotationData = {
@@ -62,7 +74,7 @@ export default function ViewQuotationDialog({
     
     products: quotation.products.map((p, idx) => ({
       no: idx + 1,
-      modelNo: p.sku || p.modelNo || '',
+      modelNo: getFormalBusinessModelNo(p),
       imageUrl: p.image,
       productName: p.name || p.productName || '',
       specification: p.specs || '',
@@ -172,6 +184,19 @@ export default function ViewQuotationDialog({
                 <DialogDescription className="text-xs text-gray-500 mt-1">
                   Quotation Number: {quotation.quotationNumber}
                 </DialogDescription>
+                {quotation.projectRevisionId && (
+                  <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                    <div className="font-medium text-slate-900">
+                      {quotation.projectCode ? `${quotation.projectCode} · ` : ''}
+                      {quotation.projectName || 'Project quotation'}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-slate-500">
+                      <span>Revision: {quotation.projectRevisionCode || '-'}</span>
+                      <span>Status: {quotation.projectRevisionStatus || 'working'}</span>
+                      <span>Role: {quotationRoleLabel}</span>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <Button

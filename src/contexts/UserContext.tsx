@@ -90,11 +90,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       if (user) {
         localStorage.setItem('cosun_auth_user', JSON.stringify(user));
-      } else {
+      } else if (!authLoading) {
         localStorage.removeItem('cosun_auth_user');
       }
     }
-  }, [user]);
+  }, [authLoading, user]);
 
   // 监听 Supabase Auth 状态变化（登录/登出/刷新）
   useEffect(() => {
@@ -173,10 +173,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
     // 监听后续状态变化（登录/登出/token刷新）
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           if (session?.user) {
             setUserState(userFromMeta(session.user));
             void enrichFromProfile(session.user);
+          } else {
+            setUserState(null);
           }
           setAuthLoading(false);
         } else if (event === 'SIGNED_OUT') {
@@ -239,7 +241,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       const dateStr = String(date.getFullYear()).slice(2)
         + String(date.getMonth() + 1).padStart(2, '0')
         + String(date.getDate()).padStart(2, '0');
-      return `INQ-${region}-${dateStr}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`;
+      return `ING-${region}-${dateStr}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`;
     }
   };
 
@@ -250,7 +252,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const dateStr = String(date.getFullYear()).slice(2)
       + String(date.getMonth() + 1).padStart(2, '0')
       + String(date.getDate()).padStart(2, '0');
-    return `INQ-${region}-${dateStr}-????`;
+    return `ING-${region}-${dateStr}-????`;
   };
 
   return (
@@ -279,4 +281,8 @@ export function useUser() {
     throw new Error('useUser must be used within a UserProvider');
   }
   return context;
+}
+
+export function useOptionalUser() {
+  return useContext(UserContext);
 }

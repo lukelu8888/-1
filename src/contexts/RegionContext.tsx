@@ -55,8 +55,14 @@ export function RegionProvider({ children }: { children: ReactNode }) {
   // Detect user's region based on IP
   const detectRegion = async () => {
     try {
+      if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+        return null;
+      }
       // ipwho.is: 免费、支持 HTTPS、无需 API key
       const response = await fetch('https://ipwho.is/');
+      if (!response.ok) {
+        return null;
+      }
       const data = await response.json();
 
       if (data.success && data.country_code && data.continent_code) {

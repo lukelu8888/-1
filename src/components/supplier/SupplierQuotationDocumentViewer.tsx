@@ -1,18 +1,17 @@
 /**
  * SupplierQuotationDocumentViewer
  *
- * Wraps the professional DocumentModal with real data resolved by
- * useQuotationDocumentData.
+ * Wraps the professional DocumentModal with persisted template-center data.
  *
  * Data flow:
- *   quotation (raw localStorage obj)
- *     → useQuotationDocumentData        (resolves supplier profile, normalises items/prices)
+ *   quotation (Supabase row with persisted template binding)
+ *     → documentDataSnapshot            (SupplierQuotationData)
  *     → buildQuotationPages             (paginates into A4 ReactNode[])
  *     → DocumentModal                   (draggable, zoom, PDF, print)
  *
  * Error / loading states:
- *   • isEmpty  → renders nothing (modal closed)
- *   • pages[]  → passed straight to DocumentModal
+ *   • missing persisted snapshot → inline error page
+ *   • pages[]                  → passed straight to DocumentModal
  */
 
 import React, { useMemo } from 'react';
@@ -20,12 +19,12 @@ import { Edit, Send, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import { DocumentModal } from '../documents/DocumentModal';
 import { buildQuotationPages } from '../documents/templates/SupplierQuotationPages';
-import { useQuotationDocumentData } from '../../hooks/useQuotationDocumentData';
+import type { SupplierQuotationData } from '../documents/templates/SupplierQuotationDocument';
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** Raw quotation object from localStorage / parent state */
+  /** Persisted quotation object from Supabase */
   quotation: any;
   onEdit?: () => void;
   onSubmit?: () => void;
@@ -41,8 +40,31 @@ export default function SupplierQuotationDocumentViewer({
   onSubmit,
   extraActions,
 }: Props) {
-  // ── Resolve all data (supplier profile + normalised items/prices) ──────────
-  const { data, isEmpty } = useQuotationDocumentData(open ? quotation : null);
+  const templateSnapshot = quotation?.templateSnapshot || quotation?.template_snapshot || null;
+  const templateVersion = templateSnapshot?.version || null;
+  const rawData = (quotation?.documentDataSnapshot || quotation?.document_data_snapshot || null) as SupplierQuotationData | null;
+  const data = useMemo(() => {
+    if (!rawData) return null;
+    const projectExecutionBaseline = quotation?.documentRenderMeta?.projectExecutionBaseline
+      || quotation?.document_render_meta?.projectExecutionBaseline
+      || (quotation?.projectRevisionId
+        ? {
+            projectId: quotation.projectId || null,
+            projectCode: quotation.projectCode || null,
+            projectName: quotation.projectName || null,
+            projectRevisionId: quotation.projectRevisionId || null,
+            projectRevisionCode: quotation.projectRevisionCode || null,
+            projectRevisionStatus: quotation.projectRevisionStatus || null,
+            finalRevisionId: quotation.finalRevisionId || null,
+            finalQuotationId: quotation.finalQuotationId || null,
+            finalQuotationNumber: quotation.finalQuotationNumber || null,
+          }
+        : null);
+    return projectExecutionBaseline
+      ? { ...rawData, projectExecutionBaseline }
+      : rawData;
+  }, [quotation, rawData]);
+  const isEmpty = !quotation;
 
   // ── Build paginated A4 pages from the resolved data ───────────────────────
   const pages = useMemo(
@@ -94,8 +116,20 @@ export default function SupplierQuotationDocumentViewer({
     </div>
   );
 
+  const missingBoundSnapshot = !isEmpty && (!templateVersion || !data);
+
+  const snapshotErrorPage = (
+    <div className="flex flex-col items-center justify-center h-64 gap-4 text-slate-500">
+      <RefreshCw className="w-8 h-8 text-slate-300" />
+      <p className="text-sm">该 BJ 未绑定模板中心版本快照，无法预览</p>
+      <Button variant="outline" size="sm" onClick={onClose}>关闭</Button>
+    </div>
+  );
+
   const displayPages = isEmpty
     ? [emptyPage]
+    : missingBoundSnapshot
+      ? [snapshotErrorPage]
     : pages.length === 0 && !data
       ? [errorPage]
       : pages;
@@ -112,7 +146,7 @@ export default function SupplierQuotationDocumentViewer({
       }
       pages={displayPages}
       actions={actions}
-      fileName={`${quotation?.quotationNo ?? 'quotation'}.pdf`}
+      fileName={`${quotation?.quotationNo ?? quotation?.bjNumber ?? 'bj'}.pdf`}
     />
   );
 }

@@ -24,12 +24,18 @@ import {
 import { toast } from 'sonner';
 import { useUser } from '../../contexts/UserContext';
 import { useInquiry } from '../../contexts/InquiryContext';
-import { InquiryPreviewDialog } from '../InquiryPreviewDialog';
+import { adaptInquiryToDocumentData } from '../../utils/documentDataAdapters';
 import { InquiryProductBrowser } from './InquiryProductBrowser';
 import { InquiryProductHome } from './InquiryProductHome';
 import { REGION_CODES, type RegionType } from '../../utils/xjNumberGenerator';
 import { nextInquiryNumber } from '../../lib/supabaseService';
 import { getCurrentUser } from '../../data/authorizedUsers';
+import {
+  buildCustomerInquiryRequirementText,
+  CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+  DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+  type CustomerInquiryRequirementFormFields,
+} from '../documents/templates/CustomerInquiryDocument';
 
 interface ProductItem {
   id: string;
@@ -61,7 +67,6 @@ export function CreateInquiryPage({
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [isSelectingHistory, setIsSelectingHistory] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
   const [activeTab, setActiveTab] = useState<'products' | 'browse'>('products');
   const [browseView, setBrowseView] = useState<'home' | 'category'>('home');
   const [selectedBrowseCategory, setSelectedBrowseCategory] = useState<string>('all');
@@ -73,6 +78,9 @@ export function CreateInquiryPage({
     unit: 'pcs',
     targetPrice: '',
     specifications: ''
+  });
+  const [customerRequirement, setCustomerRequirement] = useState<CustomerInquiryRequirementFormFields>({
+    ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   });
 
   // Get user's inquiry history
@@ -158,6 +166,7 @@ export function CreateInquiryPage({
     // Save to localStorage as draft
     localStorage.setItem('inquiry_draft', JSON.stringify({
       products,
+      requirements: customerRequirement,
       timestamp: Date.now()
     }));
     
@@ -225,9 +234,13 @@ export function CreateInquiryPage({
         totalGrossWeight: '0',
         totalNetWeight: '0'
       },
-      message: '',
+      requirements: { ...customerRequirement },
+      message: buildCustomerInquiryRequirementText(customerRequirement),
       createdAt: now
     };
+    (newInquiry as any).templateSnapshot = { pendingResolution: true };
+    (newInquiry as any).documentRenderMeta = null;
+    (newInquiry as any).documentDataSnapshot = adaptInquiryToDocumentData(newInquiry as any);
 
     console.log('🔵 提交新询价:', newInquiry);
     try {
@@ -443,6 +456,48 @@ export function CreateInquiryPage({
                 )}
               </TabsContent>
             </Tabs>
+
+            <div className="rounded-sm border-2 border-gray-200 bg-white">
+              <div className="border-b-2 border-gray-200 px-6 py-4">
+                <h3 className="text-gray-900 uppercase tracking-wide" style={{ fontSize: '14px', fontWeight: 600 }}>
+                  TRADING REQUIREMENTS
+                </h3>
+                <p className="mt-1 text-gray-600" style={{ fontSize: '12px', fontWeight: 400 }}>
+                  These terms will be written into the inquiry document and flow into the ING template directly.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 p-6 md:grid-cols-2">
+                {CUSTOMER_INQUIRY_REQUIREMENT_FIELDS.map((field) => (
+                  <div
+                    key={field.key}
+                    className={field.type === 'textarea' && field.key === 'otherRequirements' ? 'md:col-span-2' : ''}
+                  >
+                    <Label htmlFor={`create-inquiry-${field.key}`} style={{ fontSize: '13px', fontWeight: 600 }}>
+                      {field.sourceLabel}
+                    </Label>
+                    <p className="mt-1 text-[12px] text-gray-500">{field.description}</p>
+                    {field.type === 'textarea' ? (
+                      <Textarea
+                        id={`create-inquiry-${field.key}`}
+                        placeholder={field.placeholder}
+                        rows={field.rows || 3}
+                        value={customerRequirement[field.key] || ''}
+                        onChange={(e) => setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                        className="mt-2"
+                      />
+                    ) : (
+                      <Input
+                        id={`create-inquiry-${field.key}`}
+                        placeholder={field.placeholder}
+                        value={customerRequirement[field.key] || ''}
+                        onChange={(e) => setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                        className="mt-2"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Footer Actions */}
@@ -468,13 +523,12 @@ export function CreateInquiryPage({
               
               <Button
                 variant="outline"
-                onClick={() => setShowPreview(true)}
-                disabled={products.length === 0}
+                disabled
                 className="border-[#0D3B66] text-[#0D3B66] hover:bg-[#0D3B66] hover:text-white"
                 style={{ fontSize: '13px', fontWeight: 600 }}
               >
                 <Eye className="w-4 h-4 mr-2" strokeWidth={2.5} />
-                PREVIEW
+                PREVIEW SOON
               </Button>
               
               <Button

@@ -35,7 +35,7 @@ import { PurchaseOrderDocument, PurchaseOrderData } from './templates/PurchaseOr
 import { ProformaInvoiceDocument, ProformaInvoiceData } from './templates/ProformaInvoiceDocument';
 import { XJDocument, XJData } from './templates/XJDocument';
 import { SupplierQuotationDocument, SupplierQuotationData } from './templates/SupplierQuotationDocument';
-import { PurchaseRequirementDocument, PurchaseRequirementDocumentData } from './templates/PurchaseRequirementDocument';
+import { QuoteRequirementDocument, QuoteRequirementDocumentData } from './templates/QuoteRequirementDocument';
 import { StatementOfAccountDocument, StatementOfAccountData } from './templates/StatementOfAccountDocument';
 import { CommercialInvoiceDocument, CommercialInvoiceData } from './templates/CommercialInvoiceDocument';
 import { PackingListDocument, PackingListData } from './templates/PackingListDocument';
@@ -53,14 +53,14 @@ import { exportToPDFPrint } from '../../utils/pdfExport';
  */
 
 type DocumentType = 
-  | 'inquiry'           // 客户询价单
-  | 'quotation'         // 报价单
-  | 'sales-contract'    // 销售合同
-  | 'purchase-order'    // 采购订单
-  | 'proforma-invoice'  // 形式发票
+  | 'ing'               // 客户询价单
+  | 'qt'                // 报价单
+  | 'sc'                // 销售合同
+  | 'cg'                // 采购合同
+  | 'pi'                // 形式发票
   | 'supplier-xj'      // 采购询价单
   | 'supplier-quotation' // 供应商报价单
-  | 'purchase-requirement' // 采购需求单
+  | 'qr'               // 报价请求单
   | 'statement'         // 对账单
   | 'commercial-invoice' // 商业发票
   | 'packing-list';     // 装箱单
@@ -73,7 +73,7 @@ type DocumentData =
   | ProformaInvoiceData
   | XJData
   | SupplierQuotationData
-  | PurchaseRequirementDocumentData
+  | QuoteRequirementDocumentData
   | StatementOfAccountData
   | CommercialInvoiceData
   | PackingListData;
@@ -88,8 +88,8 @@ interface SavedDocument {
 }
 
 export function DocumentEditor() {
-  const [documentType, setDocumentType] = useState<DocumentType>('inquiry');
-  const [documentData, setDocumentData] = useState<DocumentData>(getDefaultData('inquiry'));
+  const [documentType, setDocumentType] = useState<DocumentType>('ing');
+  const [documentData, setDocumentData] = useState<DocumentData>(getDefaultData('ing'));
   const [showPreview, setShowPreview] = useState(true);
   const [savedDocuments, setSavedDocuments] = useState<SavedDocument[]>([]);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
@@ -98,14 +98,14 @@ export function DocumentEditor() {
 
   // 文档类型配置
   const documentTypes = [
-    { value: 'inquiry', label: '📋 客户询价单', color: 'blue' },
-    { value: 'quotation', label: '💰 报价单', color: 'green' },
-    { value: 'sales-contract', label: '📄 销售合同', color: 'purple' },
-    { value: 'purchase-order', label: '🛒 采购订单', color: 'orange' },
-    { value: 'proforma-invoice', label: '📜 形式发票', color: 'indigo' },
+    { value: 'ing', label: '📋 客户询价单', color: 'blue' },
+    { value: 'qt', label: '💰 销售报价单', color: 'green' },
+    { value: 'sc', label: '📄 销售合同', color: 'purple' },
+    { value: 'cg', label: '🛒 采购合同', color: 'orange' },
+    { value: 'pi', label: '📜 形式发票', color: 'indigo' },
     { value: 'supplier-xj', label: '📨 采购询价单', color: 'cyan' },
     { value: 'supplier-quotation', label: '💵 供应商报价单', color: 'teal' },
-    { value: 'purchase-requirement', label: '📋 采购需求单', color: 'amber' },
+    { value: 'qr', label: '📋 报价请求单', color: 'amber' },
     { value: 'statement', label: '📊 对账单', color: 'pink' },
     { value: 'commercial-invoice', label: '🧾 商业发票', color: 'rose' },
     { value: 'packing-list', label: '📦 装箱单', color: 'lime' },
@@ -264,22 +264,22 @@ export function DocumentEditor() {
   // 渲染文档预览
   const renderDocumentPreview = () => {
     switch (documentType) {
-      case 'inquiry':
+      case 'ing':
         return <CustomerInquiryDocument ref={documentRef} data={documentData as CustomerInquiryData} />;
-      case 'quotation':
+      case 'qt':
         return <QuotationDocument ref={documentRef} data={documentData as QuotationData} />;
-      case 'sales-contract':
+      case 'sc':
         return <SalesContractDocument ref={documentRef} data={documentData as SalesContractData} />;
-      case 'purchase-order':
+      case 'cg':
         return <PurchaseOrderDocument ref={documentRef} data={documentData as PurchaseOrderData} />;
-      case 'proforma-invoice':
+      case 'pi':
         return <ProformaInvoiceDocument ref={documentRef} data={documentData as ProformaInvoiceData} />;
       case 'supplier-xj':
         return <XJDocument ref={documentRef} data={documentData as XJData} />;
       case 'supplier-quotation':
         return <SupplierQuotationDocument ref={documentRef} data={documentData as SupplierQuotationData} />;
-      case 'purchase-requirement':
-        return <PurchaseRequirementDocument ref={documentRef} data={documentData as PurchaseRequirementDocumentData} />;
+      case 'qr':
+        return <QuoteRequirementDocument ref={documentRef} data={documentData as QuoteRequirementDocumentData} />;
       case 'statement':
         return <StatementOfAccountDocument ref={documentRef} data={documentData as StatementOfAccountData} />;
       case 'commercial-invoice':
@@ -548,7 +548,7 @@ interface ProductRowProps {
 }
 
 function ProductRow({ index, product, documentType, updateField, removeProduct }: ProductRowProps) {
-  const basePath = (documentType === 'inquiry' || documentType === 'quotation' || documentType === 'sales-contract') ? 'products' : 'items';
+  const basePath = (documentType === 'ing' || documentType === 'qt' || documentType === 'sc') ? 'products' : 'items';
   
   return (
     <div className="border border-gray-200 rounded p-3 bg-gray-50 relative">
@@ -647,14 +647,14 @@ function renderBasicFields(type: DocumentType, data: any, updateField: (path: st
   
   // 根据文档类型显示不同的字段
   const fieldMap: Record<string, string> = {
-    'inquiry': 'inquiryNo',
-    'quotation': 'quotationNo',
-    'sales-contract': 'contractNo',
-    'purchase-order': 'poNo',
-    'proforma-invoice': 'piNo',
+    'ing': 'inquiryNo',
+    'qt': 'quotationNo',
+    'sc': 'contractNo',
+    'cg': 'poNo',
+    'pi': 'piNo',
     'supplier-xj': 'xjNo',
     'supplier-quotation': 'quotationNo',
-    'purchase-requirement': 'requirementNo',
+    'qr': 'requirementNo',
   };
 
   const noField = fieldMap[type];
@@ -764,14 +764,14 @@ function formatFieldName(field: string): string {
 // 获取文档类型名称
 function getDocTypeName(type: DocumentType): string {
   const typeMap: Record<DocumentType, string> = {
-    'inquiry': '客户询价单',
-    'quotation': '报价单',
-    'sales-contract': '销售合同',
-    'purchase-order': '采购订单',
-    'proforma-invoice': '形式发票',
+    'ing': '客户询价单',
+    'qt': '销售报价单',
+    'sc': '销售合同',
+    'cg': '采购合同',
+    'pi': '形式发票',
     'supplier-xj': '采购询价单',
     'supplier-quotation': '供应商报价单',
-    'purchase-requirement': '采购需求单',
+    'qr': '报价请求单',
     'statement': '对账单',
     'commercial-invoice': '商业发票',
     'packing-list': '装箱单',
@@ -784,9 +784,9 @@ function getDefaultData(type: DocumentType): DocumentData {
   const baseDate = new Date().toISOString().split('T')[0];
   
   switch (type) {
-    case 'inquiry':
+    case 'ing':
       return {
-        inquiryNo: 'INQ-NA-' + Date.now(),
+        inquiryNo: 'ING-NA-' + Date.now(),
         inquiryDate: baseDate,
         region: 'NA',
         customer: {
@@ -810,7 +810,7 @@ function getDefaultData(type: DocumentType): DocumentData {
         }
       } as CustomerInquiryData;
     
-    case 'quotation':
+    case 'qt':
       return {
         quotationNo: 'QT-NA-' + Date.now(),
         quotationDate: baseDate,
@@ -850,7 +850,7 @@ function getDefaultData(type: DocumentType): DocumentData {
         remarks: ''
       } as QuotationData;
 
-    case 'sales-contract':
+    case 'sc':
       return {
         contractNo: 'SC-NA-' + Date.now(),
         contractDate: baseDate,

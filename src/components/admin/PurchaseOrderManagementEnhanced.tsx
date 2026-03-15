@@ -39,16 +39,21 @@ import { PurchaseOrderDocument, PurchaseOrderData } from '../documents/templates
 import { XJData } from '../documents/templates/XJDocument'; // 🔥 采购询价单(XJ)模板
 import QuoteCreationIntelligent from './QuoteCreationIntelligent'; // 🔥 智能报价创建页面
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport'; // 🔥 PDF导出工具
-import { usePurchaseRequirements, PurchaseRequirement, PurchaserFeedback } from '../../contexts/PurchaseRequirementContext'; // 🔥 采购需求Context
+import {
+  useQuoteRequirements,
+  type QuoteRequirement,
+  type QuoteRequirementFeedback as PurchaserFeedback,
+} from '../../contexts/QuoteRequirementContext'; // 🔥 QR Context（沿用现有类型名以保持本文件稳定）
 import { usePurchaseOrders, PurchaseOrder as PurchaseOrderType, PurchaseOrderItem } from '../../contexts/PurchaseOrderContext'; // 🔥 采购订单Context
 import { useXJs, XJ, XJProduct } from '../../contexts/XJContext'; // 🔥 XJ Context
 import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 报价Context（用于保存业务员报价）
+import { useInquiry } from '../../contexts/InquiryContext';
 import { PurchaserFeedbackForm } from './PurchaserFeedbackForm'; // 🔥 智能采购反馈表单
 import { useUser } from '../../contexts/UserContext'; // 🔥 用户Context
 import { useApproval } from '../../contexts/ApprovalContext';
 import { generateXJNumber, nextXJNumber } from '../../utils/xjNumberGenerator'; // 🔥 XJ编号生成器
 import { generateCGNumber, nextCGNumberAsync, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
-import { contractService, xjService, supplierQuotationService, companyService, purchaseRequirementService } from '../../lib/supabaseService';
+import { contractService, supplierQuotationService, companyService } from '../../lib/supabaseService';
 import { TERMS_OPTIONS } from './purchase-order/purchaseOrderConstants'; // 🔥 从常量文件导入
 import { PurchaseOrderEditDialog } from './purchase-order/PurchaseOrderEditDialog';
 import { PurchaseOrderCreateDialogs } from './purchase-order/PurchaseOrderCreateDialogs';
@@ -61,7 +66,7 @@ import { ProcurementRequestsTab } from './purchase-order/ProcurementRequestsTab'
 import { SupplierAllocationDialog } from './purchase-order/SupplierAllocationDialog';
 import { PurchaseOrderDetailDialog } from './purchase-order/PurchaseOrderDetailDialog';
 import { PurchaseOrderPreviewDialog } from './purchase-order/PurchaseOrderPreviewDialog';
-import { PurchaseRequirementPreviewDialog } from './purchase-order/PurchaseRequirementPreviewDialog';
+import { QuoteRequirementPreviewDialog } from './purchase-order/QuoteRequirementPreviewDialog';
 import {
   createInitialCreateOrderForm,
   createInitialEditPOForm,
@@ -72,12 +77,23 @@ import {
 import {
   getBusinessTypeLabel, 
   getUrgencyConfig,
+  buildPurchaseOrderDocumentSnapshot,
+  buildQuoteRequirementDocumentSnapshot,
+  buildXJDocumentSnapshot,
   convertToPOData,
-  convertToPRData,
   desensitizeFeedback,
+  extractProjectExecutionBaseline,
   generateXJDocumentData
 } from './purchase-order/purchaseOrderUtils'; // 🔥 从工具函数文件导入
+import {
+  findRelatedInquiryForProcurementDoc,
+  hydrateProcurementRequirementWithInquiry,
+} from '../../utils/procurementRequestContext';
+import { buildProcurementConditionGroups } from '../../utils/procurementRequestContext';
+import { adaptLegacyQuotationToDocumentData } from '../../utils/documentDataAdapters';
+import { saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
 import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 /**
  * 🔥 采购订单管理 - 台湾大厂风格
@@ -88,12 +104,12 @@ import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tom
 // 🔥 TERMS_OPTIONS已从purchase-order/purchaseOrderConstants.ts导入，不再在此定义
 // UI 缓存键：审批请求在切页时的即时通知缓存，业务数据已写入 Supabase approval_records 表
 // 此 localStorage 仅用于减少切页空窗，可安全删除（不影响 Supabase 中的审批数据）
-const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
 
 const PurchaseOrderManagementEnhanced: React.FC = () => {
   
-  // 🔥 使用采购需求Context - 添加deleteRequirement
-  const { requirements, updateRequirement, deleteRequirement, refreshPurchaseRequirementsFromApi } = usePurchaseRequirements();
+  // 🔥 使用 QR Context - 底层仍复用当前主承载表
+  const { requirements, updateRequirement, deleteRequirement, refreshQuoteRequirementsFromApi } = useQuoteRequirements();
+  const { inquiries } = useInquiry();
   // 🔥 使用采购订单Context
   const { purchaseOrders, addPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder } = usePurchaseOrders();
   // 🔥 使用XJ Context - 获取rfqs列表用于计算状态
@@ -124,16 +140,16 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [showOrderDialog, setShowOrderDialog] = useState(false);
   
   // 🔥 需求详情对话框状态
-  const [viewRequirement, setViewRequirement] = useState<PurchaseRequirement | null>(null);
+  const [viewRequirement, setViewRequirement] = useState<QuoteRequirement | null>(null);
   const [showRequirementDialog, setShowRequirementDialog] = useState(false);
   
   // 🔥 智能报价创建对话框状态
   const [showQuoteCreation, setShowQuoteCreation] = useState(false);
-  const [selectedRequirementForQuote, setSelectedRequirementForQuote] = useState<PurchaseRequirement | null>(null);
+  const [selectedRequirementForQuote, setSelectedRequirementForQuote] = useState<QuoteRequirement | null>(null);
   
   // 🔥 创建采购订单对话框状态
   const [showCreateOrderDialog, setShowCreateOrderDialog] = useState(false);
-  const [selectedRequirement, setSelectedRequirement] = useState<PurchaseRequirement | null>(null);
+  const [selectedRequirement, setSelectedRequirement] = useState<QuoteRequirement | null>(null);
   const [createOrderForm, setCreateOrderForm] = useState(createInitialCreateOrderForm);
   const [showEditPODialog, setShowEditPODialog] = useState(false);
   const [editingPO, setEditingPO] = useState<PurchaseOrderType | null>(null);
@@ -159,7 +175,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   
   // 🔥 创建XJ对话框状态
   const [showCreateXJDialog, setShowCreateRFQDialog] = useState(false);
-  const [selectedRequirementForXJ, setSelectedRequirementForRFQ] = useState<PurchaseRequirement | null>(null);
+  const [selectedRequirementForXJ, setSelectedRequirementForRFQ] = useState<QuoteRequirement | null>(null);
   const [selectedSuppliers, setSelectedSuppliers] = useState<Supplier[]>([]);
   const [xjDeadline, setRFQDeadline] = useState<Date | undefined>(undefined);
   const [xjRemarks, setRFQRemarks] = useState('');
@@ -173,6 +189,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 询价单预览状态
   const [showXJPreview, setShowRFQPreview] = useState(false);
   const [currentXJData, setCurrentRFQData] = useState<XJData | null>(null);
+  const [currentXJBaseline, setCurrentXJBaseline] = useState<any>(null);
   const xjDocRef = React.useRef<HTMLDivElement>(null);
   
   // 🔥 询价单编辑状态
@@ -206,10 +223,17 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 智能采购反馈 - 状态管理
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
-  const [feedbackRequirement, setFeedbackRequirement] = useState<PurchaseRequirement | null>(null);
+  const [feedbackRequirement, setFeedbackRequirement] = useState<QuoteRequirement | null>(null);
 
   // 🔥 采购需求数据 - 从Context获取
-  const purchaseRequirements = requirements;
+  const purchaseRequirements = useMemo(
+    () =>
+      requirements.map((req) => {
+        const relatedInquiry = findRelatedInquiryForProcurementDoc(req, inquiries);
+        return hydrateProcurementRequirementWithInquiry(req, relatedInquiry);
+      }),
+    [requirements, inquiries],
+  );
 
   // 🔥 供应商报价数据 - Supabase-first
   const [supplierQuotations, setSupplierQuotations] = useState<any[]>([]);
@@ -250,7 +274,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   
   // Supabase-first: 直接读 DB status 字段，不在前端重新计算
   // DB purchase_requirements.status 由业务操作（创建XJ、收到报价等）更新
-  const calculateRequirementStatus = (req: PurchaseRequirement): 'pending' | 'partial' | 'processing' | 'completed' => {
+  const calculateRequirementStatus = (req: QuoteRequirement): 'pending' | 'partial' | 'processing' | 'completed' => {
     const s = req.status as string;
     if (s === 'completed') return 'completed';
     if (s === 'processing' || s === 'in_progress') return 'processing';
@@ -268,7 +292,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return list.some((q: any) => getQuotationXJKey(q) === key);
   }, [supplierQuotations]);
 
-  const hasDownstreamXJForRequirement = React.useCallback((req: PurchaseRequirement, xjList?: XJ[]) => {
+  const hasDownstreamXJForRequirement = React.useCallback((req: QuoteRequirement, xjList?: XJ[]) => {
     const reqNo = String(req?.requirementNo || '').trim();
     const list = Array.isArray(xjList) ? xjList : xjs;
     if (!reqNo) return false;
@@ -282,9 +306,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       const req = requirements.find((r) => String(r.requirementNo || '').trim() === reqNo);
       if (!req) return;
       const activeXJCount = list.filter((x) => String(x?.requirementNo || '').trim() === reqNo).length;
-      const nextStatus: PurchaseRequirement['status'] = activeXJCount > 0 ? 'processing' : 'pending';
+      const nextStatus: QuoteRequirement['status'] = activeXJCount > 0 ? 'processing' : 'pending';
       if ((req.status as any) !== nextStatus) {
-        updateRequirement(req.id, { status: nextStatus });
+        void updateRequirement(req.id, { status: nextStatus }).catch((error: any) => {
+          console.warn('⚠️ [PurchaseOrderMgmt] recomputeRequirementStatusByXJ failed:', error?.message || error);
+        });
       }
     });
   }, [requirements, updateRequirement, xjs]);
@@ -310,7 +336,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     try {
       const rows = await supplierQuotationService.getAll();
       const apiList: any[] = Array.isArray(rows) ? rows : [];
-      const visibleList = filterNotDeleted('quotation', apiList, (q: any) => getQuotationMarkers(q));
+      const visibleList = filterNotDeleted('qt', apiList, (q: any) => getQuotationMarkers(q));
       setSupplierQuotations(visibleList);
     } catch (e: any) {
       console.warn('⚠️ [loadSupplierQuotations] Supabase 读取失败:', e?.message);
@@ -329,7 +355,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     if (!selectedSupplierQuotation) return;
     const qid = selectedSupplierQuotation.id;
     try {
-      await supplierQuotationService.upsert({ ...selectedSupplierQuotation, status: 'accepted' });
+      await saveSupplierQuotation({ ...selectedSupplierQuotation, status: 'accepted' } as any);
     } catch (e: any) {
       console.warn('⚠️ 接受报价 Supabase 同步失败:', e?.message);
       toast.error('接受报价失败：Supabase 写入未成功');
@@ -346,7 +372,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     if (!selectedSupplierQuotation) return;
     const qid = selectedSupplierQuotation.id;
     try {
-      await supplierQuotationService.upsert({ ...selectedSupplierQuotation, status: 'rejected' });
+      await saveSupplierQuotation({ ...selectedSupplierQuotation, status: 'rejected' } as any);
     } catch (e: any) {
       console.warn('⚠️ 拒绝报价 Supabase 同步失败:', e?.message);
       toast.error('拒绝报价失败：Supabase 写入未成功');
@@ -475,12 +501,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
     const isMatched = (reqItem: any) => {
       const reqId = String(reqItem?.id || '').trim();
-      const reqModel = String(reqItem?.modelNo || '').trim().toLowerCase();
+      const reqModel = String(getFormalBusinessModelNo(reqItem) || '').trim().toLowerCase();
       const reqName = String(reqItem?.productName || '').trim().toLowerCase();
       return children.some((child) =>
         (child.items || []).some((childItem: any) => {
           const sameId = reqId && String(childItem?.id || '').trim() === reqId;
-          const sameModel = reqModel && String(childItem?.modelNo || '').trim().toLowerCase() === reqModel;
+          const sameModel = reqModel && String(getFormalBusinessModelNo(childItem) || '').trim().toLowerCase() === reqModel;
           const sameName = reqName && String(childItem?.productName || '').trim().toLowerCase() === reqName;
           return sameId || sameModel || sameName;
         })
@@ -507,13 +533,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 采购请求状态自动随分配结果变化（包括下游CG被删除后自动恢复可分配）
   useEffect(() => {
     const requests = purchaseOrders.filter((po) => isProcurementRequestRecord(po));
-    requests.forEach((po) => {
-      const runtimeStatus = getProcurementRequestRuntimeStatus(po);
-      const persisted = String((po as any).procurementRequestStatus || '').trim();
-      if (persisted !== runtimeStatus) {
-        updatePurchaseOrder(po.id, { procurementRequestStatus: runtimeStatus } as any);
+    const syncStatuses = async () => {
+      for (const po of requests) {
+        const runtimeStatus = getProcurementRequestRuntimeStatus(po);
+        const persisted = String((po as any).procurementRequestStatus || '').trim();
+        if (persisted === runtimeStatus) continue;
+        try {
+          await updatePurchaseOrder(po.id, { procurementRequestStatus: runtimeStatus } as any);
+        } catch (error: any) {
+          console.warn('⚠️ [PurchaseOrderMgmt] procurementRequestStatus sync failed:', error?.message || error);
+        }
       }
-    });
+    };
+    void syncStatuses();
   }, [purchaseOrders, isProcurementRequestRecord, getProcurementRequestRuntimeStatus, updatePurchaseOrder]);
 
   // 🔥 筛选采购订单 - 根据订单号、供应商、需求编号（不含“待分配”的采购请求）
@@ -539,8 +571,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const existingByPo = new Set(
       (purchaseOrders || []).map((po) => String(po.poNumber || '').trim().toUpperCase()).filter(Boolean)
     );
-
-    purchaseRequirements.forEach((req) => {
+    const recoverMissingProcurementRequests = async () => {
+      const recoveryTasks: Promise<void>[] = [];
+      purchaseRequirements.forEach((req) => {
       const note = String((req as any).specialRequirements || '');
       const match = note.match(/采购单号[:：]\s*(CQ-\d{6}-\d{4})/i);
       if (!match) return;
@@ -554,7 +587,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           ? (req as any).items.map((item: any, idx: number) => ({
               id: String(item?.id || `item-${idx + 1}`),
               productName: String(item?.productName || 'Unknown Product'),
-              modelNo: String(item?.modelNo || item?.productName || '-'),
+              modelNo: getFormalBusinessModelNo(item) || String(item?.productName || '-'),
               specification: String(item?.specification || ''),
               quantity: Number(item?.quantity || 0),
               unit: String(item?.unit || 'PCS'),
@@ -569,7 +602,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const recoveredCurrency =
           normalizeCurrencyCode((req as any)?.currency || recoveredItems[0]?.currency || 'USD') || 'USD';
 
-        addPurchaseOrder({
+        const recoveredOrder = {
           id: `recovered-${cqNo.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           poNumber: cqNo,
           requirementNo,
@@ -594,12 +627,29 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         createdDate: String((req as any).createdDate || new Date().toISOString()),
         updatedDate: new Date().toISOString(),
         procurementRequestStatus: 'pending_procurement_assignment',
-      } as any);
-    });
+        } as any;
+        recoveredOrder.templateSnapshot = { pendingResolution: true };
+        recoveredOrder.documentRenderMeta = null;
+        recoveredOrder.documentDataSnapshot = buildPurchaseOrderDocumentSnapshot(recoveredOrder);
+        recoveryTasks.push(
+          addPurchaseOrder(recoveredOrder).catch((error: any) => {
+            console.warn('⚠️ [PurchaseOrderMgmt] recovered purchase request sync failed:', error?.message || error);
+            toast.error('自动补回采购请求失败', {
+              description: error?.message || 'Supabase 写入失败',
+              duration: 5000,
+            });
+          })
+        );
+      });
+
+      await Promise.all(recoveryTasks);
+    };
+
+    void recoverMissingProcurementRequests();
   }, [purchaseRequirements, purchaseOrders, addPurchaseOrder]);
 
   const requirementByNo = useMemo(() => {
-    const byNo = new Map<string, PurchaseRequirement>();
+    const byNo = new Map<string, QuoteRequirement>();
     purchaseRequirements.forEach((req) => {
       if (req.requirementNo) byNo.set(req.requirementNo, req);
     });
@@ -637,7 +687,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       return quotation.documentData.products.map((p: any) => ({
         id: p?.id || p?.productId || '',
         productName: p?.description || p?.productName || '',
-        modelNo: p?.modelNo || '',
+        modelNo: getFormalBusinessModelNo(p),
         unitPrice: p?.unitPrice || 0,
         currency: p?.currency || quotation?.currency || '',
       }));
@@ -645,7 +695,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return [];
   };
 
-  const findRequirementForPO = (po: PurchaseOrderType): PurchaseRequirement | undefined => {
+  const findRequirementForPO = (po: PurchaseOrderType): QuoteRequirement | undefined => {
     const requirementNo = getRequirementNoFromPO(po);
     if (requirementNo && requirementByNo.has(requirementNo)) {
       return requirementByNo.get(requirementNo);
@@ -677,7 +727,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       matchedXJ?.xjNumber ||
       '',
     ).trim();
-    return candidate.startsWith('RFQ-') || candidate.startsWith('INQ-') ? candidate : '';
+    return candidate.startsWith('RFQ-') || candidate.startsWith('ING-') ? candidate : '';
   };
 
   const getInquiryByContractRef = (po: PurchaseOrderType): string => {
@@ -696,7 +746,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     });
     if (!matchedContract) return '';
     const inquiryNo = String(matchedContract?.inquiryNumber || '').trim();
-    return inquiryNo.startsWith('RFQ-') || inquiryNo.startsWith('INQ-') ? inquiryNo : '';
+    return inquiryNo.startsWith('RFQ-') || inquiryNo.startsWith('ING-') ? inquiryNo : '';
   };
 
   const resolveInquirySourceRef = (po: PurchaseOrderType): string => {
@@ -705,18 +755,18 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const xjFromRequirement = requirementNo ? getXJNumberByRequirementNo(requirementNo) : '';
     const poRfqRef = String((po as any).xjNumber || '').trim();
     const poSourceRef = String(po.sourceRef || '').trim();
-    const xjFromPO = poRfqRef.startsWith('RFQ-') || poRfqRef.startsWith('INQ-')
+    const xjFromPO = poRfqRef.startsWith('RFQ-') || poRfqRef.startsWith('ING-')
       ? poRfqRef
-      : (poSourceRef.startsWith('RFQ-') || poSourceRef.startsWith('INQ-') ? poSourceRef : '');
+      : (poSourceRef.startsWith('RFQ-') || poSourceRef.startsWith('ING-') ? poSourceRef : '');
     const legacyFromRequirement = String(matchedRequirement?.sourceRef || '').trim();
     const sourceInquiryNumber = String(matchedRequirement?.sourceInquiryNumber || '').trim();
     const inquiryFromContract = getInquiryByContractRef(po);
-    // 规则：来源统一显示 INQ 客户询价编号；不显示 CG/SC/XJ
-    if (sourceInquiryNumber.startsWith('RFQ-') || sourceInquiryNumber.startsWith('INQ-')) return sourceInquiryNumber;
+    // 规则：来源统一显示 ING 客户询价编号；不显示 CG/SC/XJ
+    if (sourceInquiryNumber.startsWith('RFQ-') || sourceInquiryNumber.startsWith('ING-')) return sourceInquiryNumber;
     if (xjFromRequirement) return xjFromRequirement;
     if (inquiryFromContract) return inquiryFromContract;
     if (xjFromPO) return xjFromPO;
-    if (legacyFromRequirement.startsWith('RFQ-') || legacyFromRequirement.startsWith('INQ-')) return legacyFromRequirement;
+    if (legacyFromRequirement.startsWith('RFQ-') || legacyFromRequirement.startsWith('ING-')) return legacyFromRequirement;
     return '';
   };
 
@@ -779,14 +829,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const resolveQuotedItemPricing = React.useCallback(
     (po: PurchaseOrderType, item: PurchaseOrderItem, supplierCode?: string) => {
       const itemId = String(item?.id || '').trim();
-      const itemModel = String(item?.modelNo || '').trim().toLowerCase();
+      const itemModel = String(getFormalBusinessModelNo(item) || '').trim().toLowerCase();
       const itemName = String(item?.productName || '').trim().toLowerCase();
       const quotes = getPOQuoteCandidates(po, supplierCode);
       for (const quotation of quotes) {
         const qItems = getQuotationItems(quotation);
         const matched = qItems.find((qi: any) => {
           const qiId = String(qi?.id || qi?.productId || '').trim();
-          const qiModel = String(qi?.modelNo || '').trim().toLowerCase();
+          const qiModel = String(getFormalBusinessModelNo(qi) || '').trim().toLowerCase();
           const qiName = String(qi?.productName || qi?.description || '').trim().toLowerCase();
           const sameId = itemId !== '' && qiId !== '' && qiId === itemId;
           const sameModel = itemModel !== '' && qiModel !== '' && qiModel === itemModel;
@@ -842,52 +892,65 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     [resolveQuotedItemPricing]
   );
 
-  // 自动反查回填：为缺失来源的采购单回填 INQ（持久化到 purchase order）
+  // 自动反查回填：为缺失来源的采购单回填 ING（持久化到 purchase order）
   useEffect(() => {
     if (!purchaseOrders.length) return;
-    purchaseOrders.forEach((po) => {
-      const existing = String((po as any).xjNumber || '').trim();
-      if (existing.startsWith('RFQ-') || existing.startsWith('INQ-')) return;
-      const inferred = resolveInquirySourceRef(po);
-      if (!inferred) return;
-      if (inferred === existing) return;
-      updatePurchaseOrder(po.id, { xjNumber: inferred });
-    });
+    const backfillXjNumbers = async () => {
+      for (const po of purchaseOrders) {
+        const existing = String((po as any).xjNumber || '').trim();
+        if (existing.startsWith('RFQ-') || existing.startsWith('ING-')) continue;
+        const inferred = resolveInquirySourceRef(po);
+        if (!inferred || inferred === existing) continue;
+        try {
+          await updatePurchaseOrder(po.id, { xjNumber: inferred });
+        } catch (error: any) {
+          console.warn('⚠️ [PurchaseOrderMgmt] xjNumber backfill failed:', error?.message || error);
+        }
+      }
+    };
+    void backfillXjNumbers();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [purchaseOrders, salesContractsLite, xjs, purchaseRequirements]);
 
   // 审批联动：老板审批采购请求后，自动更新采购单可下推状态
   useEffect(() => {
     if (!purchaseOrders.length || !approvalRequests.length) return;
-    purchaseOrders.forEach((po) => {
-      const reqStatus = String((po as any).procurementRequestStatus || '');
-      if (reqStatus !== 'pending_boss_approval') return;
-      const poNo = String(po.poNumber || '').trim();
-      const parentNo = String((po as any).parentRequestPoNumber || '').trim();
-      const requestIds = [
-        poNo ? `PRQ-${poNo}` : '',
-        !poNo && parentNo ? `PRQ-${parentNo}` : ''
-      ].filter(Boolean);
-      const matched = approvalRequests.find((r) => requestIds.includes(String(r.relatedDocumentId || '')));
-      if (!matched) return;
-      if (matched.status === 'approved') {
-        updatePurchaseOrder(po.id, {
-          status: 'confirmed',
-          ...( { procurementRequestStatus: 'approved_boss' } as any ),
-        } as any);
-      } else if (matched.status === 'rejected') {
-        updatePurchaseOrder(po.id, {
-          ...( { procurementRequestStatus: 'rejected_boss' } as any ),
-        } as any);
+    const syncApprovalStatuses = async () => {
+      for (const po of purchaseOrders) {
+        const reqStatus = String((po as any).procurementRequestStatus || '');
+        if (reqStatus !== 'pending_boss_approval') continue;
+        const poNo = String(po.poNumber || '').trim();
+        const parentNo = String((po as any).parentRequestPoNumber || '').trim();
+        const requestIds = [
+          poNo ? `PRQ-${poNo}` : '',
+          !poNo && parentNo ? `PRQ-${parentNo}` : ''
+        ].filter(Boolean);
+        const matched = approvalRequests.find((r) => requestIds.includes(String(r.relatedDocumentId || '')));
+        if (!matched) continue;
+        try {
+          if (matched.status === 'approved') {
+            await updatePurchaseOrder(po.id, {
+              status: 'confirmed',
+              ...( { procurementRequestStatus: 'approved_boss' } as any ),
+            } as any);
+          } else if (matched.status === 'rejected') {
+            await updatePurchaseOrder(po.id, {
+              ...( { procurementRequestStatus: 'rejected_boss' } as any ),
+            } as any);
+          }
+        } catch (error: any) {
+          console.warn('⚠️ [PurchaseOrderMgmt] approval status sync failed:', error?.message || error);
+        }
       }
-    });
+    };
+    void syncApprovalStatuses();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [purchaseOrders, approvalRequests]);
 
   // 🔥 工具函数已移至 purchase-order/purchaseOrderUtils.ts
 
   // 🔥 处理采购单号点击 - 打开文档预览
-  const handleViewPODocument = (po: PurchaseOrderType) => {
+  const handleViewPODocument = async (po: PurchaseOrderType) => {
     const tracedPatch = buildPOWithTracedQuoteCurrency(po);
     const poForDoc = {
       ...po,
@@ -903,27 +966,34 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         String(item.currency || '').toUpperCase() !== String(next.currency || '').toUpperCase();
     });
     if (hasCurrencyDelta || hasAmountDelta || hasItemDelta) {
-      updatePurchaseOrder(po.id, {
-        items: tracedPatch.items as any,
-        currency: tracedPatch.currency,
-        totalAmount: tracedPatch.totalAmount,
-        updatedDate: new Date().toISOString(),
-      } as any);
+      try {
+        await updatePurchaseOrder(po.id, {
+          items: tracedPatch.items as any,
+          currency: tracedPatch.currency,
+          totalAmount: tracedPatch.totalAmount,
+          updatedDate: new Date().toISOString(),
+        } as any);
+      } catch (error: any) {
+        toast.error('采购合同数据同步失败', {
+          description: error?.message || 'Supabase 写入失败',
+          duration: 5000,
+        });
+        return;
+      }
     }
-    const poData = convertToPOData(poForDoc);
+    const poData = buildPurchaseOrderDocumentSnapshot(poForDoc as any);
     setCurrentPOData(poData);
     setShowPOPreview(true);
   };
 
   // 🔥 处理采购需求单号点击 - 打开文档预览
-  const handleViewPRDocument = (req: PurchaseRequirement) => {
-    const prData = convertToPRData(req, user?.role);
+  const handleViewPRDocument = (req: QuoteRequirement) => {
     // 使用文档预览
     setViewRequirement(req);
     setShowRequirementDialog(true);
   };
 
-  const handleApplyBossApproval = (po: PurchaseOrderType) => {
+  const handleApplyBossApproval = async (po: PurchaseOrderType) => {
     const navigateToBossApproval = () => {
       window.dispatchEvent(new CustomEvent('navigate', {
         detail: {
@@ -966,7 +1036,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const currentApproverEmail = managerByRegion[po.region || 'NA'] || 'ceo@cosun.com';
     const requestId = `PRQ-${mainPoNo || currentPoNo}`;
     const existingRequest = approvalRequests.find((r) => String(r.relatedDocumentId || '') === requestId);
-    let bridgeRequest: any = null;
     if (existingRequest && (existingRequest.status === 'pending' || existingRequest.status === 'forwarded')) {
       toast.info('该采购单已提交审核');
       navigateToBossApproval();
@@ -974,7 +1043,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
 
     if (existingRequest && isRejectedAndResubmit) {
-      updateApprovalRequest(existingRequest.id, {
+      await updateApprovalRequest(existingRequest.id, {
         status: 'pending',
         submittedAt: new Date().toISOString(),
         submittedBy: user?.email || existingRequest.submittedBy,
@@ -989,7 +1058,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       } as any);
     } else if (!existingRequest) {
       const linkedRequirement = findRequirementForPO(po);
-      bridgeRequest = addApprovalRequest({
+      await addApprovalRequest({
         type: 'contract',
         relatedDocumentId: requestId,
         relatedDocumentType: '采购请求审批',
@@ -1016,26 +1085,21 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         deadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         expiresIn: 24
       } as any);
-
-      try {
-        const rawBridge = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
-        const bridgeItems = rawBridge ? JSON.parse(rawBridge) : [];
-        const next = Array.isArray(bridgeItems) ? bridgeItems : [];
-        next.unshift({
-          currentApprover: currentApproverEmail,
-          request: bridgeRequest,
-        });
-        localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(next.slice(0, 200)));
-      } catch {}
     }
-    groupPOs.forEach((p) => {
-      updatePurchaseOrder(p.id, { procurementRequestStatus: 'pending_boss_approval' } as any);
-    });
+    try {
+      await Promise.all(groupPOs.map((p) => updatePurchaseOrder(p.id, { procurementRequestStatus: 'pending_boss_approval' } as any)));
+    } catch (error: any) {
+      toast.error('同步采购单审批状态失败', {
+        description: error?.message || 'Supabase 写入失败',
+        duration: 5000,
+      });
+      return;
+    }
     toast.success(`已提交审核（${groupPOs.length}张采购单）`);
     navigateToBossApproval();
   };
 
-  const handlePushPurchaseToSupplier = (po: PurchaseOrderType) => {
+  const handlePushPurchaseToSupplier = async (po: PurchaseOrderType) => {
     const reqStatus = String((po as any).procurementRequestStatus || '');
     const isUnassigned = !po.supplierCode || po.supplierCode === 'TBD' || String(po.supplierName || '').includes('待');
     if (reqStatus === 'pending_procurement_assignment' || isUnassigned) {
@@ -1063,13 +1127,16 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const parentNo = String((p as any).parentRequestPoNumber || '').trim();
         return pNo === mainPoNo || parentNo === mainPoNo;
       });
-      targetPOs.forEach((p) => {
-        updatePurchaseOrder(p.id, {
+      try {
+        await Promise.all(targetPOs.map((p) => updatePurchaseOrder(p.id, {
           procurementRequestStatus: 'pushed_supplier',
           status: 'confirmed',
           updatedDate: new Date().toISOString(),
-        } as any);
-      });
+        } as any)));
+      } catch (error: any) {
+        toast.error(`下推采购单失败：${error?.message || '未知错误'}`);
+        return;
+      }
       toast.success(`已向供应商发送 ${targetPOs.length || 1} 张采购单`);
       return;
     }
@@ -1248,11 +1315,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }));
   };
 
-  const handleSaveEditPO = () => {
+  const handleSaveEditPO = async () => {
     if (!editingPO) return;
     const totalAmount = editPOItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     const normalizedSourceRef = normalizeRegionalDocNo(editPOForm.sourceRef);
-    updatePurchaseOrder(editingPO.id, {
+    try {
+      await updatePurchaseOrder(editingPO.id, {
       poNumber: String(editPOForm.poNumber || '').trim(),
       requirementNo: String(editPOForm.requirementNo || '').trim(),
       xjNumber: String(editPOForm.xjNumber || '').trim(),
@@ -1304,14 +1372,25 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       items: editPOItems,
       totalAmount,
       updatedDate: new Date().toISOString(),
-    } as any);
-    toast.success(`采购订单 ${editingPO.poNumber} 已更新`);
-    setShowEditPODialog(false);
-    setEditingPO(null);
+      } as any);
+      toast.success(`采购订单 ${editingPO.poNumber} 已更新`);
+      setShowEditPODialog(false);
+      setEditingPO(null);
+    } catch (error: any) {
+      toast.error(`采购订单更新失败：${error?.message || '未知错误'}`);
+    }
   };
 
   // 🔥 处理创建XJ - 从采购需求创建，向多个供应商发送采购询价
-  const handleCreateRFQFromRequirement = (req: PurchaseRequirement) => {
+  const handleCreateRFQFromRequirement = (req: QuoteRequirement) => {
+    const sourceTemplateSnapshot = (req as any).templateSnapshot || (req as any).template_snapshot || null;
+    const sourceTemplateVersion = sourceTemplateSnapshot?.version || null;
+    const sourceDocumentData = (req as any).documentDataSnapshot || (req as any).document_data_snapshot || null;
+    if (!sourceTemplateVersion || !sourceDocumentData) {
+      toast.error('该 QR 未绑定模板中心版本快照，无法创建 XJ');
+      return;
+    }
+
     setSelectedRequirementForRFQ(req);
     setSelectedSuppliers([]);
     setRFQDeadline(undefined);
@@ -1336,6 +1415,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     
     const xjData = generateXJDocumentData(supplier, selectedRequirementForXJ, xjDeadline, xjRemarks, selectedProductIds);
     setCurrentRFQData(xjData);
+    setCurrentXJBaseline(extractProjectExecutionBaseline(selectedRequirementForXJ));
     setShowRFQPreview(true);
   };
 
@@ -1370,6 +1450,26 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         ? xj.products
         : [];
     const dateFallback = toDateText(xj.quotationDeadline || xj.createdDate);
+    const relatedRequirement = purchaseRequirements.find((req) =>
+      [
+        (xj as any).requirementNo,
+        (xj as any).sourceQRNumber,
+        (xj as any).sourceQrNumber,
+        (xj as any).sourceRef,
+      ]
+        .filter(Boolean)
+        .includes(req.requirementNo),
+    );
+    const fallbackConditionSource = relatedRequirement || {
+      tradeTerms: rawTerms.deliveryTerms,
+      paymentTerms: rawTerms.paymentTerms,
+      deliveryDate: raw.requiredDeliveryDate || rawTerms.deliveryRequirement,
+      qualityRequirements: rawTerms.inspectionMethod || rawTerms.qualityStandard,
+      packagingRequirements: rawTerms.packaging,
+      remarks: rawTerms.remarks,
+      items: sourceProducts,
+      notes: raw.inquiryDescription,
+    };
 
     return {
       xjNo: String(raw.xjNo || xj.supplierXjNo || xj.xjNumber || ''),
@@ -1400,23 +1500,42 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         specification: String(p?.specification || '-'),
         quantity: Number(p?.quantity || 0),
         unit: String(p?.unit || '件'),
-        modelNo: p?.modelNo ? String(p.modelNo) : undefined,
+        modelNo: getFormalBusinessModelNo(p) || undefined,
         imageUrl: p?.imageUrl ? String(p.imageUrl) : undefined,
         targetPrice: p?.targetPrice ? String(p.targetPrice) : undefined,
       })),
+      conditionGroups:
+        Array.isArray(raw.conditionGroups) && raw.conditionGroups.length > 0
+          ? raw.conditionGroups
+          : buildProcurementConditionGroups(fallbackConditionSource, 'xj'),
       terms: {
         paymentTerms: String(rawTerms.paymentTerms || 'T/T 30% 预付，70% 发货前付清'),
         deliveryTerms: String(rawTerms.deliveryTerms || 'EXW 工厂交货'),
         currency: String(rawTerms.currency || 'USD'),
         deliveryAddress: rawTerms.deliveryAddress ? String(rawTerms.deliveryAddress) : undefined,
+        deliveryRequirement: rawTerms.deliveryRequirement ? String(rawTerms.deliveryRequirement) : undefined,
         qualityStandard: rawTerms.qualityStandard ? String(rawTerms.qualityStandard) : undefined,
         inspectionMethod: rawTerms.inspectionMethod ? String(rawTerms.inspectionMethod) : undefined,
+        packaging: rawTerms.packaging ? String(rawTerms.packaging) : undefined,
+        shippingMarks: rawTerms.shippingMarks ? String(rawTerms.shippingMarks) : undefined,
+        inspectionRequirement: rawTerms.inspectionRequirement ? String(rawTerms.inspectionRequirement) : undefined,
+        technicalDocuments: rawTerms.technicalDocuments ? String(rawTerms.technicalDocuments) : undefined,
+        confidentiality: rawTerms.confidentiality ? String(rawTerms.confidentiality) : undefined,
+        remarks: rawTerms.remarks ? String(rawTerms.remarks) : undefined,
       },
     };
   };
 
   const openXJPreview = (xj: XJ) => {
-    setCurrentRFQData(buildXJPreviewData(xj));
+    const templateSnapshot = (xj as any).templateSnapshot || (xj as any).template_snapshot || null;
+    const templateVersion = templateSnapshot?.version || null;
+    const documentData = (xj as any).documentDataSnapshot || (xj as any).document_data_snapshot || null;
+    if (!templateVersion || !documentData) {
+      toast.error('该 XJ 未绑定模板中心版本快照，无法预览');
+      return;
+    }
+    setCurrentRFQData(documentData as XJData);
+    setCurrentXJBaseline(extractProjectExecutionBaseline(xj));
     setShowRFQPreview(true);
   };
 
@@ -1437,6 +1556,20 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 提交XJ - 向多个供应商发送询价
   const handleSubmitXJ = async () => {
     if (!selectedRequirementForXJ) return;
+
+    const sourceTemplateSnapshot =
+      (selectedRequirementForXJ as any).templateSnapshot ||
+      (selectedRequirementForXJ as any).template_snapshot ||
+      null;
+    const sourceTemplateVersion = sourceTemplateSnapshot?.version || null;
+    const sourceDocumentData =
+      (selectedRequirementForXJ as any).documentDataSnapshot ||
+      (selectedRequirementForXJ as any).document_data_snapshot ||
+      null;
+    if (!sourceTemplateVersion || !sourceDocumentData) {
+      toast.error('该 QR 未绑定模板中心版本快照，无法创建 XJ');
+      return;
+    }
     
     if (selectedSuppliers.length === 0) {
       toast.error('请至少选择一个供应商');
@@ -1462,7 +1595,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
       const requirementItems = selectedRequirementForXJ.items || [];
       if (requirementItems.length === 0) {
-        toast.error('创建失败：采购需求没有产品明细(items)');
+        toast.error('创建失败：QR 没有产品明细(items)');
         return;
       }
 
@@ -1485,6 +1618,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const selectedProducts = requirementItems.filter((item: any) =>
           selectedProductIds.includes(String(item.id))
         );
+        const projectExecutionBaseline = extractProjectExecutionBaseline(selectedRequirementForXJ);
 
         if (selectedProducts.length === 0) {
           throw new Error('选中的产品为空：请检查产品ID类型/字段是否一致');
@@ -1494,12 +1628,16 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const xjProducts: XJProduct[] = selectedProducts.map(item => ({
           id: String(item.id),
           productName: item.productName,
-          modelNo: item.modelNo,
+          modelNo: getFormalBusinessModelNo(item),
           specification: item.specification || '',
           quantity: item.quantity,
           unit: item.unit,
           targetPrice: item.targetPrice,
-          currency: item.targetCurrency || 'USD'
+          currency: item.targetCurrency || 'USD',
+          customerProductId: (item as any).customerProductId || null,
+          projectId: (item as any).projectId || projectExecutionBaseline?.projectId || null,
+          projectRevisionId: (item as any).projectRevisionId || projectExecutionBaseline?.projectRevisionId || null,
+          projectRevisionCode: (item as any).projectRevisionCode || projectExecutionBaseline?.projectRevisionCode || null,
         }));
 
         // 🔥 使用第一个产品作为主产品（兼容旧字段）
@@ -1514,13 +1652,22 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           sourceRef: selectedRequirementForXJ.sourceRef,
           customerName: (selectedRequirementForXJ as any).customerName,
           customerRegion: selectedRequirementForXJ.region,
+          projectId: projectExecutionBaseline?.projectId || null,
+          projectCode: projectExecutionBaseline?.projectCode || null,
+          projectName: projectExecutionBaseline?.projectName || null,
+          projectRevisionId: projectExecutionBaseline?.projectRevisionId || null,
+          projectRevisionCode: projectExecutionBaseline?.projectRevisionCode || null,
+          projectRevisionStatus: projectExecutionBaseline?.projectRevisionStatus || null,
+          finalRevisionId: projectExecutionBaseline?.finalRevisionId || null,
+          finalQuotationId: projectExecutionBaseline?.finalQuotationId || null,
+          finalQuotationNumber: projectExecutionBaseline?.finalQuotationNumber || null,
 
           // 🔥 多产品数组（新字段）
           products: xjProducts,
 
           // 🔥 主产品信息（兼容旧字段）
           productName: mainProduct.productName,
-          modelNo: mainProduct.modelNo,
+          modelNo: getFormalBusinessModelNo(mainProduct),
           specification: mainProduct.specification || '',
           quantity: mainProduct.quantity,
           unit: mainProduct.unit,
@@ -1542,13 +1689,15 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           createdDate: new Date().toISOString().split('T')[0],
 
           // 🔥 保存完整的询价单文档数据（供供应商Portal显示）
-          documentData: xjDocumentData as any
+          documentData: xjDocumentData as any,
+          documentDataSnapshot: xjDocumentData as any,
+          documentRenderMeta: projectExecutionBaseline
+            ? { projectExecutionBaseline }
+            : undefined,
         };
 
-        const savedXJ = await xjService.upsert(xj).catch(() => null);
-        const saved = savedXJ || xj;
-        createdXJs.push(saved);
-        addXJ(saved);
+        await addXJ(xj);
+        createdXJs.push(xj);
       }));
 
       // 更新产品的询价历史
@@ -1586,8 +1735,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       newStatus = 'partial';    // 部分产品已发询价
     }
 
-    // 写回 Supabase（updateRequirement 内部调用 purchaseRequirementService.upsert）
-    updateRequirement(selectedRequirementForXJ.id, {
+    // 写回 Supabase（updateRequirement 内部调用 QR 主承载 service.upsert）
+    await updateRequirement(selectedRequirementForXJ.id, {
       status: newStatus,
       items: updatedItems
     });
@@ -1596,7 +1745,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       <div className="space-y-1">
         <p className="font-semibold">✅ 询价单创建成功</p>
           <p className="text-sm">已为 {selectedSuppliers.length} 个供应商创建并提交询价单</p>
-        <p className="text-xs text-slate-600">需求编号: {selectedRequirementForXJ.requirementNo}</p>
+        <p className="text-xs text-slate-600">QR编号: {selectedRequirementForXJ.requirementNo}</p>
         <p className="text-xs text-slate-600">产品数量: {selectedProductIds.length} 个</p>
           <p className="text-xs text-blue-600 mt-1">👉 供应商可在 Portal【客户需求池】中看到该询价</p>
       </div>,
@@ -1619,7 +1768,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 批量删除询价单
-  const handleBatchDeleteRFQs = () => {
+  const handleBatchDeleteRFQs = async () => {
     if (selectedXJIds.length === 0) {
       toast.error('请先选择要删除的询价单');
       return;
@@ -1636,9 +1785,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         toast.error(`有 ${lockedXJs.length} 条询价已生成下游报价(BJ)，不可删除`);
       }
 
-      deletableXJs.forEach((x) => {
-        deleteXJ(x.id);
-      });
+      try {
+        await Promise.all(deletableXJs.map((x) => deleteXJ(x.id)));
+      } catch (error: any) {
+        toast.error(`删除询价单失败：${error?.message || '未知错误'}`);
+        return;
+      }
 
       if (deletableXJs.length > 0) {
         const remainingXJs = xjs.filter((x) => !deletableXJs.some((d) => d.id === x.id));
@@ -1651,13 +1803,13 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 批量删除采购需求
-  const handleBatchDeleteRequirements = () => {
+  const handleBatchDeleteRequirements = async () => {
     if (selectedRequirementIds.length === 0) {
-      toast.error('请先选择要删除的采购需求');
+      toast.error('请先选择要删除的报价请求单');
       return;
     }
     
-    const confirmMessage = `确定要删除选中的 ${selectedRequirementIds.length} 个采购需求吗？\n\n⚠️ 此操作不可恢复！`;
+    const confirmMessage = `确定要删除选中的 ${selectedRequirementIds.length} 个报价请求单吗？\n\n⚠️ 此操作不可恢复！`;
     
     if (window.confirm(confirmMessage)) {
       const targets = requirements.filter((r) => selectedRequirementIds.includes(r.id));
@@ -1665,13 +1817,18 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       const deletable = targets.filter((r) => !hasDownstreamXJForRequirement(r));
 
       if (locked.length > 0) {
-        toast.error(`有 ${locked.length} 条采购需求已生成下游询价(XJ)，不可删除`);
+        toast.error(`有 ${locked.length} 条报价请求单已生成下游询价(XJ)，不可删除`);
       }
 
-      deletable.forEach((r) => deleteRequirement(r.id));
+      try {
+        await Promise.all(deletable.map((r) => deleteRequirement(r.id)));
+      } catch (error: any) {
+        toast.error(`删除报价请求单失败：${error?.message || '未知错误'}`);
+        return;
+      }
 
       if (deletable.length > 0) {
-        toast.success(`已删除 ${deletable.length} 个采购需求`, { duration: 3000 });
+        toast.success(`已删除 ${deletable.length} 个报价请求单`, { duration: 3000 });
       }
 
       setSelectedRequirementIds([]);
@@ -1695,7 +1852,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         deletedQuotationRows.flatMap((q: any) => getQuotationMarkers(q))
       )
     );
-    addTombstones('quotation', tombstoneMarkers, {
+    addTombstones('qt', tombstoneMarkers, {
       reason: 'manual-hide-admin-supplier-quotation',
       deletedBy: user?.email || 'admin',
     });
@@ -1725,7 +1882,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 批量删除采购订单
-  const handleBatchDeleteOrders = () => {
+  const handleBatchDeleteOrders = async () => {
     if (selectedOrderIds.length === 0) {
       toast.error('请先选择要删除的采购订单');
       return;
@@ -1734,20 +1891,20 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const confirmMessage = `确定要删除选中的 ${selectedOrderIds.length} 个采购订单吗？\n\n⚠️ 此操作不可恢复！`;
     
     if (window.confirm(confirmMessage)) {
-      selectedOrderIds.forEach(id => {
-        deletePurchaseOrder(id);
-      });
-      
-      toast.success(`已删除 ${selectedOrderIds.length} 个采购订单`, {
-        duration: 3000
-      });
-      
-      setSelectedOrderIds([]);
+      try {
+        await Promise.all(selectedOrderIds.map((id) => deletePurchaseOrder(id)));
+        toast.success(`已删除 ${selectedOrderIds.length} 个采购订单`, {
+          duration: 3000
+        });
+        setSelectedOrderIds([]);
+      } catch (error: any) {
+        toast.error(`删除采购订单失败：${error?.message || '未知错误'}`);
+      }
     }
   };
 
   // 🔥 批量删除采购请求
-  const handleBatchDeleteProcurementRequests = () => {
+  const handleBatchDeleteProcurementRequests = async () => {
     if (selectedProcurementRequestIds.length === 0) {
       toast.error('请先选择要删除的采购请求');
       return;
@@ -1760,13 +1917,16 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const deletable = rows.filter((po) => !hasDownstreamPOForProcurementRequest(po));
     const blocked = rows.filter((po) => hasDownstreamPOForProcurementRequest(po));
 
-    deletable.forEach((po) => {
-      deletePurchaseOrder(po.id);
-    });
     if (deletable.length > 0) {
-      toast.success(`已删除 ${deletable.length} 个采购请求`, {
-        duration: 3000,
-      });
+      try {
+        await Promise.all(deletable.map((po) => deletePurchaseOrder(po.id)));
+        toast.success(`已删除 ${deletable.length} 个采购请求`, {
+          duration: 3000,
+        });
+      } catch (error: any) {
+        toast.error(`删除采购请求失败：${error?.message || '未知错误'}`);
+        return;
+      }
     }
     if (blocked.length > 0) {
       toast.error(`有 ${blocked.length} 个采购请求已存在下游采购单(PO)，已禁止删除`, {
@@ -1776,14 +1936,18 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setSelectedProcurementRequestIds([]);
   };
 
-  const handleDeleteProcurementRequest = (po: PurchaseOrderType) => {
+  const handleDeleteProcurementRequest = async (po: PurchaseOrderType) => {
     if (hasDownstreamPOForProcurementRequest(po)) {
       toast.error('该采购请求已存在下游采购单(PO)，禁止删除上游记录');
       return;
     }
     if (!window.confirm(`确定要删除采购请求 "${po.poNumber}" 吗？\n\n⚠️ 此操作不可恢复！`)) return;
-    deletePurchaseOrder(po.id);
-    toast.success('采购请求已删除');
+    try {
+      await deletePurchaseOrder(po.id);
+      toast.success('采购请求已删除');
+    } catch (error: any) {
+      toast.error(`删除采购请求失败：${error?.message || '未知错误'}`);
+    }
   };
 
   // 🔥 编辑询价单
@@ -1797,7 +1961,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 保存编辑的询价单
-  const handleSaveEditXJ = () => {
+  const handleSaveEditXJ = async () => {
     if (!editingXJ || !editXJData) return;
     const normalizedRfqNo = String(editingXJ.supplierXjNo || editXJData?.xjNo || '').trim();
     const normalizedDocumentData = {
@@ -1806,31 +1970,33 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     };
     
     // 更新XJ，包括完整的documentData
-    updateXJ(editingXJ.id, {
-      documentData: normalizedDocumentData,
-      supplierXjNo: normalizedRfqNo || editingXJ.supplierXjNo,
-      // 同步更新关键字段
-      quotationDeadline: normalizedDocumentData.requiredResponseDate,
-      expectedDate: normalizedDocumentData.requiredDeliveryDate,
-      products: normalizedDocumentData.products?.map((p: any) => ({
-        id: p.no?.toString() || String(Math.random()),
-        productName: p.description,
-        modelNo: p.modelNo || '',
-        specification: p.specification || '',
-        quantity: p.quantity,
-        unit: p.unit,
-        targetPrice: p.targetPrice ? parseFloat(p.targetPrice) : undefined,
-        currency: normalizedDocumentData.terms?.currency || 'CNY'
-      }))
-    });
-    
-    toast.success('询价单已更新', {
-      duration: 3000
-    });
-    
-    setShowEditXJDialog(false);
-    setEditingXJ(null);
-    setEditRFQData(null);
+    try {
+      await updateXJ(editingXJ.id, {
+        documentData: normalizedDocumentData,
+        documentDataSnapshot: normalizedDocumentData,
+        supplierXjNo: normalizedRfqNo || editingXJ.supplierXjNo,
+        quotationDeadline: normalizedDocumentData.requiredResponseDate,
+        expectedDate: normalizedDocumentData.requiredDeliveryDate,
+        products: normalizedDocumentData.products?.map((p: any) => ({
+          id: p.no?.toString() || String(Math.random()),
+          productName: p.description,
+          modelNo: getFormalBusinessModelNo(p),
+          specification: p.specification || '',
+          quantity: p.quantity,
+          unit: p.unit,
+          targetPrice: p.targetPrice ? parseFloat(p.targetPrice) : undefined,
+          currency: normalizedDocumentData.terms?.currency || 'CNY'
+        }))
+      });
+      toast.success('询价单已更新', {
+        duration: 3000
+      });
+      setShowEditXJDialog(false);
+      setEditingXJ(null);
+      setEditRFQData(null);
+    } catch (error: any) {
+      toast.error(`询价单更新失败：${error?.message || '未知错误'}`);
+    }
   };
 
   // 🔥 提交询价单给供应商 - Supabase-first: 状态改为 pending，供应商通过 XJContext getByEmail 可见
@@ -1846,18 +2012,22 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
 
     try {
-      // Supabase-first: 将状态改为 pending，供应商端通过 supplier_xjs 表查询可见
-      await xjService.upsert({ ...xj, status: 'pending', sentDate: new Date().toISOString().split('T')[0] });
-    } catch (err: any) {
-      toast.error('下推失败：' + (err?.message || '请稍后重试'));
+      const templateSnapshot = (xj as any).templateSnapshot || (xj as any).template_snapshot || null;
+      const templateVersion = templateSnapshot?.version || null;
+      const documentData = (xj as any).documentDataSnapshot || (xj as any).document_data_snapshot || null;
+      if (!templateVersion || !documentData) {
+        throw new Error('该 XJ 未绑定模板中心版本快照，无法下推供应商');
+      }
+
+      await updateXJ(xj.id, {
+        status: 'sent' as any,
+        sentDate: new Date().toISOString().split('T')[0],
+        documentDataSnapshot: documentData,
+      });
+    } catch (error: any) {
+      toast.error(`下推失败：${error?.message || '未知错误'}`);
       return;
     }
-
-    // 更新 XJ Context 中的本地状态
-    updateXJ(xj.id, {
-      status: 'sent' as any,
-      sentDate: new Date().toISOString().split('T')[0]
-    });
 
 
     toast.success(
@@ -1872,13 +2042,13 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   const getPOProductAllocationKey = (item: PurchaseOrderItem, index: number) => {
-    return String(item?.id || item?.modelNo || `${index}`);
+    return String(item?.id || getFormalBusinessModelNo(item) || `${index}`);
   };
 
   const getProductMatchToken = (item: PurchaseOrderItem, index: number) => {
     const key = getPOProductAllocationKey(item, index);
     const name = String(item?.productName || '').trim().toLowerCase();
-    const model = String(item?.modelNo || '').trim().toLowerCase();
+    const model = String(getFormalBusinessModelNo(item) || '').trim().toLowerCase();
     return `${key}|${name}|${model}`;
   };
 
@@ -1900,8 +2070,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         (child.items || []).some((ci) => {
           const sameId = String(ci?.id || '').trim() !== '' && String(ci?.id || '').trim() === String(item?.id || '').trim();
           const sameModel =
-            String(ci?.modelNo || '').trim().toLowerCase() !== '' &&
-            String(ci?.modelNo || '').trim().toLowerCase() === String(item?.modelNo || '').trim().toLowerCase();
+            String(getFormalBusinessModelNo(ci) || '').trim().toLowerCase() !== '' &&
+            String(getFormalBusinessModelNo(ci) || '').trim().toLowerCase() === String(getFormalBusinessModelNo(item) || '').trim().toLowerCase();
           const sameName =
             String(ci?.productName || '').trim().toLowerCase() !== '' &&
             String(ci?.productName || '').trim().toLowerCase() === String(item?.productName || '').trim().toLowerCase();
@@ -2022,7 +2192,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         );
         const draftCurrency = currencyCandidates[0] || normalizeCurrencyCode(po.currency || 'USD') || 'USD';
         const newPoNumber = await nextCGNumberAsync();
-        addPurchaseOrder({
+        const allocatedOrder = {
           ...po,
           id: `po-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           poNumber: newPoNumber,
@@ -2038,7 +2208,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           updatedDate: new Date().toISOString(),
           procurementRequestStatus: 'draft_allocated',
           parentRequestPoNumber: po.poNumber as any,
-        } as any);
+        } as any;
+        allocatedOrder.templateSnapshot = { pendingResolution: true };
+        allocatedOrder.documentRenderMeta = null;
+        allocatedOrder.documentDataSnapshot = buildPurchaseOrderDocumentSnapshot(allocatedOrder);
+        await addPurchaseOrder(allocatedOrder);
         createdPONumbers.push(newPoNumber);
       }
 
@@ -2063,7 +2237,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           (sum, item) => sum + Number(item.subtotal || Number(item.quantity || 0) * Number(item.unitPrice || 0)),
           0
         );
-        updatePurchaseOrder(po.id, {
+        await updatePurchaseOrder(po.id, {
           items: tracedRemainingItems,
           totalAmount: remainingAmount,
           currency: remainingCurrencies[0] || normalizeCurrencyCode(po.currency || 'USD') || 'USD',
@@ -2076,7 +2250,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         } as any);
       } else {
         // 全部分配完成：保留采购请求记录，仅更新状态（不消失）
-        updatePurchaseOrder(po.id, {
+        await updatePurchaseOrder(po.id, {
           procurementRequestStatus: 'allocated_completed',
           supplierAllocationReady: true as any,
           allocatedSupplierCount: distribution.length as any,
@@ -2105,7 +2279,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   // 🔥 处理创建订单 - 从采购需求创建
-  const handleCreateOrderFromRequirement = (req: PurchaseRequirement) => {
+  const handleCreateOrderFromRequirement = (req: QuoteRequirement) => {
     setSelectedRequirement(req);
     
     // 🔥 初始化产品单价映射 - 每个产品都有独立的单价
@@ -2159,7 +2333,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       
       return {
         no: index + 1,
-        modelNo: item.modelNo,
+        modelNo: getFormalBusinessModelNo(item),
         description: item.productName,
         specification: item.specification || '标准规格',
         quantity: item.quantity,
@@ -2249,7 +2423,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       items: items.map((item) => ({
         id: item.id,
         productName: item.productName,
-        modelNo: item.modelNo,
+        modelNo: getFormalBusinessModelNo(item),
         specification: item.specification,
         quantity: item.quantity,
         unit: item.unit,
@@ -2282,14 +2456,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       createdBy: '采购部-刘明', // TODO: 从用户Context获取
       createdDate: today.toISOString()
     };
+    (newPurchaseOrder as any).templateSnapshot = { pendingResolution: true };
+    (newPurchaseOrder as any).documentRenderMeta = null;
+    (newPurchaseOrder as any).documentDataSnapshot = buildPurchaseOrderDocumentSnapshot(newPurchaseOrder);
 
-    // 🔥 添加采购订单到Context（持久化保存）
-    addPurchaseOrder(newPurchaseOrder);
-
-    // 🔥 更新采购需求状态为已完成
-    updateRequirement(selectedRequirement.id, {
-      status: 'completed'
-    });
+    try {
+      await addPurchaseOrder(newPurchaseOrder);
+      await updateRequirement(selectedRequirement.id, {
+        status: 'completed'
+      });
+    } catch (error: any) {
+      toast.error(`创建采购订单失败：${error?.message || '未知错误'}`);
+      return;
+    }
 
     // 🔥 设置文档数据并打开预览
     setCurrentPOData(newPOData);
@@ -2306,7 +2485,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         <p className="text-xs">产品数: {products.length} 个</p>
         <p className="text-xs">金额: {createOrderForm.currency} {totalAmount.toLocaleString()}</p>
         <p className="text-xs mt-1 text-green-600">✓ 已保存到采购订单模块</p>
-        <p className="text-xs text-green-600">✓ 采购需求已标记完成</p>
+        <p className="text-xs text-green-600">✓ QR 已标记完成</p>
         <p className="text-xs mt-1 text-blue-600">正在打开文档预览...</p>
       </div>,
       { duration: 5000 }
@@ -2336,14 +2515,28 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     toast.success('请从报价请求池中选择需求创建订单');
   };
 
+  const ensureBoundQuoteRequirementSnapshot = (req: QuoteRequirement | null | undefined) => {
+    if (!req) return false;
+    const templateSnapshot = (req as any).templateSnapshot || (req as any).template_snapshot || null;
+    const templateVersion = templateSnapshot?.version || null;
+    const documentData = (req as any).documentDataSnapshot || (req as any).document_data_snapshot || null;
+    if (!templateVersion || !documentData) {
+      toast.error('该 QR 未绑定模板中心版本快照，无法继续流转');
+      return false;
+    }
+    return true;
+  };
+
   // 🔥 处理智能采购反馈 - 一键流转
-  const handleSmartFeedback = (req: PurchaseRequirement) => {
+  const handleSmartFeedback = (req: QuoteRequirement) => {
+    if (!ensureBoundQuoteRequirementSnapshot(req)) return;
     setFeedbackRequirement(req);
     setShowFeedbackForm(true);
   };
 
   // 🔥 下推业务员询报（采购侧仅做下推动作，不创建业务员报价）
-  const handlePushToSalesInquiry = async (req: PurchaseRequirement) => {
+  const handlePushToSalesInquiry = async (req: QuoteRequirement) => {
+    if (!ensureBoundQuoteRequirementSnapshot(req)) return;
     if (!req.purchaserFeedback) {
       toast.error('请先完成智能对比建议并保存采购反馈');
       return;
@@ -2354,33 +2547,23 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
 
     const pushTimestamp = new Date().toISOString();
-    const savedRequirement = await purchaseRequirementService.upsert({
-      ...req,
-      pushedToQuotation: true,
-      pushedToQuotationDate: pushTimestamp,
-      pushedBy: user?.email || user?.name || 'procurement',
-    });
-
-    const persisted = Boolean(savedRequirement?.pushedToQuotation);
-    if (!persisted) {
-      toast.error('❌ 下推业务员询报失败：Supabase 未落库', {
-        description: '请先补齐 purchase_requirements 表的下推字段后再重试',
+    try {
+      await updateRequirement(req.id, {
+        pushedToQuotation: true,
+        pushedToQuotationDate: pushTimestamp,
+        pushedBy: user?.email || user?.name || 'procurement',
       });
-      return;
+      await refreshQuoteRequirementsFromApi();
+      toast.success('已下推业务员询报');
+    } catch (error: any) {
+      toast.error(`同步 QR 状态失败：${error?.message || '未知错误'}`);
     }
-
-    updateRequirement(req.id, {
-      pushedToQuotation: true,
-      pushedToQuotationDate: pushTimestamp,
-      pushedBy: user?.email || user?.name || 'procurement',
-    });
-    await refreshPurchaseRequirementsFromApi();
-    toast.success('已下推业务员询报');
   };
 
   // 🔥 保存采购反馈（仅保存，不在此处下推）
   const handleSubmitFeedback = async (feedback: PurchaserFeedback) => {
     if (!feedbackRequirement) return;
+    if (!ensureBoundQuoteRequirementSnapshot(feedbackRequirement)) return;
     
     console.log('🔥 [采购反馈] 提交反馈，QR信息:', {
       qrId: feedbackRequirement.id,
@@ -2389,45 +2572,38 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       feedbackData: feedback
     });
     
-    const savedRequirement = await purchaseRequirementService.upsert({
-      ...feedbackRequirement,
-      purchaserFeedback: feedback,
-      status: 'completed' // 🔥 同时更新状态为已完成
-    });
+    try {
+      await updateRequirement(feedbackRequirement.id, {
+        purchaserFeedback: feedback,
+        status: 'completed',
+      });
+      await refreshQuoteRequirementsFromApi();
 
-    const persistedFeedbackCount = Array.isArray(savedRequirement?.purchaserFeedback?.products)
-      ? savedRequirement.purchaserFeedback.products.length
-      : 0;
-
-    if (!savedRequirement || persistedFeedbackCount === 0) {
-      toast.error('❌ 采购反馈保存失败：Supabase 未落库');
-      return;
+      toast.success('✅ 采购反馈已保存', {
+        description: '请在操作区点击“下推业务员询报”完成流转',
+        duration: 4000
+      });
+      
+      setShowFeedbackForm(false);
+      setFeedbackRequirement(null);
+    } catch (error: any) {
+      toast.error(`同步 QR 状态失败：${error?.message || '未知错误'}`);
     }
-
-    updateRequirement(feedbackRequirement.id, {
-      purchaserFeedback: feedback,
-      status: 'completed'
-    });
-    await refreshPurchaseRequirementsFromApi();
-
-    toast.success('✅ 采购反馈已保存', {
-      description: '请在操作区点击“下推业务员询报”完成流转',
-      duration: 4000
-    });
-    
-    setShowFeedbackForm(false);
-    setFeedbackRequirement(null);
   };
 
   // 🔥 处理删除采购订单
-  const handleDeletePurchaseOrder = (po: PurchaseOrderType) => {
+  const handleDeletePurchaseOrder = async (po: PurchaseOrderType) => {
     const firstProductName = po.items?.[0]?.productName || 'N/A';
     if (window.confirm(`确定要删除采购订单 "${po.poNumber}" 吗？\n\n供应商: ${po.supplierName}\n产品: ${firstProductName}\n金额: ${po.currency} ${po.totalAmount.toLocaleString()}\n\n⚠️ 此操作不可恢复！`)) {
-      deletePurchaseOrder(po.id);
-      toast.success('采购订单已删除', {
-        description: `${po.poNumber} - ${po.supplierName}`,
-        duration: 3000
-      });
+      try {
+        await deletePurchaseOrder(po.id);
+        toast.success('采购订单已删除', {
+          description: `${po.poNumber} - ${po.supplierName}`,
+          duration: 3000
+        });
+      } catch (error: any) {
+        toast.error(`删除采购订单失败：${error?.message || '未知错误'}`);
+      }
     }
   };
 
@@ -2577,13 +2753,13 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             </TabsList>
           </div>
 
-          {/* ==================== Tab 1: 采购需求池 ==================== */}
+          {/* ==================== Tab 1: QR池 ==================== */}
           <TabsContent value="requirements" className="m-0">
             {/* 需求统计 */}
             <div className="px-3 py-3 bg-gray-50 border-b border-gray-200">
               <div className="grid grid-cols-5 gap-2">
                 <div className="text-center">
-                  <p className="text-[14px] text-gray-500">总需求</p>
+                  <p className="text-[14px] text-gray-500">总 QR</p>
                   <p className="text-base font-bold text-gray-900">{requirementStats.total}</p>
                 </div>
                 <div className="text-center">
@@ -2599,7 +2775,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                   <p className="text-base font-bold text-blue-600">{requirementStats.processing}</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-[14px] text-gray-500">紧急需求</p>
+                  <p className="text-[14px] text-gray-500">紧急 QR</p>
                   <p className="text-base font-bold text-red-600">{requirementStats.highUrgency}</p>
                 </div>
               </div>
@@ -2613,7 +2789,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                   <div className="relative">
                     <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <Input
-                      placeholder="搜索需求编号、来源单号、区域..."
+                      placeholder="搜索 QR 编号、来源单号、区域..."
                       value={requirementSearchTerm}
                       onChange={(e) => setRequirementSearchTerm(e.target.value)}
                       className="pl-8 h-8 text-xs w-80"
@@ -2631,7 +2807,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                     </Button>
                   )}
                 </div>
-                <p className="text-[14px] text-gray-600">共 {filteredRequirements.length} 条采购需求</p>
+                <p className="text-[14px] text-gray-600">共 {filteredRequirements.length} 条 QR</p>
               </div>
               
               <div className="border border-gray-200 rounded overflow-hidden">
@@ -2653,7 +2829,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                         />
                       </th>
                       <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                      <th className="text-left py-1.5 px-2 font-medium text-gray-700">需求编号</th>
+                      <th className="text-left py-1.5 px-2 font-medium text-gray-700">QR编号</th>
                       <th className="text-left py-1.5 px-2 font-medium text-gray-700">来源单号</th>
                       <th className="text-left py-1.5 px-2 font-medium text-gray-700">区域</th>
                       <th className="text-center py-1.5 px-2 font-medium text-gray-700">产品数</th>
@@ -2760,7 +2936,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                   setShowRequirementDialog(true);
                                 }}
                                 className="h-6 text-[12px] px-2 border-gray-300 text-gray-600 hover:bg-gray-50 gap-1"
-                                title="查看采购需求详情"
+                                title="查看报价请求单详情"
                               >
                                 <Eye className="w-3 h-3" />
                                 <span>查看</span>
@@ -2773,7 +2949,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                 onClick={() => {
                                   // TODO: 实现编辑功能
                                   toast.info('编辑功能开发中...', {
-                                    description: '即将支持编辑采购需求',
+                                    description: '即将支持编辑报价请求单',
                                     duration: 2000
                                   });
                                 }}
@@ -2783,7 +2959,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     ? 'border-gray-200 text-gray-300 cursor-not-allowed'
                                     : 'border-blue-300 text-blue-600 hover:bg-blue-50'
                                 }`}
-                                title="编辑采购需求"
+                                title="编辑报价请求单"
                               >
                                 <Edit className="w-3 h-3" />
                                 <span>编辑</span>
@@ -2848,17 +3024,21 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => {
+                                onClick={async () => {
                                   if (hasLinkedXJ) {
-                                    toast.error('该采购需求已生成下游询价(XJ)，不可删除');
+                                    toast.error('该报价请求单已生成下游询价(XJ)，不可删除');
                                     return;
                                   }
-                                  if (window.confirm(`确定要删除采购需求 "${req.requirementNo}" 吗？\n\n产品: ${req.productName}\n数量: ${req.quantity} ${req.unit}`)) {
-                                    deleteRequirement(req.id);
-                                    toast.success('采购需求已删除', {
-                                      description: `${req.requirementNo} - ${req.productName}`,
-                                      duration: 3000
-                                    });
+                                  if (window.confirm(`确定要删除报价请求单 "${req.requirementNo}" 吗？\n\n产品: ${req.productName}\n数量: ${req.quantity} ${req.unit}`)) {
+                                    try {
+                                      await deleteRequirement(req.id);
+                                      toast.success('报价请求单已删除', {
+                                        description: `${req.requirementNo} - ${req.productName}`,
+                                        duration: 3000
+                                      });
+                                    } catch (error: any) {
+                                      toast.error(`删除报价请求单失败：${error?.message || '未知错误'}`);
+                                    }
                                   }
                                 }}
                                 disabled={hasLinkedXJ}
@@ -2867,7 +3047,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     ? 'border-gray-200 text-gray-300 cursor-not-allowed'
                                     : 'border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400'
                                 }`}
-                                title="删除采购需求"
+                                title="删除报价请求单"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </Button>
@@ -2918,7 +3098,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                   <div className="relative">
                     <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <Input
-                      placeholder="搜索询价单号、供应商、需求编号..."
+                      placeholder="搜索询价单号、供应商、QR编号..."
                       value={xjSearchTerm}
                       onChange={(e) => setRFQSearchTerm(e.target.value)}
                       className="pl-8 h-8 text-xs w-80"
@@ -3248,6 +3428,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                           <td className="py-2 px-2">
                             <div className="text-gray-900">{quotation.sourceXJ || '-'}</div>
                             {quotation.sourceQR && <div className="text-[12px] text-blue-600 font-mono">{quotation.sourceQR}</div>}
+                            {(quotation.projectCode || quotation.projectRevisionCode || quotation.finalQuotationNumber) && (
+                              <div className="text-[12px] text-purple-600 font-mono">
+                                基线: {quotation.projectCode || quotation.projectName || '项目'} / {quotation.projectRevisionCode || 'Rev'}{quotation.finalQuotationNumber ? ` / ${quotation.finalQuotationNumber}` : ''}
+                              </div>
+                            )}
                           </td>
                           <td className="py-2 px-2 text-right">
                             <div className="font-semibold text-green-600">
@@ -3298,7 +3483,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     size="sm"
                                     onClick={async () => {
                                       try {
-                                        await supplierQuotationService.upsert({ ...quotation, status: 'accepted' });
+                                        await saveSupplierQuotation({ ...quotation, status: 'accepted' } as any);
                                       } catch (e: any) {
                                         console.warn('⚠️ 接受报价 Supabase 同步失败:', e?.message);
                                         toast.error('接受报价失败：Supabase 写入未成功');
@@ -3320,7 +3505,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                                     variant="outline"
                                     onClick={async () => {
                                       try {
-                                        await supplierQuotationService.upsert({ ...quotation, status: 'rejected' });
+                                        await saveSupplierQuotation({ ...quotation, status: 'rejected' } as any);
                                       } catch (e: any) {
                                         console.warn('⚠️ 拒绝报价 Supabase 同步失败:', e?.message);
                                         toast.error('拒绝报价失败：Supabase 写入未成功');
@@ -3443,7 +3628,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         )}
       </div>
 
-      <PurchaseRequirementPreviewDialog
+      <QuoteRequirementPreviewDialog
         showRequirementDialog={showRequirementDialog}
         setShowRequirementDialog={setShowRequirementDialog}
         viewRequirement={viewRequirement}
@@ -3519,6 +3704,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         showXJPreview={showXJPreview}
         setShowRFQPreview={setShowRFQPreview}
         currentXJData={currentXJData}
+        projectExecutionBaseline={currentXJBaseline}
         xjDocRef={xjDocRef}
         handleExportRFQPDF={handleExportRFQPDF}
       />
@@ -3559,7 +3745,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             setShowQuoteCreation(false);
             setSelectedRequirementForQuote(null);
           }}
-          onSubmit={(quoteData) => {
+          onSubmit={async (quoteData) => {
             
             // 🔥 转换数据格式：QuoteData → Quotation
             const newQuotation = {
@@ -3579,7 +3765,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
               products: quoteData.items.map((item: any) => ({
                 name: item.productName,
                 productName: item.productName,
-                sku: item.sku || item.modelNo || '',
+                sku: item.sku || getFormalBusinessModelNo(item) || '',
                 quantity: item.quantity,
                 unit: item.unit,
                 unitPrice: item.quotePrice,
@@ -3597,11 +3783,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
               // 🔥 审批流程信息（待提交审核时使用）
               approvalNotes: quoteData.approvalNotes,
               createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
+              updatedAt: new Date().toISOString(),
+              templateSnapshot: { pendingResolution: true },
+              documentRenderMeta: null,
             };
+            (newQuotation as any).documentDataSnapshot = adaptLegacyQuotationToDocumentData(newQuotation);
             
             // 🔥 保存到QuotationContext
-            addQuotation(newQuotation);
+            await addQuotation(newQuotation as any);
             
             
             toast.success('报价已保存！', {

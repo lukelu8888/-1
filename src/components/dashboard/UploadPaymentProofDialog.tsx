@@ -89,37 +89,26 @@ export function UploadPaymentProofDialog({
       // 上传到 Supabase Storage
       const fileToUpload = selectedFileObj || (isDataUrl(paymentFile) ? dataUrlToFile(paymentFile, defaultFileName) : null);
       if (fileToUpload) {
-        try {
-          const result = await paymentProofStorage.upload(
-            fileToUpload,
-            order.orderNumber || order.id,
-            paymentType || 'deposit',
-            user?.email || 'unknown'
-          );
-          fileUrl = result.url;
-          fileName = result.fileName;
-          storagePath = result.path;
-        } catch (storageErr: any) {
-          console.warn('⚠️ [UploadPaymentProof] Supabase Storage 上传失败，使用 blob URL:', storageErr?.message);
-          fileUrl = URL.createObjectURL(fileToUpload);
-          fileName = fileToUpload.name;
-        }
+        const result = await paymentProofStorage.upload(
+          fileToUpload,
+          order.orderNumber || order.id,
+          paymentType || 'deposit',
+          user?.email || 'unknown'
+        );
+        fileUrl = result.url;
+        fileName = result.fileName;
+        storagePath = result.path;
       } else {
         fileUrl = paymentFile;
       }
 
       // 同步到 Supabase
-      try {
-        const proofField = paymentType === 'deposit' ? 'deposit_payment_proof' : 'balance_payment_proof';
-        await orderService.upsert({
-          id: orderUid,
-          [proofField]: { fileUrl, fileName, storagePath, amount: parseFloat(paymentAmount), transactionId: paymentReference, notes: paymentNotes || null, uploadedAt: new Date().toISOString() },
-        });
-      } catch (apiErr: any) {
-        console.warn('⚠️ [UploadPaymentProof] Supabase 同步失败（本地继续处理）:', apiErr?.message);
-      }
+      const proofField = paymentType === 'deposit' ? 'deposit_payment_proof' : 'balance_payment_proof';
+      await orderService.upsert({
+        id: orderUid,
+        [proofField]: { fileUrl, fileName, storagePath, amount: parseFloat(paymentAmount), transactionId: paymentReference, notes: paymentNotes || null, uploadedAt: new Date().toISOString() },
+      });
 
-      // 本地立即更新合同状态为 deposit_uploaded
       const contractNumber = order.orderNumber || order.id;
       const proofData = {
         fileName,
@@ -130,16 +119,6 @@ export function UploadPaymentProofDialog({
         transactionId: paymentReference,
         notes: paymentNotes || undefined,
       };
-      try {
-        const allContracts: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-        const updated = allContracts.map((c: any) =>
-          c.contractNumber === contractNumber
-            ? { ...c, status: 'deposit_uploaded', depositPaymentProof: proofData, updatedAt: new Date().toISOString() }
-            : c
-        );
-        localStorage.setItem('salesContracts', JSON.stringify(updated));
-        console.log(`✅ [UploadPaymentProof] 合同 ${contractNumber} 状态已本地更新为 deposit_uploaded`);
-      } catch { /* ignore */ }
 
       // 直接写入财务应收账款 localStorage（客户端不在 FinanceProvider 内，无法通过 Context 写入）
       try {
@@ -207,7 +186,6 @@ export function UploadPaymentProofDialog({
         depositPaymentProof: { fileName, fileUrl, uploadedAt: new Date().toISOString() },
       });
       window.dispatchEvent(new CustomEvent('ordersUpdated'));
-      window.dispatchEvent(new CustomEvent('salesContractCreatedLocally'));
 
       // 同步更新财务应收账款（本地状态）
       const paymentProofData = {

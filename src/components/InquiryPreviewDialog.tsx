@@ -2,6 +2,7 @@ import React from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useCart } from '../contexts/CartContext';
 import { useInquiry } from '../contexts/InquiryContext';
+import { adaptInquiryToDocumentData } from '../utils/documentDataAdapters';
 import { useRegion } from '../contexts/RegionContext';
 import { nextInquiryNumber } from '../lib/supabaseService';
 import { Building2, Mail, Phone, Globe, User, CheckCircle2, Download, Printer, HardDrive, Cloud } from 'lucide-react';
@@ -12,6 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Progress } from './ui/progress';
 import { toast } from 'sonner';
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel } from './ui/alert-dialog';
+import { Textarea } from './ui/textarea';
+import {
+  buildCustomerInquiryRequirementText,
+  CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+  DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+  type CustomerInquiryRequirementFormFields,
+} from './documents/templates/CustomerInquiryDocument';
 
 interface InquiryPreviewDialogProps {
   cartItems: any[];
@@ -105,6 +113,9 @@ export function InquiryPreviewDialog({
     email: user?.email || userInfo?.email || '',
     website: userInfo?.website || '',
     businessType: userInfo?.businessType || 'Importer' as 'Retailer' | 'Importer' | 'Wholesaler' | 'Distributor' | 'E-commerce' | 'Other'
+  });
+  const [customerRequirement, setCustomerRequirement] = React.useState<CustomerInquiryRequirementFormFields>({
+    ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   });
 
   // Sync showForm state with user login status
@@ -534,6 +545,44 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
               </Select>
             </div>
           </div>
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-4">
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-gray-900">Trading Requirements</h3>
+              <p className="mt-1 text-xs text-gray-600">
+                These terms become structured ING data instead of staying in free-form notes.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {CUSTOMER_INQUIRY_REQUIREMENT_FIELDS.map((field) => (
+                <div
+                  key={field.key}
+                  className={field.type === 'textarea' && field.key === 'otherRequirements' ? 'md:col-span-2' : ''}
+                >
+                  <Label htmlFor={`preview-legacy-${field.key}`}>{field.sourceLabel}</Label>
+                  <p className="mt-1 text-xs text-gray-500">{field.description}</p>
+                  {field.type === 'textarea' ? (
+                    <Textarea
+                      id={`preview-legacy-${field.key}`}
+                      rows={field.rows || 3}
+                      value={customerRequirement[field.key] || ''}
+                      onChange={(e) => setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                      className="mt-2"
+                    />
+                  ) : (
+                    <Input
+                      id={`preview-legacy-${field.key}`}
+                      value={customerRequirement[field.key] || ''}
+                      onChange={(e) => setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                      className="mt-2"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -619,6 +668,28 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
           >
             Edit Information
           </Button>
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-lg mb-3 bg-gray-100 px-3 py-2 rounded">TRADING REQUIREMENTS</h2>
+        <div className="border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <tbody>
+              {CUSTOMER_INQUIRY_REQUIREMENT_FIELDS
+                .map((field) => ({
+                  label: field.previewLabel,
+                  value: customerRequirement[field.key]?.trim() || '',
+                }))
+                .filter((row) => row.value)
+                .map((row) => (
+                  <tr key={row.label} className="border-b last:border-b-0">
+                    <td className="w-[30%] bg-gray-50 px-3 py-2 font-medium">{row.label}</td>
+                    <td className="px-3 py-2">{row.value}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -930,10 +1001,14 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
                     businessType: formData.businessType || ''
                   },
                   region: regionCode,
-                  message: `Container: ${planningMode === 'automatic' ? recommendedContainer?.name : 'Custom'} | Total CBM: ${totalShipping.cbm} | Cartons: ${totalShipping.cartons}`,
+                  requirements: { ...customerRequirement },
+                  message: buildCustomerInquiryRequirementText(customerRequirement),
                   createdAt: Date.now(),
                   submittedAt: Date.now(),
                 };
+                (customerInquiry as any).templateSnapshot = { pendingResolution: true };
+                (customerInquiry as any).documentRenderMeta = null;
+                (customerInquiry as any).documentDataSnapshot = adaptInquiryToDocumentData(customerInquiry as any);
 
                 // Save to Supabase (awaited — failure surfaces to user)
                 await addInquiry(customerInquiry);

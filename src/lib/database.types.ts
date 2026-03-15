@@ -207,13 +207,28 @@ export interface Database {
           id: string;
           inquiry_number: string;
           user_email: string;
+          date: string | null;
           buyer_name: string | null;
           buyer_company: string | null;
           buyer_country: string | null;
+          company_id: string | null;
+          region_code: string | null;
           products: Json;
           status: string;
+          is_submitted: boolean | null;
+          total_price: number | null;
+          message: string | null;
           notes: string | null;
           assigned_to: string | null;
+          buyer_info: Json | null;
+          shipping_info: Json | null;
+          container_info: Json | null;
+          submitted_at: string | null;
+          template_id: string | null;
+          template_version_id: string | null;
+          template_snapshot: Json | null;
+          document_data_snapshot: Json | null;
+          document_render_meta: Json | null;
           created_at: string;
           updated_at: string;
         };
@@ -222,6 +237,78 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database['public']['Tables']['inquiries']['Insert']>;
+      };
+      product_main_categories: {
+        Row: {
+          id: string;
+          name: string;
+          icon: string | null;
+          description: string | null;
+          sort_order: number | null;
+          region_code: string | null;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['product_main_categories']['Row'], 'created_at'> & {
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['product_main_categories']['Insert']>;
+      };
+      product_sub_categories: {
+        Row: {
+          id: string;
+          main_category_id: string;
+          name: string;
+          description: string | null;
+          sort_order: number | null;
+          region_code: string | null;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['product_sub_categories']['Row'], 'created_at'> & {
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['product_sub_categories']['Insert']>;
+      };
+      product_categories: {
+        Row: {
+          id: string;
+          sub_category_id: string;
+          name: string;
+          description: string | null;
+          sort_order: number | null;
+          region_code: string | null;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['product_categories']['Row'], 'created_at'> & {
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['product_categories']['Insert']>;
+      };
+      products: {
+        Row: {
+          id: string;
+          category_id: string;
+          name: string;
+          model: string | null;
+          image: string | null;
+          price: number | null;
+          net_weight: number | null;
+          gross_weight: number | null;
+          units_per_carton: number | null;
+          carton_length: number | null;
+          carton_width: number | null;
+          carton_height: number | null;
+          carton_net_weight: number | null;
+          carton_gross_weight: number | null;
+          specifications: Json | null;
+          region_code: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['products']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['products']['Insert']>;
       };
       supplier_quotations: {
         Row: {

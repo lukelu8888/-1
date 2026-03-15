@@ -23,9 +23,9 @@
 - 用途：客户发送的产品询价请求
 - 特点：标准化格式，包含客户信息、产品需求、交易要求
 
-### ✅ 2. 业务员报价单 (Quotation)
+### ✅ 2. 销售报价单 (Sales Quotation)
 - 文件：`/components/documents/templates/QuotationDocument.tsx`
-- 用途：业务员给客户的正式报价
+- 用途：业务员基于供应链反馈给客户的正式报价
 - 特点：专业排版，橙色主题，包含公司完整信息
 
 ### ✅ 3. 销售合同 (Sales Contract) 🆕
@@ -33,9 +33,9 @@
 - 用途：发给客户的正式销售合同
 - 特点：法律文件，包含完整条款、违约责任、争议解决、签字区域
 
-### ✅ 4. 采购订单 (Purchase Order) 🆕
+### ✅ 4. 采购合同 (Purchase Contract) 🆕
 - 文件：`/components/documents/templates/PurchaseOrderDocument.tsx`
-- 用途：发给供应商的采购订单
+- 用途：发给供应商的采购合同
 - 特点：物料编码、质量标准、验收方式、审批信息
 
 ### ✅ 5. 对账单 (Statement of Account) 🆕
@@ -81,7 +81,7 @@
 ```
 客户询价单 (INQ-NA-20251210-001)
     ↓ 继承90%数据
-业务员报价单 (QT-NA-20251210-001)
+销售报价单 (QT-NA-20251210-001)
     ↓ 继承95%数据
 销售合同 (SC-NA-20251220-001)
     ↓ 继承数据 + 实际生产数据

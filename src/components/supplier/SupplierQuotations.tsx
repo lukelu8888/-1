@@ -20,6 +20,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
 import { generateBJNumber, nextBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 /**
  * 🔥 供应商视角：询价报价管理
@@ -197,10 +198,19 @@ export default function SupplierQuotations() {
     };
     
     // 🔥 添加报价到采购询价
-    addQuoteToXJ(selectedXJ.id, quote);
+    try {
+      await addQuoteToXJ(selectedXJ.id, quote);
+    } catch (error: any) {
+      toast.error(`保存供应商报价失败：${error?.message || '未知错误'}`);
+      return;
+    }
     
-    // 🔥 更新采购询价，添加供应商报价单号
-    updateXJ(selectedXJ.id, { supplierQuotationNo });
+    try {
+      await updateXJ(selectedXJ.id, { supplierQuotationNo });
+    } catch (error: any) {
+      toast.error(`同步 XJ 状态失败：${error?.message || '未知错误'}`);
+      return;
+    }
     
     toast.success(
       <div className="space-y-1">
@@ -321,7 +331,7 @@ export default function SupplierQuotations() {
       
       products: [{
         no: 1,
-        modelNo: xj.productCode || xj.product || 'N/A',
+        modelNo: getFormalBusinessModelNo(xj) || xj.product || 'N/A',
         description: xj.productName || xj.product,
         specification: xj.specifications || xj.spec || '',
         quantity: xj.quantity,
@@ -577,6 +587,11 @@ export default function SupplierQuotations() {
                               : item.supplierXjNo || item.xjNumber || item.id}
                           </p>
                           <p className="text-xs text-gray-500">{isDraft ? item.savedDate : item.createdDate}</p>
+                          {!isDraft && (item.projectCode || item.projectRevisionCode || item.finalQuotationNumber) && (
+                            <p className="text-xs text-purple-600 font-mono mt-1">
+                              {item.projectCode || item.projectName || '项目'} / {item.projectRevisionCode || 'Rev'}{item.finalQuotationNumber ? ` / ${item.finalQuotationNumber}` : ''}
+                            </p>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="py-3" style={{ fontSize: '13px' }}>

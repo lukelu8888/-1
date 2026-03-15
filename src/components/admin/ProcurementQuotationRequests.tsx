@@ -4,6 +4,7 @@ import { useUser } from '../../contexts/UserContext';
 import { Clock, Package, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { ProductSupplierDistributionDialog } from './ProductSupplierDistributionDialog';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 /**
  * 📋 采购员 - 报价请求管理
@@ -87,13 +88,17 @@ export function ProcurementQuotationRequests() {
     }
   };
 
-  const handleAcceptRequest = (requestId: string) => {
-    updateQuotationRequest(requestId, {
-      status: 'processing',
-      assignedTo: user?.email,
-      assignedToName: user?.name,
-      assignedDate: new Date().toISOString().split('T')[0]
-    });
+  const handleAcceptRequest = async (requestId: string) => {
+    try {
+      await updateQuotationRequest(requestId, {
+        status: 'processing',
+        assignedTo: user?.email,
+        assignedToName: user?.name,
+        assignedDate: new Date().toISOString().split('T')[0]
+      });
+    } catch (error: any) {
+      toast.error(error?.message || '接受报价请求失败');
+    }
   };
 
   return (
@@ -194,7 +199,7 @@ export function ProcurementQuotationRequests() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-300 bg-gray-50">
-                <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-gray-700 w-36">请求编号</th>
+                <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-gray-700 w-36">QR编号</th>
                 <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-gray-700 w-24">状态</th>
                 <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-gray-700">产品清单</th>
                 <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-gray-700 w-24">总数量</th>
@@ -220,7 +225,7 @@ export function ProcurementQuotationRequests() {
                 
                 return (
                   <tr key={request.id} className="border-b border-gray-200 hover:bg-gray-50">
-                    {/* 请求编号 */}
+                    {/* QR 编号 */}
                     <td className="px-4 py-3">
                       <div className="text-xs font-mono text-black">{request.requestNumber}</div>
                       <div className="text-xs text-gray-500 mt-0.5">
@@ -241,7 +246,7 @@ export function ProcurementQuotationRequests() {
                         return (
                           <div className="space-y-1">
                             <div className="text-xs">
-                              <span className="text-gray-900">{first?.modelNo || first?.productName || 'N/A'}</span>
+                              <span className="text-gray-900">{getFormalBusinessModelNo(first) || first?.productName || 'N/A'}</span>
                             </div>
                             <div className="text-xs text-gray-500">共 {Math.max(items.length, 1)} 个产品</div>
                           </div>

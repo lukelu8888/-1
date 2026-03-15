@@ -1,35 +1,60 @@
-/**
- * 🎯 全流程演示 V5.2 - 泳道图布局（完整业务流程版）
- * 🎨 优化版：85%默认尺寸 + 6列表单字段 + 台湾大厂风格紧凑布局
- * ✅ V5.2 完整版：18个阶段，122个步骤，完整业务闭环
- * 
- * 特性：
- * - 横向阶段条（18个阶段）
- * - 纵向角色泳道（14个核心角色）
- * - 步骤圆圈定位在对应位置
- * - 箭头连线展示流程走向
- * - 紧凑专业的布局设计
- * - 完整业务流程：从客户询价到销售反馈（完整闭环）
- * 
- * 🔥 阶段分布（共122步）：
- * - 阶段1-3：询价报价→销售合同→采购合同（39步）
- * - 阶段4-7：生产质检→验货完货→尾款催收→商检订舱（34步）
- * - 阶段8-10：拖车装柜→装柜报关→报关开船（18步）
- * - 阶段11-13：海运跟踪→到港清关→客户验货（15步）
- * - 阶段14-18：物流追踪API→开票归档→到港清关II→清关单证→清关反馈（16步）
- * 
- * 最后更新：2026-01-01 V5.2 Complete
- */
+// =============================================================================
+// ⚠️  SANDBOX / DEMO FILE — NOT PART OF THE REAL ERP SYSTEM
+// =============================================================================
+//
+// File    : FullProcessSandboxV5.tsx
+// Location: src/sandbox/demo/
+//
+// PURPOSE
+//   This file is a visual workflow sandbox used to illustrate the full
+//   end-to-end B2B procurement process across 18 stages and 122 steps.
+//   It is a standalone, self-contained UI demonstration with NO connection
+//   to any real ERP business logic, backend services, or production database.
+//
+// WHAT THIS FILE IS
+//   - A swimlane diagram renderer for workflow visualization
+//   - A read-only interactive demo page accessible from the Admin sidebar
+//   - A training / onboarding aid for understanding the overall process flow
+//
+// WHAT THIS FILE IS NOT
+//   - NOT connected to any React business Context
+//     (OrderContext, InquiryContext, SalesContractContext, etc.)
+//   - NOT calling any Supabase table (zero supabase.from / supabase.rpc calls)
+//   - NOT invoking any ERP service object
+//     (contractService, orderService, approvalService, etc.)
+//   - NOT emitting any ERP events (emitErpEvent is not called)
+//   - NOT modifying any real business state or database records
+//   - NOT a reference implementation for real ERP modules
+//
+// DATA
+//   All step data is static mock data defined inline in this file.
+//   The only external write is to localStorage with the key prefix
+//   "fullProcessDemoV5_" to persist UI state (zoom, pan, pinned step).
+//   initSupplierStore() and initCustomerSalesRepMapping() initialize
+//   mock/test data in localStorage only — they do NOT write to Supabase.
+//
+// DO NOT
+//   - Import this file from any real ERP business component or context
+//   - Use this file as a template for real workflow or business logic
+//   - Assume that data shown here reflects real database schema or API contracts
+//
+// =============================================================================
+//
+// Original demo content: Full Process Demo V5.2 — Swimlane Layout
+// 18 stages, 122 steps, complete B2B procurement cycle visualization
+// Last updated: 2026-01-01 V5.2 Complete
+//
+// =============================================================================
 
 import React, { useState, useRef, useEffect } from 'react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { Card } from '../ui/card';
-import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
-import { Input } from '../ui/input';
-import { Textarea } from '../ui/textarea';
-import { Checkbox } from '../ui/checkbox';
+import { Card } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import { Input } from '../../components/ui/input';
+import { Textarea } from '../../components/ui/textarea';
+import { Checkbox } from '../../components/ui/checkbox';
 import {
   Popover,
   PopoverContent,
@@ -100,7 +125,7 @@ import {
 } from '../../lib/customer-salesrep-mapping';
 
 // 🔥 导入步骤1智能推荐组件
-import { Step1SmartRecommendation } from './Step1SmartRecommendation';
+import { Step1SmartRecommendation } from '../../components/demo/Step1SmartRecommendation';
 
 // 定义步骤接口
 interface Step {
@@ -3259,7 +3284,7 @@ const DraggableField: React.FC<DraggableFieldProps> = ({
   );
 };
 
-export function FullProcessDemoV5() {
+export function FullProcessSandboxV5() {
   // 🔥 初始化供应商库和客户-业务员关系库（仅在首次加载时执行）
   useEffect(() => {
     initSupplierStore();
@@ -5882,4 +5907,4 @@ export function FullProcessDemoV5() {
   );
 }
 
-export default FullProcessDemoV5;
+export default FullProcessSandboxV5;

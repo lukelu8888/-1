@@ -50,8 +50,8 @@ export function MyOrdersOverview({ activeOrders, orderHistory, onNavigate, onTab
   const recentActivities = [
     ...inquiries.slice(0, 2).map(inq => ({
       id: inq.id,
-      type: 'inquiry',
-      title: `Inquiry ${inq.id}`,
+      type: 'ing',
+      title: `ING ${inq.id}`,
       description: inq.products?.[0]?.productName || 'Product inquiry',
       status: inq.status,
       date: inq.date,
@@ -297,7 +297,7 @@ export function MyOrdersOverview({ activeOrders, orderHistory, onNavigate, onTab
                     onClick={activity.action}
                   >
                     <div className="flex-shrink-0">
-                      {activity.type === 'inquiry' ? (
+                      {activity.type === 'ing' ? (
                         <div className="w-10 h-10 bg-[#0D3B66] rounded-sm flex items-center justify-center">
                           <FileText className="w-5 h-5 text-white" strokeWidth={2.5} />
                         </div>

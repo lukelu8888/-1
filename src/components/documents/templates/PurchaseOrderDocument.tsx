@@ -1,17 +1,18 @@
 import React, { forwardRef } from 'react';
 import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
 
 /**
- * 📋 采购订单/采购合同（Purchase Order）
+ * 📋 采购合同（CG / Purchase Contract）
  * 
- * 用途：发给供应商的正式采购订单
+ * 用途：发给供应商的正式采购合同
  * 场景：公司作为买方，向供应商采购产品/原材料
- * 数据来源：采购需求 + 供应商报价
+ * 数据来源：销售合同 + 供应商报价
  * 语言：全中文版本
  */
 
 export interface PurchaseOrderData {
-  // 采购单基本信息
+  // 采购合同基本信息
   poNo: string;                // PO-20251215-001
   poDate: string;              // 2025-12-15
   requiredDeliveryDate: string; // 2026-01-15
@@ -95,12 +96,18 @@ export interface PurchaseOrderData {
 
 interface PurchaseOrderDocumentProps {
   data: PurchaseOrderData;
+  layoutConfig?: DocumentLayoutConfig;
 }
 
 export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDocumentProps>(
-  ({ data }, ref) => {
-    
+  ({ data, layoutConfig }, ref) => {
     const total = data.products.reduce((sum, item) => sum + item.amount, 0);
+    const documentWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
+    const documentMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
+    const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '10pt';
+    const lineHeight = layoutConfig?.lineHeight ?? 1.5;
+    const contentPaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '20mm';
+    const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '20mm';
 
     return (
       <>
@@ -124,8 +131,8 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
             
             /* 文档容器 - A4标准宽度 210mm */
             .purchase-order-document {
-              width: 794px !important;
-              max-width: 794px !important;
+              width: ${documentWidth} !important;
+              max-width: ${documentWidth} !important;
               margin: 0 !important;
               padding: 0 !important;
               box-shadow: none !important;
@@ -212,18 +219,28 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
         
         <div 
           ref={ref}
-          className="purchase-order-document bg-white w-[794px] min-h-[1123px] mx-auto"
+          className="purchase-order-document bg-white mx-auto"
           style={{ 
+            width: documentWidth,
+            minHeight: documentMinHeight,
             fontFamily: '"Microsoft YaHei", "SimHei", Arial, sans-serif',
-            fontSize: '10pt',
-            lineHeight: '1.5',
+            fontSize,
+            lineHeight,
           }}
         >
           {/* ✅ 内容区域 - 屏幕预览20mm padding，打印时0 padding（margin在@page设置） */}
-          <div className="purchase-order-content p-[20mm] print:p-0">
+          <div
+            className="purchase-order-content print:p-0"
+            style={{
+              paddingTop: contentPaddingTop,
+              paddingBottom: contentPaddingBottom,
+              paddingLeft: '20mm',
+              paddingRight: '20mm',
+            }}
+          >
             {/* 页眉 - 台湾大厂紧凑风格 */}
             <div className="mb-3">
-              {/* 第一行：Logo + 采购订单标题 + 订单信息 */}
+              {/* 第一行：Logo + 采购合同标题 + 合同信息 */}
               <div className="flex items-center justify-between mb-2">
                 {/* 左侧：Logo */}
                 <div className="w-[80px] h-[70px] flex items-center">
@@ -235,23 +252,23 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                   />
                 </div>
                 
-                {/* 中间：采购订单标题 */}
+                {/* 中间：采购合同标题 */}
                 <div className="flex-1 flex justify-center items-center">
                   <h1 className="text-3xl font-bold tracking-wider text-black">
-                    采购订单
+                    采购合同
                   </h1>
                 </div>
                 
-                {/* 右侧：订单信息表格 */}
+                {/* 右侧：合同信息表格 */}
                 <div className="w-[180px] h-[70px]">
                   <table className="w-full h-full border-collapse border border-gray-400 text-xs">
                     <tbody>
                       <tr>
-                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">订单编号</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">合同编号</td>
                         <td className="border border-gray-400 px-1.5 py-0.5 font-bold text-black">{data.poNo}</td>
                       </tr>
                       <tr>
-                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">订单日期</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">合同日期</td>
                         <td className="border border-gray-400 px-1.5 py-0.5">
                           {new Date(data.poDate).toLocaleDateString('zh-CN', { 
                             year: 'numeric', 
@@ -699,7 +716,7 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
 
               {/* 页脚说明 - 与签名区域一起，不分页 */}
               <div className="text-xs text-gray-500 text-center border-t border-gray-200 pt-3">
-                <p>本采购订单一式两份，采购方和供应方各执一份，双方签章后生效。</p>
+                <p>本采购合同一式两份，采购方和供应方各执一份，双方签章后生效。</p>
                 <p className="mt-1">请供应方签章确认后回扫件至采购方邮箱。</p>
               </div>
             </div>

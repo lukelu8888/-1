@@ -27,6 +27,8 @@ import { useQuotations } from '../../contexts/QuotationContext';
 import { useInquiry } from '../../contexts/InquiryContext'; // 🔥 导入InquiryContext
 import { sendNotificationToUser } from '../../utils/notificationUtils'; // 🆕 导入通知功能
 import { getCurrentUser } from '../../data/authorizedUsers'; // 🆕 获取当前用户信息
+import { adaptLegacyQuotationToDocumentData } from '../../utils/documentDataAdapters';
+import { customerProductLibraryService } from '../../lib/customerProductLibrary';
 import EditQuotationDialog from './EditQuotationDialog';
 import ViewQuotationDialog from './ViewQuotationDialog';
 import NegotiationDialog from './NegotiationDialog';
@@ -42,6 +44,14 @@ export interface Quotation {
   customerName: string;
   customerEmail: string;
   region?: string; // 🌍 区域属性（从询价继承）
+  projectId?: string | null;
+  projectCode?: string | null;
+  projectName?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
+  projectRevisionStatus?: 'working' | 'quoted' | 'superseded' | 'final' | 'cancelled' | null;
+  finalRevisionId?: string | null;
+  quotationRole?: 'budgetary' | 'technical_review' | 'commercial_offer' | 'final_offer' | 'accepted';
   products: {
     name: string;
     quantity: number;
@@ -51,6 +61,10 @@ export interface Quotation {
     image?: string;
     sku?: string;
     productName?: string;
+    customerProductId?: string;
+    projectId?: string | null;
+    projectRevisionId?: string | null;
+    projectRevisionCode?: string | null;
   }[];
   subtotal: number;
   discount: number;
@@ -103,6 +117,11 @@ export interface Quotation {
     changes: string; // 变更说明
   }[];
   revisionNumber?: number; // 当前修订版本号，默认为1
+  templateId?: string | null;
+  templateVersionId?: string | null;
+  templateSnapshot?: any;
+  documentDataSnapshot?: any;
+  documentRenderMeta?: any;
 }
 
 interface QuotationManagementProps {
@@ -143,6 +162,53 @@ export default function QuotationManagement({
   // 🌍 Get current user region from localStorage
   const [currentUserRegion, setCurrentUserRegion] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+
+  const getQuotationRoleLabel = (role?: Quotation['quotationRole'] | null) => {
+    const labels: Record<string, string> = {
+      budgetary: 'Budgetary',
+      technical_review: 'Technical Review',
+      commercial_offer: 'Commercial Offer',
+      final_offer: 'Final Offer',
+      accepted: 'Accepted',
+    };
+    return labels[String(role || '')] || 'Standard';
+  };
+
+  const handleLockAsFinalQuotation = async (quotation: Quotation) => {
+    const primaryProjectLine = quotation.products.find((item: any) => Boolean(item?.projectRevisionId));
+    const customerProductId = String(primaryProjectLine?.customerProductId || '').trim();
+    const projectRevisionId = String(
+      quotation.projectRevisionId
+      || primaryProjectLine?.projectRevisionId
+      || ''
+    ).trim();
+
+    if (!customerProductId || !projectRevisionId) {
+      toast.error('无法锁定最终报价：缺少项目产品或 revision 关联。');
+      return;
+    }
+
+    try {
+      customerProductLibraryService.lockProjectFinalRevisionAndQuotation({
+        customerProductId,
+        revisionId: projectRevisionId,
+        quotationId: quotation.id,
+        quotationNumber: quotation.quotationNumber,
+      });
+
+      await updateQuotation(quotation.id, {
+        quotationRole: 'accepted',
+        projectRevisionStatus: 'final',
+        finalRevisionId: projectRevisionId,
+      } as Partial<Quotation>);
+
+      toast.success('项目最终 revision 和最终报价已锁定。', {
+        description: `${quotation.quotationNumber} is now the execution baseline.`,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '锁定最终报价失败');
+    }
+  };
 
   // 🗺️ Region mapping: convert short codes to full names
   const regionCodeToFullName = (code: string | null): string | null => {
@@ -220,7 +286,7 @@ export default function QuotationManagement({
   }, []);
 
   // 从询价创建报价 - 使用 useCallback 避免依赖问题
-  const handleCreateQuotation = useCallback((inquiry: any) => {
+  const handleCreateQuotation = useCallback(async (inquiry: any) => {
     console.log('🎯 QuotationManagement: handleCreateQuotation 被调用');
     console.log('📋 收到的询价对象:', inquiry);
     
@@ -306,16 +372,42 @@ export default function QuotationManagement({
     
     console.log(`📊 [生成报价编号] 区域=${region}, 历史报价数=${allRegionQuotations.length}, 新序列号=${sequence}`);
     
-    // ✅ 生成区域化报价编号: QUO-{REGION}-YYMMDD-XXXX
-    const quotationNumber = `QUO-${region}-${dateStr}-${sequence}`;
+    // ✅ 生成区域化报价编号: QT-{REGION}-YYMMDD-XXXX
+    const quotationNumber = `QT-${region}-${dateStr}-${sequence}`;
     
     const today = new Date().toISOString().split('T')[0];
     const validDate = new Date();
     validDate.setDate(validDate.getDate() + 30);
+
+    const projectLineItems = Array.isArray(inquiry?.products)
+      ? inquiry.products.filter((item: any) => Boolean(item?.projectRevisionId || item?.projectRevisionSnapshot?.revisionId))
+      : [];
+    const primaryProjectLineItem = projectLineItems[0] || null;
+    const projectSnapshot = primaryProjectLineItem?.projectRevisionSnapshot || null;
+    const projectRevisionId = String(
+      primaryProjectLineItem?.projectRevisionId
+      || projectSnapshot?.revisionId
+      || ''
+    ).trim() || null;
+    const finalRevisionId = String(
+      primaryProjectLineItem?.finalRevisionId
+      || projectSnapshot?.finalRevisionId
+      || ''
+    ).trim() || null;
+    const projectRevisionStatus = String(
+      primaryProjectLineItem?.projectRevisionStatus
+      || projectSnapshot?.revisionStatus
+      || ''
+    ).trim() as Quotation['projectRevisionStatus'] || null;
+    const quotationRole: Quotation['quotationRole'] = projectRevisionId
+      ? (projectRevisionStatus === 'final' || (finalRevisionId && projectRevisionId === finalRevisionId)
+          ? 'final_offer'
+          : 'technical_review')
+      : 'commercial_offer';
     
     // 创建新报价
     const newQuotation: Quotation = {
-      id: `QUO-${Date.now()}`,
+      id: `QT-${Date.now()}`,
       quotationNumber: quotationNumber,
       inquiryId: inquiry.id,
       inquiryNumber: inquiry.id, // 🔥 使用 inquiry.id 而不是 inquiry.inquiryNumber
@@ -323,6 +415,30 @@ export default function QuotationManagement({
       customerName: inquiry.buyerInfo?.companyName || inquiry.buyerInfo?.contactPerson || 'N/A',
       customerEmail: customerEmail, // 🔥 修复：优先使用inquiry.userEmail
       region: region, // 🌍 添加区域属性
+      projectId: String(
+        primaryProjectLineItem?.projectId
+        || projectSnapshot?.projectId
+        || ''
+      ).trim() || null,
+      projectCode: String(
+        primaryProjectLineItem?.projectCode
+        || projectSnapshot?.projectCode
+        || ''
+      ).trim() || null,
+      projectName: String(
+        primaryProjectLineItem?.projectName
+        || projectSnapshot?.projectName
+        || ''
+      ).trim() || null,
+      projectRevisionId,
+      projectRevisionCode: String(
+        primaryProjectLineItem?.projectRevisionCode
+        || projectSnapshot?.revisionCode
+        || ''
+      ).trim() || null,
+      projectRevisionStatus,
+      finalRevisionId,
+      quotationRole,
       products: inquiry.products.map((p: any) => ({
         name: p.name || p.productName,
         productName: p.productName || p.name,
@@ -331,7 +447,11 @@ export default function QuotationManagement({
         unitPrice: p.unitPrice || 0,
         totalPrice: (p.unitPrice || 0) * p.quantity,
         specs: p.specs || '',
-        image: p.image || ''
+        image: p.image || '',
+        customerProductId: String(p.customerProductId || '').trim() || undefined,
+        projectId: String(p.projectId || p.projectRevisionSnapshot?.projectId || '').trim() || null,
+        projectRevisionId: String(p.projectRevisionId || p.projectRevisionSnapshot?.revisionId || '').trim() || null,
+        projectRevisionCode: String(p.projectRevisionCode || p.projectRevisionSnapshot?.revisionCode || '').trim() || null,
       })),
       subtotal: 0,
       discount: 0,
@@ -343,8 +463,11 @@ export default function QuotationManagement({
       deliveryTerms: 'FOB Shenzhen, 15-20个工作日',
       quotationDate: today,
       status: 'draft',
-      notes: `基于询价 ${inquiry.id} 创建`
+      notes: `基于询价 ${inquiry.id} 创建`,
+      templateSnapshot: { pendingResolution: true },
+      documentRenderMeta: null,
     };
+    newQuotation.documentDataSnapshot = adaptLegacyQuotationToDocumentData(newQuotation);
 
     // 🐛 调试日志
     console.log('✅ 新报价已创建:', newQuotation);
@@ -354,11 +477,11 @@ export default function QuotationManagement({
     console.log('🌍 报价区域:', region, '(从询价单号提取)');
     
     // 添加到Context
-    addQuotation(newQuotation);
+    const savedQuotation = await addQuotation(newQuotation);
     
     // 打开编辑对话框
     setIsCreatingQuotation(true);
-    setViewQuotation(newQuotation);
+    setViewQuotation(savedQuotation);
     
     toast.success('报价已创建！', {
       description: `报价编号: ${quotationNumber}，请补充价格信息`,
@@ -378,7 +501,7 @@ export default function QuotationManagement({
       console.log('📝 开始自动创建报价...');
       
       // 自动创建报价
-      handleCreateQuotation(selectedInquiry);
+      void handleCreateQuotation(selectedInquiry);
     }
   }, [selectedInquiry, handleCreateQuotation]);
 
@@ -465,15 +588,20 @@ export default function QuotationManagement({
   };
 
   // 模拟客户确认报价
-  const handleSimulateCustomerConfirm = (quotationId: string) => {
+  const handleSimulateCustomerConfirm = async (quotationId: string) => {
     const quotation = quotations.find(q => q.id === quotationId);
     if (!quotation) return;
 
-    updateQuotation(quotationId, {
-      status: 'confirmed' as const,
-      confirmedDate: new Date().toISOString().split('T')[0],
-      confirmedBy: 'Customer'
-    });
+    try {
+      await updateQuotation(quotationId, {
+        status: 'confirmed' as const,
+        confirmedDate: new Date().toISOString().split('T')[0],
+        confirmedBy: 'Customer'
+      } as Partial<Quotation>);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '更新报价状态失败');
+      return;
+    }
 
     toast.success('客户已确认报价！', {
       description: `可以将 ${quotation.quotationNumber} 下推生成订单`,
@@ -486,11 +614,26 @@ export default function QuotationManagement({
   };
 
   // 下推生成订单
-  const handleConvertToOrder = (quotationId: string) => {
+  const handleConvertToOrder = async (quotationId: string) => {
     const quotation = quotations.find(q => q.id === quotationId);
     if (!quotation) {
       toast.error('错误', { description: '找不到报价信息' });
       return;
+    }
+
+    if (quotation.projectRevisionId) {
+      const isExecutionLocked =
+        quotation.quotationRole === 'accepted' &&
+        quotation.projectRevisionStatus === 'final' &&
+        Boolean(quotation.finalRevisionId) &&
+        quotation.finalRevisionId === quotation.projectRevisionId;
+
+      if (!isExecutionLocked) {
+        toast.error('项目类报价尚未锁定最终执行版本。', {
+          description: '请先使用 Lock Final，确认最终 revision 与最终报价，再下推执行。',
+        });
+        return;
+      }
     }
 
     console.log('🚀 ========================================');
@@ -513,7 +656,9 @@ export default function QuotationManagement({
       console.log('🔧 [智能修复] 自动生成邮箱地址:', generatedEmail);
       
       // 更新报价单的customerEmail
-      updateQuotation(quotationId, { customerEmail: generatedEmail });
+      void updateQuotation(quotationId, { customerEmail: generatedEmail }).catch((error) => {
+        toast.error(error instanceof Error ? error.message : '修复客户邮箱失败');
+      });
       
       // 使用生成的邮箱继续创建订单
       quotation.customerEmail = generatedEmail;
@@ -589,15 +734,24 @@ export default function QuotationManagement({
         unitPrice: p.unitPrice,
         totalPrice: p.totalPrice,
         specs: p.specs,
-        produced: 0
+        produced: 0,
+        customerProductId: p.customerProductId,
+        projectId: p.projectId || quotation.projectId || null,
+        projectRevisionId: p.projectRevisionId || quotation.projectRevisionId || null,
+        projectRevisionCode: p.projectRevisionCode || quotation.projectRevisionCode || null,
       })),
       paymentStatus: 'Pending Payment',
       paymentTerms: quotation.paymentTerms,
       shippingMethod: 'Sea Freight',
       deliveryTerms: quotation.deliveryTerms,
-      notes: quotation.notes,
+      notes: quotation.projectRevisionId
+        ? [
+            quotation.notes,
+            `Execution Baseline: ${quotation.projectCode ? `${quotation.projectCode} · ` : ''}${quotation.projectName || 'Project'} / Rev ${quotation.projectRevisionCode || '-'} / Final QT ${quotation.quotationNumber}`,
+          ].filter(Boolean).join('\n')
+        : quotation.notes,
       region: fullRegionName, // 🌍 传递完整区域名称
-      createdFrom: 'quotation' as const,
+      createdFrom: 'qt' as const,
       createdAt: new Date().toISOString()
     };
 
@@ -619,7 +773,12 @@ export default function QuotationManagement({
 
     // 更新报价状态为已转订单
     console.log('🔄 [下推订单] 更新报价状态为 converted...');
-    updateQuotation(quotationId, { status: 'converted' as const });
+    try {
+      await updateQuotation(quotationId, { status: 'converted' as const });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '更新 QT 状态失败');
+      return;
+    }
 
     console.log('🎉 [下推订单] 流程完成！');
     console.log('🚀 ========================================\n');
@@ -646,13 +805,18 @@ export default function QuotationManagement({
     setQuotationToDelete({ id: quotationId, number: quotationNumber });
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (quotationToDelete) {
-      deleteQuotation(quotationToDelete.id);
-      toast.success('报价已删除', {
-        description: `删除报价 ${quotationToDelete.number}`,
-        duration: 2000
-      });
+      try {
+        await deleteQuotation(quotationToDelete.id);
+        toast.success('报价已删除', {
+          description: `删除报价 ${quotationToDelete.number}`,
+          duration: 2000
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '删除报价失败');
+        return;
+      }
     }
     setDeleteDialogOpen(false);
     setQuotationToDelete(null);
@@ -664,7 +828,7 @@ export default function QuotationManagement({
   };
 
   // 🔥 提交审核处理函数
-  const handleSubmitForApproval = (quotation: Quotation) => {
+  const handleSubmitForApproval = async (quotation: Quotation) => {
     console.log('📤 提交报价审核:', quotation);
     
     // 判断审批流程
@@ -690,11 +854,16 @@ export default function QuotationManagement({
     ];
     
     // 更新报价状态
-    updateQuotation(quotation.id, {
-      status: 'pending_supervisor' as any,
-      approvalFlow,
-      approvalHistory
-    });
+    try {
+      await updateQuotation(quotation.id, {
+        status: 'pending_supervisor' as any,
+        approvalFlow,
+        approvalHistory
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '提交审核失败');
+      return;
+    }
     
     // 显示审批流程提示
     const approvalMessage = requiresDirectorApproval
@@ -716,7 +885,7 @@ export default function QuotationManagement({
   };
 
   // 🔥 新增：申请复核处理函数（用于已发送/已确认的报价）
-  const handleSubmitForReview = (quotation: Quotation) => {
+  const handleSubmitForReview = async (quotation: Quotation) => {
     console.log('📤 申请报价复核:', quotation);
     
     // 判断复核流程
@@ -742,11 +911,16 @@ export default function QuotationManagement({
     ];
     
     // 更新报价状态为待复核
-    updateQuotation(quotation.id, {
-      status: 'pending_supervisor' as any,
-      approvalFlow,
-      approvalHistory
-    });
+    try {
+      await updateQuotation(quotation.id, {
+        status: 'pending_supervisor' as any,
+        approvalFlow,
+        approvalHistory
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '提交复核失败');
+      return;
+    }
     
     // 显示复核流程提示
     const reviewMessage = requiresDirectorReview
@@ -768,7 +942,7 @@ export default function QuotationManagement({
   };
 
   // 🔥 批量删除处理函数
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     const visibleSelectedIds = Array.from(selectedIds).filter((id) =>
       filteredQuotations.some((quotation) => quotation.id === id),
     );
@@ -779,9 +953,12 @@ export default function QuotationManagement({
     }
 
     if (window.confirm(`确认要删除选中的 ${visibleSelectedIds.length} 条报价单吗？此操作无法撤销！`)) {
-      visibleSelectedIds.forEach(id => {
-        deleteQuotation(id);
-      });
+      try {
+        await Promise.all(visibleSelectedIds.map((id) => deleteQuotation(id)));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '批量删除报价失败');
+        return;
+      }
       setSelectedIds(new Set());
       toast.success(`✅ 已成功删除 ${visibleSelectedIds.length} 条报价单`);
     }
@@ -959,6 +1136,7 @@ export default function QuotationManagement({
                 <TableHead className="text-xs">报价编号</TableHead>
                 <TableHead className="text-xs">客户名称</TableHead>
                 <TableHead className="text-xs">询价编号</TableHead>
+                <TableHead className="text-xs">项目 / Revision</TableHead>
                 <TableHead className="text-xs">金额</TableHead>
                 <TableHead className="text-xs">货币</TableHead>
                 <TableHead className="text-xs">报价日期</TableHead>
@@ -1005,6 +1183,24 @@ export default function QuotationManagement({
                   </TableCell>
                   <TableCell className="text-xs">{quotation.customerName}</TableCell>
                   <TableCell className="text-xs text-blue-600">{quotation.inquiryNumber}</TableCell>
+                  <TableCell className="py-3">
+                    {quotation.projectRevisionId ? (
+                      <div className="space-y-1 text-xs">
+                        <div className="font-medium text-slate-900">
+                          {quotation.projectCode ? `${quotation.projectCode} · ` : ''}
+                          {quotation.projectName || 'Project'}
+                        </div>
+                        <div className="text-slate-500">
+                          Rev {quotation.projectRevisionCode || '-'} · {quotation.projectRevisionStatus || 'working'}
+                        </div>
+                        <div className="text-[11px] text-indigo-600">
+                          {getQuotationRoleLabel(quotation.quotationRole)}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">Standard product flow</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-xs">${quotation.totalAmount.toLocaleString()}</TableCell>
                   <TableCell className="text-xs">{quotation.currency}</TableCell>
                   <TableCell className="text-xs text-gray-600">{quotation.quotationDate}</TableCell>
@@ -1037,13 +1233,18 @@ export default function QuotationManagement({
                         <Button 
                           size="sm" 
                           className="h-7 px-3 text-xs bg-green-600 hover:bg-green-700 text-white"
-                          onClick={() => {
+                          onClick={async () => {
                             // 发送给客户
-                            updateQuotation(quotation.id, { 
-                              status: 'sent' as const,
-                              customerStatus: 'sent' as const,
-                              sentAt: new Date().toISOString()
-                            });
+                            try {
+                              await updateQuotation(quotation.id, { 
+                                status: 'sent' as const,
+                                customerStatus: 'sent' as const,
+                                sentAt: new Date().toISOString()
+                              } as Partial<Quotation>);
+                            } catch (error) {
+                              toast.error(error instanceof Error ? error.message : '发送报价失败');
+                              return;
+                            }
                             
                             // 🔔 发送通知给客户
                             sendNotificationToUser(quotation.customerEmail, {
@@ -1051,7 +1252,7 @@ export default function QuotationManagement({
                               title: 'New Quotation Received',
                               message: `Your quotation ${quotation.quotationNumber} is ready. Total amount: ${quotation.currency} ${quotation.totalAmount.toLocaleString()}`,
                               relatedId: quotation.quotationNumber,
-                              relatedType: 'quotation',
+                              relatedType: 'qt',
                               sender: getCurrentUser()?.email || 'admin@cosun.com',
                               metadata: {
                                 quotationNumber: quotation.quotationNumber,
@@ -1101,14 +1302,35 @@ export default function QuotationManagement({
                         </Button>
                       )}
                       {quotation.status === 'confirmed' && (
-                        <Button 
-                          size="sm" 
-                          className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-700"
-                          onClick={() => handleConvertToOrder(quotation.id)}
-                        >
-                          <ArrowRight className="w-3.5 h-3.5 mr-1" />
-                          下推订单
-                        </Button>
+                        <>
+                          {quotation.projectRevisionId && (
+                            <Button
+                              size="sm"
+                              className="h-7 px-3 text-xs bg-indigo-600 hover:bg-indigo-700"
+                              onClick={() => void handleLockAsFinalQuotation(quotation)}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                              Lock Final
+                            </Button>
+                          )}
+                          <Button 
+                            size="sm" 
+                            className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-700"
+                            onClick={() => handleConvertToOrder(quotation.id)}
+                            disabled={Boolean(
+                              quotation.projectRevisionId &&
+                              !(
+                                quotation.quotationRole === 'accepted' &&
+                                quotation.projectRevisionStatus === 'final' &&
+                                quotation.finalRevisionId &&
+                                quotation.finalRevisionId === quotation.projectRevisionId
+                              )
+                            )}
+                          >
+                            <ArrowRight className="w-3.5 h-3.5 mr-1" />
+                            下推订单
+                          </Button>
+                        </>
                       )}
                       {quotation.status === 'draft' && (
                         <>
@@ -1171,9 +1393,16 @@ export default function QuotationManagement({
           setViewQuotation(null); // 关闭时清空
         }}
         quotation={viewQuotation}
-        onSave={(updatedQuotation) => {
-          // 保存报价到 Context
-          updateQuotation(updatedQuotation.id, updatedQuotation);
+        onSave={async (updatedQuotation) => {
+          try {
+            await updateQuotation(updatedQuotation.id, {
+              ...updatedQuotation,
+              documentDataSnapshot: adaptLegacyQuotationToDocumentData(updatedQuotation),
+            });
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : '保存报价失败');
+            return;
+          }
           
           // 关闭编辑对话框
           setIsCreatingQuotation(false);
@@ -1186,7 +1415,7 @@ export default function QuotationManagement({
             duration: 2000
           });
         }}
-        onSend={(updatedQuotation) => {
+        onSend={async (updatedQuotation) => {
           console.log('🔥 [QuotationManagement] 发送修改后的报价');
           console.log('  - 报价ID:', updatedQuotation.id);
           console.log('  - 客户反馈 (应该为空):', updatedQuotation.customerFeedback);
@@ -1194,27 +1423,38 @@ export default function QuotationManagement({
           
           // 直接发送给客户，无需审核
           // 🔥 关键修复：清除之前的客户反馈，让客户能够重新响应
-          updateQuotation(updatedQuotation.id, { 
-            ...updatedQuotation, 
-            status: 'sent' as const,
-            customerFeedback: undefined, // 清除旧的反馈，让客户能重新选择
-            // 记录修订历史
-            revisions: [
-              ...(updatedQuotation.revisions || []),
-              {
-                revisionNumber: (updatedQuotation.revisionNumber || 1) + 1,
-                revisedAt: Date.now(),
-                revisedBy: 'admin@cosun.com',
-                reason: 'Admin modified quotation based on customer feedback'
-              }
-            ],
-            revisionNumber: (updatedQuotation.revisionNumber || 1) + 1
-          });
+          try {
+            await updateQuotation(updatedQuotation.id, { 
+              ...updatedQuotation, 
+              status: 'sent' as const,
+              customerFeedback: undefined, // 清除旧的反馈，让客户能重新选择
+              customerStatus: 'sent' as any,
+              sentAt: new Date().toISOString(),
+              documentDataSnapshot: adaptLegacyQuotationToDocumentData({
+                ...updatedQuotation,
+                status: 'sent',
+              }),
+              // 记录修订历史
+              revisions: [
+                ...(updatedQuotation.revisions || []),
+                {
+                  revisionNumber: (updatedQuotation.revisionNumber || 1) + 1,
+                  revisedAt: Date.now(),
+                  revisedBy: 'admin@cosun.com',
+                  reason: 'Admin modified quotation based on customer feedback'
+                }
+              ],
+              revisionNumber: (updatedQuotation.revisionNumber || 1) + 1
+            });
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : '发送报价失败');
+            return;
+          }
           
           console.log('✅ [QuotationManagement] 报价已更新到Context，customerFeedback已清除');
           
           // 🔥 更新询价单状态为"已报价"（quoted）
-          updateInquiryStatus(updatedQuotation.inquiryId, 'quoted');
+          await updateInquiryStatus(updatedQuotation.inquiryId, 'quoted');
           console.log(`✅ [QuotationManagement] 询价单 ${updatedQuotation.inquiryId} 状态已更新为 "quoted"`);
           
           // 🔔 发送通知给客户
@@ -1223,7 +1463,7 @@ export default function QuotationManagement({
             title: 'New Quotation Received',
             message: `Your quotation ${updatedQuotation.quotationNumber} is ready. Total amount: ${updatedQuotation.currency} ${updatedQuotation.totalAmount.toLocaleString()}`,
             relatedId: updatedQuotation.quotationNumber,
-            relatedType: 'quotation',
+            relatedType: 'qt',
             sender: 'admin@cosun.com',
             metadata: {
               quotationNumber: updatedQuotation.quotationNumber,
@@ -1263,22 +1503,32 @@ export default function QuotationManagement({
         }}
         onSendRevision={async (quotation, responseMessage) => {
           // 清除客户反馈状态，保持报价为已发送状态
-          updateQuotation(quotation.id, {
-            customerFeedback: undefined, // 清除反馈
-            status: 'sent' as const, // 重新设为已发送
-            // 添加修订历史（如果需要）
-            revisions: [
-              ...(quotation.revisions || []),
-              {
-                revisionNumber: (quotation.revisionNumber || 1) + 1,
-                revisedAt: Date.now(),
-                revisedBy: 'admin@cosun.com',
-                reason: '客户协商反馈',
-                changes: responseMessage
-              }
-            ],
-            revisionNumber: (quotation.revisionNumber || 1) + 1
-          });
+          try {
+            await updateQuotation(quotation.id, {
+              customerFeedback: undefined, // 清除反馈
+              status: 'sent' as const, // 重新设为已发送
+              customerStatus: 'sent' as any,
+              sentAt: new Date().toISOString(),
+              documentDataSnapshot: adaptLegacyQuotationToDocumentData({
+                ...quotation,
+                status: 'sent',
+              }),
+              // 添加修订历史（如果需要）
+              revisions: [
+                ...(quotation.revisions || []),
+                {
+                  revisionNumber: (quotation.revisionNumber || 1) + 1,
+                  revisedAt: Date.now(),
+                  revisedBy: 'admin@cosun.com',
+                  reason: '客户协商反馈',
+                  changes: responseMessage
+                }
+              ],
+              revisionNumber: (quotation.revisionNumber || 1) + 1
+            });
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : '发送修订报价失败');
+          }
         }}
       />
 

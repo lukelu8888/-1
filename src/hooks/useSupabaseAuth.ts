@@ -4,7 +4,7 @@
  * 统一通过 Supabase Auth 管理登录状态
  */
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, supabaseAnonKey } from '../lib/supabase'
 import type { Session, User } from '@supabase/supabase-js'
 
 export interface SupabaseProfile {
@@ -27,10 +27,125 @@ export interface AuthState {
 }
 
 // ── 登录 ──────────────────────────────────────────────────────
+function promiseWithTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ])
+}
+
+function shouldUseProxyAuth() {
+  if (typeof window === 'undefined') return false
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+}
+
+function isRetriableNetworkError(error: any) {
+  return (
+    error?.message === 'Supabase auth SDK timed out' ||
+    error?.message === 'Profile fetch timed out' ||
+    error?.message === 'Profile proxy fetch timed out' ||
+    error?.message === 'Login request timed out. Please try again.' ||
+    error?.message === 'Load failed' ||
+    error?.message === 'Failed to fetch'
+  )
+}
+
+async function directPasswordSignIn(email: string, password: string) {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), 10000)
+
+  try {
+    const response = await fetch(`/__supabase_auth__/token?grant_type=password`, {
+      method: 'POST',
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, password }),
+      signal: controller.signal,
+    })
+
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload?.msg || payload?.error_description || payload?.error || 'Login failed')
+    }
+
+    const { access_token, refresh_token } = payload ?? {}
+    if (!access_token || !refresh_token) {
+      throw new Error('Login response missing session token')
+    }
+
+    const { data, error } = await supabase.auth.setSession({
+      access_token,
+      refresh_token,
+    })
+    if (error) throw error
+    return data
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Login request timed out. Please try again.')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+async function fetchProfileViaProxy(userId: string): Promise<SupabaseProfile | null> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), 5000)
+
+  try {
+    const response = await fetch(
+      `/__supabase_rest__/user_profiles?select=*&id=eq.${encodeURIComponent(userId)}`,
+      {
+        headers: {
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${session?.access_token ?? supabaseAnonKey}`,
+        },
+        signal: controller.signal,
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`Profile fetch failed with status ${response.status}`)
+    }
+
+    const data = await response.json().catch(() => [])
+    return Array.isArray(data) && data.length > 0 ? data[0] : null
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Profile proxy fetch timed out')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
 export async function signInWithEmail(email: string, password: string) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-  if (error) throw error
-  return data
+  try {
+    const { data, error } = await promiseWithTimeout(
+      supabase.auth.signInWithPassword({ email, password }),
+      8000,
+      'Supabase auth SDK timed out',
+    )
+    if (error) throw error
+    return data
+  } catch (error: any) {
+    if (shouldUseProxyAuth() && isRetriableNetworkError(error)) {
+      console.warn('[useSupabaseAuth] signInWithEmail falling back to proxy auth:', error?.message || error)
+      return directPasswordSignIn(email, password)
+    }
+    throw error
+  }
 }
 
 // ── 登出 ──────────────────────────────────────────────────────
@@ -48,16 +163,43 @@ export async function signOut() {
 
 // ── 获取用户 Profile ───────────────────────────────────────────
 export async function fetchProfile(userId: string): Promise<SupabaseProfile | null> {
-  const { data, error } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .eq('id', userId)
-    .maybeSingle()
-  if (error) {
-    console.warn('[useSupabaseAuth] fetchProfile error:', error.message)
+  try {
+    const { data, error } = await promiseWithTimeout(
+      supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle(),
+      5000,
+      'Profile fetch timed out',
+    )
+    if (error) throw error
+    return data
+  } catch (error: any) {
+    const message = String(error?.message || error || '')
+    if (
+      error?.name === 'AbortError' ||
+      message.includes('timed out') ||
+      isRetriableNetworkError(error)
+    ) {
+      if (shouldUseProxyAuth() && isRetriableNetworkError(error)) {
+        try {
+          return await fetchProfileViaProxy(userId)
+        } catch {
+          return null
+        }
+      }
+      return null
+    }
+    if (shouldUseProxyAuth() && isRetriableNetworkError(error)) {
+      try {
+        return await fetchProfileViaProxy(userId)
+      } catch {
+        return null
+      }
+    }
     return null
   }
-  return data
 }
 
 // ── 主 Hook ────────────────────────────────────────────────────

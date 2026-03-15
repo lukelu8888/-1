@@ -5,7 +5,12 @@ import "./index.css";
 import { initializeSupabaseStorageBridge } from "./lib/supabaseStorageBridge";
 
 async function bootstrap() {
-  await initializeSupabaseStorageBridge();
+  try {
+    await initializeSupabaseStorageBridge();
+  } catch (error) {
+    console.error('[bootstrap] initializeSupabaseStorageBridge failed:', error);
+  }
+
   createRoot(document.getElementById("root")!).render(<App />);
 }
 

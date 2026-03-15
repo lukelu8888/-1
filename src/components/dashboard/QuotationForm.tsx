@@ -9,7 +9,7 @@ interface QuotationFormProps {
 
 export function QuotationForm({ 
   quotationNumber = 'QT-2025-001234',
-  inquiryNumber = 'INQ-2025-001234',
+  inquiryNumber = 'ING-2025-001234',
   onClose 
 }: QuotationFormProps) {
   const handlePrint = () => {

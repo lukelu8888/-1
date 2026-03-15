@@ -35,6 +35,7 @@ import {
   Trash2 // 🔥 新增：删除图标
 } from 'lucide-react';
 import { useOrders } from '../../contexts/OrderContext';
+import { useSalesContracts } from '../../contexts/SalesContractContext';
 import { useFinance } from '../../contexts/FinanceContext'; // 🔥 新增：导入财务Context
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
@@ -42,6 +43,7 @@ import { orderService } from '../../lib/supabaseService';
 
 export function AccountsReceivable() {
   const { orders, updateOrder, deleteOrder } = useOrders();
+  const { contracts } = useSalesContracts();
   const { clearAllAccountsReceivable } = useFinance(); // 🔥 新增：获取清空方法
   const currentUser = getCurrentUser();
   
@@ -67,14 +69,11 @@ export function AccountsReceivable() {
     notes: ''
   });
   
-  // 🔥 直接从 salesContracts 读取已发送合同（不依赖 OrderContext 链路是否正确写入）
   const [contractBasedOrders, setContractBasedOrders] = useState<any[]>([]);
   useEffect(() => {
     const load = () => {
-      try {
-        const SENT = new Set(['sent_to_customer', 'sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed']);
-        const all: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-        const mapped = all
+      const SENT = new Set(['sent_to_customer', 'sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed']);
+      const mapped = contracts
           .filter((c: any) => SENT.has(c.status))
           .map((c: any) => ({
             id: c.id,
@@ -98,23 +97,20 @@ export function AccountsReceivable() {
             createdFrom: 'sales_contract',
             createdAt: c.createdAt,
           }));
-        setContractBasedOrders(mapped);
-      } catch { /* ignore */ }
+      setContractBasedOrders(mapped);
     };
     load();
     window.addEventListener('ordersUpdated', load);
-    window.addEventListener('salesContractCreatedLocally', load);
     window.addEventListener('financeDataUpdated', load);
     window.addEventListener('userChanged', load);
     return () => {
       window.removeEventListener('ordersUpdated', load);
-      window.removeEventListener('salesContractCreatedLocally', load);
       window.removeEventListener('financeDataUpdated', load);
       window.removeEventListener('userChanged', load);
     };
-  }, []);
+  }, [contracts]);
 
-  // 🔥 筛选需要财务处理的订单（有销售合同的订单）— 合并 OrderContext + salesContracts 两个来源
+  // 🔥 筛选需要财务处理的订单（有销售合同的订单）— 合并 OrderContext + 合同上下文
   const receivableOrders = useMemo(() => {
     // 合并去重
     const contextOrders = orders.filter(o => o.orderNumber?.startsWith('SC-'));

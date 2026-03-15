@@ -38,7 +38,7 @@ import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 
 interface DocumentItem {
   id: string;
-  type: 'inquiry' | 'quotation' | 'sc' | 'pi' | 'ci' | 'pl';
+  type: 'ing' | 'qt' | 'sc' | 'pi' | 'ci' | 'pl';
   number: string;
   externalNumber?: string;
   date: string;
@@ -112,9 +112,9 @@ export function MyDocuments() {
       const firstProduct = inq.products?.[0]?.productName || inq.products?.[0]?.name || 'Inquiry';
       result.push({
         id: `inq-${inq.id}`,
-        type: 'inquiry',
+        type: 'ing',
         number,
-        externalNumber: getMappedExternalNo('inquiry', number),
+        externalNumber: getMappedExternalNo('ing', number),
         date: String(inq.date || '').slice(0, 10) || new Date(inq.createdAt || Date.now()).toISOString().slice(0, 10),
         title: String(firstProduct),
         status: mapInquiryStatus(inq.status),
@@ -126,9 +126,9 @@ export function MyDocuments() {
       const firstProduct = qt.items?.[0]?.productName || 'Quotation';
       result.push({
         id: `qt-${qt.id}`,
-        type: 'quotation',
+        type: 'qt',
         number: qt.qtNumber || qt.id,
-        externalNumber: getMappedExternalNo('quotation', qt.qtNumber || qt.id),
+        externalNumber: getMappedExternalNo('qt', qt.qtNumber || qt.id),
         date: String(qt.createdAt || '').slice(0, 10),
         title: `Quotation - ${firstProduct}`,
         status: mapQuotationStatus(qt.customerStatus),
@@ -198,8 +198,8 @@ export function MyDocuments() {
 
   // 文档类型标签
   const docTypeLabels: Record<string, { label: string; color: string }> = {
-    inquiry: { label: 'Inquiry', color: 'bg-blue-100 text-blue-700' },
-    quotation: { label: 'Quotation', color: 'bg-purple-100 text-purple-700' },
+    ing: { label: 'ING', color: 'bg-blue-100 text-blue-700' },
+    qt: { label: 'QT', color: 'bg-purple-100 text-purple-700' },
     sc: { label: 'Sales Contract', color: 'bg-green-100 text-green-700' },
     pi: { label: 'Proforma Invoice', color: 'bg-yellow-100 text-yellow-700' },
     ci: { label: 'Commercial Invoice', color: 'bg-orange-100 text-orange-700' },
@@ -259,7 +259,7 @@ export function MyDocuments() {
     ];
 
     switch (doc.type) {
-      case 'inquiry':
+      case 'ing':
         return {
           inquiryNo: doc.number,
           inquiryDate: doc.date,
@@ -273,12 +273,12 @@ export function MyDocuments() {
           notes: 'Please provide your best price for the items listed above.'
         } as CustomerInquiryData;
 
-      case 'quotation':
+      case 'qt':
         return {
           quotationNo: doc.number,
           quotationDate: doc.date,
           validUntil: '2025-12-31',
-          inquiryRef: 'INQ-NA-20251210-001',
+          inquiryRef: 'ING-NA-20251210-001',
           region: 'NA',
           customer: baseCustomer,
           items: baseItems,
@@ -439,9 +439,9 @@ export function MyDocuments() {
     if (!data) return null;
 
     switch (doc.type) {
-      case 'inquiry':
+      case 'ing':
         return <CustomerInquiryDocument data={data as CustomerInquiryData} />;
-      case 'quotation':
+      case 'qt':
         return <QuotationDocument data={data as QuotationData} />;
       case 'sc':
         return <SalesContractDocument data={data as SalesContractData} />;
@@ -523,8 +523,8 @@ export function MyDocuments() {
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="all">All Types</option>
-                  <option value="inquiry">Inquiry</option>
-                  <option value="quotation">Quotation</option>
+                  <option value="ing">Inquiry</option>
+                  <option value="qt">Quotation</option>
                   <option value="sc">Sales Contract</option>
                   <option value="pi">Proforma Invoice</option>
                   <option value="ci">Commercial Invoice</option>

@@ -4,7 +4,7 @@ import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOr
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { TabsContent } from '../../ui/tabs';
-import { getPOStatusConfig } from './purchaseOrderUtils';
+import { extractProjectExecutionBaseline, getPOStatusConfig } from './purchaseOrderUtils';
 
 type PurchaseOrdersTabProps = {
   orderSearchTerm: string;
@@ -105,6 +105,7 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
             <tbody>
               {filteredOrders.map((po, idx) => {
                 const reqStatus = String((po as any).procurementRequestStatus || '');
+                const projectBaseline = extractProjectExecutionBaseline(po);
                 const statusConfig =
                   reqStatus === 'pending_boss_approval'
                     ? { label: '提交审核状态', color: 'bg-amber-50 text-amber-700 border-amber-200' }
@@ -148,6 +149,11 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                         来源: {resolveInquirySourceRef(po)}
                         {getRequirementNoFromPO(po) ? ` · ${getRequirementNoFromPO(po)}` : ''}
                       </div>
+                      {projectBaseline && (
+                        <div className="text-[11px] text-indigo-600 mt-0.5">
+                          基线: {projectBaseline.projectCode ? `${projectBaseline.projectCode} · ` : ''}{projectBaseline.projectName || 'Project'} / Rev {projectBaseline.projectRevisionCode || '-'} / QT {projectBaseline.finalQuotationNumber || '-'}
+                        </div>
+                      )}
                     </td>
 
                     <td className="py-3 px-3">

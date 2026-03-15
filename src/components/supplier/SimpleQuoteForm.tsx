@@ -6,6 +6,7 @@ import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { AlertCircle, Calculator, DollarSign, Clock, Package } from 'lucide-react';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 interface SimpleQuoteFormProps {
   xj: any;
@@ -16,6 +17,7 @@ interface SimpleQuoteFormProps {
 
 export function SimpleQuoteForm({ xj, initialData, onSubmit, onCancel }: SimpleQuoteFormProps) {
   const [formData, setFormData] = useState({
+    supplierModelNo: initialData?.supplierModelNo || xj?.items?.[0]?.supplierModelNo || '',
     unitPrice: initialData?.unitPrice || '',
     currency: initialData?.currency || 'CNY', // 默认人民币
     leadTime: initialData?.leadTime || '',
@@ -112,7 +114,10 @@ export function SimpleQuoteForm({ xj, initialData, onSubmit, onCancel }: SimpleQ
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-semibold">{item.productName}</p>
-                      <p className="text-xs text-slate-500">{item.modelNo}</p>
+                      <p className="text-xs text-slate-500">{getFormalBusinessModelNo(item)}</p>
+                      {item.supplierModelNo && (
+                        <p className="text-xs text-slate-500">供应商型号: {item.supplierModelNo}</p>
+                      )}
                       {item.specification && (
                         <p className="text-xs text-slate-500">{item.specification}</p>
                       )}
@@ -142,6 +147,18 @@ export function SimpleQuoteForm({ xj, initialData, onSubmit, onCancel }: SimpleQ
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="supplierModelNo" className="text-xs">
+                供应商型号
+              </Label>
+              <Input
+                id="supplierModelNo"
+                placeholder="请输入供应商产品编号"
+                value={formData.supplierModelNo}
+                onChange={(e) => setFormData({ ...formData, supplierModelNo: e.target.value })}
+              />
+            </div>
+
             {/* 单价 - 货币选择器 */}
             <div className="space-y-2">
               <Label htmlFor="currency" className="text-xs">

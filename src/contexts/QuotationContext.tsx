@@ -6,6 +6,7 @@ import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
 import { emitErpEvent } from '../lib/erp-core/event-bus';
 import { salesQuotationService, inquiryService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
+import { adaptLegacyQuotationToDocumentData } from '../utils/documentDataAdapters';
 
 const getQuotationMarkers = (quotation: Partial<Quotation>): string[] => {
   return [quotation.id, (quotation as any).qtNumber, quotation.quotationNumber]
@@ -22,7 +23,7 @@ const emitQuotationEvent = (
   emitErpEvent({
     id: `evt-quotation-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     key: key as any,
-    domain: 'quotation',
+    domain: 'qt',
     recordId: String(quotation.id),
     internalNo: String((quotation as any).qtNumber || quotation.quotationNumber || quotation.id),
     companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
@@ -41,6 +42,14 @@ function toServicePayload(q: Quotation): any {
     region: q.region,
     customerName: q.customerName || q.customer,
     customerEmail: q.customerEmail,
+    projectId: (q as any).projectId || null,
+    projectCode: (q as any).projectCode || null,
+    projectName: (q as any).projectName || null,
+    projectRevisionId: (q as any).projectRevisionId || null,
+    projectRevisionCode: (q as any).projectRevisionCode || null,
+    projectRevisionStatus: (q as any).projectRevisionStatus || null,
+    finalRevisionId: (q as any).finalRevisionId || null,
+    quotationRole: (q as any).quotationRole || null,
     items: q.products?.map(p => ({
       name: p.name || p.productName,
       quantity: p.quantity,
@@ -49,6 +58,10 @@ function toServicePayload(q: Quotation): any {
       specs: p.specs,
       image: p.image,
       sku: p.sku,
+      customerProductId: (p as any).customerProductId || null,
+      projectId: (p as any).projectId || null,
+      projectRevisionId: (p as any).projectRevisionId || null,
+      projectRevisionCode: (p as any).projectRevisionCode || null,
     })) || [],
     totalPrice: q.totalAmount,
     currency: q.currency,
@@ -63,6 +76,11 @@ function toServicePayload(q: Quotation): any {
     customerResponse: q.customerFeedback,
     revisions: q.revisions,
     revisionNumber: q.revisionNumber,
+    templateId: (q as any).templateId || null,
+    templateVersionId: (q as any).templateVersionId || null,
+    templateSnapshot: (q as any).templateSnapshot || { pendingResolution: true },
+    documentDataSnapshot: (q as any).documentDataSnapshot || adaptLegacyQuotationToDocumentData(q),
+    documentRenderMeta: (q as any).documentRenderMeta || null,
   };
 }
 
@@ -77,6 +95,14 @@ function fromServicePayload(r: any): Quotation {
     customerName: r.customerName || '',
     customerEmail: r.customerEmail || '',
     region: r.region,
+    projectId: r.projectId || r.project_id || null,
+    projectCode: r.projectCode || r.project_code || null,
+    projectName: r.projectName || r.project_name || null,
+    projectRevisionId: r.projectRevisionId || r.project_revision_id || null,
+    projectRevisionCode: r.projectRevisionCode || r.project_revision_code || null,
+    projectRevisionStatus: r.projectRevisionStatus || r.project_revision_status || null,
+    finalRevisionId: r.finalRevisionId || r.final_revision_id || null,
+    quotationRole: r.quotationRole || r.quotation_role || null,
     products: (r.items || []).map((item: any) => ({
       name: item.name || item.productName,
       productName: item.name || item.productName,
@@ -86,6 +112,10 @@ function fromServicePayload(r: any): Quotation {
       specs: item.specs || '',
       image: item.image,
       sku: item.sku,
+      customerProductId: item.customerProductId || item.customer_product_id || undefined,
+      projectId: item.projectId || item.project_id || null,
+      projectRevisionId: item.projectRevisionId || item.project_revision_id || null,
+      projectRevisionCode: item.projectRevisionCode || item.project_revision_code || null,
     })),
     subtotal: r.totalPrice || 0,
     discount: 0,
@@ -105,14 +135,19 @@ function fromServicePayload(r: any): Quotation {
     customerFeedback: r.customerResponse,
     revisions: r.revisions,
     revisionNumber: r.revisionNumber,
+    templateId: r.templateId || r.template_id || null,
+    templateVersionId: r.templateVersionId || r.template_version_id || null,
+    templateSnapshot: r.templateSnapshot || r.template_snapshot || null,
+    documentDataSnapshot: r.documentDataSnapshot || r.document_data_snapshot || null,
+    documentRenderMeta: r.documentRenderMeta || r.document_render_meta || null,
   };
 }
 
 interface QuotationContextType {
   quotations: Quotation[];
-  addQuotation: (quotation: Quotation) => void;
-  updateQuotation: (id: string, updates: Partial<Quotation>) => void;
-  deleteQuotation: (id: string) => void;
+  addQuotation: (quotation: Quotation) => Promise<Quotation>;
+  updateQuotation: (id: string, updates: Partial<Quotation>) => Promise<Quotation>;
+  deleteQuotation: (id: string) => Promise<void>;
   getQuotationById: (id: string) => Quotation | undefined;
 }
 
@@ -135,7 +170,7 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
     if (!Array.isArray(raw)) return;
 
     const mapped = raw.filter(Boolean).map(fromServicePayload);
-    const visible = filterNotDeleted('quotation', mapped, (q) => getQuotationMarkers(q));
+    const visible = filterNotDeleted('qt', mapped, (q) => getQuotationMarkers(q));
     setQuotations(visible);
   };
 
@@ -162,64 +197,57 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const addQuotation = (quotation: Quotation) => {
+  const addQuotation = async (quotation: Quotation) => {
     if (!quotation.customerEmail || quotation.customerEmail === 'N/A') {
-      console.error('[QuotationContext] addQuotation: 客户邮箱无效，不保存');
-      return;
+      throw new Error('[QuotationContext] addQuotation: 客户邮箱无效，不保存');
     }
 
-    // 立即更新 React State
+    const saved = fromServicePayload(await salesQuotationService.upsert(toServicePayload(quotation)));
     setQuotations(prev => {
-      const exists = prev.some(q => q.id === quotation.id);
-      return exists ? prev : [quotation, ...prev];
+      const exists = prev.some(q => q.id === saved.id);
+      return exists ? prev.map(q => q.id === saved.id ? saved : q) : [saved, ...prev];
     });
 
-    // Supabase 异步写入
-    void salesQuotationService.upsert(toServicePayload(quotation)).catch(() => {});
-
-    // 标记对应询价为已报价
     if (quotation.inquiryNumber || quotation.inquiryId) {
       const inquiryId = quotation.inquiryId || quotation.inquiryNumber;
-      void inquiryService.updateStatus(inquiryId, 'quoted', {
+      await inquiryService.updateStatus(inquiryId, 'quoted', {
         quotation_created: true,
         quotation_number: quotation.quotationNumber,
-      }).catch(() => {});
+      });
     }
 
     window.dispatchEvent(new Event('quotationsUpdated'));
-    emitQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, quotation, {
-      status: quotation.status,
+    emitQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, saved, {
+      status: saved.status,
     });
+    return saved;
   };
 
-  const updateQuotation = (id: string, updates: Partial<Quotation>) => {
-    // 立即更新 React State
-    setQuotations(prev => prev.map(q => q.id === id ? { ...q, ...updates } : q));
-
-    // Supabase 异步写入
+  const updateQuotation = async (id: string, updates: Partial<Quotation>) => {
     const target = quotations.find(q => q.id === id);
     if (target) {
       const merged = { ...target, ...updates };
-      void salesQuotationService.upsert(toServicePayload(merged)).catch(() => {});
+      const saved = fromServicePayload(await salesQuotationService.upsert(toServicePayload(merged)));
+      setQuotations(prev => prev.map(q => q.id === id ? saved : q));
+      window.dispatchEvent(new Event('quotationsUpdated'));
+      emitQuotationEvent(ERP_EVENT_KEYS.QUOTATION_SENT, {
+        id,
+        quotationNumber: String(saved.quotationNumber || id),
+      } as any, { fields: Object.keys(updates) });
+      return saved;
     }
-
-    window.dispatchEvent(new Event('quotationsUpdated'));
-    emitQuotationEvent(ERP_EVENT_KEYS.QUOTATION_SENT, {
-      id,
-      quotationNumber: String(updates.quotationNumber || id),
-    } as any, { fields: Object.keys(updates) });
+    throw new Error(`Quotation ${id} not found`);
   };
 
-  const deleteQuotation = (id: string) => {
+  const deleteQuotation = async (id: string) => {
     const target = quotations.find(q => q.id === id);
     const markers = target ? getQuotationMarkers(target) : [String(id)];
     const currentUser = getCurrentUser();
 
+    await salesQuotationService.delete(id);
     setQuotations(prev => prev.filter(q => q.id !== id));
 
-    void salesQuotationService.delete(id).catch(() => {});
-
-    addTombstones('quotation', markers, {
+    addTombstones('qt', markers, {
       reason: 'manual_delete',
       deletedBy: currentUser?.email || 'unknown',
     });

@@ -1,13 +1,13 @@
 import type { BusinessDomain } from './types';
 
 export const ERP_EVENT_KEYS = {
-  INQUIRY_CREATED: 'inquiry.created',
-  INQUIRY_SUBMITTED: 'inquiry.submitted',
-  INQUIRY_DELETED: 'inquiry.deleted',
-  QUOTATION_CREATED: 'quotation.created',
-  QUOTATION_SENT: 'quotation.sent',
-  QUOTATION_ACCEPTED: 'quotation.accepted',
-  QUOTATION_DELETED: 'quotation.deleted',
+  INQUIRY_CREATED: 'ing.created',
+  INQUIRY_SUBMITTED: 'ing.submitted',
+  INQUIRY_DELETED: 'ing.deleted',
+  QUOTATION_CREATED: 'qt.created',
+  QUOTATION_SENT: 'qt.sent',
+  QUOTATION_ACCEPTED: 'qt.accepted',
+  QUOTATION_DELETED: 'qt.deleted',
   ORDER_CREATED: 'order.created',
   ORDER_SUBMITTED: 'order.submitted',
   ORDER_STATUS_CHANGED: 'order.status_changed',

@@ -17,7 +17,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
   const testXJs = [
     {
       id: 'xj-001',
-      xjNumber: 'INQ-NA-251119-0001',
+      xjNumber: 'ING-NA-251119-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
       region: 'NA',
@@ -34,7 +34,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     },
     {
       id: 'xj-002',
-      xjNumber: 'INQ-NA-251120-0001',
+      xjNumber: 'ING-NA-251120-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
       region: 'NA',
@@ -67,8 +67,8 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
   const testQuotations = [
     {
       id: 'quo-001',
-      quotationNumber: 'QUO-NA-251120-0001',
-      xjNumber: 'INQ-NA-251119-0001',
+      quotationNumber: 'QT-NA-251120-0001',
+      xjNumber: 'ING-NA-251119-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
       region: 'NA',
@@ -92,8 +92,8 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     },
     {
       id: 'quo-002',
-      quotationNumber: 'QUO-NA-251119-0001',
-      xjNumber: 'INQ-NA-251120-0001',
+      quotationNumber: 'QT-NA-251119-0001',
+      xjNumber: 'ING-NA-251120-0001',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
       region: 'NA',
@@ -134,7 +134,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     {
       arNumber: 'YS-NA-251121-0001',
       orderNumber: 'ORD-NA-251121-0002',
-      quotationNumber: 'QUO-NA-251120-0001',
+      quotationNumber: 'QT-NA-251120-0001',
       contractNumber: 'ORD-NA-251121-0002',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
@@ -171,7 +171,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     {
       arNumber: 'YS-NA-251120-0001',
       orderNumber: 'ORD-NA-251121-0003',
-      quotationNumber: 'QUO-NA-251119-0001',
+      quotationNumber: 'QT-NA-251119-0001',
       contractNumber: 'ORD-NA-251121-0003',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
@@ -208,7 +208,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     {
       arNumber: 'YS-NA-251119-0001',
       orderNumber: 'ORD-NA-251121-0004',
-      quotationNumber: 'QUO-NA-251118-0001',
+      quotationNumber: 'QT-NA-251118-0001',
       contractNumber: 'ORD-NA-251121-0004',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
@@ -245,7 +245,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     {
       arNumber: 'YS-NA-251121-0002',
       orderNumber: 'ORD-NA-251121-0005',
-      quotationNumber: 'QUO-NA-251121-0002',
+      quotationNumber: 'QT-NA-251121-0002',
       contractNumber: 'ORD-NA-251121-0005',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,
@@ -273,7 +273,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
     {
       arNumber: 'YS-NA-251121-0003',
       orderNumber: 'ORD-NA-251121-0006',
-      quotationNumber: 'QUO-NA-251121-0003',
+      quotationNumber: 'QT-NA-251121-0003',
       contractNumber: 'ORD-NA-251121-0006',
       customerName: 'Global Electronics Corp',
       customerEmail: customerEmail,

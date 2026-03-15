@@ -13,6 +13,8 @@ import { QuotationDocument, QuotationData } from '../documents/templates/Quotati
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { toast } from 'sonner@2.0.3';
+import type { DocumentLayoutConfig } from '../documents/A4PageContainer';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 interface QuotationViewProps {
   quotation: any; // 销售报价单（QT）数据
@@ -56,7 +58,7 @@ export function QuotationView({ quotation, onClose }: QuotationViewProps) {
       // 产品报价列表
       products: quotation.items?.map((item: any, index: number) => ({
         no: index + 1,
-        modelNo: item.modelNo || '',
+        modelNo: getFormalBusinessModelNo(item),
         imageUrl: item.imageUrl || '',
         productName: item.productName || '',
         specification: item.specification || '',
@@ -144,7 +146,10 @@ export function QuotationView({ quotation, onClose }: QuotationViewProps) {
     return () => window.removeEventListener('keydown', handleEsc);
   }, [onClose]);
 
-  const quotationData = convertToQuotationData();
+  const templateSnapshot = quotation.templateSnapshot || quotation.template_snapshot || null;
+  const templateVersion = templateSnapshot?.version || null;
+  const resolvedQuotationData = (quotation.documentDataSnapshot || quotation.document_data_snapshot) as QuotationData | null;
+  const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -202,7 +207,13 @@ export function QuotationView({ quotation, onClose }: QuotationViewProps) {
         {/* 文档预览区域 */}
         <div className="flex-1 overflow-auto bg-gray-100 p-6">
           <div className="max-w-[210mm] mx-auto">
-            <QuotationDocument ref={documentRef} data={quotationData} />
+            {!templateVersion || !resolvedQuotationData ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+                该 QT 未绑定模板中心版本快照，无法预览。
+              </div>
+            ) : (
+              <QuotationDocument ref={documentRef} data={resolvedQuotationData} layoutConfig={layoutConfig || undefined} />
+            )}
           </div>
         </div>
       </div>

@@ -82,8 +82,8 @@ export default function QuotationFlowManagement() {
   // 模拟询价数据
   const [inquiries, setInquiries] = useState<Inquiry[]>([
     {
-      id: 'INQ-001',
-      inquiryNumber: 'INQ-2025-1156',
+      id: 'ING-001',
+      inquiryNumber: 'ING-2025-1156',
       customerName: 'ABC Trading Ltd.',
       customerEmail: 'contact@abctrading.com',
       customerPhone: '+1 555-0123',
@@ -98,8 +98,8 @@ export default function QuotationFlowManagement() {
       priority: 'high'
     },
     {
-      id: 'INQ-002',
-      inquiryNumber: 'INQ-2025-1189',
+      id: 'ING-002',
+      inquiryNumber: 'ING-2025-1189',
       customerName: 'HomeStyle Warehouse',
       customerEmail: 'orders@homestyle.com',
       customerPhone: '+44 20 7946 0958',
@@ -113,8 +113,8 @@ export default function QuotationFlowManagement() {
       priority: 'medium'
     },
     {
-      id: 'INQ-003',
-      inquiryNumber: 'INQ-2025-1201',
+      id: 'ING-003',
+      inquiryNumber: 'ING-2025-1201',
       customerName: 'BuildPro Solutions',
       customerEmail: 'info@buildpro.com',
       customerPhone: '+1 555-0199',
@@ -132,10 +132,10 @@ export default function QuotationFlowManagement() {
   // 模拟报价数据
   const [quotations, setQuotations] = useState<Quotation[]>([
     {
-      id: 'QUO-001',
-      quotationNumber: 'QUO-2025-1156',
-      inquiryId: 'INQ-002',
-      inquiryNumber: 'INQ-2025-1189',
+      id: 'QT-001',
+      quotationNumber: 'QT-2025-1156',
+      inquiryId: 'ING-002',
+      inquiryNumber: 'ING-2025-1189',
       customerName: 'HomeStyle Warehouse',
       customerEmail: 'orders@homestyle.com',
       products: [
@@ -160,10 +160,10 @@ export default function QuotationFlowManagement() {
       notes: '5%折扣仅在11月底前有效'
     },
     {
-      id: 'QUO-002',
-      quotationNumber: 'QUO-2025-1201',
-      inquiryId: 'INQ-003',
-      inquiryNumber: 'INQ-2025-1201',
+      id: 'QT-002',
+      quotationNumber: 'QT-2025-1201',
+      inquiryId: 'ING-003',
+      inquiryNumber: 'ING-2025-1201',
       customerName: 'BuildPro Solutions',
       customerEmail: 'info@buildpro.com',
       products: [
@@ -197,8 +197,8 @@ export default function QuotationFlowManagement() {
       id: 'NOTIF-001',
       type: 'quotation_confirmed',
       title: '报价已确认',
-      message: 'BuildPro Solutions 已确认报价 QUO-2025-1201',
-      quotationNumber: 'QUO-2025-1201',
+      message: 'BuildPro Solutions 已确认报价 QT-2025-1201',
+      quotationNumber: 'QT-2025-1201',
       time: '2025-11-18 10:30',
       isRead: false,
       action: 'convert_to_order'
@@ -207,8 +207,8 @@ export default function QuotationFlowManagement() {
       id: 'NOTIF-002',
       type: 'new_inquiry',
       title: '新询价',
-      message: 'ABC Trading Ltd. 提交了新询价 INQ-2025-1156',
-      inquiryNumber: 'INQ-2025-1156',
+      message: 'ABC Trading Ltd. 提交了新询价 ING-2025-1156',
+      inquiryNumber: 'ING-2025-1156',
       time: '2025-11-15 14:20',
       isRead: true,
       action: 'create_quotation'
@@ -376,7 +376,7 @@ export default function QuotationFlowManagement() {
       shippingMethod: 'Sea Freight',
       deliveryTerms: quotation.deliveryTerms,
       notes: quotation.notes,
-      createdFrom: 'quotation' as const,
+      createdFrom: 'qt' as const,
       createdAt: new Date().toISOString()
     };
 

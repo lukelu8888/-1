@@ -18,6 +18,8 @@ import { toast } from 'sonner@2.0.3';
 import { useXJs } from '../../contexts/XJContext';
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
 import { generateDocumentNumber, type RegionType } from '../../utils/xjNumberGenerator';
+import { buildXJDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 /**
  * 📋 产品-供应商分发选择器
@@ -273,7 +275,7 @@ export function ProductSupplierDistributionDialog({
   };
 
   // 提交：按供应商维度创建XJ
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!quotationRequest) return;
 
     if (statistics.totalXJs === 0) {
@@ -292,10 +294,10 @@ export function ProductSupplierDistributionDialog({
 
     try {
       // 🔥 按供应商维度创建XJ
-      Object.entries(statistics.supplierGroups).forEach(([supplierId, group]) => {
+      await Promise.all(Object.entries(statistics.supplierGroups).map(async ([supplierId, group]) => {
         const xjNumber = generateXJNumber(quotationRequest.region);
         
-        addXJ({
+        const xjPayload = {
           id: `rfq_${Date.now()}_${supplierId}_${Math.random()}`,
           xjNumber,
           
@@ -314,7 +316,7 @@ export function ProductSupplierDistributionDialog({
           products: group.products.map(p => ({
             id: p.id,
             productName: p.productName,
-            modelNo: p.modelNo,
+            modelNo: getFormalBusinessModelNo(p),
             specification: p.specification || '',
             quantity: p.quantity,
             unit: p.unit,
@@ -324,7 +326,7 @@ export function ProductSupplierDistributionDialog({
           
           // 保留旧字段以兼容（使用第一个产品的信息）
           productName: group.products[0].productName,
-          modelNo: group.products[0].modelNo,
+          modelNo: getFormalBusinessModelNo(group.products[0]),
           quantity: group.products.reduce((sum, p) => sum + p.quantity, 0),
           unit: group.products[0].unit,
           
@@ -339,14 +341,18 @@ export function ProductSupplierDistributionDialog({
           dueDate: quotationRequest.expectedQuoteDate || quotationRequest.requiredDate || '',
           
           // 🔥 备注
-          remarks: `来自采购需求 ${quotationRequest.requestNumber}，包含 ${group.products.length} 个产品`,
+          remarks: `来自 QR ${quotationRequest.requestNumber}，包含 ${group.products.length} 个产品`,
           
-          quotes: []
-        });
-      });
+          quotes: [],
+          templateSnapshot: { pendingResolution: true }
+        } as any;
+
+        xjPayload.documentDataSnapshot = buildXJDocumentSnapshot(xjPayload);
+        await addXJ(xjPayload);
+      }));
 
       // 🔥 更新QuotationRequest的rfqCount
-      updateQuotationRequest(quotationRequest.id, {
+      await updateQuotationRequest(quotationRequest.id, {
         xjCount: statistics.totalXJs,
         status: 'processing'
       });
@@ -391,12 +397,12 @@ export function ProductSupplierDistributionDialog({
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-6 py-4">
-          {/* QR信息 */}
+          {/* QR 信息 */}
           <Card className="border-orange-200 bg-orange-50">
             <CardContent className="pt-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
-                  <p className="text-xs text-slate-600 mb-1">采购需求编号</p>
+                  <p className="text-xs text-slate-600 mb-1">QR 编号</p>
                   <p className="font-semibold text-orange-600">{quotationRequest.requestNumber}</p>
                 </div>
                 <div>
@@ -545,7 +551,7 @@ export function ProductSupplierDistributionDialog({
                                 {product.productName}
                               </div>
                               <div className="text-xs text-slate-600 mt-0.5">
-                                型号: {product.modelNo}
+                                型号: {getFormalBusinessModelNo(product)}
                               </div>
                               <div className="text-xs text-slate-600">
                                 数量: {product.quantity} {product.unit}

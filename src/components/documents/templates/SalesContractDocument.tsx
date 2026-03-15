@@ -1,6 +1,7 @@
 import React, { forwardRef } from 'react';
 import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
 import { A4DocumentContainer, A4PrintStyles } from '../A4PageContainer';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
 
 /**
  * 📋 Sales Contract
@@ -107,11 +108,18 @@ export interface SalesContractData {
 
 interface SalesContractDocumentProps {
   data: SalesContractData;
+  layoutConfig?: DocumentLayoutConfig;
 }
 
 export const SalesContractDocument = forwardRef<HTMLDivElement, SalesContractDocumentProps>(
-  ({ data }, ref) => {
+  ({ data, layoutConfig }, ref) => {
     const total = data.products.reduce((sum, item) => sum + item.amount, 0);
+    const pageWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
+    const pageMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
+    const pagePaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '15mm';
+    const pagePaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '15mm';
+    const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '9pt';
+    const lineHeight = layoutConfig?.lineHeight ?? 1.4;
     
     // Extract trade term abbreviation (EXW, FOB, CNF, CIF) from tradeTerms
     const extractTradeTerm = (tradeTerms: string): string => {
@@ -187,7 +195,16 @@ export const SalesContractDocument = forwardRef<HTMLDivElement, SalesContractDoc
             }
           }
         `}</style>
-        <A4DocumentContainer ref={ref} pageWidth="794px" pageMinHeight="1123px">
+        <A4DocumentContainer
+          ref={ref}
+          pageWidth={pageWidth}
+          pageMinHeight={pageMinHeight}
+          pagePaddingTop={pagePaddingTop}
+          pagePaddingBottom={pagePaddingBottom}
+          pagePaddingX="15mm"
+          fontSize={fontSize}
+          lineHeight={lineHeight}
+        >
           <div className="sales-contract-content">{/* Header - Taiwan Enterprise Compact Style */}
             <div className="mb-3">
               {/* First Row: Logo + Sales Contract Title + Contract Info */}

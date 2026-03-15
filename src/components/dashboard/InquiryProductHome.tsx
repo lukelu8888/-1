@@ -19,6 +19,10 @@ import { fetchProductCatalog } from '../../lib/services/productCatalogService';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { toast } from 'sonner';
 import { ProductDetailModal } from './ProductDetailModal';
+import { useRegion } from '../../contexts/RegionContext';
+import { toRegionCode } from '../../lib/supabaseService';
+import { getCustomerFacingModelNo } from '../../utils/productModelDisplay';
+import { websiteCatalogAdapter } from '../../lib/adapters/websiteCatalogAdapter';
 
 interface InquiryProductHomeProps {
   onAddProduct: (product: any) => void;
@@ -27,6 +31,7 @@ interface InquiryProductHomeProps {
 }
 
 export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCategory }: InquiryProductHomeProps) {
+  const { region } = useRegion();
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategory, setExpandedCategory] = useState<string | null>('appliances');
   const [expandedSubCategories, setExpandedSubCategories] = useState<Set<string>>(new Set());
@@ -149,17 +154,42 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
   const productsToDisplay = getProductsToDisplay();
 
   const handleAddProduct = (product: any) => {
+    const regionCode = product.regionCode || toRegionCode(region) || 'NA';
+    const modelNo = getCustomerFacingModelNo(product);
+    const inquirySnapshotDraft = websiteCatalogAdapter.toInquirySnapshotDraft(product, {
+      regionCode,
+      categoryId: product.categoryId,
+      subCategoryId: product.subCategoryId,
+      productCategoryId: product.productCategoryId,
+      quantity: 100,
+      currency: 'USD',
+    });
     const productToAdd = {
       id: product.uniqueId,
       productName: product.name,
       quantity: 100,
       unit: 'pcs',
+      model: modelNo,
+      modelNo,
+      internalModelNo: modelNo,
+      sku: modelNo,
+      regionCode,
       targetPrice: product.price || 0,
       specifications: Object.entries(product.specifications || {})
         .map(([key, value]) => `${key}: ${value}`)
         .join(', '),
       image: product.image,
-      source: 'website' as const
+      imageUrl: product.image,
+      categoryId: product.categoryId,
+      subCategoryId: product.subCategoryId,
+      productCategoryId: product.productCategoryId,
+      source: 'website' as const,
+      sourceType: 'saved_from_website' as const,
+      masterRef: inquirySnapshotDraft.masterRef,
+      mappingRef: inquirySnapshotDraft.mappingRef,
+      inquirySnapshotDraft,
+      attachmentSummarySnapshot: inquirySnapshotDraft.attachmentSummarySnapshot,
+      fileManifestSnapshot: inquirySnapshotDraft.fileManifestSnapshot,
     };
 
     onAddProduct(productToAdd);
@@ -201,8 +231,10 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
 
       {/* Left Sidebar - Tree Navigation */}
       <div className="w-[280px] bg-white border-r flex-shrink-0 overflow-y-auto">
-        <div className="p-4 border-b bg-[#F96302]">
-          <h2 className="text-white font-medium">Browse Products</h2>
+        <div className="border-b bg-orange-50 px-4 py-3">
+          <div className="border-l-[3px] pl-3" style={{ borderLeftColor: '#F96302' }}>
+            <h2 className="text-[14px] font-semibold text-slate-900">Browse Products</h2>
+          </div>
         </div>
 
         <div className="p-4">
@@ -237,7 +269,7 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                         setSelectedProductCategory(null);
                       }
                     }}
-                    className="w-full flex items-center gap-2 px-2 py-2 hover:bg-[#F96302]/10 rounded text-left group transition-colors"
+                    className="w-full flex items-center gap-2 rounded px-2 py-2 text-left transition-colors hover:bg-[#F96302]/10 group"
                   >
                     {isExpanded ? (
                       <ChevronDown className="w-4 h-4 text-[#F96302] flex-shrink-0" />
@@ -245,7 +277,7 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                       <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-[#F96302] flex-shrink-0" />
                     )}
                     <span className="text-xl flex-shrink-0">{category.icon}</span>
-                    <span className={`flex-1 text-sm ${isExpanded ? 'text-[#F96302] font-medium' : 'text-gray-700'}`}>
+                    <span className={`flex-1 text-sm ${isExpanded ? 'font-medium text-[#F96302]' : 'text-gray-700'}`}>
                       {category.name}
                     </span>
                     <Badge variant="secondary" className="text-xs">
@@ -387,7 +419,7 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                   <h2 className="text-[#F96302] mb-6">
                     {currentCategory.subCategories.find(s => s.id === selectedSubCategory)?.productCategories.find(p => p.id === selectedProductCategory)?.name}
                   </h2>
-                  <div className="grid grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
                     {productsToDisplay.map((product) => {
                       const isAdded = addedProductIds.has(product.uniqueId);
 
@@ -476,7 +508,7 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                   <h2 className="text-[#F96302] mb-6">
                     {currentCategory.subCategories.find(s => s.id === selectedSubCategory)?.name}
                   </h2>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
                     {currentCategory.subCategories
                       .find(s => s.id === selectedSubCategory)
                       ?.productCategories.map((prodCat) => {
@@ -521,7 +553,7 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                   <h2 className="text-[#F96302] mb-6">
                     All {currentCategory.name} Categories
                   </h2>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
                     {currentCategory.subCategories.map((subCat) => {
                       const subCount = getSubCategoryProductCount(currentCategory.id, subCat.id);
 

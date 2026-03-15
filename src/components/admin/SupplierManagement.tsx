@@ -19,6 +19,7 @@ import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import { PurchaseOrderDocument } from '../documents/templates/PurchaseOrderDocument'; // 🔥 文档中心采购订单模板（单页版）
 import { PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument'; // 🔥 采购订单数据类型
+import type { DocumentLayoutConfig } from '../documents/A4PageContainer';
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport'; // 🔥 PDF导出工具
 
 // 🔥 供应商接口 - 导出供其他模块使用
@@ -2106,80 +2107,26 @@ export default function SupplierManagement() {
           
           <div className="print-contract-content">
             {viewPurchaseOrder && (
+              (() => {
+                const templateSnapshot = (viewPurchaseOrder as any).templateSnapshot || (viewPurchaseOrder as any).template_snapshot || null;
+                const templateVersion = templateSnapshot?.version || null;
+                const purchaseOrderData = ((viewPurchaseOrder as any).documentDataSnapshot || (viewPurchaseOrder as any).document_data_snapshot) as PurchaseOrderData | null;
+                const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
+                if (!templateVersion || !purchaseOrderData) {
+                  return (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+                      该 CG 未绑定模板中心版本快照，无法预览。
+                    </div>
+                  );
+                }
+                return (
               <PurchaseOrderDocument
                 ref={poPDFRef}
-                data={{
-                  // 采购单基本信息
-                  poNo: viewPurchaseOrder.poNumber,
-                  poDate: viewPurchaseOrder.orderDate,
-                  requiredDeliveryDate: viewPurchaseOrder.expectedDate,
-                  
-                  // 买方（公司）信息
-                  buyer: {
-                    name: '福建高盛达富建材有限公司',
-                    nameEn: 'Fujian Cosun Dafu Building Materials Co., Ltd.',
-                    address: '福建省厦门市湖里区湖里大道',
-                    addressEn: 'Huli Avenue, Huli District, Xiamen, Fujian Province, China',
-                    tel: '+86-591-8888-8888',
-                    email: 'purchase@cosun.com',
-                    contactPerson: '采购部李经理'
-                  },
-                  
-                  // 卖方（供应商）信息
-                  supplier: {
-                    companyName: viewPurchaseOrder.supplierName,
-                    address: suppliers.find(s => s.name === viewPurchaseOrder.supplierName)?.address || 'N/A',
-                    contactPerson: suppliers.find(s => s.name === viewPurchaseOrder.supplierName)?.contact || 'N/A',
-                    tel: suppliers.find(s => s.name === viewPurchaseOrder.supplierName)?.phone || 'N/A',
-                    email: suppliers.find(s => s.name === viewPurchaseOrder.supplierName)?.email || 'N/A',
-                    supplierCode: suppliers.find(s => s.name === viewPurchaseOrder.supplierName)?.code,
-                    bankInfo: {
-                      bankName: '中国银行',
-                      accountName: viewPurchaseOrder.supplierName,
-                      accountNumber: '1234 5678 9012 3456',
-                      swiftCode: 'BKCHCNBJ950',
-                      bankAddress: '中国',
-                      currency: viewPurchaseOrder.currency
-                    }
-                  },
-                  
-                  // 采购产品清单
-                  products: [{
-                    no: 1,
-                    modelNo: 'N/A',
-                    description: viewPurchaseOrder.productName,
-                    specification: `关联销售订单: ${viewPurchaseOrder.orderNumber}`,
-                    quantity: viewPurchaseOrder.quantity,
-                    unit: 'pcs',
-                    unitPrice: viewPurchaseOrder.unitPrice,
-                    currency: viewPurchaseOrder.currency,
-                    amount: viewPurchaseOrder.totalAmount,
-                    deliveryDate: viewPurchaseOrder.expectedDate,
-                    remarks: `客户: ${viewPurchaseOrder.customerName}`
-                  }],
-                  
-                  // 采购条款
-                  terms: {
-                    totalAmount: viewPurchaseOrder.totalAmount,
-                    currency: viewPurchaseOrder.currency,
-                    paymentTerms: viewPurchaseOrder.paymentStatus === 'paid' ? '已付款' : '货到付款',
-                    deliveryTerms: 'EXW 工厂交货',
-                    deliveryAddress: '福建省厦门市湖里区湖里大道',
-                    qualityStandard: '按照样品标准和国家标准执行',
-                    inspectionMethod: '供方自检，需方抽检',
-                    packaging: '出口标准包装',
-                    deliveryPenalty: '延期交货每天罚款合同总金额的0.5%',
-                    qualityPenalty: '质量不合格按合同总金额10%赔偿',
-                    warrantyPeriod: '12个月',
-                    warrantyTerms: '质保期内免费维修或更换',
-                    returnPolicy: '质量问题7天内无条件退换货',
-                    forceMajeure: '因不可抗力导致无法履约，双方均不承担违约责任',
-                    disputeResolution: '协商解决；协商不成提交厦门仲裁委员会仲裁',
-                    applicableLaw: '中华人民共和国合同法',
-                    contractValidity: '本合同一式两份，双方签字盖章后生效'
-                  }
-                }}
+                data={purchaseOrderData}
+                layoutConfig={layoutConfig || undefined}
               />
+                );
+              })()
             )}
           </div>
 

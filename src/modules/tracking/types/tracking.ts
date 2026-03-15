@@ -1,6 +1,6 @@
 export type TrackingStage =
-  | 'inquiry'
-  | 'quotation'
+  | 'ing'
+  | 'qt'
   | 'contract'
   | 'production'
   | 'qc'

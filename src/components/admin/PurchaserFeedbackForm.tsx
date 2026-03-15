@@ -28,7 +28,7 @@ import {
   BarChart3
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { PurchaseRequirement, PurchaserFeedback, PurchaserFeedbackProduct } from '../../contexts/PurchaseRequirementContext';
+import { QuoteRequirement, QuoteRequirementFeedback, QuoteRequirementFeedbackProduct } from '../../contexts/QuoteRequirementContext';
 import { useXJs } from '../../contexts/XJContext';
 import { validateFeedback, calculateSuggestedPrice } from '../../utils/autoPopulateFeedback';
 import { performSmartComparison, SmartComparisonResult } from '../../utils/supplierScoring';
@@ -39,8 +39,8 @@ import { buildSourcePricingBasis } from '../../types/pricingBasis';
 interface PurchaserFeedbackFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  qr: PurchaseRequirement;
-  onSubmit: (feedback: PurchaserFeedback) => void;
+  qr: QuoteRequirement;
+  onSubmit: (feedback: QuoteRequirementFeedback) => void;
   currentUserName: string;
 }
 

@@ -1,6 +1,6 @@
 export type BusinessDomain =
-  | 'inquiry'
-  | 'quotation'
+  | 'ing'
+  | 'qt'
   | 'contract'
   | 'order'
   | 'shipment'

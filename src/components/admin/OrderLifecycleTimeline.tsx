@@ -46,7 +46,7 @@ export default function OrderLifecycleTimeline() {
   const mockOrderLifecycles: OrderLifecycle[] = [
     {
       customerName: 'ABC Trading Ltd.',
-      orderReference: 'INQ-251201-0001',
+      orderReference: 'ING-251201-0001',
       region: 'NA',
       totalAmount: 125000,
       currency: 'USD',
@@ -54,17 +54,17 @@ export default function OrderLifecycleTimeline() {
       estimatedCompletion: '2025-02-15',
       timeline: [
         {
-          stage: 'inquiry',
+          stage: 'ing',
           label: '询价',
           icon: FileText,
           status: 'completed',
           date: '2024-12-01',
-          documentId: 'INQ-251201-0001',
+          documentId: 'ING-251201-0001',
           color: 'blue',
           details: '客户提交询价单，5个产品项'
         },
         {
-          stage: 'quotation',
+          stage: 'qt',
           label: '报价',
           icon: DollarSign,
           status: 'completed',
@@ -115,23 +115,23 @@ export default function OrderLifecycleTimeline() {
     },
     {
       customerName: 'Global Parts Ltd.',
-      orderReference: 'INQ-251115-0012',
+      orderReference: 'ING-251115-0012',
       region: 'NA',
       totalAmount: 85000,
       currency: 'USD',
       createdAt: '2024-11-15',
       timeline: [
         {
-          stage: 'inquiry',
+          stage: 'ing',
           label: '询价',
           icon: FileText,
           status: 'completed',
           date: '2024-11-15',
-          documentId: 'INQ-251115-0012',
+          documentId: 'ING-251115-0012',
           color: 'blue'
         },
         {
-          stage: 'quotation',
+          stage: 'qt',
           label: '报价',
           icon: DollarSign,
           status: 'completed',
@@ -180,23 +180,23 @@ export default function OrderLifecycleTimeline() {
     },
     {
       customerName: 'Euro Building Materials',
-      orderReference: 'INQ-251125-0018',
+      orderReference: 'ING-251125-0018',
       region: 'EA',
       totalAmount: 210000,
       currency: 'EUR',
       createdAt: '2024-11-25',
       timeline: [
         {
-          stage: 'inquiry',
+          stage: 'ing',
           label: '询价',
           icon: FileText,
           status: 'completed',
           date: '2024-11-25',
-          documentId: 'INQ-251125-0018',
+          documentId: 'ING-251125-0018',
           color: 'blue'
         },
         {
-          stage: 'quotation',
+          stage: 'qt',
           label: '报价',
           icon: DollarSign,
           status: 'completed',

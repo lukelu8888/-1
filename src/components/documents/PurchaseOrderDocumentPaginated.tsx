@@ -3,7 +3,7 @@ import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png'
 import { PurchaseOrderData } from './templates/PurchaseOrderDocument';
 
 /**
- * 🔥 分页版采购订单文档
+ * 🔥 分页版采购合同文档
  * 
  * 智能分页逻辑：
  * - 产品数量 <= 2：所有内容显示在一页
@@ -128,7 +128,7 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                 
                 <div className="flex-1 flex justify-center items-end pb-1">
                   <h1 className="text-2xl font-bold tracking-wider text-black">
-                    采购订单
+                    采购合同
                   </h1>
                 </div>
                 
@@ -136,11 +136,11 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                   <table className="w-full border-collapse border border-gray-400 text-[9pt]">
                     <tbody>
                       <tr>
-                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">订单编号</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">合同编号</td>
                         <td className="border border-gray-400 px-1.5 py-0.5 font-bold text-black">{data.poNo}</td>
                       </tr>
                       <tr>
-                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">订单日期</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">合同日期</td>
                         <td className="border border-gray-400 px-1.5 py-0.5">
                           {new Date(data.poDate).toLocaleDateString('zh-CN', { 
                             year: 'numeric', 
@@ -244,7 +244,7 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                   {!needsSecondPage && (
                     <tr className="bg-[#FFF4EC] font-bold" style={{ backgroundColor: '#FFF4EC' }}>
                       <td colSpan={5} className="border border-gray-300 px-1.5 py-1.5 text-right text-sm">
-                        采购订单总金额：
+                        采购合同总金额：
                       </td>
                       <td className="border border-gray-300 px-1.5 py-1.5 text-right font-bold text-sm text-[#F96302]">
                         {(data.products[0]?.currency || data.terms.currency)}{total.toFixed(2)}
@@ -376,7 +376,7 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                   <tfoot>
                     <tr className="bg-[#FFF4EC] font-bold" style={{ backgroundColor: '#FFF4EC' }}>
                       <td colSpan={5} className="border border-gray-300 px-1.5 py-1.5 text-right text-sm">
-                        采购订单总金额：
+                        采购合同总金额：
                       </td>
                       <td className="border border-gray-300 px-1.5 py-1.5 text-right font-bold text-sm text-[#F96302]">
                         {(data.products[0]?.currency || data.terms.currency)}{total.toFixed(2)}

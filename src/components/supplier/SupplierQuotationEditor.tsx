@@ -42,8 +42,9 @@ import {
   RefreshCw, Percent, Globe, HelpCircle, Zap
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import { supplierQuotationService } from '../../lib/supabaseService';
+import { saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
 import { buildSourcePricingBasis } from '../../types/pricingBasis';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 // ─── 带问号 Tooltip 的字段标签 ────────────────────────────────────────────────
 interface FieldLabelProps {
@@ -566,19 +567,7 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
 
     if (submitNow) {
       try {
-        await supplierQuotationService.upsert({
-          id: updatedQuotation.id,
-          xjNumber: updatedQuotation.sourceXJ,
-          supplierEmail: updatedQuotation.supplierEmail,
-          supplierName: updatedQuotation.supplierName,
-          currency: currencyCode,
-          totalAmount: totals.revenue,
-          paymentTerms,
-          deliveryTime: deliveryTerms,
-          status: 'submitted',
-          products: updatedQuotation.items,
-          notes: remarks ?? '',
-        });
+        await saveSupplierQuotation(updatedQuotation as any);
       } catch (err: any) {
         toast.error(err?.message ?? '提交报价失败，请重试');
         return;
@@ -809,7 +798,7 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                   <Badge variant="outline" className="text-xs font-bold shrink-0">#{index + 1}</Badge>
                   <span className="font-semibold text-sm truncate">{item.productName}</span>
-                  {item.modelNo && <span className="text-xs text-slate-500 shrink-0">型号: {item.modelNo}</span>}
+                  {getFormalBusinessModelNo(item) && <span className="text-xs text-slate-500 shrink-0">型号: {getFormalBusinessModelNo(item)}</span>}
                 </div>
                 <div className="flex items-center gap-3 text-xs shrink-0 ml-2">
                   <span className="text-slate-500">数量: <strong>{item.quantity} {item.unit}</strong></span>

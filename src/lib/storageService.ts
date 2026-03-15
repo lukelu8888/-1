@@ -9,6 +9,7 @@ import { supabase } from './supabase'
 
 const BUCKET_PAYMENT = 'payment-proofs'
 const BUCKET_CONTRACTS = 'contract-attachments'
+const BUCKET_OEM = 'oem-attachments'
 
 export type UploadResult = {
   url: string
@@ -121,6 +122,31 @@ export const contractAttachmentStorage = {
 }
 
 // ============================================================
+// OEM 附件上传
+// ============================================================
+export const oemAttachmentStorage = {
+  async upload(
+    file: File,
+    inquiryNumber: string,
+    uploaderEmail: string,
+  ): Promise<UploadResult> {
+    const safeInquiryNo = inquiryNumber.replace(/[^a-zA-Z0-9_\-]/g, '_')
+    const safeEmail = uploaderEmail.split('@')[0].replace(/[^a-zA-Z0-9]/g, '_')
+    const pathPrefix = `${safeInquiryNo}/${safeEmail}`
+    return uploadFile(BUCKET_OEM, file, pathPrefix)
+  },
+
+  async delete(path: string) {
+    return deleteFile(BUCKET_OEM, path)
+  },
+
+  getPublicUrl(path: string) {
+    const { data } = supabase.storage.from(BUCKET_OEM).getPublicUrl(path)
+    return data.publicUrl
+  },
+}
+
+// ============================================================
 // 工具函数：把旧的 base64 dataURL 转成 File 对象
 // ============================================================
 export function dataUrlToFile(dataUrl: string, fileName: string): File {
@@ -146,12 +172,26 @@ export async function ensureBucketsExist() {
   const { data: buckets } = await supabase.storage.listBuckets()
   const existing = new Set((buckets || []).map((b) => b.name))
 
-  for (const bucketName of [BUCKET_PAYMENT, BUCKET_CONTRACTS]) {
+  for (const bucketName of [BUCKET_PAYMENT, BUCKET_CONTRACTS, BUCKET_OEM]) {
     if (!existing.has(bucketName)) {
       const { error } = await supabase.storage.createBucket(bucketName, {
         public: true,
         fileSizeLimit: 10 * 1024 * 1024, // 10MB
-        allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'application/pdf'],
+        allowedMimeTypes: [
+          'image/jpeg',
+          'image/jpg',
+          'image/png',
+          'image/gif',
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/plain',
+          'application/zip',
+          'application/x-zip-compressed',
+          'application/octet-stream',
+        ],
       })
       if (error) {
         console.warn(`[Storage] Cannot create bucket "${bucketName}":`, error.message)

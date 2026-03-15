@@ -22,30 +22,14 @@ import { useXJs } from '../../contexts/XJContext';
 import { SimpleQuoteForm } from './SimpleQuoteForm';
 import XJDocumentViewer from './XJDocumentViewer';
 import { supplierQuotationService } from '../../lib/supabaseService';
-
-// 🔥 供应商报价单接口
-interface SupplierQuotation {
-  id: string;
-  quotationNo: string;
-  sourceXJ?: string;
-  customerName: string;
-  customerCompany: string;
-  supplierEmail: string;
-  quotationDate: string;
-  validUntil: string;
-  totalAmount: number;
-  items: any[];
-  status: 'draft' | 'submitted' | 'accepted' | 'rejected' | 'completed';
-  createdDate: string;
-  version: number;
-}
+import type { SupplierQuotation } from '../../utils/createQuotationFromXJ';
 
 export default function SupplierOrderManagementCenterV2() {
   const { user } = useUser();
   const { xjs, getXJsBySupplier, deleteXJ, updateXJ, addQuoteToXJ } = useXJs();
   
   // 主Tab状态
-  const [mainTab, setMainTab] = useState<'overview' | 'xj' | 'quotation' | 'orders' | 'payment'>('overview');
+  const [mainTab, setMainTab] = useState<'overview' | 'xj' | 'qt' | 'orders' | 'payment'>('overview');
   
   // 概览子Tab
   const [overviewTab, setOverviewTab] = useState<'summary' | 'conversion' | 'performance' | 'risk'>('summary');
@@ -404,7 +388,7 @@ export default function SupplierOrderManagementCenterV2() {
                 </div>
               </TabsTrigger>
               <TabsTrigger 
-                value="quotation"
+                value="qt"
                 className="relative h-14 px-0 pb-3 rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:text-orange-600 data-[state=active]:shadow-none bg-transparent"
               >
                 <div className="flex items-center gap-2">
@@ -536,7 +520,7 @@ export default function SupplierOrderManagementCenterV2() {
             </Card>
           )}
 
-          {mainTab === 'quotation' && (
+          {mainTab === 'qt' && (
             <Card>
               <CardContent className="p-12 text-center">
                 <p className="text-slate-500">报价管理模块</p>

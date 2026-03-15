@@ -5,8 +5,9 @@
  * 链路追溯：QR → XJ → BJ
  */
 
-import { PurchaseRequirement, PurchaserFeedback, PurchaserFeedbackProduct } from '../contexts/PurchaseRequirementContext';
+import { QuoteRequirement, QuoteRequirementFeedback, QuoteRequirementFeedbackProduct } from '../contexts/QuoteRequirementContext';
 import { RFQ } from '../contexts/XJContext';
+import { getFormalBusinessModelNo } from './productModelDisplay';
 
 interface SupplierQuotation {
   id: string;
@@ -48,7 +49,7 @@ interface SupplierQuotation {
  * @returns 自动生成的采购反馈对象
  */
 export function autoPopulateFeedbackFromBJ(
-  qr: PurchaseRequirement,
+  qr: QuoteRequirement,
   rfqs: XJ[],
   supplierQuotations: any[],
   currentUserName: string
@@ -113,7 +114,7 @@ export function autoPopulateFeedbackFromBJ(
       // 🔥 匹配QR中的产品（通过产品名称或型号）
       const qrItem = qr.items.find(item => 
         item.productName === bjItem.productName || 
-        item.modelNo === bjItem.modelNo
+        getFormalBusinessModelNo(item) === getFormalBusinessModelNo(bjItem)
       );
       
       const feedbackProduct: PurchaserFeedbackProduct = {

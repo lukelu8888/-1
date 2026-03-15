@@ -23,11 +23,12 @@ import { AdminInquiryManagementNew } from '../admin/AdminInquiryManagementNew'; 
 import { CostInquiryQuotationManagement } from '../admin/CostInquiryQuotationManagement'; // 成本询报
 import { SalesQuotationManagement } from './SalesQuotationManagement'; // 报价管理
 import { SalesContractManagement } from './SalesContractManagement'; // 🔥 合同管理
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext';
 import { useSalesContracts } from '../../contexts/SalesContractContext'; // 🔥 销售合同Context
 import { useInquiry } from '../../contexts/InquiryContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
+import { normalizePersonnelEmail } from '../../lib/notification-rules';
 
 export function BusinessProcessCenter() {
   const [activeTab, setActiveTab] = useState('inquiry-management');
@@ -37,16 +38,17 @@ export function BusinessProcessCenter() {
   
   // 获取数据用于显示Badge数量
   const { inquiries } = useInquiry();
-  const { requirements } = usePurchaseRequirements();
+  const { requirements: quoteRequirements } = useQuoteRequirements();
   const { quotations } = useSalesQuotations();
   const { contracts } = useSalesContracts(); // 🔥 销售合同
   
   // 统计业务员相关的数据
+  const currentSalesEmail = normalizePersonnelEmail(currentUser?.email, currentUser?.region);
   const myInquiries = inquiries.filter(inq => 
-    inq.salesRepEmail === currentUser?.email || inq.assignedTo === currentUser?.email
+    normalizePersonnelEmail(inq.salesRepEmail || inq.assignedTo, inq.region) === currentSalesEmail
   );
   
-  const myRequirements = requirements.filter(qr => 
+  const myRequirements = quoteRequirements.filter(qr => 
     qr.createdBy === currentUser?.email
   );
   

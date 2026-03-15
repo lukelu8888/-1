@@ -40,7 +40,7 @@ const CONTAINER_TYPES = {
     length: 5.898,
     width: 2.352,
     height: 2.385,
-    volume: 33.1, // CBM
+    volume: 28, // Practical loadable CBM
     maxWeight: 28000, // kg (含柜重)
     tareWeight: 2300, // kg (柜重)
     maxPayload: 25700, // kg (最大载重)
@@ -60,7 +60,7 @@ const CONTAINER_TYPES = {
     length: 12.032,
     width: 2.352,
     height: 2.698,
-    volume: 76.3,
+    volume: 68, // Practical loadable CBM
     maxWeight: 28000,
     tareWeight: 4000,
     maxPayload: 24000,

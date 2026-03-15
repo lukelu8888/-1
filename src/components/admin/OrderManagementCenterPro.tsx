@@ -183,8 +183,8 @@ export default function OrderManagementCenterPro() {
   useEffect(() => {
     setQuotations([
       {
-        id: 'QUO-2025-0234',
-        inquiryId: 'INQ-2025-0156',
+        id: 'QT-2025-0234',
+        inquiryId: 'ING-2025-0156',
         customer: 'ABC Trading Ltd.',
         contactPerson: 'John Smith',
         email: 'john@abctrading.com',
@@ -235,8 +235,8 @@ export default function OrderManagementCenterPro() {
         ],
       },
       {
-        id: 'QUO-2025-0233',
-        inquiryId: 'INQ-2025-0155',
+        id: 'QT-2025-0233',
+        inquiryId: 'ING-2025-0155',
         customer: 'XYZ Construction Inc.',
         contactPerson: 'Maria Garcia',
         email: 'maria@xyzconstruction.com',
@@ -273,8 +273,8 @@ export default function OrderManagementCenterPro() {
         ],
       },
       {
-        id: 'QUO-2025-0232',
-        inquiryId: 'INQ-2025-0154',
+        id: 'QT-2025-0232',
+        inquiryId: 'ING-2025-0154',
         customer: 'Euro Hardware GmbH',
         contactPerson: 'Hans Mueller',
         email: 'hans@eurohardware.de',
@@ -326,7 +326,7 @@ export default function OrderManagementCenterPro() {
       title: '准备创建报价',
       message: `正在为 ${customerName} 创建报价单`,
       relatedId: inquiry.id,
-      relatedType: 'inquiry',
+      relatedType: 'ing',
       recipient: 'admin@cosun.com',
       sender: 'system'
     });
@@ -426,7 +426,7 @@ export default function OrderManagementCenterPro() {
       title: '报价单已发送',
       message: `报价单 ${quotation.id} 已发送给 ${quotation.customer}`,
       relatedId: quotation.id,
-      relatedType: 'quotation',
+      relatedType: 'qt',
       recipient: 'admin@cosun.com',
       sender: 'system'
     });

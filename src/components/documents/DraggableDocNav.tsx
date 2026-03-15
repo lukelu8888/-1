@@ -13,7 +13,7 @@ import { GripVertical } from 'lucide-react';
  * 3. 页面刷新后恢复上次的排序
  */
 
-export type DocType = 'inquiry' | 'quotation' | 'sc' | 'po' | 'xj' | 'supplier-quotation' | 'pr' | 'soa' | 'ci' | 'pl' | 'pi';
+export type DocType = 'ing' | 'qt' | 'sc' | 'cg' | 'xj' | 'supplier-quotation' | 'qr' | 'soa' | 'ci' | 'pl' | 'pi';
 
 interface DocTab {
   id: DocType;
@@ -25,13 +25,13 @@ const STORAGE_KEY = 'doc_nav_order';
 
 // 默认标签配置
 const defaultTabs: DocTab[] = [
-  { id: 'inquiry', label: '客户询价单' },
-  { id: 'quotation', label: '业务员报价单' },
+  { id: 'ing', label: '客户询价单' },
+  { id: 'qt', label: '销售报价单' },
   { id: 'sc', label: '销售合同' },
-  { id: 'po', label: '采购订单' },
+  { id: 'cg', label: '采购合同' },
   { id: 'xj', label: '采购询价单' },
   { id: 'supplier-quotation', label: '供应商报价单' },
-  { id: 'pr', label: '采购需求单' },
+  { id: 'qr', label: '报价请求单' },
   { id: 'soa', label: '账户对账单' },
   { id: 'ci', label: '商业发票' },
   { id: 'pl', label: '包装清单' },

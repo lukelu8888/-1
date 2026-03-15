@@ -16,6 +16,43 @@
 
 import { Personnel, Region, personnelList } from './notification-rules';
 
+const normalizeSalesRepEmail = (email?: string | null, region?: Region): string | undefined => {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return undefined;
+
+  const exactMatch = personnelList.find((person) => String(person.email || '').trim().toLowerCase() === normalized);
+  if (exactMatch?.email) return exactMatch.email;
+
+  const legacyRegionFallback: Partial<Record<Region, string>> = {
+    north_america: 'zhangwei@cosun.com',
+    south_america: 'lifang@cosun.com',
+    europe_africa: 'wangfang@cosun.com',
+  };
+
+  if (normalized.endsWith('@gsd.com')) {
+    return region ? legacyRegionFallback[region] : undefined;
+  }
+
+  return undefined;
+};
+
+const resolveMappedSalesRep = (mapping: CustomerSalesRepMapping): Personnel | null => {
+  const mappedEmail = normalizeSalesRepEmail(mapping.salesRepEmail, mapping.customerRegion);
+  const mappedName = String(mapping.salesRepName || '').trim();
+
+  return (
+    personnelList.find((person) => {
+      const personEmail = String(person.email || '').trim().toLowerCase();
+      const personDisplayName = String(person.displayName || '').trim();
+      const personName = String(person.name || '').trim();
+      return (
+        (mappedEmail && personEmail === mappedEmail) ||
+        (!!mappedName && (personDisplayName === mappedName || personName === mappedName))
+      );
+    }) || null
+  );
+};
+
 // 客户-业务员映射关系
 export interface CustomerSalesRepMapping {
   customerId: string;           // 客户ID（使用客户名称作为唯一标识）
@@ -48,8 +85,8 @@ export function initCustomerSalesRepMapping(): void {
       customerId: 'ABC Building Supplies',
       customerName: 'ABC Building Supplies',
       customerRegion: 'north_america',
-      salesRepName: '张伟 (北美区)', // 北美区负载5
-      salesRepEmail: 'zhangwei@gsd.com',
+      salesRepName: '张伟 (北美区)',
+      salesRepEmail: 'zhangwei@cosun.com',
       assignedDate: '2024-01-15',
       assignedBy: 'auto',
       notes: '首次询价自动分配'
@@ -58,8 +95,8 @@ export function initCustomerSalesRepMapping(): void {
       customerId: 'Brasil Construction Co.',
       customerName: 'Brasil Construction Co.',
       customerRegion: 'south_america',
-      salesRepName: '赵婷 (南美区)', // 南美区负载2（最低）
-      salesRepEmail: 'zhaoting@gsd.com',
+      salesRepName: '李芳 (南美区)',
+      salesRepEmail: 'lifang@cosun.com',
       assignedDate: '2024-02-10',
       assignedBy: 'auto',
       notes: '首次询价自动分配'
@@ -68,8 +105,8 @@ export function initCustomerSalesRepMapping(): void {
       customerId: 'Europa Trading GmbH',
       customerName: 'Europa Trading GmbH',
       customerRegion: 'europe_africa',
-      salesRepName: '王芳 (欧非区)', // 欧非区负载2（最低）
-      salesRepEmail: 'wangfang@gsd.com',
+      salesRepName: '王芳 (欧非区)',
+      salesRepEmail: 'wangfang@cosun.com',
       assignedDate: '2024-03-05',
       assignedBy: 'auto',
       notes: '首次询价自动分配'
@@ -115,10 +152,7 @@ export function getSalesRepByCustomer(customerName: string): Personnel | null {
   }
   
   // 在人员列表中查找对应的业务员
-  const salesRep = personnelList.find(p => 
-    p.displayName === mapping.salesRepName || 
-    p.name === mapping.salesRepName
-  );
+  const salesRep = resolveMappedSalesRep(mapping);
   
   if (!salesRep) {
     console.warn(`⚠️ 找不到业务员: ${mapping.salesRepName}`);

@@ -3,7 +3,7 @@
  *
  * 功能：
  * 显示从成本询报模块“下推报价管理”生成的 draft 状态 QT 报价单，
- * 数据优先从后端接口 /api/sales-quotations 加载，其次使用本地 Context。
+ * 数据统一从 Supabase / sales_quotations 加载。
  *
  * 流程：
  * 成本询报 → 点击“下推报价管理” → POST /api/sales-quotations → 保存到数据库 →
@@ -35,25 +35,22 @@ import {
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext';
 import { useSalesContracts } from '../../contexts/SalesContractContext'; // 🔥 导入销售合同Context
 import { useInquiry } from '../../contexts/InquiryContext'; // 🔥 导入询价Context
-import { useQuotations } from '../../contexts/QuotationContext'; // 🔥 导入客户报价Context
 import { useOrders } from '../../contexts/OrderContext'; // 🔥 导入订单Context
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext'; // 🔥 导入采购需求Context（用于溯源回写）
-import { salesQuotationService, approvalRecordService, purchaseRequirementService } from '../../lib/supabaseService';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext'; // 🔥 导入 QR Context（用于溯源回写）
+import { salesQuotationService, approvalRecordService } from '../../lib/supabaseService';
 import { supabase } from '../../lib/supabase';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
 import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
 import { subscribeErpEvent, emitErpEvent } from '../../lib/erp-core/event-bus';
 import { addTombstones, filterNotDeleted, removeTombstones } from '../../lib/erp-core/deletion-tombstone';
+import { adaptSalesQuotationToDocumentData } from '../../utils/documentDataAdapters';
+import { adaptSalesContractToDocumentData } from '../../utils/documentDataAdapters';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import QuoteCreationIntelligent from '../admin/QuoteCreationIntelligent'; // 🔥 智能报价创建
 // ❌ 已禁用：文件不存在
 // import { CustomerInquiryView } from '../admin/CustomerInquiryView'; // 🔥 客户询价单查看
 import { QuotationView } from './QuotationView'; // 🔥 报价单查看（使用文档中心模版）
-
-const SALES_QUOTATION_DRAFT_OVERRIDES_KEY = 'sales_quotation_draft_overrides';
-const SALES_QUOTATION_DELETED_IDS_KEY = 'sales_quotation_deleted_ids'; // legacy key, keep for backward compatibility
-const SALES_QUOTATION_CACHE_PREFIX = 'sales_quotation_management_cache_v1';
-const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
 
 const normalizeProfitPercent = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
@@ -73,38 +70,12 @@ export function SalesQuotationManagement({
   onNavigateToOrders, 
   onNavigateToOrdersWithHighlight 
 }: SalesQuotationManagementProps = {}) {
-  const getSalesQuotationCacheKey = (email?: string) => `${SALES_QUOTATION_CACHE_PREFIX}:${email || 'anonymous'}`;
-
-  const readSalesQuotationCache = (email?: string): any[] => {
-    try {
-      const raw = localStorage.getItem(getSalesQuotationCacheKey(email));
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const writeSalesQuotationCache = (email: string | undefined, list: any[]) => {
-    localStorage.setItem(getSalesQuotationCacheKey(email), JSON.stringify(Array.isArray(list) ? list : []));
-  };
-
-  const readSalesQuotationLocalFallback = (): any[] => {
-    try {
-      const raw = localStorage.getItem('salesQuotations');
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  };
-
   const pushApprovalBridgeItem = async (item: any) => {
     const request = item?.request || {};
     const currentApprover = item?.currentApprover || request?.currentApprover || '';
     const currentApproverRole = request?.currentApproverRole || '';
 
-    // 业务审批记录必须先落 Supabase，localStorage 仅保留 UI 过渡缓存。
+    // 业务审批记录必须先落 Supabase。
     const saved = await approvalRecordService.upsert({
       ...request,
       currentApprover,
@@ -113,86 +84,6 @@ export function SalesQuotationManagement({
     if (!saved) {
       throw new Error('approval_records upsert failed');
     }
-
-    try {
-      const raw = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      const queue = Array.isArray(list) ? list : [];
-      const dedupKey = `${request?.type}:${request?.relatedDocumentId}:${currentApprover}`;
-      const next = queue.filter((x: any) => {
-        const k = `${x?.request?.type}:${x?.request?.relatedDocumentId}:${x?.currentApprover}`;
-        return k !== dedupKey;
-      });
-      next.unshift({ ...item, request: { ...request, currentApprover, currentApproverRole } });
-      localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(next.slice(0, 200)));
-    } catch {}
-  };
-
-  const readDraftOverrides = (): Record<string, any> => {
-    try {
-      const raw = localStorage.getItem(SALES_QUOTATION_DRAFT_OVERRIDES_KEY);
-      if (!raw) return {};
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-      return {};
-    }
-  };
-
-  const writeDraftOverride = (quotationId: string, override: any) => {
-    const all = readDraftOverrides();
-    all[quotationId] = override;
-    localStorage.setItem(SALES_QUOTATION_DRAFT_OVERRIDES_KEY, JSON.stringify(all));
-  };
-
-  const readDeletedIds = (): string[] => {
-    try {
-      const raw = localStorage.getItem(SALES_QUOTATION_DELETED_IDS_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.map((id) => String(id)) : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const appendDeletedIds = (ids: string[]) => {
-    const merged = new Set(readDeletedIds());
-    ids.forEach((id) => merged.add(String(id)));
-    localStorage.setItem(SALES_QUOTATION_DELETED_IDS_KEY, JSON.stringify(Array.from(merged)));
-    addTombstones(
-      'quotation',
-      ids.flatMap((id) => [String(id)]),
-      { reason: 'manual-delete-sales-quotation', deletedBy: currentUser?.email || 'unknown' },
-    );
-  };
-
-  const removeDraftOverrideByIds = (ids: string[]) => {
-    const all = readDraftOverrides();
-    ids.forEach((id) => {
-      delete all[String(id)];
-    });
-    localStorage.setItem(SALES_QUOTATION_DRAFT_OVERRIDES_KEY, JSON.stringify(all));
-  };
-
-  const mergeDraftOverrides = (quotations: any[]) => {
-    const all = readDraftOverrides();
-    const legacyDeletedSet = new Set(readDeletedIds());
-    return filterNotDeleted(
-      'quotation',
-      quotations.filter((qt) => !legacyDeletedSet.has(String(qt.id))),
-      (qt: any) => [String(qt?.id || ''), String(qt?.qtNumber || '')],
-    )
-      .map((qt) => {
-      const key = String(qt.id);
-      const override = all[key];
-      if (!override || typeof override !== 'object') return qt;
-      return {
-        ...qt,
-        ...override,
-        id: qt.id,
-        qtNumber: qt.qtNumber,
-      };
-    });
   };
 
   const mapQuoteDataToServerLike = (quoteData: any, currentQt: any) => ({
@@ -209,7 +100,7 @@ export function SalesQuotationManagement({
       ? quoteData.items.map((item: any) => ({
           id: item.id,
           productName: item.productName,
-          modelNo: item.modelNo,
+          modelNo: getFormalBusinessModelNo(item),
           specification: item.specification,
           quantity: item.quantity,
           unit: item.unit,
@@ -226,15 +117,40 @@ export function SalesQuotationManagement({
       : currentQt?.items ?? [],
   });
 
+  const mapQuoteDataToQuotationUpdate = (quoteData: any, currentQt: any) => {
+    const base = mapQuoteDataToServerLike(quoteData, currentQt);
+    return {
+      ...base,
+      documentDataSnapshot: adaptSalesQuotationToDocumentData({
+        ...currentQt,
+        ...base,
+      }),
+    };
+  };
+
   const { quotations, updateQuotation } = useSalesQuotations();
   const quotationsRef = React.useRef(quotations);
   quotationsRef.current = quotations;
   const { contracts: salesContracts, createContract, getContractByQuotationNumber } = useSalesContracts(); // 🔥 获取销售合同
   const { inquiries } = useInquiry();
-  const { addQuotation: addCustomerQuotation } = useQuotations(); // 🔥 导入客户报价Context
   const { orders, addOrder } = useOrders(); // 🔥 获取订单和添加订单函数
-  const { purchaseRequirements, updatePurchaseRequirement, refreshPurchaseRequirementsFromApi } = usePurchaseRequirements(); // 🔥 获取采购需求和更新函数
+  const {
+    requirements: quoteRequirements,
+    updateRequirement: updateQuoteRequirement,
+    refreshQuoteRequirementsFromApi,
+  } = useQuoteRequirements(); // 🔥 获取 QR 和更新函数
   const [currentUser, setCurrentUser] = useState<any>(() => getCurrentUser());
+
+  const ensureBoundQuotationSnapshot = (qt: any) => {
+    const templateSnapshot = qt?.templateSnapshot || qt?.template_snapshot || null;
+    const templateVersion = templateSnapshot?.version || null;
+    const documentData = qt?.documentDataSnapshot || qt?.document_data_snapshot || null;
+    if (!templateVersion || !documentData) {
+      toast.error('该 QT 未绑定模板中心版本快照，无法下推 SC');
+      return false;
+    }
+    return true;
+  };
 
   useEffect(() => {
     const syncCurrentUser = () => setCurrentUser(getCurrentUser());
@@ -247,34 +163,8 @@ export function SalesQuotationManagement({
     };
   }, []);
 
-  // 一次性修复：把 salesPerson=admin@cosun.com 的本地报价单更正为当前登录用户
-  React.useEffect(() => {
-    if (!currentUser?.email || currentUser.email === 'admin@cosun.com') return;
-    try {
-      const cacheKey = getSalesQuotationCacheKey(currentUser.email);
-      const cached: any[] = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-      let fixed = false;
-      const updated = cached.map((q: any) => {
-        if (q.salesPerson === 'admin@cosun.com') {
-          fixed = true;
-          return { ...q, salesPerson: currentUser.email, salesPersonName: currentUser.name || q.salesPersonName };
-        }
-        return q;
-      });
-      if (fixed) {
-        localStorage.setItem(cacheKey, JSON.stringify(updated));
-        setServerQuotations(updated);
-      }
-    } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.email]);
-
   // 🔥 从后端加载报价单列表（只读服务器数据，不读本地）
-  const [serverQuotations, setServerQuotations] = useState<any[]>(() => {
-    const cached = readSalesQuotationCache(currentUser?.email);
-    if (cached.length > 0) return cached;
-    return mergeDraftOverrides(readSalesQuotationLocalFallback());
-  });
+  const [serverQuotations, setServerQuotations] = useState<any[]>([]);
   const [loadingFromApi, setLoadingFromApi] = useState(false);
   const hasAuthWarningRef = React.useRef(false);
 
@@ -290,28 +180,11 @@ export function SalesQuotationManagement({
         const effectiveEmail = String(currentUser?.email || sessionEmail).trim();
 
         if (!sessionEmail) {
-          const existingCache = readSalesQuotationCache(effectiveEmail || currentUser?.email);
-          const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
-          const legacyList = readSalesQuotationLocalFallback();
-          const fallback = existingCache.length > 0
-            ? existingCache
-            : contextList.length > 0
-              ? mergeDraftOverrides(contextList)
-              : legacyList.length > 0
-                ? mergeDraftOverrides(legacyList)
-                : [];
-          setServerQuotations(fallback);
+          setServerQuotations([]);
           if (!hasAuthWarningRef.current) {
             hasAuthWarningRef.current = true;
             toast.error('登录状态已失效，请重新登录后再读取 Supabase 报价单');
           }
-          console.warn('⚠️ [SalesQuotationManagement] Supabase session 不可用，使用 UI 缓存兜底', {
-            currentUserEmail: currentUser?.email,
-            sessionEmail,
-            cacheCount: existingCache.length,
-            contextCount: contextList.length,
-            legacyCount: legacyList.length,
-          });
           return;
         }
 
@@ -320,64 +193,15 @@ export function SalesQuotationManagement({
           ? await salesQuotationService.getBySalesPerson(effectiveEmail)
           : await salesQuotationService.getAll();
         const quotations: any[] = Array.isArray(rows) ? rows : [];
-        if (quotations.length === 0) {
-          const existingCache = readSalesQuotationCache(effectiveEmail || currentUser?.email);
-          const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
-          const legacyList = readSalesQuotationLocalFallback();
-          console.warn('⚠️ [SalesQuotationManagement] Supabase 返回 0 条，启用本地回显兜底', {
-            user: effectiveEmail || currentUser?.email,
-            cacheCount: existingCache.length,
-            contextCount: contextList.length,
-            legacyCount: legacyList.length,
-          });
-          const fallback = existingCache.length > 0
-            ? existingCache
-            : contextList.length > 0
-              ? mergeDraftOverrides(contextList)
-              : legacyList.length > 0
-                ? mergeDraftOverrides(legacyList)
-                : [];
-          setServerQuotations(fallback);
-          if (fallback.length > 0) {
-            writeSalesQuotationCache(effectiveEmail || currentUser?.email, fallback);
-          }
-        } else {
-          let merged = mergeDraftOverrides(quotations);
-          try {
-            const apiIds = new Set(quotations.flatMap((q: any) => [String(q.qtNumber), String(q.id)].filter(Boolean)));
-            const bridge = JSON.parse(localStorage.getItem('customer_quotations_bridge') || '[]');
-            const trimmed = bridge.filter((b: any) => !apiIds.has(String(b.qtNumber)) && !apiIds.has(String(b.id)));
-            localStorage.setItem('customer_quotations_bridge', JSON.stringify(trimmed));
-          } catch {}
-          try {
-            const declineBridge: any[] = JSON.parse(localStorage.getItem('customer_decline_bridge') || '[]');
-            if (declineBridge.length > 0) {
-              merged = merged.map((q: any) => {
-                const entry = declineBridge.find((b: any) =>
-                  (b.qtNumber && b.qtNumber === q.qtNumber) || (b.id && b.id === String(q.id))
-                );
-                if (entry?.customerResponse && q.customerStatus !== 'sent' && q.customerStatus !== 'accepted') {
-                  return { ...q, customerStatus: entry.customerStatus ?? q.customerStatus, customerResponse: entry.customerResponse };
-                }
-                return q;
-              });
-            }
-          } catch {}
-          setServerQuotations(merged);
-          writeSalesQuotationCache(effectiveEmail || currentUser?.email, merged);
-        }
+        setServerQuotations(filterNotDeleted(
+          'qt',
+          quotations,
+          (qt: any) => [String(qt?.id || ''), String(qt?.qtNumber || '')],
+        ));
       } catch (err) {
         console.error('❌ [SalesQuotationManagement] 加载 sales_quotations 失败:', err);
-        const existingCache = readSalesQuotationCache(currentUser?.email);
-        const contextList = Array.isArray(quotationsRef.current) ? (quotationsRef.current as any[]) : [];
-        const legacyList = readSalesQuotationLocalFallback();
-        const fallback = existingCache.length > 0 ? existingCache
-          : contextList.length > 0 ? mergeDraftOverrides(contextList)
-          : legacyList.length > 0 ? mergeDraftOverrides(legacyList) : [];
-        setServerQuotations(fallback);
-        if (fallback.length > 0) {
-          writeSalesQuotationCache(currentUser?.email, fallback);
-        }
+        setServerQuotations([]);
+        toast.error(err instanceof Error ? err.message : '加载 QT 列表失败');
       } finally {
         setLoadingFromApi(false);
       }
@@ -427,13 +251,6 @@ export function SalesQuotationManagement({
     }
   }, [highlightQtNumber, loadSalesQuotations]);
 
-  // 如果接口尚未返回且本地缓存为空，则用 Context 兜底，避免页面先空白
-  useEffect(() => {
-    if (serverQuotations.length === 0 && Array.isArray(quotations) && quotations.length > 0) {
-      setServerQuotations(mergeDraftOverrides(quotations as any[]));
-    }
-  }, [quotations, serverQuotations.length]);
-  
   // 🔥 高亮状态（3秒后自动消失）
   const [highlightedId, setHighlightedId] = React.useState<string | null>(null);
   
@@ -482,22 +299,12 @@ export function SalesQuotationManagement({
       const stillHasQuotation = remainingQuotations.some((qt) => String(qt?.qrNumber || '') === qrNumber);
       if (stillHasQuotation) continue;
 
-      const requirement = purchaseRequirements.find((req: any) =>
+      const requirement = quoteRequirements.find((req: any) =>
         String(req?.requirementNo || '') === qrNumber || String(req?.qrNumber || '') === qrNumber,
       );
       if (!requirement) continue;
 
-      const saved = await purchaseRequirementService.upsert({
-        ...requirement,
-        pushedToQuotation: false,
-        pushedToQuotationDate: null,
-        pushedBy: null,
-        quotationNumber: null,
-        updatedAt: new Date().toISOString(),
-      });
-      if (!saved) continue;
-
-      updatePurchaseRequirement(requirement.id, {
+      await updateQuoteRequirement(requirement.id, {
         pushedToQuotation: false,
         pushedToQuotationDate: null,
         pushedBy: null,
@@ -507,7 +314,7 @@ export function SalesQuotationManagement({
     }
 
     if (changed) {
-      await refreshPurchaseRequirementsFromApi();
+      await refreshQuoteRequirementsFromApi();
     }
   };
   
@@ -522,15 +329,19 @@ export function SalesQuotationManagement({
       const ids = selectedIds.map((id) => String(id));
       const deletedQuotations = myQuotations.filter((qt) => ids.includes(String(qt.id)));
       let deletedCount = 0;
+      let lastError: unknown = null;
       for (const id of ids) {
         try {
           await salesQuotationService.delete(id);
           deletedCount += 1;
-        } catch {}
+        } catch (error) {
+          lastError = error;
+        }
       }
-      if (deletedCount < ids.length) appendDeletedIds(ids);
-
-      removeDraftOverrideByIds(ids);
+      if (deletedCount !== ids.length) {
+        toast.error(lastError instanceof Error ? lastError.message : '删除 QT 失败');
+        return;
+      }
       const remainingQuotations = effectiveQuotations.filter((qt) => !ids.includes(String(qt.id)));
       setServerQuotations((prev) => prev.filter((qt) => !ids.includes(String(qt.id))));
       await syncRequirementsAfterQuotationDelete(deletedQuotations, remainingQuotations);
@@ -631,15 +442,6 @@ export function SalesQuotationManagement({
         q.id === qt.id ? { ...q, approvalStatus: 'pending_approval', approvalChain } : q
       )
     );
-    try {
-      const cacheKey = getSalesQuotationCacheKey(currentUser?.email);
-      const cachedList = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-      const updated = cachedList.map((q: any) =>
-        q.id === qt.id ? { ...q, approvalStatus: 'pending_approval', approvalChain } : q
-      );
-      localStorage.setItem(cacheKey, JSON.stringify(updated));
-    } catch {}
-
     // ─── 3. 推送到审批中心（主管可立即看到复核请求）───
     const now = new Date();
     const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -656,7 +458,7 @@ export function SalesQuotationManagement({
 
     const baseReviewRequest = {
       id: qt.id,
-      type: 'quotation' as const,
+      type: 'qt' as const,
       relatedDocumentId: qt.qtNumber || qt.id,
       relatedDocumentType: '销售报价单（复核申请）',
       relatedDocument: { ...qt },
@@ -700,20 +502,15 @@ export function SalesQuotationManagement({
     try {
       const qtId = qt.id || qt.quotation_uid || qt.qtNumber;
       await salesQuotationService.updateStatus(qtId, 'draft', { approval_chain: [] });
+      setServerQuotations((prev: any[]) =>
+        prev.map((q: any) => q.id === qt.id ? { ...q, approvalStatus: 'draft', approvalChain: [] } : q)
+      );
       toast.success('✅ 报价单已撤回，可重新编辑并提交审批', {
         description: `报价单号：${qt.qtNumber}`,
         duration: 4000,
       });
-      loadSalesQuotations();
     } catch (e: any) {
-      console.warn('⚠️ [撤回] Supabase 同步失败，降级本地模式:', e?.message);
-      setServerQuotations((prev: any[]) =>
-        prev.map((q: any) => q.id === qt.id ? { ...q, approvalStatus: 'draft', approvalChain: [] } : q)
-      );
-      toast.success('✅ 报价单已撤回（本地），可重新编辑并提交审批', {
-        description: `报价单号：${qt.qtNumber}`,
-        duration: 4000,
-      });
+      toast.error(`❌ 撤回失败：${e?.message || 'Supabase 写入失败'}`);
     }
   };
 
@@ -772,30 +569,20 @@ export function SalesQuotationManagement({
       return;
     }
 
-    // ─── 2. 无论后端是否成功，都在本地更新状态 ───
+    // ─── 2. 以 Supabase 成功结果更新当前页面状态 ───
     setServerQuotations((prev: any[]) =>
       prev.map((q: any) => q.id === qt.id
         ? { ...q, approvalStatus: 'pending_approval', approvalChain }
         : q
       )
     );
-    // 同步写入本地缓存（确保切页后状态不丢失，key 与 getSalesQuotationCacheKey 保持一致）
-    try {
-      const cacheKey = getSalesQuotationCacheKey(currentUser?.email);
-      const cachedList = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-      const updated = cachedList.map((q: any) => q.id === qt.id
-        ? { ...q, approvalStatus: 'pending_approval', approvalChain }
-        : q
-      );
-      localStorage.setItem(cacheKey, JSON.stringify(updated));
-    } catch {}
 
     try {
       const now = new Date();
       const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       const baseRequest = {
         id: qt.id,
-        type: 'quotation',
+        type: 'qt',
         relatedDocumentId: qt.qtNumber || qt.id,
         relatedDocumentType: '销售报价单',
         relatedDocument: { ...qt, id: qt.id },
@@ -830,9 +617,9 @@ export function SalesQuotationManagement({
       });
 
       // 提交后刷新列表，确保以 Supabase 实际状态回流
-      loadSalesQuotations();
     } catch (e: any) {
-      console.error('❌ bridge 注入失败:', e);
+      toast.error(`❌ 审批记录创建失败：${e?.message || 'approval_records 写入失败'}`);
+      return;
     }
 
     // 显示审批流程提示
@@ -881,16 +668,11 @@ export function SalesQuotationManagement({
 
     const applyLocalSent = () => {
       setServerQuotations((prev) => updateListLocal(prev));
-      const cacheKey = `sales_quotation_management_cache_v1:${qt.salesPersonEmail || currentUser?.email || 'default'}`;
-      const rawGlobal = localStorage.getItem('salesQuotations');
-      if (rawGlobal) localStorage.setItem('salesQuotations', JSON.stringify(updateListLocal(JSON.parse(rawGlobal))));
-      const rawCache = localStorage.getItem(cacheKey);
-      if (rawCache) localStorage.setItem(cacheKey, JSON.stringify(updateListLocal(JSON.parse(rawCache))));
 
       emitErpEvent({
         id: `evt-qt-sent-${Date.now()}`,
         key: ERP_EVENT_KEYS.QUOTATION_SENT,
-        domain: 'quotation',
+        domain: 'qt',
         recordId: String(qt.id || qt.qtNumber),
         internalNo: String(qt.qtNumber || ''),
         source: 'salesperson',
@@ -901,13 +683,8 @@ export function SalesQuotationManagement({
 
     try {
       const sendKey = qt.qtNumber || qt.id;
-      let apiQuotation: any = null;
-      try {
-        await salesQuotationService.updateStatus(sendKey, 'sent', { customer_status: 'sent', sent_to_customer_at: nowIso });
-        apiQuotation = qt;
-      } catch (patchErr: any) {
-        console.warn('⚠️ [send-to-customer] Supabase 更新失败:', patchErr?.message);
-      }
+      await salesQuotationService.updateStatus(sendKey, 'sent', { customer_status: 'sent', sent_to_customer_at: nowIso });
+      const apiQuotation: any = qt;
 
       // 合并时：用 API 返回的元数据（customerEmail、id 等），但保留本地 items（业务员改过的价格）
       // 不能用 apiQuotation.items，因为 DB 可能存的是旧价格（智能反馈自动算的），业务员手动调整后只在前端
@@ -934,38 +711,14 @@ export function SalesQuotationManagement({
           }
         : { ...qt, items: rawLocalItems ? normalizeItems(rawLocalItems) : qt.items };
       const sentEntry = { ...latestQt, customerStatus: 'sent', sentAt: nowIso, sentToCustomerAt: nowIso };
-      try {
-        const existing = JSON.parse(localStorage.getItem('customer_quotations_bridge') || '[]');
-        const deduped = existing.filter((q: any) => q.qtNumber !== sentEntry.qtNumber && q.id !== sentEntry.id);
-        deduped.push(sentEntry);
-        localStorage.setItem('customer_quotations_bridge', JSON.stringify(deduped));
-      } catch {}
-      // 重发后清除 decline bridge 里的旧拒绝记录，避免后续加载时覆盖最新 sent 状态
-      try {
-        const declineBridge: any[] = JSON.parse(localStorage.getItem('customer_decline_bridge') || '[]');
-        const filtered = declineBridge.filter((b: any) =>
-          b.qtNumber !== qt.qtNumber && b.id !== String(qt.id)
-        );
-        localStorage.setItem('customer_decline_bridge', JSON.stringify(filtered));
-      } catch {}
-
       applyLocalSent();
       toast.success('✅ 报价单已成功发送给客户！', {
         description: `客户 ${latestQt.customerCompany || qt.customerCompany} (${latestQt.customerEmail || qt.customerEmail}) 现在可以在 Customer Portal 中查看报价单 ${qt.qtNumber}`,
         duration: 5000,
       });
     } catch (error: any) {
-      console.error('❌ [SalesQuotationManagement] 发送报价单接口失败, 启用本地兼容:', error);
-      try {
-        applyLocalSent();
-        toast.success('✅ 报价单已发送给客户（本地兼容模式）', {
-          description: `客户 ${qt.customerCompany} (${qt.customerEmail}) 的报价单 ${qt.qtNumber} 状态已更新`,
-          duration: 5000,
-        });
-      } catch (fallbackErr) {
-        console.error('❌ 本地兼容也失败:', fallbackErr);
-        toast.error(`❌ 发送失败: ${error?.message || '未知错误'}`);
-      }
+      console.error('❌ [SalesQuotationManagement] 发送报价单接口失败:', error);
+      toast.error(`❌ 发送失败: ${error?.message || '未知错误'}`);
     }
   };
 
@@ -981,18 +734,6 @@ export function SalesQuotationManagement({
         );
 
       setServerQuotations((prev) => patchList(prev));
-      try {
-        const rawGlobal = localStorage.getItem('salesQuotations');
-        if (rawGlobal) localStorage.setItem('salesQuotations', JSON.stringify(patchList(JSON.parse(rawGlobal))));
-        const cacheKey = `sales_quotation_management_cache_v1:${qt.salesPersonEmail || currentUser?.email || 'default'}`;
-        const rawCache = localStorage.getItem(cacheKey);
-        if (rawCache) localStorage.setItem(cacheKey, JSON.stringify(patchList(JSON.parse(rawCache))));
-
-        // bridge 仅用于客户侧补充：重置后移除该条，避免继续显示 sent
-        const bridge = JSON.parse(localStorage.getItem('customer_quotations_bridge') || '[]');
-        const trimmed = bridge.filter((b: any) => b.qtNumber !== qt.qtNumber && b.id !== qt.id);
-        localStorage.setItem('customer_quotations_bridge', JSON.stringify(trimmed));
-      } catch {}
     };
 
     try {
@@ -1000,9 +741,8 @@ export function SalesQuotationManagement({
       applyLocalUnlock();
       toast.success('已解锁为可发送状态');
     } catch (e: any) {
-      console.warn('⚠️ 解锁发送 Supabase 更新失败，降级本地模式:', e?.message);
-      applyLocalUnlock();
-      toast.success('已解锁为可发送状态（本地兼容）');
+      console.warn('⚠️ 解锁发送 Supabase 更新失败:', e?.message);
+      toast.error(e?.message || '解锁发送失败');
     }
   };
   
@@ -1020,6 +760,23 @@ export function SalesQuotationManagement({
     console.log('  - 客户公司:', qt.customerCompany);
     console.log('  - 报价金额:', qt.totalPrice || qt.totalAmount);
     console.log('  - 完整QT对象:', qt);
+    if (!ensureBoundQuotationSnapshot(qt)) {
+      return;
+    }
+    if (qt.projectRevisionId) {
+      const isExecutionLocked =
+        qt.quotationRole === 'accepted' &&
+        qt.projectRevisionStatus === 'final' &&
+        Boolean(qt.finalRevisionId) &&
+        qt.finalRevisionId === qt.projectRevisionId;
+
+      if (!isExecutionLocked) {
+        toast.error('项目类报价尚未锁定最终执行版本。', {
+          description: '请先使用 Lock Final，确认最终 revision 与最终报价，再生成销售合同。',
+        });
+        return;
+      }
+    }
     
     // 如果已有合同，提示但不阻止（允许重新下推）
     const existingContract = getContractByQuotationNumber(qt.qtNumber);
@@ -1051,7 +808,7 @@ export function SalesQuotationManagement({
       const items = (qt.items || []).map((item: any, idx: number) => ({
         id: item.id || `product-${idx}`,
         productName: item.productName || item.name || 'Product',
-        modelNo: item.modelNo || '-',
+        modelNo: getFormalBusinessModelNo(item),
         specification: item.specification || '',
         hsCode: item.hsCode || '',
         quantity: Number(item.quantity || 0),
@@ -1067,9 +824,19 @@ export function SalesQuotationManagement({
 
       console.log('🔥 [handlePushToContract] 本地创建合同，items:', items.length, 'totalAmount:', totalAmount);
 
-      const sc = createContract({
+      const scPayload = {
         quotationNumber: qt.qtNumber,
         inquiryNumber: qt.inqNumber || qt.xjNumber || '',
+        projectId: qt.projectId || null,
+        projectCode: qt.projectCode || null,
+        projectName: qt.projectName || null,
+        projectRevisionId: qt.projectRevisionId || null,
+        projectRevisionCode: qt.projectRevisionCode || null,
+        projectRevisionStatus: qt.projectRevisionStatus || null,
+        finalRevisionId: qt.finalRevisionId || null,
+        finalQuotationId: qt.id || null,
+        finalQuotationNumber: qt.qtNumber || null,
+        quotationRole: qt.quotationRole || null,
         customerName: qt.customerName || qt.customerCompany || '',
         customerEmail: qt.customerEmail || '',
         customerCompany: qt.customerCompany || '',
@@ -1087,20 +854,41 @@ export function SalesQuotationManagement({
         paymentTerms: qt.tradeTerms?.paymentTerms || qt.paymentTerms || '30% T/T deposit, 70% before shipment',
         deliveryTime: qt.tradeTerms?.deliveryTime || '25-30 days after deposit',
         portOfLoading: qt.tradeTerms?.portOfLoading || 'Xiamen, China',
-        remarks: qt.remarks || '',
+        remarks: qt.projectRevisionId
+          ? [
+              qt.remarks || '',
+              `Execution Baseline: ${qt.projectCode ? `${qt.projectCode} · ` : ''}${qt.projectName || 'Project'} / Rev ${qt.projectRevisionCode || '-'} / Final QT ${qt.qtNumber}`,
+            ].filter(Boolean).join('\n')
+          : (qt.remarks || ''),
+        templateId: qt.templateId || null,
+        templateVersionId: qt.templateVersionId || null,
+        templateSnapshot: qt.templateSnapshot || null,
+        documentRenderMeta: qt.projectRevisionId
+          ? {
+              projectExecutionBaseline: {
+                projectId: qt.projectId || null,
+                projectCode: qt.projectCode || null,
+                projectName: qt.projectName || null,
+                projectRevisionId: qt.projectRevisionId || null,
+                projectRevisionCode: qt.projectRevisionCode || null,
+                projectRevisionStatus: qt.projectRevisionStatus || null,
+                finalRevisionId: qt.finalRevisionId || null,
+                finalQuotationId: qt.id || null,
+                finalQuotationNumber: qt.qtNumber || null,
+                quotationRole: qt.quotationRole || null,
+              },
+            }
+          : null,
+      };
+      const sc = await createContract({
+        ...scPayload,
+        documentDataSnapshot: adaptSalesContractToDocumentData({
+          ...scPayload,
+          createdAt: new Date().toISOString(),
+        }),
       });
 
       console.log('✅ [handlePushToContract] createContract 完成，合同编号:', sc.contractNumber);
-
-      // 写入 localStorage 并 dispatch 事件，确保 context 刷新
-      const stored: any[] = JSON.parse(localStorage.getItem('salesContracts') || '[]');
-      if (!stored.some((c: any) => c.contractNumber === sc.contractNumber)) {
-        stored.push(sc);
-        localStorage.setItem('salesContracts', JSON.stringify(stored));
-      }
-      localStorage.removeItem('salesContracts_cleared');
-      window.dispatchEvent(new CustomEvent('salesContractCreatedLocally'));
-      console.log('📢 [handlePushToContract] dispatched salesContractCreatedLocally');
 
       // 回写报价单状态
       setServerQuotations((prev: any[]) =>
@@ -1201,7 +989,7 @@ export function SalesQuotationManagement({
           qt.customerCompany.toLowerCase().includes(term) ||
           qt.items.some(item => 
             item.productName.toLowerCase().includes(term) ||
-            item.modelNo?.toLowerCase().includes(term)
+            getFormalBusinessModelNo(item).toLowerCase().includes(term)
           )
         );
       }
@@ -1670,7 +1458,19 @@ export function SalesQuotationManagement({
                             type="button"
                             size="sm"
                             onClick={() => handlePushToContract(qt)}
+                            disabled={Boolean(
+                              qt.projectRevisionId &&
+                              !(
+                                qt.quotationRole === 'accepted' &&
+                                qt.projectRevisionStatus === 'final' &&
+                                qt.finalRevisionId &&
+                                qt.finalRevisionId === qt.projectRevisionId
+                              )
+                            )}
                             className="gap-1 bg-purple-600 hover:bg-purple-700 h-7 text-[11px]"
+                            title={qt.projectRevisionId
+                              ? '项目类报价需先 Lock Final，确认最终 revision 和最终报价后才能生成销售合同'
+                              : '下推生成销售合同'}
                           >
                             <FileSignature className="h-3 w-3" />
                             下推生成销售合同
@@ -1722,21 +1522,15 @@ export function SalesQuotationManagement({
           }}
           onSubmit={async (quoteData) => {
             try {
-              const fallback = mapQuoteDataToServerLike(quoteData, selectedQuotation);
-              const payload = {
-                ...selectedQuotation,
+              const fallback = mapQuoteDataToQuotationUpdate(quoteData, selectedQuotation);
+              await updateQuotation(String(selectedQuotation.id), {
                 ...fallback,
-                id: String(selectedQuotation.id),
                 qtNumber: selectedQuotation.qtNumber,
                 qrNumber: selectedQuotation.qrNumber,
                 inqNumber: selectedQuotation.inqNumber,
                 salesPerson: selectedQuotation.salesPerson || currentUser?.email || '',
                 salesPersonName: selectedQuotation.salesPersonName || currentUser?.name || '',
-              };
-              const saved = await salesQuotationService.upsert(payload);
-              if (!saved) {
-                throw new Error('Supabase upsert sales quotation failed');
-              }
+              } as any);
               toast.success('报价草稿已保存');
               loadSalesQuotations();
               setShowPriceCalculation(false);

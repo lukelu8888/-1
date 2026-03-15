@@ -176,7 +176,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "inquiry",
+            target: "ing",
             new_status: "submitted",
             display: "已提交"
           }
@@ -204,7 +204,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "inquiry",
+            target: "ing",
             new_status: "distributed",
             display: "已分发"
           }
@@ -232,7 +232,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "inquiry",
+            target: "ing",
             new_status: "pending_finance_quote",
             display: "财务报价处理中"
           }
@@ -260,7 +260,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "inquiry",
+            target: "ing",
             new_status: "supplier_inquiry_sent",
             display: "采购询价中"
           }
@@ -288,7 +288,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "inquiry",
+            target: "ing",
             new_status: "supplier_quote_received",
             display: "供应商已报价"
           }
@@ -316,7 +316,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "inquiry",
+            target: "ing",
             new_status: "cost_analysis_completed",
             display: "成本分析完成"
           }
@@ -354,13 +354,13 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "draft",
             display: "草稿"
           },
           {
             type: "status_change",
-            target: "inquiry",
+            target: "ing",
             new_status: "quotation_created",
             display: "已生成报价"
           }
@@ -390,7 +390,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "pending_approval",
             display: "待审批"
           }
@@ -490,7 +490,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "feedback_sent",
             display: "反馈已发送"
           }
@@ -512,7 +512,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "revising",
             display: "修改中"
           }
@@ -556,7 +556,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "sent_to_customer",
             display: "已发送客户"
           }
@@ -578,7 +578,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "viewed_by_customer",
             display: "客户已查看"
           }
@@ -615,7 +615,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "customer_responded",
             display: "客户已反馈"
           }
@@ -644,7 +644,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "feedback_processing",
             display: "反馈处理中"
           }
@@ -702,13 +702,13 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "closed_rejected",
             display: "已关闭-客户拒绝"
           },
           {
             type: "status_change",
-            target: "inquiry",
+            target: "ing",
             new_status: "closed_with_feedback",
             display: "已关闭-已记录反馈"
           }
@@ -758,7 +758,7 @@ const INQUIRY_TO_CONTRACT_WORKFLOW: WorkflowStage[] = [
           },
           {
             type: "status_change",
-            target: "quotation",
+            target: "qt",
             new_status: "converted_to_contract",
             display: "已转合同"
           }
@@ -997,7 +997,7 @@ export class WorkflowExecutionEngine {
           title: finalTitle,
           message: finalMessage,
           relatedId: context.inquiry_number || context.quotation_number || context.contract_number || '',
-          relatedType: context.contract_number ? 'contract' : context.quotation_number ? 'quotation' : 'inquiry',
+          relatedType: context.contract_number ? 'contract' : context.quotation_number ? 'qt' : 'ing',
           sender: 'system@gaoshengda.com',
           metadata: context
         });

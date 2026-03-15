@@ -33,7 +33,7 @@ export interface Notification {
   title: string;
   message: string;
   relatedId?: string;           // 关联的业务ID（询价/报价/订单编号）
-  relatedType?: 'inquiry' | 'quotation' | 'order' | 'payment' | 'factory_po';
+  relatedType?: 'ing' | 'qt' | 'order' | 'payment' | 'factory_po' | 'contract';
   recipient: string;            // 接收人邮箱
   sender?: string;              // 发送人
   read: boolean;
@@ -57,7 +57,7 @@ interface NotificationContextType {
   clearAll: () => void;
 }
 
-const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
+export const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -219,6 +219,10 @@ export function useNotifications() {
     throw new Error('useNotifications must be used within NotificationProvider');
   }
   return context;
+}
+
+export function useOptionalNotifications() {
+  return useContext(NotificationContext);
 }
 
 // 向后兼容重新导出 — 实现已移至 src/utils/notificationUtils.ts

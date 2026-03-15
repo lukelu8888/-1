@@ -98,11 +98,11 @@ export const REGION_CODES: Record<RegionType, string> = {
 };
 
 // 📋 Document types
-export type DocumentType = 'XJ' | 'QUO' | 'SC' | 'CI' | 'PL' | 'YS' | 'SK' | 'INQ' | 'QR' | 'XJ' | 'BJ' | 'QT' | 'SO' | 'PO';
+export type DocumentType = 'XJ' | 'QT' | 'SC' | 'CI' | 'PL' | 'YS' | 'SK' | 'ING' | 'QR' | 'BJ' | 'SO' | 'PO';
 
 interface DocumentCounterData {
   counters: {
-    [key: string]: number; // Key format: "{TYPE}-{REGION}" (e.g., "INQ-NA", "QT-EA", "PO-SA")
+    [key: string]: number; // Key format: "{TYPE}-{REGION}" (e.g., "ING-NA", "QT-EA", "PO-SA")
     // Each counter is cumulative and never resets
   };
 }
@@ -192,7 +192,7 @@ export function generateDocumentNumber(type: DocumentType, region: RegionType): 
 
 /**
  * Parse document number to extract type, region, date and sequence
- * @param documentNumber Document number string (e.g., "INQ-NA-251120-0001")
+ * @param documentNumber Document number string (e.g., "ING-NA-251120-0001")
  * @returns Parsed data or null if invalid
  */
 export function parseDocumentNumber(documentNumber: string): { type: string; region: string; date: string; sequence: number } | null {
@@ -248,8 +248,8 @@ export function resetDocumentCounter(): void {
 // ========== Convenience Functions ==========
 
 /**
- * Generate INQ (Customer Inquiry) number
- * Format: INQ-{REGION}-YYMMDD-XXXX
+ * Generate ING (Customer Inquiry) number
+ * Format: ING-{REGION}-YYMMDD-XXXX
  * @deprecated Use generateINQNumber instead
  */
 export function generateRFQNumber(region: RegionType): string {
@@ -258,10 +258,10 @@ export function generateRFQNumber(region: RegionType): string {
 
 /**
  * Generate Quotation number
- * Format: QUO-{REGION}-YYMMDD-XXXX
+ * Format: QT-{REGION}-YYMMDD-XXXX
  */
 export function generateQuotationNumber(region: RegionType): string {
-  return generateDocumentNumber('QUO', region);
+  return generateDocumentNumber('QT', region);
 }
 
 /**
@@ -361,11 +361,11 @@ export function resetRFQCounter(): void {
 // ========== 7-Level Numbering System Functions ==========
 
 /**
- * Generate INQ (Customer Inquiry) number
- * Format: INQ-{REGION}-YYMMDD-XXXX
+ * Generate ING (Customer Inquiry) number
+ * Format: ING-{REGION}-YYMMDD-XXXX
  */
 export function generateINQNumber(region: RegionType): string {
-  return generateDocumentNumber('INQ', region);
+  return generateDocumentNumber('ING', region);
 }
 
 /**

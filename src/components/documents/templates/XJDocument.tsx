@@ -1,5 +1,8 @@
 import React, { forwardRef } from 'react';
 import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
+import { DocumentConditionsSection } from './shared/DocumentConditionsSection';
+import type { DocumentConditionGroup } from '../../../types/documentConditions';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
 
 /**
  * 📋 采购询价单（Procurement Inquiry - XJ）
@@ -83,10 +86,12 @@ export interface XJData {
     moq?: string;                    // 最小起订量要求（可选）
     remarks?: string;                // 其他说明（可选）
   };
+  conditionGroups?: DocumentConditionGroup[];
 }
 
 interface XJDocumentProps {
   data: XJData;
+  layoutConfig?: DocumentLayoutConfig;
 }
 
 function safeFormatDate(dateStr: string | undefined | null): string {
@@ -97,8 +102,14 @@ function safeFormatDate(dateStr: string | undefined | null): string {
 }
 
 export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
-  ({ data }, ref) => {
-    
+  ({ data, layoutConfig }, ref) => {
+    const documentWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
+    const documentMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
+    const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '10pt';
+    const lineHeight = layoutConfig?.lineHeight ?? 1.5;
+    const contentPaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '20mm';
+    const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '20mm';
+
     return (
       <>
         {/* 🔥 打印专用样式 - A4标准分页支持 */}
@@ -121,8 +132,8 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
             
             /* 文档容器 - A4标准宽度 210mm */
             .xj-document {
-              width: 794px !important;
-              max-width: 794px !important;
+              width: ${documentWidth} !important;
+              max-width: ${documentWidth} !important;
               margin: 0 !important;
               padding: 0 !important;
               box-shadow: none !important;
@@ -191,15 +202,25 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
         
         <div 
           ref={ref}
-          className="xj-document bg-white w-[794px] min-h-[1123px] mx-auto"
+          className="xj-document bg-white mx-auto"
           style={{ 
+            width: documentWidth,
+            minHeight: documentMinHeight,
             fontFamily: '"Microsoft YaHei", "SimHei", Arial, sans-serif',
-            fontSize: '10pt',
-            lineHeight: '1.5',
+            fontSize,
+            lineHeight,
           }}
         >
           {/* ✅ 内容区域 - 屏幕预览20mm padding，打印时0 padding（margin在@page设置） */}
-          <div className="xj-content p-[20mm] print:p-0">
+          <div
+            className="xj-content print:p-0"
+            style={{
+              paddingTop: contentPaddingTop,
+              paddingBottom: contentPaddingBottom,
+              paddingLeft: '20mm',
+              paddingRight: '20mm',
+            }}
+          >
             {/* 页眉 - 台湾大厂紧凑风格 */}
             <div className="mb-3">
               {/* 第一行：Logo + 询价单标题 + 询价信息 */}
@@ -371,6 +392,14 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
 
             {/* 询价要求和条款 - 台湾大厂表格风格 */}
             <div className="terms-section mb-6">
+              {data.conditionGroups && data.conditionGroups.length > 0 && (
+                <DocumentConditionsSection
+                  title="询价条件汇总"
+                  titleEn="RFQ CONDITIONS"
+                  groups={data.conditionGroups}
+                  emptyText="暂无询价条件"
+                />
+              )}
               <table className="w-full border-collapse border border-gray-400 text-xs">
                 <thead>
                   <tr className="bg-gray-200">

@@ -47,10 +47,10 @@
 - ❌ status（询价状态）
 - ❌ 任何审批、流程相关字段
 
-### 2. 业务员报价单（Quotation）
+### 2. 销售报价单（Sales Quotation）
 ```
 文件：/templates/QuotationDocument.tsx
-用途：业务员给客户的正式报价
+用途：业务员基于供应链反馈给客户的正式报价
 数据源：KV Store - quotation_{quotationNo}
 数据继承：从客户询价单继承90%数据
 特点：专业排版，包含公司完整信息和Logo
@@ -271,7 +271,7 @@ import { DocumentCenter } from './components/documents/DocumentCenter';
 
 ### 高优先级
 1. ✅ 完成客户询价单（CustomerInquiryDocument）
-2. ✅ 完成业务员报价单（QuotationDocument）
+2. ✅ 完成销售报价单（QuotationDocument）
 3. ✅ 完成商业发票（CommercialInvoiceDocument）
 4. ✅ 完成包装清单（PackingListDocument）
 

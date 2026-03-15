@@ -1,5 +1,6 @@
 import React, { forwardRef } from 'react';
 import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
 
 /**
  * 📄 商业发票（Commercial Invoice）
@@ -78,13 +79,20 @@ export interface CommercialInvoiceData {
 
 interface CommercialInvoiceDocumentProps {
   data: CommercialInvoiceData;
+  layoutConfig?: DocumentLayoutConfig;
 }
 
 export const CommercialInvoiceDocument = forwardRef<HTMLDivElement, CommercialInvoiceDocumentProps>(
-  ({ data }, ref) => {
+  ({ data, layoutConfig }, ref) => {
     
     const total = data.goods.reduce((sum, item) => sum + item.amount, 0);
     const currency = data.goods[0]?.currency || 'USD';
+    const documentWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
+    const documentMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
+    const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '9pt';
+    const lineHeight = layoutConfig?.lineHeight ?? 1.3;
+    const contentPaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '15mm';
+    const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '15mm';
     
     // 大写金额转换
     const numberToWords = (num: number): string => {
@@ -95,14 +103,23 @@ export const CommercialInvoiceDocument = forwardRef<HTMLDivElement, CommercialIn
     return (
       <div 
         ref={ref}
-        className="bg-white w-[794px] min-h-[1123px] mx-auto shadow-lg"
+        className="bg-white mx-auto shadow-lg"
         style={{ 
+          width: documentWidth,
+          minHeight: documentMinHeight,
           fontFamily: 'Arial, "Helvetica Neue", sans-serif',
-          fontSize: '9pt',
-          lineHeight: '1.3'
+          fontSize,
+          lineHeight
         }}
       >
-        <div className="p-[15mm]">
+        <div
+          style={{
+            paddingTop: contentPaddingTop,
+            paddingBottom: contentPaddingBottom,
+            paddingLeft: '15mm',
+            paddingRight: '15mm',
+          }}
+        >
           {/* Header - Taiwan Enterprise Compact Style */}
           <div className="mb-3">
             {/* Title + Invoice Info Table */}

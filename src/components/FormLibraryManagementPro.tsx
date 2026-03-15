@@ -103,8 +103,8 @@ export function FormLibraryManagementPro({ onClose }: { onClose?: () => void }) 
   // 表单分类
   const formCategories: FormCategory[] = [
     { id: 'all', name: '全部表单', description: '所有表单模板', color: 'gray', icon: 'Boxes', formCount: allTemplates.length },
-    { id: 'inquiry', name: '询价类', description: '客户询价相关表单', color: 'blue', icon: 'FileText', formCount: allTemplates.filter(t => t.type === 'inquiry').length },
-    { id: 'quotation', name: '报价类', description: 'Cosun报价相关表单', color: 'purple', icon: 'FileCheck', formCount: allTemplates.filter(t => t.type === 'quotation').length },
+    { id: 'ing', name: '询价类', description: '客户询价相关表单', color: 'blue', icon: 'FileText', formCount: allTemplates.filter(t => t.type === 'ing').length },
+    { id: 'qt', name: '报价类', description: 'Cosun报价相关表单', color: 'purple', icon: 'FileCheck', formCount: allTemplates.filter(t => t.type === 'qt').length },
     { id: 'contract', name: '合同类', description: '销售采购合同表单', color: 'green', icon: 'BookOpen', formCount: allTemplates.filter(t => t.type === 'sales_contract' || t.type === 'purchase_contract').length },
     { id: 'invoice', name: '发票类', description: '商业发票相关表单', color: 'yellow', icon: 'Database', formCount: allTemplates.filter(t => t.type === 'invoice').length },
     { id: 'shipping', name: '物流类', description: '装箱单提单表单', color: 'orange', icon: 'Box', formCount: allTemplates.filter(t => t.type === 'packing_list' || t.type === 'booking').length },

@@ -30,7 +30,7 @@ export interface FormTemplate {
   id: string;
   name: string; // 表单名称
   name_en: string; // 英文名称
-  type: 'inquiry' | 'quotation' | 'sales_contract' | 'purchase_contract' | 'booking' | 'invoice' | 'packing_list' | 'statement' | 'custom';
+  type: 'ing' | 'qt' | 'sales_contract' | 'purchase_contract' | 'booking' | 'invoice' | 'packing_list' | 'statement' | 'custom';
   category: 'customer' | 'supplier' | 'internal';
   owner: 'customer' | 'cosun' | 'supplier'; // 表单所有人（决定使用哪个Logo）
   version: string;
@@ -97,7 +97,7 @@ export const formTemplates: FormTemplate[] = [
     id: 'form_inquiry_001',
     name: '客户询价单',
     name_en: 'Customer Inquiry Form',
-    type: 'inquiry',
+    type: 'ing',
     category: 'customer',
     owner: 'customer',
     version: '1.0',
@@ -196,7 +196,7 @@ export const formTemplates: FormTemplate[] = [
     id: 'form_quotation_001',
     name: 'Cosun报价单',
     name_en: 'Quotation / Price Quote',
-    type: 'quotation',
+    type: 'qt',
     category: 'customer',
     owner: 'cosun',
     version: '2.0',
@@ -1321,8 +1321,8 @@ export const formOwners = [
 
 // 表单类型选项
 export const formTypeOptions = [
-  { value: 'inquiry', label: 'Inquiry Form / 询价单', icon: '📋' },
-  { value: 'quotation', label: 'Quotation / 报价单', icon: '💰' },
+  { value: 'ing', label: 'Inquiry Form / 询价单', icon: '📋' },
+  { value: 'qt', label: 'Quotation / 报价单', icon: '💰' },
   { value: 'sales_contract', label: 'Sales Contract / 销售合同', icon: '📝' },
   { value: 'purchase_contract', label: 'Purchase Contract / 采购合同', icon: '🛒' },
   { value: 'booking', label: 'Booking Form / 订舱单', icon: '🚢' },

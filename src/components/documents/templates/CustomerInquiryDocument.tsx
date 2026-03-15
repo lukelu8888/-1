@@ -1,4 +1,6 @@
 import React, { forwardRef } from 'react';
+import type { DocumentLayoutConfig } from '../A4PageContainer';
+import type { InquiryOemData } from '../../../types/oem';
 
 /**
  * 📋 客户询价单文档模板 - Taiwan Enterprise Style
@@ -60,6 +62,9 @@ export interface CustomerInquiryData {
     certifications?: string[];  // ["UL", "FCC", "CE"]
     otherRequirements?: string; // 其他要求
   };
+
+  // OEM 分支（内部流程字段，不直接由客户决定下游是否转发）
+  oem?: InquiryOemData;
   
   // 备注
   remarks?: string;
@@ -70,16 +75,251 @@ export interface CustomerInquiryData {
   status?: string;             // 询价状态（后台用）
 }
 
+export interface CustomerInquiryRequirementRow {
+  key: keyof NonNullable<CustomerInquiryData['requirements']>;
+  label: string;
+  value: string;
+}
+
+export interface CustomerInquiryRequirementField {
+  key: keyof NonNullable<CustomerInquiryData['requirements']>;
+  sourceLabel: string;
+  previewLabel: string;
+  description: string;
+  placeholder: string;
+  type: 'input' | 'textarea';
+  rows?: number;
+}
+
+export type CustomerInquiryRequirementFormFields = {
+  [K in keyof NonNullable<CustomerInquiryData['requirements']>]: K extends 'certifications' ? string : string;
+};
+
+export const DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS: CustomerInquiryRequirementFormFields = {
+  tradeTerms: '',
+  deliveryTime: '',
+  portOfDestination: '',
+  paymentTerms: '',
+  packingRequirements: '',
+  certifications: '',
+  otherRequirements: '',
+};
+
+export const CUSTOMER_INQUIRY_REQUIREMENT_FIELDS: CustomerInquiryRequirementField[] = [
+  {
+    key: 'tradeTerms',
+    sourceLabel: 'Price Terms',
+    previewLabel: 'Trade Terms',
+    description: 'How the price should be quoted, such as EXW, FOB, CIF, or DDP.',
+    placeholder: 'Example: FOB Xiamen / CIF Los Angeles',
+    type: 'input',
+  },
+  {
+    key: 'deliveryTime',
+    sourceLabel: 'Delivery Time',
+    previewLabel: 'Delivery Time',
+    description: 'Expected lead time or target shipment window.',
+    placeholder: 'Example: Within 30 days after order confirmation',
+    type: 'input',
+  },
+  {
+    key: 'portOfDestination',
+    sourceLabel: 'Destination Port',
+    previewLabel: 'Port of Destination',
+    description: 'Where the goods should be delivered or shipped to.',
+    placeholder: 'Example: Los Angeles / Jebel Ali / Door delivery to Houston',
+    type: 'input',
+  },
+  {
+    key: 'paymentTerms',
+    sourceLabel: 'Payment Terms',
+    previewLabel: 'Payment Terms',
+    description: 'Preferred settlement method and deposit arrangement.',
+    placeholder: 'Example: 30% T/T deposit, 70% before shipment',
+    type: 'input',
+  },
+  {
+    key: 'packingRequirements',
+    sourceLabel: 'Packing Requirements',
+    previewLabel: 'Packing Requirements',
+    description: 'Carton, pallet, labeling, barcode, or packaging details.',
+    placeholder: 'Example: Export cartons with pallet, each carton with SKU label',
+    type: 'textarea',
+    rows: 3,
+  },
+  {
+    key: 'certifications',
+    sourceLabel: 'Required Certifications',
+    previewLabel: 'Certifications Required',
+    description: 'Compliance or test standards needed for this inquiry.',
+    placeholder: 'Example: UL, ETL, CE, FCC, RoHS',
+    type: 'textarea',
+    rows: 3,
+  },
+  {
+    key: 'otherRequirements',
+    sourceLabel: 'Other Requirements',
+    previewLabel: 'Other Requirements',
+    description: 'Any other commercial or technical condition to show in the document.',
+    placeholder: 'Example: Need logo printing, English manual, and sample approval before mass production',
+    type: 'textarea',
+    rows: 4,
+  },
+];
+
+export const normalizeCustomerInquiryRequirementFields = (
+  value?: Partial<CustomerInquiryRequirementFormFields> | null,
+): CustomerInquiryRequirementFormFields => ({
+  tradeTerms: value?.tradeTerms?.trim() || '',
+  deliveryTime: value?.deliveryTime?.trim() || '',
+  portOfDestination: value?.portOfDestination?.trim() || '',
+  paymentTerms: value?.paymentTerms?.trim() || '',
+  packingRequirements: value?.packingRequirements?.trim() || '',
+  certifications: value?.certifications?.trim() || '',
+  otherRequirements: value?.otherRequirements?.trim() || '',
+});
+
+export const parseCustomerInquiryRequirementText = (
+  value?: string | null,
+): CustomerInquiryRequirementFormFields => {
+  if (!value?.trim()) {
+    return { ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS };
+  }
+
+  const fields = { ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS };
+  const matchers: Array<[keyof CustomerInquiryRequirementFormFields, RegExp[]]> = [
+    ['tradeTerms', [/^\s*1\.\s*Price:\s*(.*)$/i, /^\s*Trade Terms:\s*(.*)$/i]],
+    ['deliveryTime', [/^\s*2\.\s*Delivery time:\s*(.*)$/i, /^\s*Delivery Time:\s*(.*)$/i]],
+    ['portOfDestination', [/^\s*3\.\s*Destination Port:\s*(.*)$/i, /^\s*Port of Destination:\s*(.*)$/i]],
+    ['paymentTerms', [/^\s*4\.\s*Payment Term:\s*(.*)$/i, /^\s*Payment Terms:\s*(.*)$/i]],
+    ['packingRequirements', [/^\s*Packing Requirements:\s*(.*)$/i]],
+    ['certifications', [/^\s*Certifications Required:\s*(.*)$/i]],
+    ['otherRequirements', [/^\s*5\.\s*Others:\s*(.*)$/i, /^\s*Other Requirements:\s*(.*)$/i]],
+  ];
+
+  value.split('\n').forEach((line) => {
+    matchers.forEach(([key, patterns]) => {
+      patterns.forEach((pattern) => {
+        const match = line.match(pattern);
+        if (match) {
+          fields[key] = match[1]?.trim() || '';
+        }
+      });
+    });
+  });
+
+  return fields;
+};
+
+export const buildCustomerInquiryRequirementText = (
+  fields: CustomerInquiryRequirementFormFields,
+) =>
+  [
+    `Trade Terms: ${fields.tradeTerms}`.trimEnd(),
+    `Delivery Time: ${fields.deliveryTime}`.trimEnd(),
+    `Port of Destination: ${fields.portOfDestination}`.trimEnd(),
+    `Payment Terms: ${fields.paymentTerms}`.trimEnd(),
+    `Packing Requirements: ${fields.packingRequirements}`.trimEnd(),
+    `Certifications Required: ${fields.certifications}`.trimEnd(),
+    `Other Requirements: ${fields.otherRequirements}`.trimEnd(),
+  ].join('\n');
+
+const LEGACY_PACKING_SUMMARY_PATTERN = /^\s*Cartons:\s*.*(?:,\s*CBM:\s*.*)?(?:,\s*GW:\s*.*)?(?:,\s*NW:\s*.*)?\s*$/i;
+const LEGACY_REQUIREMENT_BLOCK_PATTERN = /(Trade Terms|Delivery Time|Port of Destination|Payment Terms|Packing Requirements|Certifications Required|Other Requirements)\s*:/i;
+
+const resolveCustomerInquiryRequirementFields = (
+  requirements?: CustomerInquiryData['requirements'],
+): CustomerInquiryRequirementFormFields => {
+  const normalized = normalizeCustomerInquiryRequirementFields({
+    tradeTerms: requirements?.tradeTerms,
+    deliveryTime: requirements?.deliveryTime,
+    portOfDestination: requirements?.portOfDestination,
+    paymentTerms: requirements?.paymentTerms,
+    packingRequirements: requirements?.packingRequirements,
+    certifications: Array.isArray(requirements?.certifications)
+      ? requirements.certifications.join(', ')
+      : typeof requirements?.certifications === 'string'
+        ? requirements.certifications
+        : '',
+    otherRequirements: requirements?.otherRequirements,
+  });
+
+  const legacySources = [normalized.packingRequirements, normalized.otherRequirements]
+    .filter((value) => value && LEGACY_REQUIREMENT_BLOCK_PATTERN.test(value))
+    .join('\n');
+
+  if (legacySources) {
+    const parsedLegacyFields = parseCustomerInquiryRequirementText(legacySources);
+    normalized.tradeTerms = normalized.tradeTerms || parsedLegacyFields.tradeTerms;
+    normalized.deliveryTime = normalized.deliveryTime || parsedLegacyFields.deliveryTime;
+    normalized.portOfDestination = normalized.portOfDestination || parsedLegacyFields.portOfDestination;
+    normalized.paymentTerms = normalized.paymentTerms || parsedLegacyFields.paymentTerms;
+    normalized.packingRequirements = normalized.packingRequirements || parsedLegacyFields.packingRequirements;
+    normalized.certifications = normalized.certifications || parsedLegacyFields.certifications;
+    normalized.otherRequirements = normalized.otherRequirements || parsedLegacyFields.otherRequirements;
+  }
+
+  if (LEGACY_PACKING_SUMMARY_PATTERN.test(normalized.packingRequirements)) {
+    normalized.packingRequirements = '';
+  }
+
+  if (LEGACY_REQUIREMENT_BLOCK_PATTERN.test(normalized.otherRequirements)) {
+    normalized.otherRequirements = '';
+  }
+
+  return normalized;
+};
+
 interface CustomerInquiryDocumentProps {
   data: CustomerInquiryData;
+  layoutConfig?: DocumentLayoutConfig;
+  highlightedRequirementKey?: keyof NonNullable<CustomerInquiryData['requirements']> | string | null;
+}
+
+export function getCustomerInquiryRequirementRows(
+  data: CustomerInquiryData,
+  options?: { includeEmpty?: boolean },
+): CustomerInquiryRequirementRow[] {
+  const requirements = resolveCustomerInquiryRequirementFields(data.requirements);
+  const rows = CUSTOMER_INQUIRY_REQUIREMENT_FIELDS.map((field, index) => ({
+    key: field.key,
+    label: `${index + 1}. ${field.sourceLabel}`,
+    value: requirements[field.key] || '',
+  }));
+
+  if (options?.includeEmpty) {
+    return rows;
+  }
+
+  return rows.filter((item) => Boolean(item.value));
 }
 
 export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquiryDocumentProps>(
-  ({ data }, ref) => {
+  ({ data, layoutConfig, highlightedRequirementKey = null }, ref) => {
+    const resolvedLayout = {
+      canvasWidthMm: layoutConfig?.canvasWidthMm ?? 210,
+      canvasMinHeightMm: layoutConfig?.canvasMinHeightMm ?? 297,
+      contentPaddingTopMm: layoutConfig?.contentPaddingTopMm ?? 20,
+      contentPaddingBottomMm: layoutConfig?.contentPaddingBottomMm ?? 20,
+      fontSizePt: layoutConfig?.fontSizePt ?? 10,
+      lineHeight: layoutConfig?.lineHeight ?? 1.5,
+    };
+
+    const products = Array.isArray(data.products) ? data.products : [];
+    const customer = {
+      companyName: data.customer?.companyName || 'N/A',
+      contactPerson: data.customer?.contactPerson || 'N/A',
+      position: data.customer?.position,
+      email: data.customer?.email || 'N/A',
+      phone: data.customer?.phone,
+      address: data.customer?.address,
+      country: data.customer?.country || 'N/A',
+    };
+    const requirementRows = getCustomerInquiryRequirementRows(data);
     
     // 计算总金额（如果有目标价格）
     const calculateTotal = () => {
-      return data.products.reduce((sum, item) => {
+      return products.reduce((sum, item) => {
         if (item.targetPrice) {
           return sum + (item.quantity * item.targetPrice);
         }
@@ -88,19 +328,36 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
     };
 
     const total = calculateTotal();
-    const currency = data.products[0]?.currency || 'USD';
+    const currency = products[0]?.currency || 'USD';
+    const documentWidth = `${resolvedLayout.canvasWidthMm}mm`;
+    const documentMinHeight = `${resolvedLayout.canvasMinHeightMm}mm`;
+    const fontSize = `${resolvedLayout.fontSizePt}pt`;
+    const lineHeight = resolvedLayout.lineHeight;
+    const contentPaddingTop = `${resolvedLayout.contentPaddingTopMm}mm`;
+    const contentPaddingBottom = `${resolvedLayout.contentPaddingBottomMm}mm`;
+    const contentPaddingHorizontal = '20mm';
 
     return (
       <div 
         ref={ref}
-        className="bg-white w-[794px] min-h-[1123px] mx-auto shadow-lg"
+        className="mx-auto bg-white"
         style={{ 
+          width: documentWidth,
+          minHeight: documentMinHeight,
+          boxSizing: 'border-box',
           fontFamily: 'Arial, "Helvetica Neue", sans-serif',
-          fontSize: '10pt',
-          lineHeight: '1.5'
+          fontSize,
+          lineHeight
         }}
       >
-        <div className="p-[20mm]">
+        <div
+          style={{
+            paddingTop: contentPaddingTop,
+            paddingBottom: contentPaddingBottom,
+            paddingLeft: contentPaddingHorizontal,
+            paddingRight: contentPaddingHorizontal,
+          }}
+        >
           {/* Header - Taiwan Enterprise Compact Style */}
           <div className="mb-3">
             {/* Title + Inquiry Info Table */}
@@ -118,12 +375,12 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
                   <tbody>
                     <tr>
                       <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">Inq. No.</td>
-                      <td className="border border-gray-400 px-1.5 py-0.5 font-bold text-black">{data.inquiryNo}</td>
+                      <td className="border border-gray-400 px-1.5 py-0.5 font-bold text-black">{data.inquiryNo || '-'}</td>
                     </tr>
                     <tr>
                       <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">Date</td>
                       <td className="border border-gray-400 px-1.5 py-0.5 font-semibold text-black">
-                        {new Date(data.inquiryDate).toLocaleDateString('en-US', { 
+                        {new Date(data.inquiryDate || '').toLocaleDateString('en-US', { 
                           year: 'numeric', 
                           month: 'short', 
                           day: 'numeric' 
@@ -155,15 +412,15 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
                       CUSTOMER INFORMATION
                     </div>
                     <div className="px-2 py-1.5 space-y-0.5">
-                      <div><span className="font-semibold">{data.customer.companyName}</span></div>
-                      <div><span className="text-gray-600">Contact:</span> {data.customer.contactPerson}{data.customer.position && ` (${data.customer.position})`}</div>
-                      <div><span className="text-gray-600">Email:</span> {data.customer.email}</div>
-                      {data.customer.phone && (
-                        <div><span className="text-gray-600">Tel:</span> {data.customer.phone}</div>
+                      <div><span className="font-semibold">{customer.companyName}</span></div>
+                      <div><span className="text-gray-600">Contact:</span> {customer.contactPerson}{customer.position && ` (${customer.position})`}</div>
+                      <div><span className="text-gray-600">Email:</span> {customer.email}</div>
+                      {customer.phone && (
+                        <div><span className="text-gray-600">Tel:</span> {customer.phone}</div>
                       )}
-                      <div><span className="text-gray-600">Country:</span> {data.customer.country}</div>
-                      {data.customer.address && (
-                        <div><span className="text-gray-600">Address:</span> {data.customer.address}</div>
+                      <div><span className="text-gray-600">Country:</span> {customer.country}</div>
+                      {customer.address && (
+                        <div><span className="text-gray-600">Address:</span> {customer.address}</div>
                       )}
                     </div>
                   </td>
@@ -189,9 +446,9 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
                 </tr>
               </thead>
               <tbody>
-                {data.products.map((product) => (
-                  <tr key={product.no}>
-                    <td className="border border-gray-300 px-2 py-2 text-center">{product.no}</td>
+                {products.map((product, index) => (
+                  <tr key={`${product.no || index + 1}-${index}`}>
+                    <td className="border border-gray-300 px-2 py-2 text-center">{product.no || index + 1}</td>
                     <td className="border border-gray-300 px-2 py-2 text-gray-700">
                       {product.modelNo || '-'}
                     </td>
@@ -215,7 +472,7 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
                       )}
                     </td>
                     <td className="border border-gray-300 px-2 py-2 text-right">
-                      {product.quantity.toLocaleString()}
+                      {Number(product.quantity || 0).toLocaleString()}
                     </td>
                     <td className="border border-gray-300 px-2 py-2 text-center">
                       {product.unit}
@@ -228,7 +485,7 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
                     </td>
                     <td className="border border-gray-300 px-2 py-2 text-right font-semibold">
                       {product.targetPrice 
-                        ? `${product.currency || currency} ${(product.quantity * product.targetPrice).toFixed(2)}`
+                        ? `${product.currency || currency} ${(Number(product.quantity || 0) * Number(product.targetPrice || 0)).toFixed(2)}`
                         : '-'
                       }
                     </td>
@@ -251,113 +508,29 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
           </div>
 
           {/* Trading Requirements - Taiwan Enterprise Style (单列表格布局) */}
-          {data.requirements && (
-            <div className="mb-6">
-              <h3 className="text-sm font-bold mb-2 text-gray-900">TRADING REQUIREMENTS:</h3>
-              <table className="w-full border-collapse border border-gray-400 text-xs">
-                <tbody>
-                  {data.requirements.deliveryTime && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold" style={{ width: '25%' }}>
-                        Delivery Time
-                      </td>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        {data.requirements.deliveryTime}
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {data.requirements.tradeTerms && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                        Trade Terms
-                      </td>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        {data.requirements.tradeTerms}
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {data.requirements.paymentTerms && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                        Payment Terms
-                      </td>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        {data.requirements.paymentTerms}
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {data.requirements.portOfDestination && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                        Port of Destination
-                      </td>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        {data.requirements.portOfDestination}
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {data.requirements.packingRequirements && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                        Packing Requirements
-                      </td>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        {data.requirements.packingRequirements}
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {data.requirements.certifications && data.requirements.certifications.length > 0 && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                        Certifications Required
-                      </td>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        {data.requirements.certifications.join(', ')}
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {data.requirements.otherRequirements && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                        Other Requirements
-                      </td>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        {data.requirements.otherRequirements}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Remarks - Taiwan Enterprise Style */}
-          {data.remarks && (
-            <div className="mb-3">
-              <table className="w-full border-collapse border border-gray-400 text-xs">
-                <thead>
-                  <tr>
-                    <th className="border border-gray-400 px-2 py-1.5 text-left font-bold bg-gray-100">
-                      REMARKS / NOTES
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="border border-gray-400 px-2 py-1.5 text-gray-700">
-                      {data.remarks}
+          <div className="mb-6">
+            <h3 className="text-sm font-bold mb-2 text-gray-900">TRADING REQUIREMENTS:</h3>
+            <table className="w-full border-collapse border border-gray-400 text-xs">
+              <tbody>
+                {getCustomerInquiryRequirementRows(data, { includeEmpty: true }).map((row, index) => (
+                  <tr
+                    key={row.label}
+                    className={row.key === highlightedRequirementKey ? 'bg-amber-50' : ''}
+                  >
+                    <td
+                      className={`border border-gray-400 px-2 py-1.5 font-semibold ${row.key === highlightedRequirementKey ? 'bg-amber-100 text-amber-900' : 'bg-gray-100'}`}
+                      style={index === 0 ? { width: '25%' } : undefined}
+                    >
+                      {row.label}
+                    </td>
+                    <td className={`border border-gray-400 px-2 py-1.5 whitespace-pre-wrap ${row.key === highlightedRequirementKey ? 'bg-amber-50 ring-1 ring-inset ring-amber-300' : ''}`}>
+                      {row.value || '\u00A0'}
                     </td>
                   </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           {/* Footer Statement */}
           <div className="text-xs text-gray-600 text-center border-t border-gray-300 pt-2">

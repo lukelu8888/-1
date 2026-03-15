@@ -702,15 +702,30 @@ function TableField({
   );
 }
 
+function evaluateArithmeticExpression(expression: string): number {
+  const sanitized = expression.trim();
+  if (!sanitized) return 0;
+
+  // Only allow arithmetic tokens after placeholder substitution.
+  if (!/^[\d+\-*/().\s]+$/.test(sanitized)) {
+    throw new Error('Unsupported formula expression');
+  }
+
+  const result = Function(`"use strict"; return (${sanitized});`)();
+  const numeric = Number(result);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
 // 计算字段值
 function calculateFieldValue(field: AdvancedFormField, formData: any): any {
   if (typeof field.calculation === 'function') {
     return field.calculation(formData);
   }
   if (typeof field.calculation === 'string') {
-    // 简单的计算表达式解析（实际项目中应使用更强大的表达式引擎）
+    // 简单的计算表达式解析，仅支持占位符替换后的四则运算。
     try {
-      return eval(field.calculation.replace(/\{(\w+)\}/g, (_, key) => formData[key] || 0));
+      const expression = field.calculation.replace(/\{(\w+)\}/g, (_, key) => String(formData[key] || 0));
+      return evaluateArithmeticExpression(expression);
     } catch (e) {
       return 0;
     }
@@ -742,7 +757,7 @@ function calculateFieldValue(field: AdvancedFormField, formData: any): any {
           // 否则从formData获取值
           return String(formData[match] || 0);
         });
-        return eval(formula);
+        return evaluateArithmeticExpression(formula);
       } catch (e) {
         console.error('Formula calculation error:', e);
         return 0;

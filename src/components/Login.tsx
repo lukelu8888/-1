@@ -15,6 +15,127 @@ import { signInWithEmail, fetchProfile } from '../hooks/useSupabaseAuth';
 const REMEMBER_CUSTOMER_KEY = 'cosun_remember_customer';
 const REMEMBER_SUPPLIER_KEY = 'cosun_remember_supplier';
 
+function promiseWithTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    }),
+  ]);
+}
+
+function normalizeErrorMessage(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const candidate = (error as any).message || (error as any).error_description || (error as any).error || (error as any).msg;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'Login failed';
+    }
+  }
+  return 'Login failed';
+}
+
+function readCachedProfile(email: string) {
+  try {
+    const backendUserRaw = localStorage.getItem('cosun_backend_user');
+    if (!backendUserRaw) return null;
+    const backendUser = JSON.parse(backendUserRaw);
+    if (String(backendUser?.email || '').toLowerCase() !== email.toLowerCase()) return null;
+    return {
+      id: backendUser.id as string | undefined,
+      email: backendUser.email as string,
+      name: backendUser.username as string | undefined,
+      portal_role: backendUser.portal_role as 'admin' | 'customer' | 'supplier' | undefined,
+      rbac_role: backendUser.rbac_role as string | null | undefined,
+      region: backendUser.region as string | null | undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistFallbackAuthState(params: {
+  id: string;
+  email: string;
+  name: string;
+  portalRole: 'customer' | 'supplier' | 'admin';
+  rbacRole?: string | null;
+  region?: string | null;
+}) {
+  const authUser = {
+    id: params.id,
+    email: params.email,
+    name: params.name,
+    type: params.portalRole,
+    role: params.rbacRole ?? params.portalRole,
+    userRole: params.rbacRole ?? params.portalRole,
+    region: params.region ?? undefined,
+  };
+
+  localStorage.setItem('cosun_auth_user', JSON.stringify(authUser));
+  localStorage.setItem('cosun_backend_user', JSON.stringify({
+    id: params.id,
+    email: params.email,
+    username: params.name,
+    portal_role: params.portalRole,
+    rbac_role: params.rbacRole ?? null,
+    region: params.region ?? null,
+  }));
+
+  if (params.portalRole === 'admin') {
+    localStorage.setItem('cosun_current_user', JSON.stringify({
+      id: params.id,
+      email: params.email,
+      name: params.name,
+      role: params.rbacRole ?? 'Admin',
+      region: params.region ?? 'all',
+      type: 'admin',
+    }));
+  } else {
+    localStorage.removeItem('cosun_current_user');
+  }
+}
+
+function completeLoginNavigation(navigateTo: (page: string) => void) {
+  navigateTo('dashboard');
+  window.dispatchEvent(new CustomEvent('userChanged'));
+
+  const dashboardHash = '#/dashboard';
+  if (window.location.hash !== dashboardHash) {
+    window.location.hash = dashboardHash;
+  }
+}
+
+async function resolveProfileWithFallback(
+  userId: string,
+  email: string,
+  portalRole: 'customer' | 'supplier' | 'admin'
+) {
+  const cachedProfile = readCachedProfile(email);
+
+  try {
+    const profile = await promiseWithTimeout(
+      fetchProfile(userId),
+      5000,
+      'Profile lookup timed out. Please try again.',
+    );
+    return {
+      profile,
+      degraded: false,
+    };
+  } catch (error) {
+    console.warn(`[Login] profile lookup failed for ${portalRole}, using fallback session.`, error);
+    return {
+      profile: cachedProfile,
+      degraded: true,
+    };
+  }
+}
+
 // 一次性迁移：清除所有旧版 remember 数据（版本号控制，只执行一次）
 const MIGRATE_VERSION = 'v3';
 function migrateRememberKeys() {
@@ -32,6 +153,8 @@ export function Login() {
   const { setUser } = useUser();
   const { navigateTo } = useRouter();
   const [showPassword, setShowPassword] = useState(false);
+  const [isCustomerSubmitting, setIsCustomerSubmitting] = useState(false);
+  const [isManufacturerSubmitting, setIsManufacturerSubmitting] = useState(false);
 
   // 初始化：读本 Portal 专属 key，同时清除旧版共享 key
   const [customerData, setCustomerData] = useState(() => {
@@ -68,10 +191,15 @@ export function Login() {
     if (!email) { toast.error('Please enter your email'); return; }
 
     try {
+      setIsCustomerSubmitting(true);
       const { session } = await signInWithEmail(email, customerData.password);
       if (!session?.user) throw new Error('Login failed');
 
-      const profile = await fetchProfile(session.user.id);
+      const { profile, degraded } = await resolveProfileWithFallback(
+        session.user.id,
+        session.user.email!,
+        'customer',
+      );
 
       if (profile && profile.portal_role !== 'customer') {
         await import('../hooks/useSupabaseAuth').then(m => m.signOut());
@@ -89,6 +217,14 @@ export function Login() {
         name: profile?.name ?? session.user.email!.split('@')[0],
         region: profile?.region ?? undefined,
       });
+      persistFallbackAuthState({
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        portalRole: 'customer',
+        rbacRole: profile?.rbac_role,
+        region: profile?.region,
+      });
 
       if (customerData.rememberMe) {
         localStorage.setItem(REMEMBER_CUSTOMER_KEY, email);
@@ -96,15 +232,18 @@ export function Login() {
         localStorage.removeItem(REMEMBER_CUSTOMER_KEY);
       }
 
-      toast.success('Login successful');
-      navigateTo('dashboard');
+      toast.success(degraded ? 'Login successful. Some profile data will load later.' : 'Login successful');
+      completeLoginNavigation(navigateTo);
     } catch (err: any) {
-      const msg = err?.message || '';
+      const msg = normalizeErrorMessage(err);
+      console.error('[Login] customer login failed:', err);
       toast.error(
         msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')
           ? 'Invalid email or password'
           : msg || 'Login failed'
       );
+    } finally {
+      setIsCustomerSubmitting(false);
     }
   };
 
@@ -114,10 +253,15 @@ export function Login() {
     if (!email) { toast.error('Please enter your email'); return; }
 
     try {
+      setIsManufacturerSubmitting(true);
       const { session } = await signInWithEmail(email, manufacturerData.password);
       if (!session?.user) throw new Error('Login failed');
 
-      const profile = await fetchProfile(session.user.id);
+      const { profile, degraded } = await resolveProfileWithFallback(
+        session.user.id,
+        session.user.email!,
+        'supplier',
+      );
 
       if (profile && profile.portal_role !== 'supplier') {
         await import('../hooks/useSupabaseAuth').then(m => m.signOut());
@@ -135,6 +279,14 @@ export function Login() {
         name: profile?.name ?? session.user.email!.split('@')[0],
         region: profile?.region ?? undefined,
       });
+      persistFallbackAuthState({
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        portalRole: 'supplier',
+        rbacRole: profile?.rbac_role,
+        region: profile?.region,
+      });
 
       if (manufacturerData.rememberMe) {
         localStorage.setItem(REMEMBER_SUPPLIER_KEY, email);
@@ -142,14 +294,18 @@ export function Login() {
         localStorage.removeItem(REMEMBER_SUPPLIER_KEY);
       }
 
-      toast.success('Login successful');
+      toast.success(degraded ? 'Login successful. Some profile data will load later.' : 'Login successful');
+      completeLoginNavigation(navigateTo);
     } catch (err: any) {
-      const msg = err?.message || '';
+      const msg = normalizeErrorMessage(err);
+      console.error('[Login] supplier login failed:', err);
       toast.error(
         msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')
           ? 'Invalid email or password'
           : msg || 'Login failed'
       );
+    } finally {
+      setIsManufacturerSubmitting(false);
     }
   };
 
@@ -258,8 +414,12 @@ export function Login() {
                       </a>
                     </div>
 
-                    <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
-                      {t.login?.signIn || 'Sign In'}
+                    <Button
+                      type="submit"
+                      className="w-full bg-blue-600 hover:bg-blue-700"
+                      disabled={isCustomerSubmitting}
+                    >
+                      {isCustomerSubmitting ? 'Signing In...' : (t.login?.signIn || 'Sign In')}
                     </Button>
 
                     <div className="text-center text-sm text-gray-600">
@@ -382,8 +542,12 @@ export function Login() {
                       </a>
                     </div>
 
-                    <Button type="submit" className="w-full bg-orange-600 hover:bg-orange-700">
-                      {t.login?.signIn || 'Sign In'}
+                    <Button
+                      type="submit"
+                      className="w-full bg-orange-600 hover:bg-orange-700"
+                      disabled={isManufacturerSubmitting}
+                    >
+                      {isManufacturerSubmitting ? 'Signing In...' : (t.login?.signIn || 'Sign In')}
                     </Button>
 
                     <div className="text-center text-sm text-gray-600">

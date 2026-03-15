@@ -4,6 +4,7 @@ import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOr
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { TabsContent } from '../../ui/tabs';
+import { extractProjectExecutionBaseline } from './purchaseOrderUtils';
 
 type ProcurementRequestsTabProps = {
   procurementRequestSearchTerm: string;
@@ -108,6 +109,7 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
               {filteredProcurementRequests.map((po, idx) => {
                 const runtimeStatus = getProcurementRequestRuntimeStatus(po);
                 const lockedByDownstream = hasDownstreamPOForProcurementRequest(po);
+                const projectBaseline = extractProjectExecutionBaseline(po);
                 return (
                   <tr key={po.id} className="border-b border-gray-100 hover:bg-gray-50/50">
                     <td className="py-2 px-2 text-center">
@@ -132,6 +134,11 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
                     <td className="py-2 px-2">
                       <div className="text-sm text-gray-700">询价: {resolveInquirySourceRef(po) || ''}</div>
                       <div className="text-xs text-gray-500">需求: {getRequirementNoFromPO(po) || ''}</div>
+                      {projectBaseline && (
+                        <div className="text-xs text-indigo-600 mt-0.5">
+                          基线: {projectBaseline.projectCode ? `${projectBaseline.projectCode} · ` : ''}{projectBaseline.projectName || 'Project'} / Rev {projectBaseline.projectRevisionCode || '-'} / QT {projectBaseline.finalQuotationNumber || '-'}
+                        </div>
+                      )}
                     </td>
                     <td className="py-2 px-2">
                       <span className="font-semibold">{po.items?.length || 0} 个产品</span>

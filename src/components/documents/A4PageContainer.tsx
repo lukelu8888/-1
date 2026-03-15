@@ -8,11 +8,21 @@ import React, { ReactNode } from 'react';
  * - 打印输出：自动分页，标准A4尺寸
  */
 
+export interface DocumentLayoutConfig {
+  canvasWidthMm: number;
+  canvasMinHeightMm: number;
+  contentPaddingTopMm: number;
+  contentPaddingBottomMm: number;
+  fontSizePt: number;
+  lineHeight: number;
+}
+
 interface A4DocumentContainerProps {
   children: ReactNode;
   enablePagination?: boolean; // 是否启用分页显示
   pageWidth?: string;
   pageMinHeight?: string;
+  zoom?: number;
 }
 
 export const A4DocumentContainer = React.forwardRef<HTMLDivElement, A4DocumentContainerProps>(

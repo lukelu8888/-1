@@ -10,13 +10,14 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef as _useRef } from 'react';
 import { toast } from 'sonner@2.0.3';
-import { useApproval } from './ApprovalContext'; // 🔥 新增：监听审批状态
+import { useOptionalApproval } from './ApprovalContext'; // 客户端可在无审批 Provider 时继续运行
 import { useOrders } from './OrderContext'; // 🔥 新增：同步订单到客户端，以及监听客户确认状态
-import { getCurrentUser } from '../utils/dataIsolation';
+import { getCurrentUser, getStoredPortalRole, isStoredStaffPortalRole } from '../utils/dataIsolation';
 import { addTombstones, filterNotDeleted, listTombstones, removeTombstones } from '../lib/erp-core/deletion-tombstone';
 import { salesContractsDb, fromContractRow } from '../lib/supabase-db';
 import { contractService, orderService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
+import type { SalesContractData } from '../components/documents/templates/SalesContractDocument';
 
 // 🔥 销售合同产品接口
 export interface SalesContractProduct {
@@ -29,6 +30,10 @@ export interface SalesContractProduct {
   unitPrice: number;
   amount: number;
   deliveryTime?: string;
+  customerProductId?: string;
+  projectId?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
 }
 
 // 🔥 电子签名接口
@@ -65,6 +70,16 @@ export interface SalesContract {
   contractNumber: string;              // 合同编号: SC-{REGION}-{YYMMDD}-{序号}
   quotationNumber: string;             // 关联的报价单号（QT）- 一对一
   inquiryNumber?: string;              // 原始询价单号（INQ）
+  projectId?: string | null;
+  projectCode?: string | null;
+  projectName?: string | null;
+  projectRevisionId?: string | null;
+  projectRevisionCode?: string | null;
+  projectRevisionStatus?: 'working' | 'quoted' | 'superseded' | 'final' | 'cancelled' | null;
+  finalRevisionId?: string | null;
+  finalQuotationId?: string | null;
+  finalQuotationNumber?: string | null;
+  quotationRole?: 'budgetary' | 'technical_review' | 'commercial_offer' | 'final_offer' | 'accepted' | null;
   
   // 客户信息
   customerName: string;
@@ -154,6 +169,11 @@ export interface SalesContract {
     fileUrl: string;
     uploadedAt: string;
   }>;
+  templateId?: string | null;
+  templateVersionId?: string | null;
+  templateSnapshot?: any;
+  documentDataSnapshot?: SalesContractData;
+  documentRenderMeta?: any;
 }
 
 interface SalesContractContextType {
@@ -161,17 +181,17 @@ interface SalesContractContextType {
   
   // CRUD操作
   createContract: (contractData: Partial<SalesContract>) => Promise<SalesContract>;
-  updateContract: (id: string, updates: Partial<SalesContract>) => void;
-  deleteContract: (id: string) => void;
+  updateContract: (id: string, updates: Partial<SalesContract>) => Promise<void>;
+  deleteContract: (id: string) => Promise<void>;
   getContractById: (id: string) => SalesContract | undefined;
   getContractByQuotationNumber: (quotationNumber: string) => SalesContract | undefined;
   getContractByContractNumber: (contractNumber: string) => SalesContract | undefined;
   clearAllContracts: () => void; // 🔥 清空所有合同
   
   // 业务流程
-  submitForApproval: (id: string, notes?: string) => void;
-  approveContract: (id: string, approverRole: 'supervisor' | 'director', notes?: string) => void;
-  rejectContract: (id: string, reason: string, approverRole: 'supervisor' | 'director') => void;
+  submitForApproval: (id: string, notes?: string) => Promise<void>;
+  approveContract: (id: string, approverRole: 'supervisor' | 'director', notes?: string) => Promise<void>;
+  rejectContract: (id: string, reason: string, approverRole: 'supervisor' | 'director') => Promise<void>;
   sendToCustomer: (id: string) => void;
   customerConfirmContract: (id: string, signature: ElectronicSignature) => void;
   customerRejectContract: (id: string, reason: string) => void;
@@ -193,6 +213,18 @@ interface SalesContractContextType {
 }
 
 const SalesContractContext = createContext<SalesContractContextType | undefined>(undefined);
+
+const assertSalesContractWritePayload = (contract: Partial<SalesContract>) => {
+  if (!contract.templateSnapshot || !contract.documentDataSnapshot) {
+    throw new Error(`SC ${contract.contractNumber || contract.id || ''} 缺少模板快照数据，已阻止写入`);
+  }
+};
+
+const assertSalesContractPersistedBinding = (contract: Partial<SalesContract>) => {
+  if (!contract.templateId || !contract.templateVersionId || !contract.templateSnapshot || !contract.documentDataSnapshot) {
+    throw new Error(`SC ${contract.contractNumber || contract.id || ''} 缺少模板绑定字段，Supabase 返回结果不完整`);
+  }
+};
 
 export function SalesContractProvider({ children }: { children: ReactNode }) {
   // 迁移历史 tombstone：将错误写入 order 域的合同删除标记迁移到 contract 域
@@ -223,7 +255,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   const [contracts, setContracts] = useState<SalesContract[]>([]);
   
   // 🔥 获取审批Context（监听审批状态变化）
-  const { requests: approvalRequests } = useApproval();
+  const approvalContext = useOptionalApproval();
+  const approvalRequests = approvalContext?.requests || [];
   
   // 🔥 获取订单Context（用于同步订单到客户端，以及监听客户确认状态）
   const { addOrder, orders: allOrders } = useOrders();
@@ -234,13 +267,35 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     const load = async () => {
       if (clearingRef.current) return;
       try {
-        const data = await contractService.getAll();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session) {
+          if (alive) setContracts([]);
+          return;
+        }
+
+        let isStaff = isStoredStaffPortalRole();
+        if (!isStaff && getStoredPortalRole() === null) {
+          const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('portal_role')
+            .eq('id', session.user.id)
+            .maybeSingle();
+          isStaff = profile?.portal_role === 'admin' || profile?.portal_role === 'staff';
+        }
+        const data = isStaff
+          ? await contractService.getAll()
+          : await contractService.getByEmail(session.user.email || '');
         if (!alive || clearingRef.current) return;
         if (Array.isArray(data) && data.length > 0) {
           const filtered = filterDeletedContracts(data as SalesContract[]);
           setContracts(filtered);
+        } else if (alive) {
+          setContracts([]);
         }
       } catch (e: any) {
+        if (e?.name === 'AbortError') return;
         console.warn('⚠️ [SalesContractProvider] Supabase 加载合同失败:', e?.message || e);
       }
     };
@@ -262,11 +317,32 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   const refreshFromBackend = React.useCallback(async (): Promise<void> => {
     if (clearingRef.current) return;
     try {
-      const data = await contractService.getAll();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        setContracts([]);
+        return;
+      }
+
+      let isStaff = isStoredStaffPortalRole();
+      if (!isStaff && getStoredPortalRole() === null) {
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('portal_role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+        isStaff = profile?.portal_role === 'admin' || profile?.portal_role === 'staff';
+      }
+      const data = isStaff
+        ? await contractService.getAll()
+        : await contractService.getByEmail(session.user.email || '');
       if (clearingRef.current) return;
       if (Array.isArray(data) && data.length > 0) {
         const filtered = filterDeletedContracts(data as SalesContract[]);
         setContracts(filtered);
+      } else {
+        setContracts([]);
       }
     } catch (e: any) {
       console.warn('⚠️ [SalesContractProvider] refreshFromBackend 失败:', e?.message || e);
@@ -473,6 +549,16 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       contractNumber,
       quotationNumber: contractData.quotationNumber || '',
       inquiryNumber: contractData.inquiryNumber,
+      projectId: contractData.projectId || null,
+      projectCode: contractData.projectCode || null,
+      projectName: contractData.projectName || null,
+      projectRevisionId: contractData.projectRevisionId || null,
+      projectRevisionCode: contractData.projectRevisionCode || null,
+      projectRevisionStatus: contractData.projectRevisionStatus || null,
+      finalRevisionId: contractData.finalRevisionId || null,
+      finalQuotationId: contractData.finalQuotationId || null,
+      finalQuotationNumber: contractData.finalQuotationNumber || contractData.quotationNumber || null,
+      quotationRole: contractData.quotationRole || null,
       
       customerName: contractData.customerName || '',
       customerEmail: contractData.customerEmail || '',
@@ -515,54 +601,53 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       updatedAt: now,
       
       remarks: contractData.remarks,
-      attachments: contractData.attachments || []
+      attachments: contractData.attachments || [],
+      templateId: contractData.templateId || null,
+      templateVersionId: contractData.templateVersionId || null,
+      templateSnapshot: contractData.templateSnapshot || null,
+      documentDataSnapshot: contractData.documentDataSnapshot,
+      documentRenderMeta: contractData.documentRenderMeta || null,
     };
     
     
-    setContracts(prev => [...prev, newContract]);
+    assertSalesContractWritePayload(newContract);
+    const saved = await contractService.upsert(newContract);
+    if (!saved) {
+      throw new Error(`销售合同 ${newContract.contractNumber} 创建失败`);
+    }
+    assertSalesContractPersistedBinding(saved as SalesContract);
+    setContracts(prev => [...prev.filter(c => c.id !== saved.id), saved as SalesContract]);
     toast.success(`销售合同 ${newContract.contractNumber} 创建成功！`);
-
-    // 持久化到 Supabase
-    void contractService.upsert(newContract)
-      .catch(e => console.warn('⚠️ [createContract] Supabase upsert 失败:', e?.message));
-    
-    return newContract;
+    return saved as SalesContract;
   };
   
   // 🔥 更新合同
-  const updateContract = (id: string, updates: Partial<SalesContract>) => {
-    setContracts(prev => {
-      const next = prev.map(contract => {
-        if (contract.id === id) {
-          const updated = { ...contract, ...updates, updatedAt: new Date().toISOString() };
-          if (updates.totalAmount && updates.totalAmount !== contract.totalAmount) {
-            const requiresDirectorApproval = updates.totalAmount >= 20000;
-            updated.approvalFlow = {
-              requiresDirectorApproval,
-              currentStep: 'supervisor',
-              steps: requiresDirectorApproval ? ['supervisor', 'director'] : ['supervisor']
-            };
-          }
-          return updated;
-        }
-        return contract;
-      });
-      return next;
-    });
-
-    toast.success('合同已更新！');
-
-    // 持久化到 Supabase
+  const updateContract = async (id: string, updates: Partial<SalesContract>) => {
     const targetContract = contracts.find(c => c.id === id);
-    if (targetContract) {
-      void contractService.upsert({ ...targetContract, ...updates, updatedAt: new Date().toISOString() })
-        .catch(e => console.warn('⚠️ [updateContract] Supabase upsert 失败:', e?.message));
+    if (!targetContract) return;
+    const merged = { ...targetContract, ...updates, updatedAt: new Date().toISOString() } as SalesContract;
+    if (updates.totalAmount && updates.totalAmount !== targetContract.totalAmount) {
+      const requiresDirectorApproval = updates.totalAmount >= 20000;
+      merged.approvalFlow = {
+        requiresDirectorApproval,
+        currentStep: 'supervisor',
+        steps: requiresDirectorApproval ? ['supervisor', 'director'] : ['supervisor']
+      };
     }
+    assertSalesContractWritePayload(merged);
+    const saved = await contractService.upsert(merged);
+    if (!saved) {
+      throw new Error(`合同 ${targetContract.contractNumber || id} 更新失败`);
+    }
+    assertSalesContractPersistedBinding(saved as SalesContract);
+    setContracts(prev => prev.map(contract => contract.id === id ? saved as SalesContract : contract));
+    toast.success('合同已更新！');
   };
   
   // 🔥 删除合同
-  const deleteContract = (id: string) => {
+  const deleteContract = async (id: string) => {
     const target = contracts.find((c) => c.id === id);
+    await contractService.delete(id);
     const markers = [
       String(id || ''),
       String(target?.contractNumber || ''),
@@ -574,12 +659,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         deletedBy: getCurrentUser()?.email || 'unknown',
       });
     }
-    // 先乐观删除（并确保 tombstone 过滤生效）
     setContracts(prev => filterDeletedContracts(prev.filter(c => c.id !== id)));
     toast.success('合同已删除！');
-
-    void contractService.delete(id)
-      .catch(e => console.warn('⚠️ [deleteContract] Supabase 删除失败:', e?.message));
   };
   
   // 🔥 清空所有合同
@@ -605,114 +686,89 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   };
   
   // 🔥 提交审批
-  const submitForApproval = (id: string, notes?: string) => {
-    // 先乐观更新 UI
-    setContracts(prev => prev.map(contract => {
-      if (contract.id === id) {
-        const updated = { ...contract };
-        updated.status = 'pending_supervisor';
-        updated.submittedAt = new Date().toISOString();
-        updated.approvalNotes = notes;
-        updated.approvalHistory = [...(updated.approvalHistory || []), {
-          action: 'submitted',
-          actor: contract.salesPersonName,
-          actorRole: 'salesperson',
-          timestamp: new Date().toISOString(),
-          notes,
-          amount: contract.totalAmount
-        }];
-        return updated;
-      }
-      return contract;
-    }));
-
-    // 持久化到 Supabase
+  const submitForApproval = async (id: string, notes?: string) => {
     const submittedContract = contracts.find(c => c.id === id);
-    if (submittedContract) {
-      void contractService.upsert({ ...submittedContract, status: 'pending_supervisor', submittedAt: new Date().toISOString() })
-        .catch(e => console.warn('⚠️ [submitForApproval] Supabase upsert 失败:', e?.message));
+    if (!submittedContract) return;
+    const updatedContract = {
+      ...submittedContract,
+      status: 'pending_supervisor',
+      submittedAt: new Date().toISOString(),
+      approvalNotes: notes,
+      approvalHistory: [...(submittedContract.approvalHistory || []), {
+        action: 'submitted',
+        actor: submittedContract.salesPersonName,
+        actorRole: 'salesperson',
+        timestamp: new Date().toISOString(),
+        notes,
+        amount: submittedContract.totalAmount
+      }],
+    };
+    const saved = await contractService.upsert(updatedContract);
+    if (!saved) {
+      throw new Error(`合同 ${submittedContract.contractNumber || id} 提交审批失败`);
     }
+    setContracts(prev => prev.map(contract => contract.id === id ? saved as SalesContract : contract));
   };
   
   // 🔥 审批通过
-  const approveContract = (id: string, approverRole: 'supervisor' | 'director', notes?: string) => {
-    setContracts(prev => {
-      const next = prev.map(contract => {
-        if (contract.id === id) {
-          const updated = { ...contract };
-          updated.approvalHistory.push({
-            action: 'approved',
-            actor: approverRole === 'supervisor' ? '区域主管' : '销售总监',
-            actorRole: approverRole,
-            timestamp: new Date().toISOString(),
-            notes
-          });
-          if (approverRole === 'supervisor') {
-            if (contract.approvalFlow.requiresDirectorApproval) {
-              updated.status = 'pending_director';
-              updated.approvalFlow.currentStep = 'director';
-            } else {
-              updated.status = 'approved';
-              updated.approvalFlow.currentStep = 'completed';
-              updated.approvedAt = new Date().toISOString();
-            }
-          } else if (approverRole === 'director') {
-            updated.status = 'approved';
-            updated.approvalFlow.currentStep = 'completed';
-            updated.approvedAt = new Date().toISOString();
-          }
-          return updated;
-        }
-        return contract;
-      });
-      return next;
-    });
-
+  const approveContract = async (id: string, approverRole: 'supervisor' | 'director', notes?: string) => {
     const contract = contracts.find(c => c.id === id);
+    if (!contract) return;
+    const updated = { ...contract };
+    updated.approvalHistory.push({
+      action: 'approved',
+      actor: approverRole === 'supervisor' ? '区域主管' : '销售总监',
+      actorRole: approverRole,
+      timestamp: new Date().toISOString(),
+      notes
+    });
+    if (approverRole === 'supervisor') {
+      if (contract.approvalFlow.requiresDirectorApproval) {
+        updated.status = 'pending_director';
+        updated.approvalFlow.currentStep = 'director';
+      } else {
+        updated.status = 'approved';
+        updated.approvalFlow.currentStep = 'completed';
+        updated.approvedAt = new Date().toISOString();
+      }
+    } else if (approverRole === 'director') {
+      updated.status = 'approved';
+      updated.approvalFlow.currentStep = 'completed';
+      updated.approvedAt = new Date().toISOString();
+    }
+    const saved = await contractService.upsert(updated);
+    if (!saved) {
+      throw new Error(`合同 ${contract.contractNumber || id} 审批同步失败`);
+    }
+    setContracts(prev => prev.map(item => item.id === id ? saved as SalesContract : item));
+
     if (contract?.approvalFlow.requiresDirectorApproval && approverRole === 'supervisor') {
       toast.success('主管审批通过！合同已提交给销售总监审批。');
     } else {
       toast.success('合同审批通过！现在可以发送给客户了。');
     }
-
-    // 同步到 Supabase（静默）
-    const updatedContract = contracts.find(c => c.id === id);
-    if (updatedContract) {
-      void contractService.upsert(updatedContract)
-        .catch(e => console.warn('⚠️ [approveContract] Supabase 同步失败:', e?.message));
-    }
   };
   
   // 🔥 审批驳回
-  const rejectContract = (id: string, reason: string, approverRole: 'supervisor' | 'director') => {
-    setContracts(prev => prev.map(contract => {
-      if (contract.id === id) {
-        const updated = { ...contract };
-        updated.status = 'rejected';
-        updated.rejectionReason = reason;
-        
-        // 添加审批历史
-        updated.approvalHistory.push({
-          action: 'rejected',
-          actor: approverRole === 'supervisor' ? '区域主管' : '销售总监',
-          actorRole: approverRole,
-          timestamp: new Date().toISOString(),
-          notes: reason
-        });
-        
-        return updated;
-      }
-      return contract;
-    }));
-    
-    toast.error('合同已被驳回，请修改后重新提交！');
-
-    // 同步到 Supabase（静默）
+  const rejectContract = async (id: string, reason: string, approverRole: 'supervisor' | 'director') => {
     const rejectedContract = contracts.find(c => c.id === id);
-    if (rejectedContract) {
-      void contractService.upsert({ ...rejectedContract, status: 'rejected', rejectionReason: reason })
-        .catch(e => console.warn('⚠️ [rejectContract] Supabase 同步失败:', e?.message));
+    if (!rejectedContract) return;
+    const updated = { ...rejectedContract };
+    updated.status = 'rejected';
+    updated.rejectionReason = reason;
+    updated.approvalHistory.push({
+      action: 'rejected',
+      actor: approverRole === 'supervisor' ? '区域主管' : '销售总监',
+      actorRole: approverRole,
+      timestamp: new Date().toISOString(),
+      notes: reason
+    });
+    const saved = await contractService.upsert(updated);
+    if (!saved) {
+      throw new Error(`合同 ${rejectedContract.contractNumber || id} 驳回同步失败`);
     }
+    setContracts(prev => prev.map(contract => contract.id === id ? saved as SalesContract : contract));
+    toast.error('合同已被驳回，请修改后重新提交！');
   };
   
   // 🔥 发送给客户（先调后端接口落库，再刷新列表并同步订单到客户视角）

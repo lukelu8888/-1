@@ -27,6 +27,7 @@ const VALID_DASHBOARD_VIEWS = new Set([
   'overview',
   'profile',
   'my-orders',
+  'my-products',
   'rate-request',
   'create-order',
   'analytics',
@@ -60,8 +61,21 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
       return;
     }
     localStorage.setItem('dashboardActiveView', activeView);
-    console.log('💾 Saved dashboard view:', activeView);
   }, [activeView]);
+
+  useEffect(() => {
+    const handleNavigate = (event: Event) => {
+      const nextView = (event as CustomEvent<{ view?: string }>).detail?.view;
+      if (nextView && VALID_DASHBOARD_VIEWS.has(nextView)) {
+        setActiveView(nextView);
+      }
+    };
+
+    window.addEventListener('customer-dashboard-navigate', handleNavigate as EventListener);
+    return () => {
+      window.removeEventListener('customer-dashboard-navigate', handleNavigate as EventListener);
+    };
+  }, []);
 
   // Shared orders state between Active Orders and Order History
   const [activeOrders, setActiveOrders] = useState<any[]>([]);
@@ -107,6 +121,7 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
   const defaultMenuItems = [
     { id: 'overview', label: 'Dashboard Overview', icon: LayoutDashboard },
     { id: 'my-orders', label: 'My Orders', icon: Package },
+    { id: 'my-products', label: 'My Products', icon: Package },
     { id: 'rate-request', label: 'Rate Request', icon: DollarSign },
     { id: 'analytics', label: 'Data Analytics', icon: BarChart3 },
     { id: 'messages', label: 'Messages', icon: Mail },
@@ -227,6 +242,8 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
           onOrderSubmitted={handleOrderSubmitted}
           onNavigateToShop={() => navigateTo('home')}
         />;
+      case 'my-products':
+        return <MyProducts />;
       case 'rate-request':
         return <RateRequestForm />;
       case 'create-order':
@@ -254,7 +271,7 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="h-screen overflow-hidden bg-gray-50">
       {/* Mobile Header */}
       <div className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
@@ -283,42 +300,14 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
         </div>
       </div>
 
-      <div className="flex">
-        {/* Resizable Sidebar - Desktop Only */}
-        <Resizable
-          size={{ width: sidebarWidth, height: '100vh' }}
-          onResizeStop={(e, direction, ref, d) => {
-            setSidebarWidth(sidebarWidth + d.width);
-          }}
-          minWidth={200}
-          maxWidth={400}
-          enable={{ 
-            right: true, 
-            top: false, 
-            bottom: false, 
-            left: false, 
-            topRight: false, 
-            bottomRight: false, 
-            bottomLeft: false, 
-            topLeft: false 
-          }}
+      <div className="flex h-[calc(100vh-0px)]">
+        {/* Mobile Sidebar */}
+        <div
           className={`
-            fixed lg:sticky top-0 left-0 h-screen bg-white border-r border-gray-200 z-50
-            transition-transform duration-300 ease-in-out
-            ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+            fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 shadow-xl
+            transition-transform duration-300 ease-in-out lg:hidden
+            ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
           `}
-          handleStyles={{
-            right: {
-              width: '4px',
-              right: '-2px',
-              cursor: 'col-resize',
-              backgroundColor: 'transparent',
-              transition: 'background-color 0.2s',
-            }
-          }}
-          handleClasses={{
-            right: 'hover:bg-red-600'
-          }}
         >
           <div className="flex flex-col h-full">
             {/* User Info */}
@@ -442,7 +431,157 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
               </Button>
             </div>
           </div>
-        </Resizable>
+        </div>
+
+        {/* Desktop Sidebar */}
+        <div className="hidden lg:block shrink-0 h-full">
+          <Resizable
+            size={{ width: sidebarWidth, height: '100vh' }}
+            onResizeStop={(e, direction, ref, d) => {
+              setSidebarWidth(sidebarWidth + d.width);
+            }}
+            minWidth={200}
+            maxWidth={400}
+            enable={{ 
+              right: true, 
+              top: false, 
+              bottom: false, 
+              left: false, 
+              topRight: false, 
+              bottomRight: false, 
+              bottomLeft: false, 
+              topLeft: false 
+            }}
+            className="relative h-full bg-white border-r border-gray-200"
+            handleStyles={{
+              right: {
+                width: '4px',
+                right: '-2px',
+                cursor: 'col-resize',
+                backgroundColor: 'transparent',
+                transition: 'background-color 0.2s',
+              }
+            }}
+            handleClasses={{
+              right: 'hover:bg-red-600'
+            }}
+          >
+            <div className="flex flex-col h-full">
+              {/* User Info */}
+              <div className="p-4 border-b border-gray-200 bg-gray-50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveView('profile');
+                    setProfileEditToken(Date.now());
+                  }}
+                  className="w-full flex items-center gap-3 overflow-hidden text-left group"
+                >
+                  <div
+                    className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden ring-2 ring-transparent group-hover:ring-blue-300 transition"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      logoInputRef.current?.click();
+                    }}
+                    title="Click to upload logo"
+                  >
+                    {customerLogo ? (
+                      <img src={customerLogo} alt="Customer logo" className="w-full h-full object-cover" />
+                    ) : (
+                      <User className="h-6 w-6 text-white" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate whitespace-nowrap">{userEmail}</p>
+                    <p className="text-xs text-gray-500 whitespace-nowrap">Premium Member · Click to edit profile</p>
+                  </div>
+                </button>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+                      if (!dataUrl) return;
+                      setCustomerLogo(dataUrl);
+                      localStorage.setItem('cosun_customer_logo', dataUrl);
+                    };
+                    reader.readAsDataURL(file);
+                    e.currentTarget.value = '';
+                  }}
+                />
+              </div>
+
+              <nav className="flex-1 overflow-y-auto p-4">
+                <div className="space-y-1">
+                  <button
+                    onClick={handleBackToWebsite}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg mb-3 border-2 border-blue-400 overflow-hidden"
+                  >
+                    <Home className="h-4 w-4 flex-shrink-0" />
+                    <span className="text-sm font-medium whitespace-nowrap truncate">Back to Website</span>
+                  </button>
+
+                  <div className="border-t border-gray-200 my-3"></div>
+
+                  {menuItems.map((item, index) => {
+                    const Icon = item.icon;
+                    const isActive = activeView === item.id;
+                    const isDragging = draggedItem === index;
+                    const isDragOver = dragOverItem === index;
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`
+                          relative group
+                          ${isDragging ? 'opacity-50' : ''}
+                          ${isDragOver ? 'border-t-2 border-red-600' : ''}
+                        `}
+                        draggable
+                        onDragStart={() => handleDragStart(index)}
+                        onDragEnter={() => handleDragEnter(index)}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={handleDragOver}
+                      >
+                        <button
+                          onClick={() => setActiveView(item.id)}
+                          className={`
+                            w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all overflow-hidden
+                            ${isActive 
+                              ? 'bg-red-600 text-white shadow-lg' 
+                              : 'text-gray-700 hover:bg-gray-100'
+                            }
+                          `}
+                        >
+                          <GripVertical className={`h-3.5 w-3.5 flex-shrink-0 cursor-grab active:cursor-grabbing ${isActive ? 'text-white/70' : 'text-gray-400'}`} />
+                          <Icon className="h-4 w-4 flex-shrink-0" />
+                          <span className="text-sm font-medium flex-1 whitespace-nowrap truncate">{item.label}</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </nav>
+
+              <div className="p-4 border-t border-gray-200 space-y-2">
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start gap-3 text-sm overflow-hidden bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
+                  onClick={onLogout}
+                >
+                  <LogOut className="h-4 w-4 flex-shrink-0" />
+                  <span className="whitespace-nowrap truncate">Logout</span>
+                </Button>
+              </div>
+            </div>
+          </Resizable>
+        </div>
 
         {/* Mobile Sidebar Overlay */}
         {isMobileSidebarOpen && (
@@ -453,7 +592,7 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
         )}
 
         {/* Main Content */}
-        <main className="flex-1 min-h-screen overflow-x-hidden">
+        <main className="relative z-0 flex-1 min-w-0 h-screen overflow-y-auto overflow-x-hidden">
           {/* 🌟 客户成长使命Banner */}
           <div className="bg-gradient-to-r from-orange-50 via-amber-50 to-orange-50 border-b-2 border-orange-200">
             <div className="px-4 lg:px-8 py-4 max-w-[1600px] mx-auto">
@@ -481,7 +620,7 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
             </div>
           </div>
 
-          <div className="p-4 lg:p-8">
+          <div className="p-4 pb-8 lg:p-8 lg:pb-10">
             {renderContent()}
           </div>
         </main>

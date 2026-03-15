@@ -35,7 +35,7 @@ import {
   DialogFooter
 } from '../ui/dialog';
 import { toast } from 'sonner';
-import { purchaseRequirementService } from '../../lib/supabaseService';
+import { quoteRequirementService } from '../../lib/supabaseService';
 
 /**
  * 💳 应付账款管理模块（供应商付款）
@@ -90,13 +90,13 @@ interface AccountPayable {
   agingDays?: number; // 账龄天数
 }
 
-interface PurchaseRequirementApiItem {
+interface QuoteRequirementApiItem {
   quantity?: number;
   targetPrice?: number | null;
   targetCurrency?: string | null;
 }
 
-interface PurchaseRequirementApi {
+interface QuoteRequirementApi {
   id?: string;
   requirementNo?: string;
   sourceRef?: string | null;
@@ -105,7 +105,7 @@ interface PurchaseRequirementApi {
   createdDate?: string | null;
   region?: string | null;
   paymentTerms?: string | null;
-  items?: PurchaseRequirementApiItem[];
+  items?: QuoteRequirementApiItem[];
 }
 
 const AccountsPayableManagement: React.FC = () => {
@@ -251,8 +251,8 @@ const AccountsPayableManagement: React.FC = () => {
     let alive = true;
     const loadAccountsPayable = async () => {
       try {
-        const rows = await purchaseRequirementService.getAll();
-        const requirements: PurchaseRequirementApi[] = Array.isArray(rows) ? (rows as any[]) : [];
+        const rows = await quoteRequirementService.getAll();
+        const requirements: QuoteRequirementApi[] = Array.isArray(rows) ? (rows as any[]) : [];
 
         const mapped: AccountPayable[] = requirements.map((r, index) => {
           const items = Array.isArray(r.items) ? r.items : [];

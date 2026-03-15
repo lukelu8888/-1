@@ -22,13 +22,13 @@ import { DocumentPreview } from './DocumentPreview';
  * 4. 符合国际商业标准的专业排版
  */
 export function DocumentCenter() {
-  const [activeTab, setActiveTab] = useState<string>('inquiry');
+  const [activeTab, setActiveTab] = useState<string>('ing');
   const [previewDocument, setPreviewDocument] = useState<any>(null);
 
   // 模拟文档列表数据
   const documentTypes = [
     { 
-      id: 'inquiry', 
+      id: 'ing', 
       name: '客户询价单', 
       nameEn: 'Customer Inquiry',
       icon: FileText,
@@ -36,12 +36,12 @@ export function DocumentCenter() {
       description: '客户发送的产品询价请求'
     },
     { 
-      id: 'quotation', 
-      name: '业务员报价单', 
-      nameEn: 'Quotation',
+      id: 'qt', 
+      name: '销售报价单', 
+      nameEn: 'Sales Quotation',
       icon: FileText,
       color: 'orange',
-      description: '业务员给客户的正式报价'
+      description: '业务员基于供应链反馈给客户的正式报价'
     },
     { 
       id: 'proforma', 

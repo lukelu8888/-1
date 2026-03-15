@@ -2,6 +2,7 @@ import React from 'react';
 import { useUser } from '../contexts/UserContext';
 import { useCart } from '../contexts/CartContext';
 import { useInquiry } from '../contexts/InquiryContext';
+import { adaptInquiryToDocumentData } from '../utils/documentDataAdapters';
 import { useRegion } from '../contexts/RegionContext';
 import { useRouter } from '../contexts/RouterContext';
 import { Building2, Mail, Phone, Globe, User, CheckCircle2, Download, Printer, HardDrive, Cloud } from 'lucide-react';
@@ -13,6 +14,13 @@ import { Progress } from './ui/progress';
 import { toast } from 'sonner';
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogCancel } from './ui/alert-dialog';
 import { nextInquiryNumber } from '../lib/supabaseService';
+import { Textarea } from './ui/textarea';
+import {
+  buildCustomerInquiryRequirementText,
+  CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+  DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+  type CustomerInquiryRequirementFormFields,
+} from './documents/templates/CustomerInquiryDocument';
 
 interface InquiryPreviewDialogProps {
   cartItems: any[];
@@ -68,6 +76,9 @@ export function InquiryPreviewDialog({
     email: user?.email || userInfo?.email || '',
     website: userInfo?.website || '',
     businessType: userInfo?.businessType || 'Importer' as 'Retailer' | 'Importer' | 'Wholesaler' | 'Distributor' | 'E-commerce' | 'Other'
+  });
+  const [customerRequirement, setCustomerRequirement] = React.useState<CustomerInquiryRequirementFormFields>({
+    ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   });
 
   React.useEffect(() => {
@@ -255,9 +266,14 @@ export function InquiryPreviewDialog({
           recommendedContainer: planningMode === 'automatic' ? recommendedContainer : undefined,
           customContainers: planningMode === 'custom' ? customContainers : undefined,
         },
+        requirements: { ...customerRequirement },
+        message: buildCustomerInquiryRequirementText(customerRequirement),
         region: regionCode,
         createdAt: Date.now(),
       };
+      (customerInquiry as any).templateSnapshot = { pendingResolution: true };
+      (customerInquiry as any).documentRenderMeta = null;
+      (customerInquiry as any).documentDataSnapshot = adaptInquiryToDocumentData(customerInquiry as any);
 
       // Save directly to Supabase (Supabase-first)
       await addInquiry(customerInquiry);
@@ -396,6 +412,44 @@ export function InquiryPreviewDialog({
               </Select>
             </div>
           </div>
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-4">
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-gray-900">Trading Requirements</h3>
+              <p className="mt-1 text-xs text-gray-600">
+                These terms will flow into the ING document directly and stay aligned with the template center.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {CUSTOMER_INQUIRY_REQUIREMENT_FIELDS.map((field) => (
+                <div
+                  key={field.key}
+                  className={field.type === 'textarea' && field.key === 'otherRequirements' ? 'md:col-span-2' : ''}
+                >
+                  <Label htmlFor={`preview-new-${field.key}`}>{field.sourceLabel}</Label>
+                  <p className="mt-1 text-xs text-gray-500">{field.description}</p>
+                  {field.type === 'textarea' ? (
+                    <Textarea
+                      id={`preview-new-${field.key}`}
+                      rows={field.rows || 3}
+                      value={customerRequirement[field.key] || ''}
+                      onChange={(e) => setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                      className="mt-2"
+                    />
+                  ) : (
+                    <Input
+                      id={`preview-new-${field.key}`}
+                      value={customerRequirement[field.key] || ''}
+                      onChange={(e) => setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                      className="mt-2"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -518,6 +572,30 @@ export function InquiryPreviewDialog({
                 >
                   Edit Information
                 </Button>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <div className="bg-orange-600 text-white px-4 py-2 mb-3">
+                <h3 className="text-sm uppercase tracking-wide font-semibold">TRADING REQUIREMENTS</h3>
+              </div>
+              <div className="border border-gray-300">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {CUSTOMER_INQUIRY_REQUIREMENT_FIELDS
+                      .map((field) => ({
+                        label: field.previewLabel,
+                        value: customerRequirement[field.key]?.trim() || '',
+                      }))
+                      .filter((row) => row.value)
+                      .map((row) => (
+                        <tr key={row.label} className="border-b border-gray-200 last:border-b-0">
+                          <td className="w-[30%] bg-gray-100 px-3 py-2.5 font-semibold text-gray-800">{row.label}</td>
+                          <td className="px-3 py-2.5 text-gray-900">{row.value}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
               </div>
             </div>
 

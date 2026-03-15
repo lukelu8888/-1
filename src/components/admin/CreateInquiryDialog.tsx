@@ -54,8 +54,8 @@ export default function CreateInquiryDialog({ isOpen, onClose, onCreateInquiry }
     }
 
     const inquiry = {
-      id: `INQ-${Date.now()}`,
-      inquiryNumber: `INQ-2025-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+      id: `ING-${Date.now()}`,
+      inquiryNumber: `ING-2025-${String(Math.floor(Math.random() * 9000) + 1000)}`,
       customerName,
       customerEmail,
       customerPhone,

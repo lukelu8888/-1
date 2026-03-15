@@ -5,13 +5,13 @@ import { Textarea } from '../ui/textarea';
 import { Printer, Download, X, CheckCircle, XCircle, MessageSquare, Calculator } from 'lucide-react';
 import { Quotation } from '../admin/QuotationManagement';
 import { QuotationDocument, QuotationData } from '../documents/templates/QuotationDocument'; // 🔥 使用文档中心的业务员报价单模版
-import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 使用SalesQuotationContext
 import { sendNotificationToUser } from '../../utils/notificationUtils';
 import { useUser } from '../../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
 import { salesQuotationService } from '../../lib/supabaseService';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 interface QuotationDetailViewProps {
   open: boolean;
@@ -32,7 +32,6 @@ export default function QuotationDetailView({
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackType, setFeedbackType] = useState<'accepted' | 'rejected' | 'negotiating'>('negotiating');
-  const { updateQuotation } = useSalesQuotations();
   const { user } = useUser();
 
   const handlePrint = () => {
@@ -71,15 +70,6 @@ export default function QuotationDetailView({
         customer_response: { status: 'accepted', comment: 'Customer accepted the quotation', respondedAt: new Date().toISOString() },
       });
 
-      // 🔥 同步本地状态（兼容现有组件/统计）
-      updateQuotation(quotation.id, {
-        customerStatus: 'accepted',
-        customerResponse: {
-          status: 'accepted',
-          comment: 'Customer accepted the quotation',
-          respondedAt: new Date().toISOString(),
-        },
-      });
       onUpdated?.();
     } catch (e: any) {
       console.error('❌ [QuotationDetailView] Accept 落库失败:', e);
@@ -87,7 +77,7 @@ export default function QuotationDetailView({
       return;
     }
 
-    console.log('✅ [QuotationDetailView] updateQuotation 已调用 - customerStatus: accepted');
+    console.log('✅ [QuotationDetailView] 接受报价已写入 Supabase');
 
     // 🔔 发送通知给业务员
     const salesPersonEmail = (quotation as any).salesPerson || 'admin@cosun.com';
@@ -96,7 +86,7 @@ export default function QuotationDetailView({
       title: '✅ 客户接受报价',
       message: `${quotation.customerName || quotation.customer} 已接受报价 ${(quotation as any).qtNumber || quotation.quotationNumber}`,
       relatedId: (quotation as any).qtNumber || quotation.quotationNumber,
-      relatedType: 'quotation',
+      relatedType: 'qt',
       sender: user.email,
       metadata: {
         customerName: quotation.customerName || quotation.customer,
@@ -151,39 +141,6 @@ export default function QuotationDetailView({
         customer_response: { status: feedbackType, comment: feedbackMessage, respondedAt: new Date().toISOString() },
       });
 
-      // 🔥 同步本地状态（兼容现有组件/统计）
-      updateQuotation(quotation.id, {
-        customerStatus: newCustomerStatus,
-        customerResponse: {
-          status: feedbackType,
-          comment: feedbackMessage,
-          respondedAt: new Date().toISOString(),
-        },
-      });
-
-      // 写入跨角色 bridge，让业务员端无需等 API 刷新即可看到客户反馈理由
-      try {
-        const responseEntry = {
-          qtNumber: (quotation as any).qtNumber || (quotation as any).quotationNumber,
-          id: String(quotation.id),
-          customerStatus: newCustomerStatus,
-          customerResponse: {
-            status: feedbackType,
-            comment: feedbackMessage,
-            respondedAt: new Date().toISOString(),
-          },
-          updatedAt: new Date().toISOString(),
-        };
-        const bridgeKey = 'customer_decline_bridge';
-        const existing: any[] = JSON.parse(localStorage.getItem(bridgeKey) || '[]');
-        const idx = existing.findIndex((e: any) =>
-          e.qtNumber === responseEntry.qtNumber || e.id === responseEntry.id
-        );
-        if (idx >= 0) existing[idx] = responseEntry;
-        else existing.push(responseEntry);
-        localStorage.setItem(bridgeKey, JSON.stringify(existing));
-      } catch {}
-
       onUpdated?.();
     } catch (e: any) {
       console.error('❌ [QuotationDetailView] Feedback 落库失败:', e);
@@ -191,7 +148,7 @@ export default function QuotationDetailView({
       return;
     }
 
-    console.log('✅ [QuotationDetailView] updateQuotation 已调用 - customerStatus:', newCustomerStatus);
+    console.log('✅ [QuotationDetailView] 反馈已写入 Supabase - customerStatus:', newCustomerStatus);
 
     // 🔔 发送通知给业务员
     const salesPersonEmail = (quotation as any).salesPerson || 'admin@cosun.com';
@@ -203,7 +160,7 @@ export default function QuotationDetailView({
       title: notificationTitle,
       message: notificationMessage,
       relatedId: (quotation as any).qtNumber || quotation.quotationNumber,
-      relatedType: 'quotation',
+      relatedType: 'qt',
       sender: user.email,
       metadata: {
         customerName: quotation.customerName || quotation.customer,
@@ -316,7 +273,7 @@ export default function QuotationDetailView({
       // 🔥 产品报价列表 - 兼容items和products两种结构
       products: productList.map((item: any, index: number) => ({
         no: index + 1,
-        modelNo: item.modelNo || item.sku || '',
+        modelNo: getFormalBusinessModelNo(item),
         imageUrl: item.imageUrl || item.image || '',
         productName: item.productName || item.name || '',
         specification: item.specification || item.specs || '',

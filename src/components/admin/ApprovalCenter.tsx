@@ -39,68 +39,14 @@ import { SalesContractDocument, SalesContractData } from '../documents/templates
 import { PurchaseOrderDocument } from '../documents/templates/PurchaseOrderDocument';
 import { useSalesContracts } from '../../contexts/SalesContractContext'; // 🔥 导入销售合同Context
 import { salesQuotationService, contractService } from '../../lib/supabaseService';
-import { addTombstones, filterNotDeleted, isDeleted } from '../../lib/erp-core/deletion-tombstone';
+import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { emitErpEvent } from '../../lib/erp-core/event-bus';
 import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
 import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext';
 import { convertToPOData } from './purchase-order/purchaseOrderUtils';
+import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 type TabType = 'pending' | 'approved' | 'rejected' | 'submitted';
-const APPROVAL_CENTER_CACHE_PREFIX = 'approval_center_cache_v1';
-const APPROVAL_CENTER_BRIDGE_KEY = 'approval_center_pending_bridge_v1';
-const SALES_QUOTATION_CACHE_PREFIX = 'sales_quotation_management_cache_v1';
-
-interface ApprovalCenterCacheShape {
-  pending: ApprovalRequest[];
-  approved: ApprovalRequest[];
-  rejected: ApprovalRequest[];
-  submitted: ApprovalRequest[];
-  updatedAt: string;
-}
-
-const getApprovalCenterCacheKey = (email: string) => `${APPROVAL_CENTER_CACHE_PREFIX}:${email || 'anonymous'}`;
-
-const readApprovalCenterCache = (email: string): ApprovalCenterCacheShape | null => {
-  if (!email) return null;
-  try {
-    const raw = localStorage.getItem(getApprovalCenterCacheKey(email));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    return {
-      pending: Array.isArray(parsed.pending) ? parsed.pending : [],
-      approved: Array.isArray(parsed.approved) ? parsed.approved : [],
-      rejected: Array.isArray(parsed.rejected) ? parsed.rejected : [],
-      submitted: Array.isArray(parsed.submitted) ? parsed.submitted : [],
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date(0).toISOString(),
-    };
-  } catch {
-    return null;
-  }
-};
-
-const writeApprovalCenterCache = (
-  email: string,
-  payload: Pick<ApprovalCenterCacheShape, 'pending' | 'approved' | 'rejected' | 'submitted'>,
-) => {
-  if (!email) return;
-  const cache: ApprovalCenterCacheShape = {
-    ...payload,
-    updatedAt: new Date().toISOString(),
-  };
-  localStorage.setItem(getApprovalCenterCacheKey(email), JSON.stringify(cache));
-};
-
-const mergeByRequestIdentity = (base: ApprovalRequest[], extra: ApprovalRequest[]) => {
-  const map = new Map<string, ApprovalRequest>();
-  [...base, ...extra].forEach((item) => {
-    const key = `${item.type}:${item.relatedDocumentId}:${item.status}`;
-    map.set(key, item);
-  });
-  return Array.from(map.values()).sort(
-    (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime(),
-  );
-};
 
 // 仅用审批请求自身 id 做可见性标记，避免误伤同单号后续新审批。
 const getApprovalMarkers = (req: Partial<ApprovalRequest>): string[] =>
@@ -130,7 +76,7 @@ export function ApprovalCenter() {
   console.log('🚨🚨🚨 [ApprovalCenter] currentUserEmail:', currentUserEmail);
   console.log('🚨🚨🚨 [ApprovalCenter] currentUser 完整对象:', JSON.stringify(currentUser, null, 2));
   
-  const { updateContract, getContractByContractNumber } = useSalesContracts(); // 🔥 添加销售合同Context
+  useSalesContracts(); // 保持合同上下文订阅，审批结果由各业务上下文自行回流
   const { purchaseOrders, updatePurchaseOrder } = usePurchaseOrders();
 
   const isBossRole = useMemo(
@@ -167,195 +113,33 @@ export function ApprovalCenter() {
     return { pending, approved, rejected, submitted };
   }, [localApprovalRequests, currentUserEmail, isBossRole]);
 
-  // 🔥 服务器审批列表（从后端接口读取，刚提交的会立刻出现在这里）
-  const cached = readApprovalCenterCache(currentUserEmail);
-  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>(
-    filterVisibleApprovals(cached?.pending || [])
-  );
-  const [approvedApprovals, setApprovedApprovals] = useState<ApprovalRequest[]>(
-    filterVisibleApprovals(cached?.approved || [])
-  );
-  const [rejectedApprovals, setRejectedApprovals] = useState<ApprovalRequest[]>(
-    filterVisibleApprovals(cached?.rejected || [])
-  );
-  const [submittedApprovals, setSubmittedApprovals] = useState<ApprovalRequest[]>(
-    filterVisibleApprovals(cached?.submitted || [])
-  );
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [approvedApprovals, setApprovedApprovals] = useState<ApprovalRequest[]>([]);
+  const [rejectedApprovals, setRejectedApprovals] = useState<ApprovalRequest[]>([]);
+  const [submittedApprovals, setSubmittedApprovals] = useState<ApprovalRequest[]>([]);
   const [loading, setLoading] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!currentUserEmail) return;
-    const nextCached = readApprovalCenterCache(currentUserEmail);
-    if (nextCached) {
-      setPendingApprovals(filterVisibleApprovals(nextCached.pending));
-      setApprovedApprovals(filterVisibleApprovals(nextCached.approved));
-      setRejectedApprovals(filterVisibleApprovals(nextCached.rejected));
-      setSubmittedApprovals(filterVisibleApprovals(nextCached.submitted));
+    setLoading(true);
+    try {
+      const nextPending = filterVisibleApprovals(localApprovalView.pending || []);
+      const nextApproved = filterVisibleApprovals(localApprovalView.approved || []);
+      const nextRejected = filterVisibleApprovals(localApprovalView.rejected || []);
+      const nextSubmitted = filterVisibleApprovals(localApprovalView.submitted || []);
+      setPendingApprovals(nextPending);
+      setApprovedApprovals(nextApproved);
+      setRejectedApprovals(nextRejected);
+      setSubmittedApprovals(nextSubmitted);
       if (typeof window !== 'undefined') {
-        const visiblePending = filterVisibleApprovals(nextCached.pending || []);
         window.dispatchEvent(new CustomEvent('approvalPendingCountChanged', {
-          detail: { count: visiblePending.length },
+          detail: { count: nextPending.length },
         }));
       }
+    } finally {
+      setLoading(false);
     }
-  }, [currentUserEmail]);
-
-  useEffect(() => {
-    if (!currentUserEmail) return;
-
-    // 先注入“流转桥接队列”，减少切页后等待网络返回的空窗
-    try {
-      const rawBridge = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
-      const bridgeItems = rawBridge ? JSON.parse(rawBridge) : [];
-      if (Array.isArray(bridgeItems)) {
-        // 先清理 bridge 中已被删除（tombstone）的请求，避免“短暂复活”
-        const cleanedBridgeItems = bridgeItems.filter((x: any) => {
-          const requestId = String(x?.request?.id || '');
-          if (!requestId) return true;
-          return !isDeleted('document', requestId);
-        });
-
-        if (cleanedBridgeItems.length !== bridgeItems.length) {
-          localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(cleanedBridgeItems.slice(0, 200)));
-        }
-
-        const mine = cleanedBridgeItems
-          .filter((x: any) => {
-            if (!x?.request) return false;
-            // 精确匹配当前审批人邮箱
-            if (x?.currentApprover === currentUserEmail) return true;
-            // 当前用户邮箱出现在审批链中任一环节
-            const chain: any[] = Array.isArray(x?.request?.approvalChain) ? x.request.approvalChain : [];
-            if (chain.some((step: any) => String(step?.approverEmail || '') === currentUserEmail)) return true;
-            // CEO/Boss 角色兜底
-            if (isBossRole) {
-              const role = String(x?.request?.currentApproverRole || '');
-              if (['CEO', 'Boss'].includes(role)) return true;
-            }
-            // 当前用户角色匹配审批角色（Sales_Manager 对应 区域业务主管）
-            const currentRole = String(currentUserRole || '');
-            const approverRole = String(x?.request?.currentApproverRole || '');
-            const roleMap: Record<string, string[]> = {
-              'Sales_Manager': ['区域业务主管', 'Sales_Manager', 'Manager'],
-              'Sales_Director': ['销售总监', 'Sales_Director', 'Director'],
-            };
-            const matchRoles = roleMap[currentRole] || [];
-            if (matchRoles.length > 0 && matchRoles.some(r => approverRole.includes(r) || r.includes(approverRole))) return true;
-            return false;
-          })
-          .map((x: any) => x.request as ApprovalRequest);
-        const visibleMine = filterVisibleApprovals(mine);
-        if (visibleMine.length > 0) {
-          // 先读当前 cache，然后合并 bridge 数据，再同步写入 cache
-          // 必须在 setPendingApprovals 之前写入，否则 API 响应的 .then() 可能读到旧 cache
-          const existingCache = readApprovalCenterCache(currentUserEmail);
-          const existingPending = filterVisibleApprovals(existingCache?.pending || []);
-          const mergedPending = filterVisibleApprovals(mergeByRequestIdentity(existingPending, visibleMine));
-          try {
-            writeApprovalCenterCache(currentUserEmail, {
-              pending: mergedPending,
-              approved: existingCache?.approved || [],
-              rejected: existingCache?.rejected || [],
-              submitted: existingCache?.submitted || [],
-            });
-          } catch {}
-          setPendingApprovals(mergedPending);
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('approvalPendingCountChanged', {
-              detail: { count: mergedPending.length },
-            }));
-          }
-        }
-      }
-    } catch {}
-
-    setLoading(true);
-    Promise.resolve()
-      .then(() => {
-        // Supabase approval_records 作为主数据源（localStorage 仅做短暂 UI 缓存）
-        const latestCache = readApprovalCenterCache(currentUserEmail);
-        const serverPending: ApprovalRequest[] = localApprovalView.pending || [];
-        const serverApproved: ApprovalRequest[] = localApprovalView.approved || [];
-        const serverRejected: ApprovalRequest[] = localApprovalView.rejected || [];
-        const serverSubmitted: ApprovalRequest[] = localApprovalView.submitted || [];
-
-        // 在 API 返回后再读一次 bridge，强制合并（防止竞态导致 bridge 数据被覆盖丢失）
-        let liveBridgePending: ApprovalRequest[] = [];
-        try {
-          const rawBridge = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
-          const allBridgeItems = rawBridge ? JSON.parse(rawBridge) : [];
-          if (Array.isArray(allBridgeItems)) {
-            liveBridgePending = allBridgeItems
-              .filter((x: any) => {
-                if (!x?.request) return false;
-                const reqId = String(x?.request?.id || '');
-                if (reqId && isDeleted('document', reqId)) return false;
-                if (x?.currentApprover === currentUserEmail) return true;
-                const chain: any[] = Array.isArray(x?.request?.approvalChain) ? x.request.approvalChain : [];
-                if (chain.some((step: any) => String(step?.approverEmail || '') === currentUserEmail)) return true;
-                const crole = String(currentUserRole || '');
-                const arole = String(x?.request?.currentApproverRole || '');
-                const roleMap: Record<string, string[]> = {
-                  'Sales_Manager': ['区域业务主管', 'Sales_Manager', 'Manager'],
-                  'Sales_Director': ['销售总监', 'Sales_Director', 'Director'],
-                };
-                return (roleMap[crole] || []).some(r => arole.includes(r) || r.includes(arole));
-              })
-              .map((x: any) => x.request as ApprovalRequest);
-          }
-        } catch {}
-
-        const basePending = serverPending.length > 0
-          ? mergeByRequestIdentity(latestCache?.pending || [], serverPending)
-          : (latestCache?.pending || []);
-
-        const nextPending = filterVisibleApprovals(
-          liveBridgePending.length > 0
-            ? mergeByRequestIdentity(basePending, liveBridgePending)
-            : basePending
-        );
-        const nextApproved = filterVisibleApprovals(
-          serverApproved.length > 0
-            ? mergeByRequestIdentity(latestCache?.approved || [], serverApproved)
-            : (latestCache?.approved || [])
-        );
-        const nextRejected = filterVisibleApprovals(
-          serverRejected.length > 0
-            ? mergeByRequestIdentity(latestCache?.rejected || [], serverRejected)
-            : (latestCache?.rejected || [])
-        );
-        const nextSubmitted = filterVisibleApprovals(
-          serverSubmitted.length > 0
-            ? mergeByRequestIdentity(latestCache?.submitted || [], serverSubmitted)
-            : (latestCache?.submitted || [])
-        );
-
-        setPendingApprovals(nextPending);
-        setApprovedApprovals(nextApproved);
-        setRejectedApprovals(nextRejected);
-        setSubmittedApprovals(nextSubmitted);
-
-        writeApprovalCenterCache(currentUserEmail, {
-          pending: nextPending,
-          approved: nextApproved,
-          rejected: nextRejected,
-          submitted: nextSubmitted,
-        });
-
-        // 同步顶部“审批中心”红点数量
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('approvalPendingCountChanged', {
-            detail: { count: nextPending.length },
-          }));
-        }
-      })
-      .catch((e) => {
-        console.error('❌ [ApprovalCenter] 加载审批列表失败（保留本地数据）:', e);
-        // API 失败时不清空，保持 bridge/cache 已注入的本地数据可见
-      })
-      .finally(() => setLoading(false));
-  }, [currentUserEmail, refreshKey, isBossRole, localApprovalView]);
+  }, [currentUserEmail, localApprovalView]);
 
   // 🎯 UI状态
   const [activeTab, setActiveTab] = useState<TabType>('pending');
@@ -561,101 +345,12 @@ export function ApprovalCenter() {
     await patchWithMethodOverrideFallback(actionPath, actionPayload);
   };
 
-  // 审批完成后从 bridge 中移除对应条目，防止重新注入为"待审批"
-  const removeFromApprovalBridge = (relatedDocumentId: string) => {
-    try {
-      const raw = localStorage.getItem(APPROVAL_CENTER_BRIDGE_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(list)) return;
-      const filtered = list.filter((x: any) =>
-        String(x?.request?.relatedDocumentId || '') !== relatedDocumentId
-      );
-      if (filtered.length !== list.length) {
-        localStorage.setItem(APPROVAL_CENTER_BRIDGE_KEY, JSON.stringify(filtered));
-      }
-    } catch {}
-  };
-
-  const fallbackLocalApprove = (req: ApprovalRequest, comment: string) => {
-    const nowIso = new Date().toISOString();
-    const historyItem = {
-      id: `hist_local_${Date.now()}`,
-      approver: currentUserEmail,
-      approverName: currentUserName,
-      approverRole: currentUserRole || 'Regional_Manager',
-      action: 'approved' as const,
-      comment: comment || '批准通过（本地兼容）',
-      timestamp: nowIso,
-    };
-
-    const updatedReq: ApprovalRequest = {
-      ...req,
-      status: 'approved',
-      approvalHistory: [...(req.approvalHistory || []), historyItem],
-    };
-
-    // 同步回写业务员报价管理缓存，确保状态从“草稿/待审批”立即变为“已批准”
-    syncSalesQuotationStatusByApproval(req, 'approved');
-
-    setPendingApprovals((prev) => prev.filter((x) => String(x.id) !== String(req.id)));
-    setApprovedApprovals((prev) => mergeByRequestIdentity([updatedReq], prev));
-    try {
-      const existingCache = readApprovalCenterCache(currentUserEmail);
-      writeApprovalCenterCache(currentUserEmail, {
-        pending: (existingCache?.pending || []).filter((x) => String(x.id) !== String(req.id)),
-        approved: mergeByRequestIdentity([updatedReq], existingCache?.approved || []),
-        rejected: existingCache?.rejected || [],
-        submitted: existingCache?.submitted || [],
-      });
-    } catch {}
-    // 从 bridge 中移除，避免 useEffect 重跑时再次注入为"待审批"
-    removeFromApprovalBridge(req.relatedDocumentId);
-    emitQuotationRefreshEvent(req, 'approved');
-  };
-
-  const fallbackLocalReject = (req: ApprovalRequest, comment: string) => {
-    const nowIso = new Date().toISOString();
-    const historyItem = {
-      id: `hist_local_${Date.now()}`,
-      approver: currentUserEmail,
-      approverName: currentUserName,
-      approverRole: currentUserRole || 'Regional_Manager',
-      action: 'rejected' as const,
-      comment: comment || '驳回（本地兼容）',
-      timestamp: nowIso,
-    };
-
-    const updatedReq: ApprovalRequest = {
-      ...req,
-      status: 'rejected',
-      approvalHistory: [...(req.approvalHistory || []), historyItem],
-    };
-
-    // 同步回写业务员报价管理缓存，确保状态立即变为“已驳回”
-    syncSalesQuotationStatusByApproval(req, 'rejected');
-
-    setPendingApprovals((prev) => prev.filter((x) => String(x.id) !== String(req.id)));
-    setRejectedApprovals((prev) => mergeByRequestIdentity([updatedReq], prev));
-    try {
-      const existingCache = readApprovalCenterCache(currentUserEmail);
-      writeApprovalCenterCache(currentUserEmail, {
-        pending: (existingCache?.pending || []).filter((x) => String(x.id) !== String(req.id)),
-        approved: existingCache?.approved || [],
-        rejected: mergeByRequestIdentity([updatedReq], existingCache?.rejected || []),
-        submitted: existingCache?.submitted || [],
-      });
-    } catch {}
-    // 从 bridge 中移除，避免 useEffect 重跑时再次注入为"待审批"
-    removeFromApprovalBridge(req.relatedDocumentId);
-    emitQuotationRefreshEvent(req, 'rejected');
-  };
-
   const emitQuotationRefreshEvent = (req: ApprovalRequest, status: 'approved' | 'rejected') => {
     try {
       emitErpEvent({
         id: `evt-quotation-status-${Date.now()}`,
         key: status === 'approved' ? ERP_EVENT_KEYS.QUOTATION_ACCEPTED : ERP_EVENT_KEYS.QUOTATION_SENT,
-        domain: 'quotation',
+        domain: 'qt',
         recordId: String((req as any)?.relatedDocument?.id || req.relatedDocumentId || req.id),
         internalNo: String(req.relatedDocumentId || ''),
         source: 'admin',
@@ -693,26 +388,10 @@ export function ApprovalCenter() {
         );
       };
 
-      // 1) 回写 legacy 全局列表
-      const rawLegacy = localStorage.getItem('salesQuotations');
-      if (rawLegacy) {
-        const parsed = JSON.parse(rawLegacy);
-        localStorage.setItem('salesQuotations', JSON.stringify(patchList(parsed)));
-      }
-
-      // 2) 回写所有按用户维度缓存
-      const keys: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k) continue;
-        if (k.startsWith(`${SALES_QUOTATION_CACHE_PREFIX}:`)) keys.push(k);
-      }
-      keys.forEach((k) => {
-        const raw = localStorage.getItem(k);
-        if (!raw) return;
-        const parsed = JSON.parse(raw);
-        localStorage.setItem(k, JSON.stringify(patchList(parsed)));
-      });
+      setPendingApprovals((prev) => patchList(prev as any) as any);
+      setApprovedApprovals((prev) => patchList(prev as any) as any);
+      setRejectedApprovals((prev) => patchList(prev as any) as any);
+      setSubmittedApprovals((prev) => patchList(prev as any) as any);
     } catch (e) {
       console.warn('⚠️ syncSalesQuotationStatusByApproval failed:', e);
     }
@@ -735,7 +414,7 @@ export function ApprovalCenter() {
     
     try {
       if (selectedRequest.relatedDocumentType === '采购请求审批' || String(selectedRequest.relatedDocumentId || '').startsWith('PRQ-')) {
-        approveRequest(selectedRequest.id, currentUserEmail, currentUserName, currentUserRole || 'CEO', comment);
+        await approveRequest(selectedRequest.id, currentUserEmail, currentUserName, currentUserRole || 'CEO', comment);
       } else if (selectedRequest.type === 'sales_contract') {
         const contractKey = resolveApprovalDocKey(selectedRequest);
         await patchWithMethodOverrideFallback(
@@ -750,49 +429,24 @@ export function ApprovalCenter() {
         );
       }
       toast.success('✅ 已批准');
-      removeFromApprovalBridge(selectedRequest.relatedDocumentId);
-      // 立即更新本地状态：从 pending 移走，加入 approved
-      fallbackLocalApprove(selectedRequest, comment);
-      setRefreshKey((k) => k + 1);
+      syncSalesQuotationStatusByApproval(selectedRequest, 'approved');
+      emitQuotationRefreshEvent(selectedRequest, 'approved');
     } catch (e: any) {
       const msg = String(e?.message || '');
-
-      // 合同审批 API 失败时直接本地兜底（后端不通时不阻塞业务）
-      if (selectedRequest?.type === 'sales_contract') {
-        console.warn('⚠️ [ApprovalCenter] 合同审批 API 失败，使用本地兜底:', msg);
-        removeFromApprovalBridge(selectedRequest.relatedDocumentId);
-        fallbackLocalApprove(selectedRequest, comment);
-        // 同步更新合同状态为 approved
-        try {
-          const contract = getContractByContractNumber(selectedRequest.relatedDocumentId);
-          if (contract?.id) updateContract(contract.id, { status: 'approved' });
-        } catch {}
-        toast.success('✅ 已批准（本地兼容模式）');
-        setRefreshKey((k) => k + 1);
-        setShowDetailDialog(false);
-        setSelectedRequest(null);
-        setApprovalComment('');
-        return;
-      }
 
       if (msg.includes('No pending approval step')) {
         try {
           await rebuildApprovalChainAndRetry(selectedRequest, 'approve', comment);
           toast.success('✅ 已批准（已自动修复审批链）');
-          removeFromApprovalBridge(selectedRequest.relatedDocumentId);
-          setRefreshKey((k) => k + 1);
+          syncSalesQuotationStatusByApproval(selectedRequest, 'approved');
+          emitQuotationRefreshEvent(selectedRequest, 'approved');
           setShowDetailDialog(false);
           setSelectedRequest(null);
           setApprovalComment('');
           return;
         } catch (repairErr: any) {
           console.error('❌ [ApprovalCenter] auto-repair approve failed:', repairErr);
-          // 最终兜底：本地完成流转，避免阻塞业务操作
-          fallbackLocalApprove(selectedRequest, comment);
-          toast.success('✅ 已批准（本地兼容模式）');
-          setShowDetailDialog(false);
-          setSelectedRequest(null);
-          setApprovalComment('');
+          toast.error(`批准失败: ${repairErr?.message || '审批链修复失败'}`);
           return;
         }
       }
@@ -818,7 +472,7 @@ export function ApprovalCenter() {
     
     try {
       if (selectedRequest.relatedDocumentType === '采购请求审批' || String(selectedRequest.relatedDocumentId || '').startsWith('PRQ-')) {
-        rejectRequest(selectedRequest.id, currentUserEmail, currentUserName, currentUserRole || 'CEO', comment);
+        await rejectRequest(selectedRequest.id, currentUserEmail, currentUserName, currentUserRole || 'CEO', comment);
       } else if (selectedRequest.type === 'sales_contract') {
         const contractKey = resolveApprovalDocKey(selectedRequest);
         await patchWithMethodOverrideFallback(
@@ -836,43 +490,24 @@ export function ApprovalCenter() {
         ? '❌ 已驳回！合同已退回给业务员修改。'
         : '❌ 已驳回！报价单已退回给业务员修改。'
       );
-      removeFromApprovalBridge(selectedRequest.relatedDocumentId);
-      // 立即更新本地状态：从 pending 移走，加入 rejected
-      fallbackLocalReject(selectedRequest, comment);
-      setRefreshKey((k) => k + 1);
+      syncSalesQuotationStatusByApproval(selectedRequest, 'rejected');
+      emitQuotationRefreshEvent(selectedRequest, 'rejected');
     } catch (e: any) {
       const msg = String(e?.message || '');
-
-      // 合同驳回 API 失败时直接本地兜底
-      if (selectedRequest?.type === 'sales_contract') {
-        console.warn('⚠️ [ApprovalCenter] 合同驳回 API 失败，使用本地兜底:', msg);
-        removeFromApprovalBridge(selectedRequest.relatedDocumentId);
-        fallbackLocalReject(selectedRequest, comment);
-        toast.error('❌ 已驳回！合同已退回给业务员修改。（本地兼容模式）');
-        setRefreshKey((k) => k + 1);
-        setShowDetailDialog(false);
-        setSelectedRequest(null);
-        setApprovalComment('');
-        return;
-      }
 
       if (msg.includes('No pending approval step')) {
         try {
           await rebuildApprovalChainAndRetry(selectedRequest, 'reject', comment);
           toast.error('❌ 已驳回（已自动修复审批链）');
-          removeFromApprovalBridge(selectedRequest.relatedDocumentId);
-          setRefreshKey((k) => k + 1);
+          syncSalesQuotationStatusByApproval(selectedRequest, 'rejected');
+          emitQuotationRefreshEvent(selectedRequest, 'rejected');
           setShowDetailDialog(false);
           setSelectedRequest(null);
           setApprovalComment('');
           return;
         } catch (repairErr: any) {
           console.error('❌ [ApprovalCenter] auto-repair reject failed:', repairErr);
-          fallbackLocalReject(selectedRequest, comment);
-          toast.error('❌ 已驳回（本地兼容模式）');
-          setShowDetailDialog(false);
-          setSelectedRequest(null);
-          setApprovalComment('');
+          toast.error(`驳回失败: ${repairErr?.message || '审批链修复失败'}`);
           return;
         }
       }
@@ -939,7 +574,7 @@ export function ApprovalCenter() {
     setSelectedRequestIds((prev) => prev.filter((x) => x !== normalizedId));
   };
 
-  const handleBatchDelete = () => {
+  const handleBatchDelete = async () => {
     if (selectedCount === 0) {
       toast.error('请先勾选要删除的记录');
       return;
@@ -952,9 +587,10 @@ export function ApprovalCenter() {
     const selectedRows = allRows.filter((req) => idSet.has(String(req.id)));
 
     // 删除采购审批单时，回滚采购单到“可申请审核”状态
-    selectedRows
+    try {
+      await Promise.all(selectedRows
       .filter((req) => req.relatedDocumentType === '采购请求审批' || String(req.relatedDocumentId || '').startsWith('PRQ-'))
-      .forEach((req) => {
+      .flatMap((req) => {
         const poNos = new Set<string>();
         const requestPoNo = String((req as any)?.relatedDocument?.poNumber || '')
           .trim()
@@ -973,19 +609,26 @@ export function ApprovalCenter() {
           .toUpperCase();
         if (idPoNo.startsWith('CG-')) poNos.add(idPoNo);
 
-        purchaseOrders.forEach((po) => {
+        return purchaseOrders
+          .filter((po) => {
           const poNo = String(po.poNumber || '').trim().toUpperCase();
           const parentNo = String((po as any).parentRequestPoNumber || '').trim().toUpperCase();
           const matched = poNos.has(poNo) || (parentNo && poNos.has(parentNo));
-          if (!matched) return;
+          return matched;
+        })
+          .map((po) => {
           const currentReqStatus = String((po as any).procurementRequestStatus || '');
-          if (currentReqStatus === 'pushed_supplier') return;
-          updatePurchaseOrder(po.id, {
+          if (currentReqStatus === 'pushed_supplier') return Promise.resolve();
+          return updatePurchaseOrder(po.id, {
             procurementRequestStatus: 'draft_allocated',
             updatedDate: new Date().toISOString(),
           } as any);
         });
-      });
+      }));
+    } catch (error: any) {
+      toast.error(`回滚采购请求状态失败：${error?.message || '未知错误'}`);
+      return;
+    }
 
     const markers = selectedRows.flatMap((req) => getApprovalMarkers(req));
     addTombstones('document', markers, {
@@ -1325,7 +968,7 @@ export function ApprovalCenter() {
       {/* 🔍 审批详情对话框 */}
       {selectedRequest && (
         <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
-          <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden p-0 gap-0">
+          <DialogContent className="w-[calc(210mm+56px)] max-w-[calc(100vw-2rem)] max-h-[95vh] overflow-hidden border-none bg-[#525659] p-0 gap-0 shadow-2xl">
             <DialogHeader className="px-6 py-4 border-b border-gray-200 bg-gray-50">
               <DialogTitle className="text-lg">
                 审批详情 - {selectedRequest.relatedDocumentId}
@@ -1362,9 +1005,19 @@ export function ApprovalCenter() {
                             );
                           }
 
+                          const templateSnapshot = (primaryPO as any).templateSnapshot || (primaryPO as any).template_snapshot || null;
+                          const templateVersion = templateSnapshot?.version || null;
+                          const poData = ((primaryPO as any).documentDataSnapshot || (primaryPO as any).document_data_snapshot) as any;
+                          if (!templateVersion || !poData) {
+                            return (
+                              <div className="bg-red-50 rounded-lg shadow-sm border border-red-200 p-6 text-sm text-red-700">
+                                该 CG 未绑定模板中心版本快照，无法渲染采购合同模板。
+                              </div>
+                            );
+                          }
                           return (
                             <div className="bg-white rounded-lg shadow-sm">
-                              <PurchaseOrderDocument data={convertToPOData(primaryPO as any)} />
+                              <PurchaseOrderDocument data={poData} layoutConfig={templateVersion?.layout_json || undefined} />
                             </div>
                           );
                         })()
@@ -1413,7 +1066,7 @@ export function ApprovalCenter() {
                               // 产品明细
                               products: (selectedRequest.relatedDocument.products || []).map((item: any, index: number) => ({
                                 no: index + 1,
-                                modelNo: item.modelNo || '',
+                                modelNo: getFormalBusinessModelNo(item),
                                 imageUrl: item.imageUrl || '',
                                 description: item.productName || '',
                                 specification: item.specification || '',
@@ -1455,7 +1108,7 @@ export function ApprovalCenter() {
                             }}
                           />
                         </div>
-                      ) : selectedRequest.type === 'quotation' ? (
+                      ) : selectedRequest.type === 'qt' ? (
                         // 🔥 销售报价单：使用QuotationDocument组件（和业务员看到的完全一样）
                         <div className="bg-white rounded-lg shadow-sm">
                           <QuotationDocument 
@@ -1502,7 +1155,7 @@ export function ApprovalCenter() {
                                 
                                 return {
                                   no: index + 1,
-                                  modelNo: item.modelNo || '',
+                                  modelNo: getFormalBusinessModelNo(item),
                                   imageUrl: item.imageUrl || '',
                                   productName: item.productName || '',
                                   specification: item.specification || '',
@@ -1546,7 +1199,7 @@ export function ApprovalCenter() {
                         </div>
                       ) : (
                         // 客户询价单：使用CustomerInquiryView组件
-                        <CustomerInquiryView inquiry={selectedRequest.relatedDocument} />
+                        <CustomerInquiryView inquiry={selectedRequest.relatedDocument} audience="internal" />
                       )}
                     </>
                   )}

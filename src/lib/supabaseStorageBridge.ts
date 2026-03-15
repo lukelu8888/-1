@@ -3,13 +3,8 @@ import { supabase } from './supabase';
 const STORAGE_TABLE = 'client_kv_store';
 const AUTH_STORAGE_KEY = 'cosun_supabase_auth';
 const BUSINESS_STORAGE_KEY_PATTERNS = [
-  /^salesQuotations$/i,
-  /^sales_quotation_management_cache_v1:/i,
-  /^sales_quotation_draft_overrides$/i,
-  /^customer_quotations_bridge$/i,
-  /^customer_decline_bridge$/i,
-  /^approval_center_pending_bridge_v1$/i,
   /^salesContracts$/i,
+  /^customerProductLibrary$/i,
 ];
 
 type NativeStorage = {
@@ -30,6 +25,8 @@ let currentScopeId: string | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
 let hasBackfilledCurrentScope = false;
+let bridgeReady = false;
+const BRIDGE_INIT_TIMEOUT_MS = 5000;
 
 function isAuthStorageKey(key: string) {
   return key === AUTH_STORAGE_KEY;
@@ -70,15 +67,33 @@ async function loadScopeCache(scopeId: string) {
 
   if (error) {
     console.warn('[SupabaseStorageBridge] loadScopeCache failed:', error.message || error);
-    return;
+    return null;
   }
 
-  cache.clear();
+  const nextCache = new Map<string, string>();
   for (const row of data || []) {
     if (row?.k && typeof row.v === 'string') {
-      cache.set(row.k, row.v);
+      nextCache.set(row.k, row.v);
     }
   }
+  return nextCache;
+}
+
+function emitBridgeSync(scopeId: string | null) {
+  bridgeReady = true;
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('supabase-storage-bridge-synced', {
+      detail: {
+        scopeId,
+        occurredAt: new Date().toISOString(),
+      },
+    }),
+  );
+}
+
+export function isSupabaseStorageBridgeReady() {
+  return bridgeReady;
 }
 
 async function flushNow() {
@@ -129,10 +144,19 @@ async function switchScope(scopeId: string | null) {
 
   if (!scopeId) {
     cache.clear();
+    emitBridgeSync(null);
     return;
   }
-  await loadScopeCache(scopeId);
+
+  const remoteCache = await loadScopeCache(scopeId);
+  if (remoteCache) {
+    cache.clear();
+    for (const [key, value] of remoteCache.entries()) {
+      cache.set(key, value);
+    }
+  }
   backfillNativeStorageForCurrentScope();
+  emitBridgeSync(scopeId);
 }
 
 function backfillNativeStorageForCurrentScope() {
@@ -142,7 +166,7 @@ function backfillNativeStorageForCurrentScope() {
   const length = nativeStorage.length;
   for (let i = 0; i < length; i += 1) {
     const key = nativeStorage.key(i);
-    if (!key || isAuthStorageKey(key)) continue;
+    if (!key || isAuthStorageKey(key) || !isBusinessStorageKey(key)) continue;
     const value = nativeStorage.getItem(key);
     if (typeof value !== 'string') continue;
     // 仅在当前 scope 缺失时才从浏览器本地回填，避免覆盖 Supabase 最新值
@@ -173,7 +197,7 @@ function migrateNativeDataToCache() {
   const length = window.localStorage.length;
   for (let i = 0; i < length; i += 1) {
     const key = nativeStorage.key(i);
-    if (!key || isAuthStorageKey(key)) continue;
+    if (!key || isAuthStorageKey(key) || !isBusinessStorageKey(key)) continue;
     const value = nativeStorage.getItem(key);
     if (typeof value === 'string') {
       cache.set(key, value);
@@ -186,13 +210,15 @@ function patchStoragePrototype() {
 
   const bridgeGetItem = function (key: string): string | null {
     if (!nativeStorage) return null;
-    if (isAuthStorageKey(key)) return nativeStorage.getItem(key);
+    if (isAuthStorageKey(key) || !isBusinessStorageKey(key)) {
+      return nativeStorage.getItem(key);
+    }
     return cache.has(key) ? cache.get(key)! : null;
   };
 
   const bridgeSetItem = function (key: string, value: string): void {
     if (!nativeStorage) return;
-    if (isAuthStorageKey(key)) {
+    if (isAuthStorageKey(key) || !isBusinessStorageKey(key)) {
       nativeStorage.setItem(key, value);
       return;
     }
@@ -205,7 +231,7 @@ function patchStoragePrototype() {
 
   const bridgeRemoveItem = function (key: string): void {
     if (!nativeStorage) return;
-    if (isAuthStorageKey(key)) {
+    if (isAuthStorageKey(key) || !isBusinessStorageKey(key)) {
       nativeStorage.removeItem(key);
       return;
     }
@@ -218,14 +244,13 @@ function patchStoragePrototype() {
 
   const bridgeClear = function (): void {
     if (!nativeStorage) return;
+    nativeStorage.clear();
     cache.clear();
     pendingUpserts.clear();
-    // 标记当前 scope 下全部 key 删除
+    pendingDeletes.clear();
     if (currentScopeId) {
       void supabase.from(STORAGE_TABLE).delete().eq('scope_id', currentScopeId);
     }
-    // 与浏览器原生语义保持一致：clear 也清 auth key
-    nativeStorage.clear();
   };
 
   Object.defineProperty(proto, 'getItem', { value: bridgeGetItem, configurable: true });
@@ -242,7 +267,15 @@ export async function initializeSupabaseStorageBridge() {
   migrateNativeDataToCache();
   patchStoragePrototype();
 
-  await switchScope(await resolveScopeId());
+  const initTask = (async () => {
+    await switchScope(await resolveScopeId());
+  })();
+  await Promise.race([
+    initTask,
+    new Promise<void>((_, reject) => {
+      window.setTimeout(() => reject(new Error('Supabase storage bridge init timed out')), BRIDGE_INIT_TIMEOUT_MS);
+    }),
+  ]);
   scheduleFlush();
 
   supabase.auth.onAuthStateChange(async (_event, session) => {

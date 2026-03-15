@@ -147,8 +147,8 @@ export function FormEditorDialog({ formData: initialData, onClose, onSave, onPre
                   value={formData.type}
                   onChange={(e) => updateBasicInfo('type', e.target.value)}
                 >
-                  <option value="inquiry">询价类</option>
-                  <option value="quotation">报价类</option>
+                  <option value="ing">询价类</option>
+                  <option value="qt">报价类</option>
                   <option value="contract">合同类</option>
                   <option value="invoice">发票类</option>
                   <option value="shipping">物流类</option>

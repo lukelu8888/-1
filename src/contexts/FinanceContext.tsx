@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { arService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
+import { getStoredPortalRole, isStoredStaffPortalRole } from '../utils/dataIsolation';
 
 // 应收账款类型
 export interface AccountReceivable {
@@ -89,7 +90,18 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const rows = await arService.getAll();
+      let isStaff = isStoredStaffPortalRole();
+      if (!isStaff && getStoredPortalRole() === null) {
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('portal_role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+        isStaff = profile?.portal_role === 'admin' || profile?.portal_role === 'staff';
+      }
+      const rows = isStaff
+        ? await arService.getAll()
+        : await arService.getByEmail(session.user.email || '');
       if (!alive || !Array.isArray(rows)) return;
       setAccountsReceivable(rows.filter(Boolean) as AccountReceivable[]);
     };

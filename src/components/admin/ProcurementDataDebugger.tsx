@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '../ui/button';
-import { usePurchaseRequirements } from '../../contexts/PurchaseRequirementContext';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { toast } from 'sonner';
 
 /**
@@ -8,7 +8,7 @@ import { toast } from 'sonner';
  * 用于检查和修复采购需求数据
  */
 export function ProcurementDataDebugger() {
-  const { requirements } = usePurchaseRequirements();
+  const { requirements } = useQuoteRequirements();
 
   const diagnoseData = () => {
     console.log('🔍 ========== 采购数据诊断开始 ==========');

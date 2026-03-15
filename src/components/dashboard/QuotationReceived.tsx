@@ -42,54 +42,6 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
     setSelectedIds([]);
   }, [user?.email]);
 
-  const readCustomerBridge = (email: string): any[] => {
-    try {
-      const raw = localStorage.getItem('customer_quotations_bridge');
-      if (!raw) return [];
-      const all: any[] = JSON.parse(raw);
-      return all.filter((q: any) =>
-        String(q.customerEmail || '').toLowerCase() === email.toLowerCase()
-      );
-    } catch { return []; }
-  };
-
-  const mergeWithBridge = (apiList: any[], email: string): any[] => {
-    const bridge = readCustomerBridge(email);
-    if (bridge.length === 0) return apiList;
-
-    const bridgeMap = new Map<string, any>();
-    bridge.forEach((b: any) => {
-      if (b.qtNumber) bridgeMap.set(String(b.qtNumber), b);
-      if (b.id) bridgeMap.set(String(b.id), b);
-    });
-
-    const patched = apiList.map((q: any) => {
-      const bridgeEntry = bridgeMap.get(String(q.qtNumber)) || bridgeMap.get(String(q.id));
-      if (!bridgeEntry) return q;
-
-      // 客户已确认（accepted）时不降级，完全以 API 为准
-      if (q.customerStatus === 'accepted') return q;
-
-      // bridge 里是 sent（业务员刚发 / 重发），无论 API 是 not_sent 还是 rejected，都用 bridge 覆盖
-      // 因为 bridge 代表业务员最新的发送操作，比 DB 里的旧 rejected 状态更新
-      if (bridgeEntry.customerStatus === 'sent') {
-        return { ...q, ...bridgeEntry };
-      }
-
-      // 其他情况：API 是 not_sent 时，用 bridge 覆盖
-      if (q.customerStatus === 'not_sent' && bridgeEntry.customerStatus !== 'not_sent') {
-        return { ...q, ...bridgeEntry };
-      }
-
-      return q;
-    });
-
-    // 把 bridge 里 API 没有的条目也加进来
-    const patchedIds = new Set(patched.map((q: any) => String(q.qtNumber || q.id)));
-    const extra = bridge.filter((b: any) => !patchedIds.has(String(b.qtNumber || b.id)));
-    return [...patched, ...extra];
-  };
-
   // 🔥 从服务器加载“客户收到的报价”（接口：GET /api/sales-quotations，customer 角色会自动按 customer_email 过滤）
   useEffect(() => {
     if (!user?.email) return;
@@ -103,14 +55,13 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
         const rows = await salesQuotationService.getByCustomerEmail(user.email!);
         if (!alive) return;
         const apiList = Array.isArray(rows) ? rows : [];
-        setServerQuotations(mergeWithBridge(apiList, user.email!));
+        setServerQuotations(apiList);
         setLastFetchedAt(new Date().toISOString());
       } catch (e: any) {
         console.error('❌ [QuotationReceived] 加载 /api/sales-quotations 失败:', e);
         if (!alive) return;
-        const bridgeOnly = readCustomerBridge(user.email!);
-        setServerQuotations(bridgeOnly);
-        setLastError(bridgeOnly.length > 0 ? null : (e?.message || 'Request failed'));
+        setServerQuotations([]);
+        setLastError(e?.message || 'Request failed');
         setLastFetchedAt(new Date().toISOString());
       } finally {
         if (!alive) return;
@@ -126,7 +77,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
 
   useEffect(() => {
     const unsubscribe = subscribeErpEvent((event) => {
-      if (event.domain !== 'quotation') return;
+      if (event.domain !== 'qt') return;
       if (
         event.key === ERP_EVENT_KEYS.QUOTATION_CREATED ||
         event.key === ERP_EVENT_KEYS.QUOTATION_SENT ||
@@ -572,7 +523,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                   const canDelete = isQuotationDeletable(quotation);
                   const quotationNo = String(quotation.qtNumber || quotation.quotationNumber || quotation.id || '');
                   const numberDisplay = resolveDisplayNumber({
-                    domain: 'quotation',
+                    domain: 'qt',
                     internalNo: quotationNo,
                     companyId: (user as any)?.companyId ? String((user as any).companyId) : undefined,
                   });

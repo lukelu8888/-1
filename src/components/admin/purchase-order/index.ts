@@ -25,7 +25,7 @@ export { ProcurementRequestsTab } from './ProcurementRequestsTab';
 export { SupplierAllocationDialog } from './SupplierAllocationDialog';
 export { PurchaseOrderDetailDialog } from './PurchaseOrderDetailDialog';
 export { PurchaseOrderPreviewDialog } from './PurchaseOrderPreviewDialog';
-export { PurchaseRequirementPreviewDialog } from './PurchaseRequirementPreviewDialog';
+export { QuoteRequirementPreviewDialog } from './QuoteRequirementPreviewDialog';
 export {
   CURRENCY_OPTIONS,
   EXTRA_TERM_OPTIONS,

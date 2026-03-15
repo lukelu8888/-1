@@ -88,21 +88,21 @@ const mockOrders = [
     estimatedArrival: '2025-03-25',
     phases: [
       {
-        id: 'inquiry',
+        id: 'ing',
         name: 'Inquiry',
         icon: MessageSquare,
         color: 'purple',
         status: 'completed',
         stages: [
           {
-            id: 'inquiry_submitted',
+            id: 'ing_submitted',
             name: 'Customer Inquiry',
             date: '2024-12-20',
             time: '14:30',
             status: 'completed',
             icon: MessageSquare,
             details: {
-              'Inquiry No': 'INQ-2024-1220-045',
+              'ING No': 'ING-2024-1220-045',
               'Contact Person': 'John Smith',
               'Products': '3 items'
             },
@@ -112,7 +112,7 @@ const mockOrders = [
             isImportant: false
           },
           {
-            id: 'quotation_sent',
+            id: 'qt_sent',
             name: 'Quotation Received',
             date: '2024-12-22',
             time: '10:15',
@@ -1017,14 +1017,14 @@ const mockOrders = [
     estimatedArrival: '2025-04-10',
     phases: [
       {
-        id: 'inquiry',
+        id: 'ing',
         name: 'Inquiry',
         icon: MessageSquare,
         color: 'purple',
         status: 'completed',
         stages: [
           {
-            id: 'inquiry_submitted',
+            id: 'ing_submitted',
             name: 'Customer Inquiry',
             date: '2025-01-05',
             time: '10:15',
@@ -1033,7 +1033,7 @@ const mockOrders = [
             isImportant: false
           },
           {
-            id: 'quotation_sent',
+            id: 'qt_sent',
             name: 'Quotation Received',
             date: '2025-01-07',
             time: '14:30',
@@ -1217,13 +1217,13 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
   }, [allOrders, user?.email]);
 
   const visibleInquiries = useMemo(() => {
-    return filterNotDeleted('inquiry', inquiries, (inquiry: any) => {
-      return [inquiry?.id, inquiry?.inquiryNumber];
+    return filterNotDeleted('ing', inquiries, (inquiry: any) => {
+      return [inquiry?.id];
     });
   }, [inquiries]);
 
   const visibleCustomerQuotations = useMemo(() => {
-    return filterNotDeleted('quotation', customerQuotations, (quotation: any) => {
+    return filterNotDeleted('qt', customerQuotations, (quotation: any) => {
       return [quotation?.id, quotation?.qtNumber, quotation?.quotationNumber];
     });
   }, [customerQuotations]);
@@ -2176,7 +2176,7 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
             <DialogDescription>View inquiry details</DialogDescription>
           </DialogHeader>
           <InquiryForm 
-            inquiryNumber="INQ-2024-1220-045"
+            inquiryNumber="ING-2024-1220-045"
             onClose={() => setShowInquiryForm(false)}
           />
         </DialogContent>
@@ -2191,7 +2191,7 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
           </DialogHeader>
           <QuotationForm 
             quotationNumber="QT-2025-001234"
-            inquiryNumber="INQ-2024-1220-045"
+            inquiryNumber="ING-2024-1220-045"
             onClose={() => setShowQuotationForm(false)}
           />
         </DialogContent>

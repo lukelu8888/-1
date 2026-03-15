@@ -82,6 +82,17 @@ export interface SupplierQuotationData {
     remarkDate?: string;             // 备注日期
     remarkBy?: string;               // 备注人
   };
+  projectExecutionBaseline?: {
+    projectId?: string | null;
+    projectCode?: string | null;
+    projectName?: string | null;
+    projectRevisionId?: string | null;
+    projectRevisionCode?: string | null;
+    projectRevisionStatus?: string | null;
+    finalRevisionId?: string | null;
+    finalQuotationId?: string | null;
+    finalQuotationNumber?: string | null;
+  };
 }
 
 interface SupplierQuotationDocumentProps {
@@ -231,9 +242,26 @@ export const SupplierQuotationDocument = forwardRef<HTMLDivElement, SupplierQuot
                 </div>
               </div>
               
-              {/* 分隔线 - 双线设计 */}
-              <div className="border-t-2 border-b border-gray-400" style={{ borderTopColor: '#000000', borderTopWidth: '3px' }}></div>
-            </div>
+      {/* 分隔线 - 双线设计 */}
+      <div className="border-t-2 border-b border-gray-400" style={{ borderTopColor: '#000000', borderTopWidth: '3px' }}></div>
+    </div>
+
+            {data.projectExecutionBaseline && (data.projectExecutionBaseline.projectCode || data.projectExecutionBaseline.projectName || data.projectExecutionBaseline.projectRevisionCode) && (
+              <div className="mb-3 border border-purple-200 bg-purple-50 px-3 py-2 rounded">
+                <div className="text-xs font-semibold text-purple-700 mb-1">执行基线 / Execution Baseline</div>
+                <div className="text-xs text-gray-700">
+                  <span className="font-medium">{data.projectExecutionBaseline.projectCode || data.projectExecutionBaseline.projectName || '项目'}</span>
+                  <span className="mx-1">/</span>
+                  <span className="font-medium">{data.projectExecutionBaseline.projectRevisionCode || 'Rev'}</span>
+                  {data.projectExecutionBaseline.finalQuotationNumber && (
+                    <>
+                      <span className="mx-1">/</span>
+                      <span className="font-medium">{data.projectExecutionBaseline.finalQuotationNumber}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 报价方和询价方信息 - 台湾大厂表格风格 */}
             <div className="mb-3">
