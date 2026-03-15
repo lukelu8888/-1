@@ -1,31 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Menu, Search, ShoppingCart, User, X, ChevronDown, LogOut, LayoutDashboard, Shield, Radio } from 'lucide-react';
+import { Menu, Search, X, ChevronDown, Shield, Radio } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Checkbox } from './ui/checkbox';
-import { ImageWithFallback } from './figma/ImageWithFallback';
 import { useRouter } from '../contexts/RouterContext';
 import { useCart } from '../contexts/CartContext';
 import { useRegion } from '../contexts/RegionContext';
 import { useOptionalUser } from '../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
-import { CustomerNotificationCenter } from './CustomerNotificationCenter';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from './ui/alert-dialog';
 import {
   Sheet,
   SheetContent,
@@ -33,13 +14,19 @@ import {
   SheetTitle,
   SheetDescription,
 } from './ui/sheet';
-import logoImg from 'figma:asset/9a3a6ac3157cb3341dbd6e007c72e203e4dda5ea.png';
 import { productDetailsData, ProductDetail } from '../data/productDetailsData';
 import { ProductDetailDialog } from './ProductDetailDialog';
 import { RegionSwitcher } from './RegionSwitcher';
 import { RegionBadge } from './RegionBadge';
 import { productRecommendationsMap, defaultProducts } from '../data/header/recommendedProductsData';
 import { departments } from '../data/header/departmentsData';
+import { HeaderLogo } from './header/HeaderLogo';
+import { UserMenu } from './header/UserMenu';
+import { CartButton } from './header/CartButton';
+import { MobileNavigation } from './header/MobileNavigation';
+import { QuantityAlertDialog } from './header/QuantityAlertDialog';
+import { DepartmentMegaMenu } from './header/DepartmentMegaMenu';
+import { ProductPanel } from './header/ProductPanel';
 
 export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -649,14 +636,7 @@ export function Header() {
             {/* Left Side - Logo and Search Area */}
             <div className="flex items-start gap-2 flex-1">
               {/* Logo */}
-              <button onClick={() => navigateTo('home')} className="flex-shrink-0">
-                <img 
-                  src={logoImg}
-                  alt="COSUN Logo"
-                  className="w-auto"
-                  style={{ height: '70.4px' }}
-                />
-              </button>
+              <HeaderLogo onNavigateHome={() => navigateTo('home')} />
 
               {/* Right Side - Text and Search */}
               <div className="hidden md:flex flex-col gap-2 flex-1 max-w-3xl">
@@ -740,71 +720,18 @@ export function Header() {
 
               {/* Bottom Row - Login/User and Cart */}
               <div className="flex items-center justify-end gap-2">
-                {/* User Menu or Login Button */}
-                {user ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        className="flex items-center gap-2"
-                      >
-                        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                          <User className="h-5 w-5 text-white" />
-                        </div>
-                        <div className="hidden xl:flex flex-col items-start">
-                          <span className="text-xs text-gray-500">Welcome</span>
-                          <span className="text-sm font-medium">{user.email.split('@')[0]}</span>
-                        </div>
-                        <ChevronDown className="h-4 w-4 hidden xl:block" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <div className="px-2 py-2 border-b">
-                        <p className="text-sm font-medium">{user.email}</p>
-                        <p className="text-xs text-gray-500">Customer Account</p>
-                      </div>
-                      <DropdownMenuItem onClick={() => navigateTo('dashboard')}>
-                        <LayoutDashboard className="mr-2 h-4 w-4" />
-                        <span>My Dashboard</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={async () => {
-                        await logout();
-                        navigateTo('home');
-                        toast.success('Logged out successfully');
-                      }}>
-                        <LogOut className="mr-2 h-4 w-4" />
-                        <span>Logout</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : (
-                  <Button 
-                    onClick={() => navigateTo('login')} 
-                    variant="ghost" 
-                    className="flex items-center gap-1"
-                  >
-                    <User className="h-5 w-5" />
-                    <span className="hidden xl:inline">Login</span>
-                  </Button>
-                )}
-
-                {/* 🔔 Notification Center - Only show when logged in */}
-                {user && <CustomerNotificationCenter />}
+                {/* User Menu or Login Button + Notification Center */}
+                <UserMenu
+                  user={user}
+                  logout={logout}
+                  onNavigateTo={(page) => navigateTo(page)}
+                />
 
                 {/* Cart Button */}
-                <Button 
-                  variant="ghost" 
-                  className="relative"
-                  onClick={() => navigateTo('cart')}
-                >
-                  <ShoppingCart className="h-5 w-5" />
-                  {getTotalItems() > 0 && (
-                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-xs text-white">
-                      {getTotalItems()}
-                    </span>
-                  )}
-                  <span className="hidden xl:inline ml-2">Cart</span>
-                </Button>
+                <CartButton
+                  totalItems={getTotalItems()}
+                  onNavigateToCart={() => navigateTo('cart')}
+                />
               </div>
             </div>
 
@@ -842,882 +769,108 @@ export function Header() {
       <div className="border-t bg-white">
         <div className="mx-auto max-w-7xl px-4">
           <nav className="hidden lg:flex items-center gap-1 py-3">
-            {/* Shop by Department with Dropdown */}
-            <DropdownMenu open={isDepartmentOpen} onOpenChange={(open) => {
-              if (open && !region) {
-                setShowRegionSelector(true);
-                return;
+            {/* Shop by Department — managed by DepartmentMegaMenu */}
+            <DepartmentMegaMenu
+              isDepartmentOpen={isDepartmentOpen}
+              currentPage={currentPage}
+              hoveredDept={hoveredDept}
+              hoveredSubcat={hoveredSubcat}
+              hoveredProduct={hoveredProduct}
+              showQuantityAlert={showQuantityAlert}
+              departments={departments}
+              onOpenChange={(open) => {
+                if (open && !region) {
+                  setShowRegionSelector(true);
+                  return;
+                }
+                setIsDepartmentOpen(open);
+              }}
+              onHoverDept={(index) => {
+                setHoveredDept(index);
+                setHoveredSubcat(null);
+              }}
+              onHoverSubcat={(name) => setHoveredSubcat(name)}
+              onHoverProduct={(name) => {
+                setHoveredProduct(name);
+                setOrderQuantity(1);
+                setSelectedColors([]);
+                setColorQuantities({});
+                setSuggestedQuantities([]);
+              }}
+              onNavigateToDept={(categoryName) => {
+                const categorySlug = categoryName
+                  .toLowerCase()
+                  .replace(/&/g, 'and')
+                  .replace(/[^a-z0-9]+/g, '-')
+                  .replace(/^-+|-+$/g, '');
+                setHoveredDept(null);
+                setHoveredSubcat(null);
+                setIsDepartmentOpen(false);
+                setTimeout(() => navigateTo(`category-${categorySlug}`, { category: categoryName }), 0);
+              }}
+              onNavigateToDeptSubcat={(categoryName, subcategoryName) => {
+                const categorySlug = categoryName
+                  .toLowerCase()
+                  .replace(/&/g, 'and')
+                  .replace(/[^a-z0-9]+/g, '-')
+                  .replace(/^-+|-+$/g, '');
+                setHoveredDept(null);
+                setHoveredSubcat(null);
+                setIsDepartmentOpen(false);
+                setTimeout(() => navigateTo(`category-${categorySlug}`, { category: categoryName, subcategory: subcategoryName }), 0);
+              }}
+              onNavigateToCatalog={() => {
+                navigateTo('catalog');
+                setIsDepartmentOpen(false);
+              }}
+              onNavigateToSpecials={() => {
+                setIsDepartmentOpen(false);
+                setHoveredDept(null);
+                setHoveredSubcat(null);
+                navigateTo('specials');
+              }}
+              onCloseMenu={() => setIsDepartmentOpen(false)}
+              onProductItemClick={(productName) => {
+                const product = getProductDetails(productName);
+                if (product) {
+                  setSelectedProduct(product);
+                  setShowProductDetail(true);
+                }
+              }}
+              onMouseLeaveProductArea={() => {
+                if (!showQuantityAlert) {
+                  setHoveredProduct(null);
+                  setSelectedColors([]);
+                  setColorQuantities({});
+                  setSuggestedQuantities([]);
+                }
+              }}
+              getRecommendedProducts={getRecommendedProducts}
+              productPanelNode={
+                hoveredProduct && getProductDetails(hoveredProduct) ? (
+                  <ProductPanel
+                    hoveredProduct={hoveredProduct}
+                    orderQuantity={orderQuantity}
+                    selectedColors={selectedColors}
+                    colorQuantities={colorQuantities}
+                    suggestedQuantities={suggestedQuantities}
+                    setOrderQuantity={setOrderQuantity}
+                    setSelectedColors={setSelectedColors}
+                    setColorQuantities={setColorQuantities}
+                    setSuggestedQuantities={setSuggestedQuantities}
+                    setPendingCartItem={setPendingCartItem}
+                    setShowQuantityAlert={setShowQuantityAlert}
+                    setIsDepartmentOpen={setIsDepartmentOpen}
+                    setHoveredDept={setHoveredDept}
+                    setHoveredSubcat={setHoveredSubcat}
+                    setHoveredProduct={setHoveredProduct}
+                    getProductDetails={getProductDetails}
+                    calculateShipping={calculateShipping}
+                    addToCart={addToCart}
+                  />
+                ) : null
               }
-              setIsDepartmentOpen(open);
-            }}>
-              <DropdownMenuTrigger asChild>
-                <button className={`flex items-center gap-1 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  currentPage === 'catalog' || isDepartmentOpen
-                    ? 'bg-red-600 text-white hover:bg-red-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}>
-                  Shop by Department
-                  <ChevronDown className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className={`p-0 max-h-[600px] overflow-hidden transition-all ${
-                hoveredDept === null 
-                  ? 'w-[225px]' 
-                  : hoveredSubcat === null 
-                    ? 'w-[465px]' 
-                    : 'w-[1150px]'
-              }`}>
-                <div className="flex">
-                  {/* Left Column - Featured Events & Departments List */}
-                  <div className="w-[225px] flex-shrink-0 border-r bg-gray-50">
-                    {/* Featured Events */}
-                    <div className="px-4 py-3 border-b border-gray-200 bg-white">
-                      <h3 className="mb-3">Featured Event(s)</h3>
-                      <div className="space-y-2 text-sm">
-                        <a href="#products" className="block text-gray-700 hover:text-orange-600">
-                          Halloween 🎃
-                        </a>
-                        <a href="#products" className="block text-gray-700 hover:text-orange-600">
-                          Refresh for Less
-                        </a>
-                        <a href="#products" className="block text-gray-700 hover:text-orange-600">
-                          DEWALT MAX POWER
-                        </a>
-                      </div>
-                    </div>
-
-                    {/* Shop by Department List */}
-                    <div className="px-4 py-3 overflow-y-auto" style={{ maxHeight: 'calc(600px - 140px)' }}>
-                      <h3 className="mb-3">Shop by Department</h3>
-                      <div className="space-y-0">
-                        {departments.map((dept, index) => (
-                          <div
-                            key={index}
-                            onMouseEnter={() => {
-                              if (!showQuantityAlert) {
-                                setHoveredDept(index);
-                                setHoveredSubcat(null); // 清除hoveredSubcat，让三级类目消失
-                              }
-                            }}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              // 保存需要的数据
-                              const categoryName = dept.name;
-                              const categorySlug = categoryName
-                                .toLowerCase()
-                                .replace(/&/g, 'and')
-                                .replace(/[^a-z0-9]+/g, '-')
-                                .replace(/^-+|-+$/g, '');
-                              // 先关闭所有菜单状态
-                              setHoveredDept(null);
-                              setHoveredSubcat(null);
-                              setIsDepartmentOpen(false);
-                              // 使用setTimeout确保状态更新后再导航
-                              setTimeout(() => {
-                                navigateTo(`category-${categorySlug}`, { category: categoryName });
-                              }, 0);
-                            }}
-                            className={`flex items-center justify-between py-2.5 text-sm transition-colors group cursor-pointer ${
-                              hoveredDept === index ? 'text-orange-600' : 'text-gray-700 hover:text-orange-600'
-                            }`}
-                          >
-                            <span>{dept.name}</span>
-                            <ChevronDown className={`h-4 w-4 -rotate-90 transition-colors ${
-                              hoveredDept === index ? 'text-orange-600' : 'text-gray-400 group-hover:text-orange-600'
-                            }`} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* All Departments & Close */}
-                    <div className="px-4 py-3 border-t border-gray-200 bg-white">
-                      <button
-                        onClick={() => {
-                          navigateTo('catalog');
-                          setIsDepartmentOpen(false);
-                        }}
-                        className="block w-full py-2 text-sm text-gray-900 hover:text-orange-600 transition-colors text-left"
-                      >
-                        All Departments
-                      </button>
-                      <button
-                        className="flex items-center gap-2 py-2 text-sm text-blue-600 hover:text-blue-700 transition-colors"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setIsDepartmentOpen(false);
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                        Close Menu
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Middle Column - Subcategories */}
-                  {hoveredDept !== null && (
-                    <div 
-                      className="w-[240px] flex-shrink-0 border-r bg-white overflow-y-auto max-h-[600px]"
-                    >
-                      <div className="px-4 py-4">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="underline">{departments[hoveredDept].name}</h3>
-                          <button 
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              // 保存需要的数据
-                              const categoryName = departments[hoveredDept].name;
-                              const categorySlug = categoryName
-                                .toLowerCase()
-                                .replace(/&/g, 'and')
-                                .replace(/[^a-z0-9]+/g, '-')
-                                .replace(/^-+|-+$/g, '');
-                              // 先关闭所有菜单状态
-                              setHoveredDept(null);
-                              setHoveredSubcat(null);
-                              setIsDepartmentOpen(false);
-                              // 使用setTimeout确保状态更新后再导航
-                              setTimeout(() => {
-                                navigateTo(`category-${categorySlug}`, { category: categoryName });
-                              }, 0);
-                            }}
-                            className="text-sm text-blue-600 hover:text-blue-700 cursor-pointer"
-                          >
-                            Shop All
-                          </button>
-                        </div>
-                        
-                        <div className="space-y-0">
-                          {departments[hoveredDept].subcategories.map((subcat, idx) => (
-                            <div
-                              key={idx}
-                              onMouseEnter={() => {
-                                if (!showQuantityAlert) {
-                                  setHoveredSubcat(subcat.name);
-                                }
-                              }}
-                              className={`flex items-center justify-between py-2.5 text-sm cursor-pointer transition-colors group ${
-                                hoveredSubcat === subcat.name ? 'text-orange-600' : 'text-gray-700 hover:text-orange-600'
-                              }`}
-                            >
-                              <span>{subcat.name}</span>
-                              {subcat.items && subcat.items.length > 0 && (
-                                <ChevronDown className={`h-4 w-4 -rotate-90 transition-colors ${
-                                  hoveredSubcat === subcat.name ? 'text-orange-600' : 'text-gray-400 group-hover:text-orange-600'
-                                }`} />
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Right Column - Products and Recommended Products */}
-                  {hoveredDept !== null && hoveredSubcat && (
-                    <div className="flex flex-1">
-                      {/* Third Level Items */}
-                      <div className="w-[280px] flex-shrink-0 border-r bg-white overflow-y-auto max-h-[600px] relative z-10">
-                        <div className="px-4 py-4">
-                          {(() => {
-                            const subcat = departments[hoveredDept].subcategories.find(s => s.name === hoveredSubcat);
-                            if (!subcat) return null;
-                            return (
-                              <>
-                                <div className="flex items-center justify-between mb-4">
-                                  <h3 className="underline">{subcat.name}</h3>
-                                  <button 
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      // 保存需要的数据
-                                      const categoryName = departments[hoveredDept].name;
-                                      const subcategoryName = subcat.name;
-                                      const categorySlug = categoryName
-                                        .toLowerCase()
-                                        .replace(/&/g, 'and')
-                                        .replace(/[^a-z0-9]+/g, '-')
-                                        .replace(/^-+|-+$/g, '');
-                                      // 先关闭所有菜单状态
-                                      setHoveredDept(null);
-                                      setHoveredSubcat(null);
-                                      setIsDepartmentOpen(false);
-                                      // 使用setTimeout确保状态更新后再导航
-                                      setTimeout(() => {
-                                        navigateTo(`category-${categorySlug}`, { 
-                                          category: categoryName,
-                                          subcategory: subcategoryName 
-                                        });
-                                      }, 0);
-                                    }}
-                                    className="text-sm text-blue-600 hover:text-blue-700 cursor-pointer"
-                                  >
-                                    Shop All
-                                  </button>
-                                </div>
-                                <div className="space-y-2">
-                                  {subcat.items && subcat.items.map((item, idx) => (
-                                    <div
-                                      key={idx}
-                                      className={`block text-sm py-1 cursor-pointer transition-colors ${
-                                        hoveredProduct === item ? 'text-orange-600' : 'text-gray-700 hover:text-orange-600'
-                                      }`}
-                                      onMouseEnter={() => {
-                                        if (!showQuantityAlert) {
-                                          setHoveredProduct(item);
-                                          setOrderQuantity(1);
-                                          setSelectedColors([]);
-                                          setColorQuantities({});
-                                          setSuggestedQuantities([]);
-                                        }
-                                      }}
-                                      onMouseLeave={() => {
-                                        // Don't clear if user is interacting with product details
-                                      }}
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        const product = getProductDetails(item);
-                                        if (product) {
-                                          setSelectedProduct(product);
-                                          setShowProductDetail(true);
-                                        }
-                                      }}
-                                    >
-                                      {item}
-                                    </div>
-                                  ))}
-                                </div>
-                                <button className="flex items-center gap-1 mt-4 text-sm text-blue-600 hover:text-blue-700">
-                                  <ChevronDown className="h-4 w-4 rotate-90" />
-                                  <span>Back</span>
-                                </button>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </div>
-
-                      {/* Far Right Column - Product Details or Recommended Products */}
-                      <div 
-                        className="w-[390px] flex-shrink-0 bg-white overflow-y-auto max-h-[600px] relative z-0"
-                        onMouseLeave={() => {
-                          if (!showQuantityAlert) {
-                            setHoveredProduct(null);
-                            setSelectedColors([]);
-                            setColorQuantities({});
-                            setSuggestedQuantities([]);
-                          }
-                        }}
-                      >
-                        <div className="p-4">
-                          {hoveredProduct && getProductDetails(hoveredProduct) ? (
-                            // Product Details View
-                            <>
-                              <h3 className="mb-4">Product Details</h3>
-                              {(() => {
-                                const product = getProductDetails(hoveredProduct);
-                                if (!product) return null;
-                                const shipping = calculateShipping(orderQuantity, hoveredProduct);
-                                
-                                return (
-                                  <div className="space-y-4">
-                                    {/* Product Image */}
-                                    <div className="bg-gray-100 rounded-lg overflow-hidden aspect-square">
-                                      <img 
-                                        src={product.image}
-                                        alt={product.name}
-                                        className="w-full h-full object-cover"
-                                      />
-                                    </div>
-
-                                    {/* Product Name */}
-                                    <h4 className="text-sm">{product.name}</h4>
-
-                                    {/* Product Description */}
-                                    <div className="space-y-2 text-xs text-gray-600">
-                                      <div className="flex justify-between">
-                                        <span className="font-medium">Material:</span>
-                                        <span>{product.material}</span>
-                                      </div>
-                                      
-                                      {/* Size */}
-                                      {product.size && (
-                                        <div className="flex justify-between">
-                                          <span className="font-medium">Size:</span>
-                                          <span>{product.size}</span>
-                                        </div>
-                                      )}
-                                      
-                                      {/* Color Options with Checkboxes */}
-                                      {product.colorOptions && product.colorOptions.length > 0 ? (
-                                        <div className="border-t pt-2">
-                                          <span className="font-medium block mb-2">Select Color(s):</span>
-                                          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 max-h-[150px] overflow-y-auto">
-                                            {product.colorOptions.map((colorOption) => (
-                                              <label 
-                                                key={colorOption.name} 
-                                                className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 py-0.5"
-                                              >
-                                                <Checkbox
-                                                  checked={selectedColors.includes(colorOption.name)}
-                                                  onCheckedChange={(checked) => {
-                                                    if (checked) {
-                                                      setSelectedColors([...selectedColors, colorOption.name]);
-                                                      setColorQuantities({...colorQuantities, [colorOption.name]: 1});
-                                                    } else {
-                                                      setSelectedColors(selectedColors.filter(c => c !== colorOption.name));
-                                                      const newQuantities = {...colorQuantities};
-                                                      delete newQuantities[colorOption.name];
-                                                      setColorQuantities(newQuantities);
-                                                    }
-                                                  }}
-                                                  className="h-3.5 w-3.5"
-                                                />
-                                                <span className="flex-1 text-xs">{colorOption.name}</span>
-                                              </label>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <div className="flex justify-between">
-                                          <span className="font-medium">Color:</span>
-                                          <span>{product.color}</span>
-                                        </div>
-                                      )}
-                                      
-                                      <div className="flex justify-between border-t pt-2">
-                                        <span className="font-medium">Specification:</span>
-                                        <span>{product.specification}</span>
-                                      </div>
-                                    </div>
-
-                                    {/* No Color Selected Message */}
-                                    {product.colorOptions && product.colorOptions.length > 0 && selectedColors.length === 0 && (
-                                      <div className="border-t pt-3">
-                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
-                                          ℹ️ Please select at least one color to view pricing and add to cart
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    {/* Selected Colors with Quantities and Subtotals */}
-                                    {selectedColors.length > 0 && product.colorOptions && (
-                                      <div className="border-t pt-3 space-y-3">
-                                        <h5 className="text-xs font-medium text-gray-700">Selected Colors:</h5>
-                                        {selectedColors.map((colorName) => {
-                                          const colorOption = product.colorOptions!.find(c => c.name === colorName);
-                                          if (!colorOption) return null;
-                                          const quantity = colorQuantities[colorName] || 1;
-                                          const subtotal = colorOption.unitPrice * quantity;
-                                          
-                                          return (
-                                            <div key={colorName} className="bg-gray-50 rounded-lg p-2 space-y-2">
-                                              <div className="flex justify-between items-center">
-                                                <span className="text-xs font-medium">{colorName}</span>
-                                                <button
-                                                  onClick={() => {
-                                                    setSelectedColors(selectedColors.filter(c => c !== colorName));
-                                                    const newQuantities = {...colorQuantities};
-                                                    delete newQuantities[colorName];
-                                                    setColorQuantities(newQuantities);
-                                                  }}
-                                                  className="text-red-600 hover:text-red-700 text-xs"
-                                                >
-                                                  Remove
-                                                </button>
-                                              </div>
-                                              
-                                              <div className="flex justify-between text-xs text-gray-600">
-                                                <span>Unit Price:</span>
-                                                <span className="text-orange-600 font-medium">${colorOption.unitPrice.toFixed(2)}</span>
-                                              </div>
-                                              
-                                              <div>
-                                                <label className="text-xs text-gray-600 mb-1 block">Quantity:</label>
-                                                <div className="flex items-center gap-2">
-                                                  <button
-                                                    className="w-6 h-6 border rounded flex items-center justify-center hover:bg-gray-100 text-xs"
-                                                    onClick={() => {
-                                                      const newQty = Math.max(1, quantity - 1);
-                                                      setColorQuantities({...colorQuantities, [colorName]: newQty});
-                                                    }}
-                                                  >
-                                                    -
-                                                  </button>
-                                                  <input
-                                                    type="text"
-                                                    value={quantity === 0 ? '' : quantity}
-                                                    onChange={(e) => {
-                                                      const value = e.target.value;
-                                                      if (value === '') {
-                                                        setColorQuantities({...colorQuantities, [colorName]: 0});
-                                                      } else {
-                                                        const num = parseInt(value);
-                                                        if (!isNaN(num) && num >= 0) {
-                                                          setColorQuantities({...colorQuantities, [colorName]: num});
-                                                        }
-                                                      }
-                                                    }}
-                                                    onBlur={() => {
-                                                      if (quantity === 0) {
-                                                        setColorQuantities({...colorQuantities, [colorName]: 1});
-                                                      }
-                                                    }}
-                                                    className="flex-1 border rounded px-2 py-1 text-center text-xs"
-                                                  />
-                                                  <button
-                                                    className="w-6 h-6 border rounded flex items-center justify-center hover:bg-gray-100 text-xs"
-                                                    onClick={() => {
-                                                      setColorQuantities({...colorQuantities, [colorName]: quantity + 1});
-                                                    }}
-                                                  >
-                                                    +
-                                                  </button>
-                                                </div>
-                                              </div>
-                                              
-                                              <div className="flex justify-between text-xs border-t pt-2">
-                                                <span className="font-medium text-gray-700">Subtotal:</span>
-                                                <span className="font-medium text-blue-600">${subtotal.toFixed(2)}</span>
-                                              </div>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-
-                                    {/* Quantity Selector for Non-Color Products */}
-                                    {!product.colorOptions && (
-                                      <div className="border-t pt-3 space-y-3">
-                                        <div className="flex justify-between text-xs text-gray-600">
-                                          <span className="font-medium">Unit Price:</span>
-                                          <span className="text-orange-600 font-medium">${product.unitPrice.toFixed(2)}</span>
-                                        </div>
-                                        
-                                        <div>
-                                          <label className="text-xs text-gray-600 mb-1 block font-medium">Order Quantity:</label>
-                                          <div className="flex items-center gap-2">
-                                            <button
-                                              className="w-8 h-8 border rounded flex items-center justify-center hover:bg-gray-100 text-sm"
-                                              onClick={() => {
-                                                setOrderQuantity(Math.max(1, orderQuantity - 1));
-                                              }}
-                                            >
-                                              -
-                                            </button>
-                                            <input
-                                              type="text"
-                                              value={orderQuantity === 0 ? '' : orderQuantity}
-                                              onChange={(e) => {
-                                                const value = e.target.value;
-                                                if (value === '') {
-                                                  setOrderQuantity(0);
-                                                } else {
-                                                  const num = parseInt(value);
-                                                  if (!isNaN(num) && num >= 0) {
-                                                    setOrderQuantity(num);
-                                                  }
-                                                }
-                                              }}
-                                              onBlur={() => {
-                                                if (orderQuantity === 0) {
-                                                  setOrderQuantity(1);
-                                                }
-                                              }}
-                                              className="flex-1 border rounded px-3 py-2 text-center text-sm"
-                                            />
-                                            <button
-                                              className="w-8 h-8 border rounded flex items-center justify-center hover:bg-gray-100 text-sm"
-                                              onClick={() => {
-                                                setOrderQuantity(orderQuantity + 1);
-                                              }}
-                                            >
-                                              +
-                                            </button>
-                                          </div>
-                                          <p className="text-xs text-gray-500 mt-2">
-                                            Minimum order: {product.pcsPerCarton} pcs (1 carton)
-                                          </p>
-                                        </div>
-
-                                        {/* Suggested Quantities */}
-                                        {suggestedQuantities.length > 0 && (
-                                          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                                            <h4 className="font-medium text-xs mb-2 flex items-center gap-1">
-                                              <span className="text-yellow-600">💡</span>
-                                              Suggested Quantities:
-                                            </h4>
-                                            <div className="space-y-1.5">
-                                              {suggestedQuantities.map((suggestion, index) => (
-                                                <button
-                                                  key={index}
-                                                  onClick={() => {
-                                                    setOrderQuantity(suggestion.qty);
-                                                  }}
-                                                  className={`w-full bg-white rounded px-3 py-1.5 flex justify-between items-center text-xs transition-all ${
-                                                    orderQuantity === suggestion.qty 
-                                                      ? 'border-2 border-orange-500 bg-orange-50' 
-                                                      : 'border border-gray-200 hover:border-orange-500 hover:bg-orange-50'
-                                                  }`}
-                                                >
-                                                  <span className="font-medium">{suggestion.qty} pcs</span>
-                                                  <span className="text-gray-600">= {suggestion.cartons} carton(s)</span>
-                                                </button>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        )}
-                                        
-                                        <div className="bg-blue-50 rounded-lg p-3">
-                                          <div className="flex justify-between items-center">
-                                            <span className="text-sm font-medium text-gray-700">Total Price:</span>
-                                            <span className="font-medium text-blue-600">
-                                              ${(product.unitPrice * orderQuantity).toFixed(2)}
-                                            </span>
-                                          </div>
-                                        </div>
-
-                                        {/* Shipping Calculations */}
-                                        {orderQuantity > 0 && (
-                                          <div className="bg-gray-50 rounded-lg p-3 border">
-                                            <h4 className="text-xs font-medium text-gray-700 mb-2">Shipping Information:</h4>
-                                            <div className="grid grid-cols-2 gap-2 text-xs">
-                                              <div>
-                                                <p className="text-gray-600">Cartons:</p>
-                                                <p className="font-medium">{Math.ceil(orderQuantity / product.pcsPerCarton)}</p>
-                                              </div>
-                                              <div>
-                                                <p className="text-gray-600">Total CBM:</p>
-                                                <p className="font-medium">{(Math.ceil(orderQuantity / product.pcsPerCarton) * product.cbmPerCarton).toFixed(3)} m³</p>
-                                              </div>
-                                              <div>
-                                                <p className="text-gray-600">Total Gross Wt:</p>
-                                                <p className="font-medium">{(Math.ceil(orderQuantity / product.pcsPerCarton) * product.cartonGrossWeight).toFixed(2)} kg</p>
-                                              </div>
-                                              <div>
-                                                <p className="text-gray-600">Total Net Wt:</p>
-                                                <p className="font-medium">{(Math.ceil(orderQuantity / product.pcsPerCarton) * product.cartonNetWeight).toFixed(2)} kg</p>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-
-                                    {/* Packaging Info */}
-                                    <div className="border-t pt-3 space-y-2 text-xs">
-                                      <div className="flex justify-between text-gray-600">
-                                        <span className="font-medium">Pcs/Carton:</span>
-                                        <span>{product.pcsPerCarton} pcs</span>
-                                      </div>
-                                      <div className="flex justify-between text-gray-600">
-                                        <span className="font-medium">Carton Size:</span>
-                                        <span>{product.cartonSize}</span>
-                                      </div>
-                                      <div className="flex justify-between text-gray-600">
-                                        <span className="font-medium">CBM per Carton:</span>
-                                        <span>{product.cbmPerCarton} m³</span>
-                                      </div>
-                                      <div className="flex justify-between text-gray-600">
-                                        <span className="font-medium">Gross Weight:</span>
-                                        <span>{product.cartonGrossWeight} kg</span>
-                                      </div>
-                                      <div className="flex justify-between text-gray-600">
-                                        <span className="font-medium">Net Weight:</span>
-                                        <span>{product.cartonNetWeight} kg</span>
-                                      </div>
-                                    </div>
-
-                                    {/* Total Price */}
-                                    {selectedColors.length > 0 && (
-                                      <div className="bg-blue-50 rounded-lg p-3 border-t mt-2">
-                                        <div className="flex justify-between items-center">
-                                          <span className="text-sm font-medium text-gray-700">Total Price:</span>
-                                          <span className="font-medium text-blue-600">
-                                            ${(() => {
-                                              return selectedColors.reduce((total, colorName) => {
-                                                const colorOption = product.colorOptions!.find(c => c.name === colorName);
-                                                if (!colorOption) return total;
-                                                const quantity = colorQuantities[colorName] || 1;
-                                                return total + (colorOption.unitPrice * quantity);
-                                              }, 0).toFixed(2);
-                                            })()}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    )}
-
-
-
-                                    {/* Add to Cart Button */}
-                                    <button 
-                                      className={`w-full py-2 rounded-md transition-colors text-sm text-center ${
-                                        (product.colorOptions ? selectedColors.length > 0 : orderQuantity > 0)
-                                          ? 'bg-orange-600 text-white hover:bg-orange-700' 
-                                          : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                      }`}
-                                      disabled={product.colorOptions ? selectedColors.length === 0 : orderQuantity === 0}
-                                      onClick={() => {
-                                        if (product) {
-                                          // Handle products WITH color options
-                                          if (product.colorOptions && selectedColors.length > 0) {
-                                          // Check if any color has non-full carton quantity
-                                          let hasNonFullCarton = false;
-                                          let firstNonFullColor = '';
-                                          let firstNonFullQuantity = 0;
-                                          
-                                          for (const colorName of selectedColors) {
-                                            const quantity = colorQuantities[colorName] || 1;
-                                            if (quantity % product.pcsPerCarton !== 0) {
-                                              hasNonFullCarton = true;
-                                              firstNonFullColor = colorName;
-                                              firstNonFullQuantity = quantity;
-                                              break;
-                                            }
-                                          }
-                                          
-                                          if (hasNonFullCarton) {
-                                            // Show quantity alert for first non-full carton color
-                                            const suggestedLower = Math.floor(firstNonFullQuantity / product.pcsPerCarton) * product.pcsPerCarton;
-                                            const suggestedHigher = Math.ceil(firstNonFullQuantity / product.pcsPerCarton) * product.pcsPerCarton;
-                                            
-                                            setPendingCartItem({
-                                              productName: product.name,
-                                              color: firstNonFullColor,
-                                              quantity: firstNonFullQuantity,
-                                              pcsPerCarton: product.pcsPerCarton,
-                                              suggestedLower: suggestedLower || product.pcsPerCarton,
-                                              suggestedHigher: suggestedHigher,
-                                            });
-                                            setShowQuantityAlert(true);
-                                            return;
-                                          }
-                                          
-                                          // All quantities are full cartons, add to cart
-                                          selectedColors.forEach((colorName) => {
-                                            const colorOption = product.colorOptions!.find(c => c.name === colorName);
-                                            if (!colorOption) return;
-                                            
-                                            const quantity = colorQuantities[colorName] || 1;
-                                            
-                                            addToCart({
-                                              productName: product.name,
-                                              image: product.image,
-                                              material: product.material,
-                                              color: colorName,
-                                              specification: product.specification,
-                                              unitPrice: colorOption.unitPrice,
-                                              quantity: quantity,
-                                              pcsPerCarton: product.pcsPerCarton,
-                                              cartonGrossWeight: product.cartonGrossWeight,
-                                              cartonNetWeight: product.cartonNetWeight,
-                                              cartonSize: product.cartonSize,
-                                              cbmPerCarton: product.cbmPerCarton,
-                                            });
-                                          });
-                                          
-                                          // Reset and close menu
-                                          setSelectedColors([]);
-                                          setColorQuantities({});
-                                          setIsDepartmentOpen(false);
-                                          setHoveredDept(null);
-                                          setHoveredSubcat(null);
-                                          setHoveredProduct(null);
-                                          
-                                          // Show success message
-                                          toast.success('Products added to cart!', {
-                                            description: `${selectedColors.length} color variant(s) added`,
-                                          });
-                                          }
-                                          // Handle products WITHOUT color options
-                                          else if (!product.colorOptions && orderQuantity > 0) {
-                                            // Check if quantity is a full carton
-                                            if (orderQuantity % product.pcsPerCarton !== 0) {
-                                              // Show quantity alert
-                                              const suggestedLower = Math.floor(orderQuantity / product.pcsPerCarton) * product.pcsPerCarton;
-                                              const suggestedHigher = Math.ceil(orderQuantity / product.pcsPerCarton) * product.pcsPerCarton;
-                                              
-                                              setPendingCartItem({
-                                                productName: product.name,
-                                                quantity: orderQuantity,
-                                                pcsPerCarton: product.pcsPerCarton,
-                                                suggestedLower: suggestedLower || product.pcsPerCarton,
-                                                suggestedHigher: suggestedHigher,
-                                              });
-                                              setShowQuantityAlert(true);
-                                              return;
-                                            }
-                                            
-                                            // Quantity is a full carton, add to cart
-                                            addToCart({
-                                              productName: product.name,
-                                              image: product.image,
-                                              material: product.material,
-                                              color: product.color,
-                                              specification: product.specification,
-                                              unitPrice: product.unitPrice,
-                                              quantity: orderQuantity,
-                                              pcsPerCarton: product.pcsPerCarton,
-                                              cartonGrossWeight: product.cartonGrossWeight,
-                                              cartonNetWeight: product.cartonNetWeight,
-                                              cartonSize: product.cartonSize,
-                                              cbmPerCarton: product.cbmPerCarton,
-                                            });
-                                            
-                                            // Reset and close menu
-                                            setOrderQuantity(1);
-                                            setSuggestedQuantities([]);
-                                            setIsDepartmentOpen(false);
-                                            setHoveredDept(null);
-                                            setHoveredSubcat(null);
-                                            setHoveredProduct(null);
-                                            
-                                            // Show success message
-                                            toast.success('Product added to cart!', {
-                                              description: `${orderQuantity} pcs added`,
-                                            });
-                                          }
-                                        }
-                                      }}
-                                    >
-                                      Add to Cart {selectedColors.length > 0 && `(${selectedColors.length} color${selectedColors.length > 1 ? 's' : ''})`}
-                                    </button>
-                                  </div>
-                                );
-                              })()}
-                            </>
-                          ) : (
-                            // Recommended Products View
-                            <>
-                              <h3 className="mb-4">Recommended Products</h3>
-                              
-                              {/* Product Recommendations */}
-                              <div className="space-y-4">
-                            {(() => {
-                              const subcat = departments[hoveredDept].subcategories.find(s => s.name === hoveredSubcat);
-                              const products = subcat ? getRecommendedProducts(subcat.name) : getRecommendedProducts('');
-                              
-                              return products.map((product, idx) => (
-                                <div 
-                                  key={idx} 
-                                  className="group cursor-pointer"
-                                  onClick={() => {
-                                    setIsDepartmentOpen(false);
-                                    setHoveredDept(null);
-                                    setHoveredSubcat(null);
-                                    navigateTo('specials');
-                                  }}
-                                >
-                                  <div className="mb-2 bg-gray-100 rounded-lg overflow-hidden aspect-square relative">
-                                    <img 
-                                      src={product.image}
-                                      alt={product.name}
-                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                    />
-                                    <div className={`absolute top-2 right-2 text-white text-xs px-2 py-1 rounded ${
-                                      product.badge === 'Hot Deal' ? 'bg-red-600' :
-                                      product.badge === 'New' ? 'bg-orange-500' :
-                                      product.badge === 'Premium' ? 'bg-purple-600' :
-                                      product.badge === 'Best Seller' ? 'bg-yellow-600' :
-                                      product.badge === 'Eco-Friendly' ? 'bg-green-600' :
-                                      'bg-blue-600'
-                                    }`}>
-                                      {product.badge}
-                                    </div>
-                                  </div>
-                                  <p className="text-sm mb-1">{product.name}</p>
-                                  <p className="text-xs text-gray-600">Starting from {product.price}</p>
-                                </div>
-                              ));
-                            })()}
-
-                            {/* View All Link */}
-                            <button 
-                              className="w-full py-2 px-4 border border-orange-600 text-orange-600 rounded-md hover:bg-orange-600 hover:text-white transition-colors text-sm"
-                              onClick={() => {
-                                setIsDepartmentOpen(false);
-                                navigateTo('specials');
-                              }}
-                            >
-                              View All Deals →
-                            </button>
-                          </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Right Column - When hovering dept but not subcat */}
-                  {hoveredDept !== null && !hoveredSubcat && (
-                    <>
-                      {/* Recommended Products - Right side when not hovering subcat */}
-                      <div className="w-[300px] bg-white overflow-y-auto max-h-[600px]">
-                        <div className="p-4">
-                          <h3 className="mb-4">Recommended Products</h3>
-                          
-                          {/* Product Recommendations - Using first subcategory's products */}
-                          <div className="space-y-4">
-                            {(() => {
-                              const firstSubcat = departments[hoveredDept].subcategories[0];
-                              const products = getRecommendedProducts(firstSubcat.name);
-                              
-                              return products.map((product, idx) => (
-                                <div 
-                                  key={idx} 
-                                  className="group cursor-pointer"
-                                  onClick={() => {
-                                    setIsDepartmentOpen(false);
-                                    setHoveredDept(null);
-                                    setHoveredSubcat(null);
-                                    navigateTo('specials');
-                                  }}
-                                >
-                                  <div className="mb-2 bg-gray-100 rounded-lg overflow-hidden aspect-square relative">
-                                    <img 
-                                      src={product.image}
-                                      alt={product.name}
-                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                    />
-                                    <div className={`absolute top-2 right-2 text-white text-xs px-2 py-1 rounded ${
-                                      product.badge === 'Hot Deal' ? 'bg-red-600' :
-                                      product.badge === 'New' ? 'bg-orange-500' :
-                                      product.badge === 'Premium' ? 'bg-purple-600' :
-                                      product.badge === 'Best Seller' ? 'bg-yellow-600' :
-                                      product.badge === 'Eco-Friendly' ? 'bg-green-600' :
-                                      'bg-blue-600'
-                                    }`}>
-                                      {product.badge}
-                                    </div>
-                                  </div>
-                                  <p className="text-sm mb-1">{product.name}</p>
-                                  <p className="text-xs text-gray-600">From {product.price}</p>
-                                </div>
-                              ));
-                            })()}
-
-                            {/* View All Link */}
-                            <button 
-                              className="w-full py-2 px-4 border border-orange-600 text-orange-600 rounded-md hover:bg-orange-600 hover:text-white transition-colors text-sm"
-                              onClick={() => {
-                                setIsDepartmentOpen(false);
-                                navigateTo('specials');
-                              }}
-                            >
-                              View All Deals →
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            />
 
             {/* Other Navigation Items */}
             {navigationItems.map((item) => (
@@ -1743,195 +896,50 @@ export function Header() {
       </div>
 
       {/* Mobile Navigation */}
-      {isMenuOpen && (
-        <div className="border-t bg-white px-4 py-4 lg:hidden">
-          <nav className="flex flex-col gap-2">
-            {/* Shop by Department Button */}
-            <button
-              className={`rounded-lg px-4 py-3 text-left transition-colors flex items-center justify-between ${
-                currentPage === 'catalog'
-                  ? 'bg-red-600 text-white hover:bg-red-700'
-                  : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-              }`}
-              onClick={() => {
-                if (!region) {
-                  setShowRegionSelector(true);
-                  setIsMenuOpen(false);
-                  return;
-                }
-                setIsMobileDepartmentOpen(true);
-                setIsMenuOpen(false);
-              }}
-            >
-              Shop by Department
-              <ChevronDown className="h-4 w-4 -rotate-90" />
-            </button>
-            
-            {navigationItems.map((item) => (
-              <button
-                key={item.name}
-                className={`rounded-lg px-4 py-3 text-left transition-colors ${
-                  currentPage === item.page
-                    ? 'bg-red-600 text-white hover:bg-red-700'
-                    : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
-                }`}
-                onClick={() => {
-                  navigateTo(item.page);
-                  setIsMenuOpen(false);
-                }}
-              >
-                {item.name}
-              </button>
-            ))}
-            <div className="border-t my-2"></div>
-            {user ? (
-              <>
-                <div className="px-4 py-2 bg-blue-50 rounded-lg">
-                  <p className="text-sm font-medium text-gray-900">{user.email}</p>
-                  <p className="text-xs text-gray-500">Customer Account</p>
-                </div>
-                <button
-                  className="rounded-lg px-4 py-3 text-left text-gray-700 transition-colors hover:bg-gray-100 hover:text-blue-600 flex items-center gap-2"
-                  onClick={() => {
-                    navigateTo('dashboard');
-                    setIsMenuOpen(false);
-                  }}
-                >
-                  <LayoutDashboard className="h-4 w-4" />
-                  My Dashboard
-                </button>
-                <button
-                  className="rounded-lg px-4 py-3 text-left text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 flex items-center gap-2"
-                  onClick={async () => {
-                    await logout();
-                    navigateTo('home');
-                    setIsMenuOpen(false);
-                    toast.success('Logged out successfully');
-                  }}
-                >
-                  <LogOut className="h-4 w-4" />
-                  Logout
-                </button>
-              </>
-            ) : (
-              <button
-                className="rounded-lg px-4 py-3 text-left text-gray-700 transition-colors hover:bg-gray-100 hover:text-blue-600"
-                onClick={() => {
-                  navigateTo('login');
-                  setIsMenuOpen(false);
-                }}
-              >
-                Login
-              </button>
-            )}
-          </nav>
-        </div>
-      )}
+      <MobileNavigation
+        isOpen={isMenuOpen}
+        user={user}
+        currentPage={currentPage}
+        region={region}
+        logout={logout}
+        navigationItems={navigationItems}
+        onNavigateTo={(page) => navigateTo(page)}
+        onSetShowRegionSelector={setShowRegionSelector}
+        onOpenMobileDept={() => setIsMobileDepartmentOpen(true)}
+        onClose={() => setIsMenuOpen(false)}
+      />
     </header>
 
     {/* Quantity Alert Dialog */}
-    <AlertDialog open={showQuantityAlert} onOpenChange={(open) => {
-      setShowQuantityAlert(open);
-      if (!open) {
+    <QuantityAlertDialog
+      open={showQuantityAlert}
+      pendingCartItem={pendingCartItem}
+      selectedSuggestedQuantity={selectedSuggestedQuantity}
+      onOpenChange={(open) => {
+        setShowQuantityAlert(open);
+        if (!open) {
+          setPendingCartItem(null);
+          setSelectedSuggestedQuantity(null);
+        }
+      }}
+      onSelectSuggestedQuantity={setSelectedSuggestedQuantity}
+      onConfirm={() => {
+        if (selectedSuggestedQuantity !== null) {
+          if (pendingCartItem?.color) {
+            setColorQuantities({ ...colorQuantities, [pendingCartItem.color]: selectedSuggestedQuantity });
+          } else {
+            setOrderQuantity(selectedSuggestedQuantity);
+          }
+          setShowQuantityAlert(false);
+          setPendingCartItem(null);
+          setSelectedSuggestedQuantity(null);
+        }
+      }}
+      onCancel={() => {
         setPendingCartItem(null);
         setSelectedSuggestedQuantity(null);
-      }
-    }}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>⚠️ Quantity Not in Full Cartons</AlertDialogTitle>
-          <AlertDialogDescription>
-            {pendingCartItem?.color ? (
-              <>
-                The quantity you entered for <strong>{pendingCartItem.color}</strong> ({pendingCartItem?.quantity} pcs) is not a multiple of the carton size ({pendingCartItem?.pcsPerCarton} pcs/carton).
-              </>
-            ) : (
-              <>
-                The quantity you entered ({pendingCartItem?.quantity} pcs) is not a multiple of the carton size ({pendingCartItem?.pcsPerCarton} pcs/carton).
-              </>
-            )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="font-medium text-yellow-900 mb-3">💡 Suggested Quantities:</p>
-          <div className="space-y-2">
-            <button
-              onClick={() => {
-                const newQuantity = pendingCartItem?.suggestedLower || 1;
-                setSelectedSuggestedQuantity(newQuantity);
-              }}
-              className={`w-full text-left px-4 py-3 rounded-md border transition-colors ${
-                selectedSuggestedQuantity === pendingCartItem?.suggestedLower
-                  ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-500'
-                  : 'bg-white border-yellow-300 hover:bg-yellow-100'
-              }`}
-            >
-              <div className="flex justify-between items-center">
-                <span className="text-gray-900">
-                  <strong>{pendingCartItem?.suggestedLower}</strong> pcs
-                </span>
-                <span className="text-gray-600 text-sm">
-                  = {Math.floor((pendingCartItem?.quantity || 0) / (pendingCartItem?.pcsPerCarton || 1))} carton(s)
-                </span>
-              </div>
-            </button>
-            <button
-              onClick={() => {
-                const newQuantity = pendingCartItem?.suggestedHigher || 1;
-                setSelectedSuggestedQuantity(newQuantity);
-              }}
-              className={`w-full text-left px-4 py-3 rounded-md border transition-colors ${
-                selectedSuggestedQuantity === pendingCartItem?.suggestedHigher
-                  ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-500'
-                  : 'bg-white border-yellow-300 hover:bg-yellow-100'
-              }`}
-            >
-              <div className="flex justify-between items-center">
-                <span className="text-gray-900">
-                  <strong>{pendingCartItem?.suggestedHigher}</strong> pcs
-                </span>
-                <span className="text-gray-600 text-sm">
-                  = {Math.ceil((pendingCartItem?.quantity || 0) / (pendingCartItem?.pcsPerCarton || 1))} carton(s)
-                </span>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => {
-            setPendingCartItem(null);
-            setSelectedSuggestedQuantity(null);
-          }}>
-            Cancel
-          </AlertDialogCancel>
-          <AlertDialogAction
-            disabled={selectedSuggestedQuantity === null}
-            onClick={() => {
-              if (selectedSuggestedQuantity !== null) {
-                // Update the quantity based on product type
-                if (pendingCartItem?.color) {
-                  // For color option products
-                  setColorQuantities({...colorQuantities, [pendingCartItem.color]: selectedSuggestedQuantity});
-                } else {
-                  // For non-color products
-                  setOrderQuantity(selectedSuggestedQuantity);
-                }
-                
-                // Close dialog and reset
-                setShowQuantityAlert(false);
-                setPendingCartItem(null);
-                setSelectedSuggestedQuantity(null);
-              }
-            }}
-            className={selectedSuggestedQuantity === null ? 'opacity-50 cursor-not-allowed' : ''}
-          >
-            Confirm
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      }}
+    />
 
     {/* Mobile Department Sheet */}
     <Sheet open={isMobileDepartmentOpen} onOpenChange={setIsMobileDepartmentOpen}>
