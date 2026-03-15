@@ -19,11 +19,9 @@ import {
   Trash2,  // 🔥 添加删除图标
   Send,  // 🔥 提交图标
   Edit,  // 🔥 编辑图标
-  Calculator  // 🔥 智能反馈图标
 } from 'lucide-react';
 import { suppliersDatabase, type Supplier } from '../../data/suppliersData'; // fallback only，已废弃，以 Supabase companies 表为准
 import { Card } from '../ui/card';
-import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { 
@@ -63,6 +61,10 @@ import { SupplierQuotationDialog } from './purchase-order/SupplierQuotationDialo
 import { CreateXJAndHistoryDialogs } from './purchase-order/CreateXJAndHistoryDialogs';
 import { PurchaseOrdersTab } from './purchase-order/PurchaseOrdersTab';
 import { ProcurementRequestsTab } from './purchase-order/ProcurementRequestsTab';
+import { FeedbackReminderDialog } from './purchase-order/FeedbackReminderDialog';
+import { QuoteRequirementsTab } from './purchase-order/QuoteRequirementsTab';
+import { XJManagementTab } from './purchase-order/XJManagementTab';
+import { SupplierQuotationsTab } from './purchase-order/SupplierQuotationsTab';
 import { SupplierAllocationDialog } from './purchase-order/SupplierAllocationDialog';
 import { PurchaseOrderDetailDialog } from './purchase-order/PurchaseOrderDetailDialog';
 import { PurchaseOrderPreviewDialog } from './purchase-order/PurchaseOrderPreviewDialog';
@@ -75,7 +77,7 @@ import {
   normalizeRegionalDocNo,
 } from './purchase-order/purchaseOrderEditConfig';
 import {
-  getBusinessTypeLabel, 
+  getBusinessTypeLabel,
   getUrgencyConfig,
   buildPurchaseOrderDocumentSnapshot,
   buildQuoteRequirementDocumentSnapshot,
@@ -83,7 +85,16 @@ import {
   convertToPOData,
   desensitizeFeedback,
   extractProjectExecutionBaseline,
-  generateXJDocumentData
+  generateXJDocumentData,
+  // Pass A extractions
+  calculateRequirementStatus,
+  getXJKey,
+  getQuotationXJKey,
+  getProcurementRequestStatusText,
+  parseDateLike,
+  formatDateForStorage,
+  toNumericAmount,
+  getQuotationItems,
 } from './purchase-order/purchaseOrderUtils'; // 🔥 从工具函数文件导入
 import {
   findRelatedInquiryForProcurementDoc,
@@ -272,18 +283,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   const allSuppliers: Supplier[] = suppliersFromApi.length > 0 ? suppliersFromApi : suppliersDatabase;
   
-  // Supabase-first: 直接读 DB status 字段，不在前端重新计算
-  // DB purchase_requirements.status 由业务操作（创建XJ、收到报价等）更新
-  const calculateRequirementStatus = (req: QuoteRequirement): 'pending' | 'partial' | 'processing' | 'completed' => {
-    const s = req.status as string;
-    if (s === 'completed') return 'completed';
-    if (s === 'processing' || s === 'in_progress') return 'processing';
-    if (s === 'partial') return 'partial';
-    return 'pending';
-  };
-
-  const getXJKey = (xj: any) => String(xj?.supplierXjNo || xj?.xjNumber || '').trim();
-  const getQuotationXJKey = (q: any) => String(q?.sourceXJ || q?.sourceXJNumber || '').trim();
+  // calculateRequirementStatus, getXJKey, getQuotationXJKey → purchaseOrderUtils (Pass A)
 
   const hasDownstreamQuotationForXJ = React.useCallback((xj: any, quotationList?: any[]) => {
     const key = getXJKey(xj);
@@ -519,11 +519,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return 'pending_procurement_assignment';
   }, [getProcurementChildOrders]);
 
-  const getProcurementRequestStatusText = (status: string) => {
-    if (status === 'allocated_completed') return '已分配完成';
-    if (status === 'partial_allocated') return '部分分配';
-    return '待分配供应商';
-  };
+  // getProcurementRequestStatusText → purchaseOrderUtils (Pass A)
 
   const pendingProcurementRequestCount = useMemo(() => {
     const requests = purchaseOrders.filter((po) => isProcurementRequestRecord(po));
@@ -660,40 +656,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return String(po.requirementNo || (po as any).requirementNumber || '').trim();
   };
 
-  const parseDateLike = (value: unknown): Date | undefined => {
-    const raw = String(value || '').trim();
-    if (!raw) return undefined;
-    const d = new Date(raw);
-    return Number.isNaN(d.getTime()) ? undefined : d;
-  };
-
-  const formatDateForStorage = (date?: Date): string => {
-    if (!date) return '';
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const toNumericAmount = (value: unknown): number => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  const getQuotationItems = (quotation: any): any[] => {
-    if (Array.isArray(quotation?.items)) return quotation.items;
-    if (Array.isArray(quotation?.quoteData?.items)) return quotation.quoteData.items;
-    if (Array.isArray(quotation?.documentData?.products)) {
-      return quotation.documentData.products.map((p: any) => ({
-        id: p?.id || p?.productId || '',
-        productName: p?.description || p?.productName || '',
-        modelNo: getFormalBusinessModelNo(p),
-        unitPrice: p?.unitPrice || 0,
-        currency: p?.currency || quotation?.currency || '',
-      }));
-    }
-    return [];
-  };
+  // parseDateLike, formatDateForStorage, toNumericAmount, getQuotationItems → purchaseOrderUtils (Pass A)
 
   const findRequirementForPO = (po: PurchaseOrderType): QuoteRequirement | undefined => {
     const requirementNo = getRequirementNoFromPO(po);
@@ -1419,112 +1382,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setShowRFQPreview(true);
   };
 
-  const toDateText = (value?: string) => {
-    if (!value) return new Date().toISOString().split('T')[0];
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? new Date().toISOString().split('T')[0] : d.toISOString().split('T')[0];
-  };
-
-  const formatCompactUtcMinute = (raw?: string) => {
-    if (!raw) return '—';
-    const d = new Date(raw);
-    if (Number.isNaN(d.getTime())) return raw;
-    const yy = String(d.getUTCFullYear()).slice(-2);
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mi = String(d.getUTCMinutes()).padStart(2, '0');
-    return `${yy}${mm}${dd} UTC ${hh}:${mi}`;
-  };
-
-  const buildXJPreviewData = (xj: XJ): XJData => {
-    const raw = xj.documentData && typeof xj.documentData === 'object' && !Array.isArray(xj.documentData)
-      ? (xj.documentData as any)
-      : {};
-    const rawBuyer = raw.buyer && typeof raw.buyer === 'object' ? raw.buyer : {};
-    const rawSupplier = raw.supplier && typeof raw.supplier === 'object' ? raw.supplier : {};
-    const rawTerms = raw.terms && typeof raw.terms === 'object' ? raw.terms : {};
-    const sourceProducts = Array.isArray(raw.products)
-      ? raw.products
-      : Array.isArray(xj.products)
-        ? xj.products
-        : [];
-    const dateFallback = toDateText(xj.quotationDeadline || xj.createdDate);
-    const relatedRequirement = purchaseRequirements.find((req) =>
-      [
-        (xj as any).requirementNo,
-        (xj as any).sourceQRNumber,
-        (xj as any).sourceQrNumber,
-        (xj as any).sourceRef,
-      ]
-        .filter(Boolean)
-        .includes(req.requirementNo),
-    );
-    const fallbackConditionSource = relatedRequirement || {
-      tradeTerms: rawTerms.deliveryTerms,
-      paymentTerms: rawTerms.paymentTerms,
-      deliveryDate: raw.requiredDeliveryDate || rawTerms.deliveryRequirement,
-      qualityRequirements: rawTerms.inspectionMethod || rawTerms.qualityStandard,
-      packagingRequirements: rawTerms.packaging,
-      remarks: rawTerms.remarks,
-      items: sourceProducts,
-      notes: raw.inquiryDescription,
-    };
-
-    return {
-      xjNo: String(raw.xjNo || xj.supplierXjNo || xj.xjNumber || ''),
-      xjDate: toDateText(raw.xjDate || xj.createdDate),
-      requiredResponseDate: toDateText(raw.requiredResponseDate || raw.quoteDeadline || raw.deadline || xj.quotationDeadline || dateFallback),
-      requiredDeliveryDate: toDateText(raw.requiredDeliveryDate || xj.quotationDeadline || dateFallback),
-      inquiryDescription: String(raw.inquiryDescription || ''),
-      buyer: {
-        name: String(rawBuyer.name || rawBuyer.companyName || '福建高盛达富建材有限公司'),
-        nameEn: String(rawBuyer.nameEn || rawBuyer.companyNameEn || 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.'),
-        address: String(rawBuyer.address || '福建省福州市仓山区金山街道浦上大道216号'),
-        addressEn: String(rawBuyer.addressEn || 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China'),
-        contactPerson: String(rawBuyer.contactPerson || '采购部'),
-        tel: String(rawBuyer.tel || '+86-591-8888-8888'),
-        email: String(rawBuyer.email || 'purchase@cosun.com'),
-      },
-      supplier: {
-        companyName: String(rawSupplier.companyName || xj.supplierName || ''),
-        supplierCode: String(rawSupplier.supplierCode || xj.supplierCode || ''),
-        contactPerson: String(rawSupplier.contactPerson || ''),
-        tel: String(rawSupplier.tel || ''),
-        email: String(rawSupplier.email || xj.supplierEmail || ''),
-        address: String(rawSupplier.address || ''),
-      },
-      products: sourceProducts.map((p: any, i: number) => ({
-        no: i + 1,
-        description: String(p?.description || p?.productName || p?.name || ''),
-        specification: String(p?.specification || '-'),
-        quantity: Number(p?.quantity || 0),
-        unit: String(p?.unit || '件'),
-        modelNo: getFormalBusinessModelNo(p) || undefined,
-        imageUrl: p?.imageUrl ? String(p.imageUrl) : undefined,
-        targetPrice: p?.targetPrice ? String(p.targetPrice) : undefined,
-      })),
-      conditionGroups:
-        Array.isArray(raw.conditionGroups) && raw.conditionGroups.length > 0
-          ? raw.conditionGroups
-          : buildProcurementConditionGroups(fallbackConditionSource, 'xj'),
-      terms: {
-        paymentTerms: String(rawTerms.paymentTerms || 'T/T 30% 预付，70% 发货前付清'),
-        deliveryTerms: String(rawTerms.deliveryTerms || 'EXW 工厂交货'),
-        currency: String(rawTerms.currency || 'USD'),
-        deliveryAddress: rawTerms.deliveryAddress ? String(rawTerms.deliveryAddress) : undefined,
-        deliveryRequirement: rawTerms.deliveryRequirement ? String(rawTerms.deliveryRequirement) : undefined,
-        qualityStandard: rawTerms.qualityStandard ? String(rawTerms.qualityStandard) : undefined,
-        inspectionMethod: rawTerms.inspectionMethod ? String(rawTerms.inspectionMethod) : undefined,
-        packaging: rawTerms.packaging ? String(rawTerms.packaging) : undefined,
-        shippingMarks: rawTerms.shippingMarks ? String(rawTerms.shippingMarks) : undefined,
-        inspectionRequirement: rawTerms.inspectionRequirement ? String(rawTerms.inspectionRequirement) : undefined,
-        technicalDocuments: rawTerms.technicalDocuments ? String(rawTerms.technicalDocuments) : undefined,
-        confidentiality: rawTerms.confidentiality ? String(rawTerms.confidentiality) : undefined,
-        remarks: rawTerms.remarks ? String(rawTerms.remarks) : undefined,
-      },
-    };
-  };
+  // toDateText, formatCompactUtcMinute, buildXJPreviewData → purchaseOrderUtils (Pass A)
 
   const openXJPreview = (xj: XJ) => {
     const templateSnapshot = (xj as any).templateSnapshot || (xj as any).template_snapshot || null;
@@ -2754,790 +2612,55 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           </div>
 
           {/* ==================== Tab 1: QR池 ==================== */}
-          <TabsContent value="requirements" className="m-0">
-            {/* 需求统计 */}
-            <div className="px-3 py-3 bg-gray-50 border-b border-gray-200">
-              <div className="grid grid-cols-5 gap-2">
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">总 QR</p>
-                  <p className="text-base font-bold text-gray-900">{requirementStats.total}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">待处理</p>
-                  <p className="text-base font-bold text-amber-600">{requirementStats.pending}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">部分提交</p>
-                  <p className="text-base font-bold text-orange-600">{requirementStats.partial}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">已发供应商</p>
-                  <p className="text-base font-bold text-blue-600">{requirementStats.processing}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">紧急 QR</p>
-                  <p className="text-base font-bold text-red-600">{requirementStats.highUrgency}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* 需求列表 */}
-            <div className="px-3 py-2">
-              {/* 🔥 搜索框和批量操作 */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                    <Input
-                      placeholder="搜索 QR 编号、来源单号、区域..."
-                      value={requirementSearchTerm}
-                      onChange={(e) => setRequirementSearchTerm(e.target.value)}
-                      className="pl-8 h-8 text-xs w-80"
-                    />
-                  </div>
-                  {selectedRequirementIds.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleBatchDeleteRequirements}
-                      className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-1" />
-                      批量删除 ({selectedRequirementIds.length})
-                    </Button>
-                  )}
-                </div>
-                <p className="text-[14px] text-gray-600">共 {filteredRequirements.length} 条 QR</p>
-              </div>
-              
-              <div className="border border-gray-200 rounded overflow-hidden">
-                <table className="w-full text-[14px]">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                        <input 
-                          type="checkbox" 
-                          className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                          checked={selectedRequirementIds.length === filteredRequirements.length && filteredRequirements.length > 0}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedRequirementIds(filteredRequirements.map(r => r.id));
-                            } else {
-                              setSelectedRequirementIds([]);
-                            }
-                          }}
-                        />
-                      </th>
-                      <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                      <th className="text-left py-1.5 px-2 font-medium text-gray-700">QR编号</th>
-                      <th className="text-left py-1.5 px-2 font-medium text-gray-700">来源单号</th>
-                      <th className="text-left py-1.5 px-2 font-medium text-gray-700">区域</th>
-                      <th className="text-center py-1.5 px-2 font-medium text-gray-700">产品数</th>
-                      <th className="text-left py-1.5 px-2 font-medium text-gray-700">要求日期</th>
-                      <th className="text-left py-1.5 px-2 font-medium text-gray-700">紧急程度</th>
-                      <th className="text-left py-1.5 px-2 font-medium text-gray-700">状态</th>
-                      <th className="text-center py-1.5 px-2 font-medium text-gray-700">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRequirements.map((req, idx) => {
-                      const urgencyConfig = getUrgencyConfig(req.urgency);
-                      const itemCount = req.items?.length || 0;
-                      
-                      // 🔥 动态计算状态
-                      const dynamicStatus = calculateRequirementStatus(req);
-                      const hasLinkedXJ = hasDownstreamXJForRequirement(req);
-                      
-                      // 🔥 区域标签配置
-                      // region 统一用 Supabase 存储的 code（NA/SA/EA）
-                      const regionCode = req.region?.toUpperCase().replace('NORTH AMERICA','NA').replace('SOUTH AMERICA','SA').replace('EUROPE & AFRICA','EA').replace('EUROPE-AFRICA','EA');
-                      const regionConfig = regionCode === 'NA' ? { label: 'NA', color: 'bg-blue-100 text-blue-700' }
-                        : regionCode === 'SA' ? { label: 'SA', color: 'bg-green-100 text-green-700' }
-                        : regionCode === 'EA' ? { label: 'EA', color: 'bg-purple-100 text-purple-700' }
-                        : null;
-                      
-                      return (
-                        <tr key={req.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-                          <td className="py-2 px-2 text-center">
-                            <input 
-                              type="checkbox" 
-                              className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                              checked={selectedRequirementIds.includes(req.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedRequirementIds([...selectedRequirementIds, req.id]);
-                                } else {
-                                  setSelectedRequirementIds(selectedRequirementIds.filter(id => id !== req.id));
-                                }
-                              }}
-                            />
-                          </td>
-                          <td className="py-2 px-2 text-center text-gray-500">
-                            {idx + 1}
-                          </td>
-                          <td className="py-2 px-2">
-                            <button
-                              onClick={() => {
-                                setViewRequirement(req);
-                                setShowRequirementDialog(true);
-                              }}
-                              className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
-                            >
-                              {req.requirementNo}
-                            </button>
-                            <div className="text-[12px] text-gray-500">{req.createdDate}</div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="text-gray-900">{req.source}</div>
-                            {req.sourceRef && <div className="text-[12px] text-blue-600 font-mono">{req.sourceRef}</div>}
-                          </td>
-                          <td className="py-2 px-2">
-                            {regionConfig ? (
-                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-medium ${regionConfig.color}`}>
-                                {regionConfig.label}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400 text-[12px]">-</span>
-                            )}
-                          </td>
-                          <td className="py-2 px-2 text-center">
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
-                              {itemCount}
-                            </span>
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="text-gray-900">{req.requiredDate}</div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${urgencyConfig.color}`}>
-                              {urgencyConfig.label}
-                            </span>
-                          </td>
-                          <td className="py-2 px-2">
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${
-                              dynamicStatus === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-200' : 
-                              dynamicStatus === 'partial' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                              dynamicStatus === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' : 
-                              'bg-green-50 text-green-700 border-green-200'
-                            }`}>
-                              {dynamicStatus === 'pending' ? '待处理' : 
-                               dynamicStatus === 'partial' ? '部分提交' : 
-                               dynamicStatus === 'processing' ? '全部提交' : '已完成'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-2 text-center">
-                            <div className="flex gap-1 justify-center">
-                              {/* 🔥 查看按钮 */}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setViewRequirement(req);
-                                  setShowRequirementDialog(true);
-                                }}
-                                className="h-6 text-[12px] px-2 border-gray-300 text-gray-600 hover:bg-gray-50 gap-1"
-                                title="查看报价请求单详情"
-                              >
-                                <Eye className="w-3 h-3" />
-                                <span>查看</span>
-                              </Button>
-                              
-                              {/* 🔥 编辑按钮 */}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  // TODO: 实现编辑功能
-                                  toast.info('编辑功能开发中...', {
-                                    description: '即将支持编辑报价请求单',
-                                    duration: 2000
-                                  });
-                                }}
-                                disabled={hasLinkedXJ}
-                                className={`h-6 text-[12px] px-2 gap-1 ${
-                                  hasLinkedXJ
-                                    ? 'border-gray-200 text-gray-300 cursor-not-allowed'
-                                    : 'border-blue-300 text-blue-600 hover:bg-blue-50'
-                                }`}
-                                title="编辑报价请求单"
-                              >
-                                <Edit className="w-3 h-3" />
-                                <span>编辑</span>
-                              </Button>
-                              
-                              {!hasLinkedXJ && (dynamicStatus === 'pending' || dynamicStatus === 'partial') && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleCreateRFQFromRequirement(req)}
-                                    className="h-6 text-[12px] bg-blue-600 hover:bg-blue-700 px-2"
-                                  >
-                                    创建询价单
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleCreateOrderFromRequirement(req)}
-                                    className="h-6 text-[12px] bg-[#F96302] hover:bg-[#E05502] px-2"
-                                  >
-                                    直接下单
-                                  </Button>
-                                </>
-                              )}
-                              {/* 采购侧固定显示智能对比建议按钮，避免在某些状态下“消失” */}
-                              <Button
-                                size="sm"
-                                onClick={() => handleSmartFeedback(req)}
-                                className="h-6 text-[12px] bg-emerald-600 hover:bg-emerald-700 px-2 gap-1"
-                                title={req.purchaserFeedback ? '重新查看/调整智能对比建议' : '智能提取BJ报价，生成对比建议'}
-                              >
-                                <Calculator className="w-3 h-3" />
-                                <span>智能对比建议</span>
-                              </Button>
-
-                              {req.purchaserFeedback && (
-                                <Badge className="h-6 px-2 bg-green-100 text-green-700 border-green-300 text-[12px]">
-                                  ✓ 已反馈
-                                </Badge>
-                              )}
-
-                              {/* 采购侧只保留下推业务员询报，不再显示“创建报价” */}
-                              <Button
-                                size="sm"
-                                onClick={() => handlePushToSalesInquiry(req)}
-                                disabled={!req.purchaserFeedback || !!req.pushedToQuotation}
-                                className={`h-6 text-[12px] px-2 gap-1 ${
-                                  !req.purchaserFeedback || req.pushedToQuotation
-                                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                                    : 'bg-orange-500 hover:bg-orange-600 text-white'
-                                }`}
-                                title={
-                                  !req.purchaserFeedback
-                                    ? '请先完成智能对比建议并保存采购反馈'
-                                    : req.pushedToQuotation
-                                      ? '已下推业务员询报'
-                                      : '下推业务员询报'
-                                }
-                              >
-                                <Calculator className="w-3 h-3" />
-                                <span>{req.pushedToQuotation ? '已下推业务员询报' : '下推业务员询报'}</span>
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={async () => {
-                                  if (hasLinkedXJ) {
-                                    toast.error('该报价请求单已生成下游询价(XJ)，不可删除');
-                                    return;
-                                  }
-                                  if (window.confirm(`确定要删除报价请求单 "${req.requirementNo}" 吗？\n\n产品: ${req.productName}\n数量: ${req.quantity} ${req.unit}`)) {
-                                    try {
-                                      await deleteRequirement(req.id);
-                                      toast.success('报价请求单已删除', {
-                                        description: `${req.requirementNo} - ${req.productName}`,
-                                        duration: 3000
-                                      });
-                                    } catch (error: any) {
-                                      toast.error(`删除报价请求单失败：${error?.message || '未知错误'}`);
-                                    }
-                                  }
-                                }}
-                                disabled={hasLinkedXJ}
-                                className={`h-6 text-[12px] px-2 ${
-                                  hasLinkedXJ
-                                    ? 'border-gray-200 text-gray-300 cursor-not-allowed'
-                                    : 'border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400'
-                                }`}
-                                title="删除报价请求单"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </TabsContent>
+          <QuoteRequirementsTab
+            requirementStats={requirementStats}
+            requirementSearchTerm={requirementSearchTerm}
+            setRequirementSearchTerm={setRequirementSearchTerm}
+            selectedRequirementIds={selectedRequirementIds}
+            setSelectedRequirementIds={setSelectedRequirementIds}
+            filteredRequirements={filteredRequirements}
+            handleBatchDeleteRequirements={handleBatchDeleteRequirements}
+            hasDownstreamXJForRequirement={hasDownstreamXJForRequirement}
+            setViewRequirement={setViewRequirement}
+            setShowRequirementDialog={setShowRequirementDialog}
+            handleCreateRFQFromRequirement={handleCreateRFQFromRequirement}
+            handleCreateOrderFromRequirement={handleCreateOrderFromRequirement}
+            handleSmartFeedback={handleSmartFeedback}
+            handlePushToSalesInquiry={handlePushToSalesInquiry}
+            deleteRequirement={deleteRequirement}
+          />
 
           {/* ==================== Tab 2: 询价管理 ==================== */}
-          <TabsContent value="xj-management" className="m-0">
-            {/* 询价统计 */}
-            <div className="px-3 py-3 bg-gray-50 border-b border-gray-200">
-              <div className="grid grid-cols-5 gap-2">
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">总询价</p>
-                  <p className="text-base font-bold text-gray-900">{xjs.length}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">草稿</p>
-                  <p className="text-base font-bold text-gray-600">{xjs.filter(r => (r.status as any) === 'draft').length}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">已发送</p>
-                  <p className="text-base font-bold text-blue-600">{xjs.filter(r => (r.status as any) === 'sent').length}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">等待报价</p>
-                  <p className="text-base font-bold text-orange-600">{xjs.filter(r => r.status === 'pending').length}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">已回复</p>
-                  <p className="text-base font-bold text-green-600">{xjs.filter(r => r.status === 'quoted').length}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* 询价列表 */}
-            <div className="px-3 py-2">
-              {/* 🔥 搜索框和批量操作 */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                    <Input
-                      placeholder="搜索询价单号、供应商、QR编号..."
-                      value={xjSearchTerm}
-                      onChange={(e) => setRFQSearchTerm(e.target.value)}
-                      className="pl-8 h-8 text-xs w-80"
-                    />
-                  </div>
-                  {selectedXJIds.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleBatchDeleteRFQs}
-                      className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-1" />
-                      批量删除 ({selectedXJIds.length})
-                    </Button>
-                  )}
-                </div>
-                <p className="text-[14px] text-gray-600">共 {filteredXJs.length} 条询价单</p>
-              </div>
-              
-              {filteredXJs.length === 0 ? (
-                <div className="text-center py-12 border border-gray-200 rounded">
-                  <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">暂无询价单</p>
-                  <p className="text-sm text-gray-400 mt-1">从报价请求池创建询价单后将显示在这里</p>
-                </div>
-              ) : (
-                <div className="border border-gray-200 rounded overflow-x-auto">
-                  <table className="min-w-max w-full text-[14px]">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                          <input 
-                            type="checkbox" 
-                            className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                            checked={selectedXJIds.length === filteredXJs.length && filteredXJs.length > 0}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedRFQIds(filteredXJs.map(r => r.id));
-                              } else {
-                                setSelectedRFQIds([]);
-                              }
-                            }}
-                          />
-                        </th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">序号</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-36">询价单号</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-40">供应商</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-32">关联需求</th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-16">产品数</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-28">发送日期</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-24">截止日期</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-20">状态</th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-40">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredXJs.map((xj, idx) => {
-                        const xjStatus = (xj.status as any);
-                        const isDraft = xjStatus === 'draft';
-                        const isSent = xjStatus === 'sent';
-                        const lockedByQuotation = hasDownstreamQuotationForXJ(xj);
-                        
-                        return (
-                          <tr key={xj.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-                            <td className="py-2 px-2 text-center">
-                              <input 
-                                type="checkbox" 
-                                className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                                checked={selectedXJIds.includes(xj.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedRFQIds([...selectedXJIds, xj.id]);
-                                  } else {
-                                    setSelectedRFQIds(selectedXJIds.filter(id => id !== xj.id));
-                                  }
-                                }}
-                              />
-                            </td>
-                            <td className="py-2 px-2 text-center text-gray-500">
-                              {idx + 1}
-                            </td>
-                            <td className="py-2 px-2">
-                              <button
-                                type="button"
-                                onClick={() => openXJPreview(xj)}
-                                className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
-                              >
-                                {xj.supplierXjNo}
-                              </button>
-                            </td>
-                            <td className="py-2 px-2 whitespace-nowrap">
-                              <div className="text-gray-900">{xj.supplierName}</div>
-                              <div className="text-[12px] text-gray-500">{xj.supplierCode}</div>
-                            </td>
-                            <td className="py-2 px-2 whitespace-nowrap">
-                              <div className="text-gray-900 font-mono">{xj.requirementNo}</div>
-                              {xj.sourceRef && <div className="text-[12px] text-gray-500">{xj.sourceRef}</div>}
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
-                                {xj.products?.length || 1}
-                              </span>
-                            </td>
-                            <td className="py-2 px-2">
-                              <div className="text-gray-900">{formatCompactUtcMinute((xj as any).sentDate || xj.createdDate)}</div>
-                            </td>
-                            <td className="py-2 px-2">
-                              <div className="text-gray-900">{xj.quotationDeadline}</div>
-                            </td>
-                            <td className="py-2 px-2">
-                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${
-                                isDraft ? 'bg-gray-50 text-gray-700 border-gray-200' :
-                                isSent ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                xj.status === 'pending' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                                xj.status === 'quoted' ? 'bg-green-50 text-green-700 border-green-200' :
-                                'bg-gray-50 text-gray-700 border-gray-200'
-                              }`}>
-                                {isDraft ? '草稿' :
-                                 isSent ? '已发送' :
-                                 xj.status === 'pending' ? '等待报价' :
-                                 xj.status === 'quoted' ? '已回复' :
-                                 xj.status}
-                              </span>
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <div className="flex gap-1 justify-center">
-                                {/* 查看按钮：始终可用 */}
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openXJPreview(xj)}
-                                  className="h-6 text-[12px] px-2 border-blue-300 text-blue-600 hover:bg-blue-50"
-                                >
-                                  <Eye className="w-3 h-3 mr-1" />
-                                  查看
-                                </Button>
-                                {/* 编辑按钮：存在下游(BJ)后禁用 */}
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleEditXJ(xj)}
-                                  disabled={lockedByQuotation || xj.status === 'completed'}
-                                  className={`h-6 text-[12px] px-2 ${
-                                    lockedByQuotation || xj.status === 'completed'
-                                      ? 'border-gray-200 text-gray-300 cursor-not-allowed'
-                                      : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                                  }`}
-                                >
-                                  <Edit className="w-3 h-3 mr-1" />
-                                  编辑
-                                </Button>
-                                {/* 下推按钮：存在下游(BJ)后变灰禁用 */}
-                                {lockedByQuotation || xj.status === 'completed' ? (
-                                  <Button
-                                    size="sm"
-                                    disabled
-                                    className="h-6 text-[12px] px-2 bg-gray-200 text-gray-400 cursor-not-allowed"
-                                  >
-                                    <Send className="w-3 h-3 mr-1" />
-                                    已锁定
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleSubmitXJToSupplier(xj)}
-                                    className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
-                                  >
-                                    <Send className="w-3 h-3 mr-1" />
-                                    {isSent ? '重新下推' : '下推供应商'}
-                                  </Button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </TabsContent>
+          <XJManagementTab
+            xjs={xjs}
+            xjSearchTerm={xjSearchTerm}
+            setRFQSearchTerm={setRFQSearchTerm}
+            selectedXJIds={selectedXJIds}
+            setSelectedRFQIds={setSelectedRFQIds}
+            filteredXJs={filteredXJs}
+            handleBatchDeleteRFQs={handleBatchDeleteRFQs}
+            hasDownstreamQuotationForXJ={hasDownstreamQuotationForXJ}
+            openXJPreview={openXJPreview}
+            handleEditXJ={handleEditXJ}
+            handleSubmitXJToSupplier={handleSubmitXJToSupplier}
+          />
 
           {/* ==================== Tab 3: 供应商报价 ==================== */}
-          <TabsContent value="supplier-quotations" className="m-0">
-            {/* 统计卡片 */}
-            <div className="px-3 py-3 bg-gray-50 border-b border-gray-200">
-              <div className="grid grid-cols-4 gap-2">
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">总报价</p>
-                  <p className="text-base font-bold text-gray-900">{supplierQuotations.length}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">待审核</p>
-                  <p className="text-base font-bold text-blue-600">
-                    {supplierQuotations.filter(q => q.status === 'submitted').length}
-                  </p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">已接受</p>
-                  <p className="text-base font-bold text-green-600">
-                    {supplierQuotations.filter(q => q.status === 'accepted').length}
-                  </p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[14px] text-gray-500">已拒绝</p>
-                  <p className="text-base font-bold text-red-600">
-                    {supplierQuotations.filter(q => q.status === 'rejected').length}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* 报价列表 */}
-            <div className="px-3 py-2">
-              {/* 🔥 搜索框和批量操作 */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                    <Input
-                      placeholder="搜索报价单号、供应商、询价单号..."
-                      value={quotationSearchTerm}
-                      onChange={(e) => setQuotationSearchTerm(e.target.value)}
-                      className="pl-8 h-8 text-xs w-80"
-                    />
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => loadSupplierQuotationsFromApi()}
-                    className="h-8 text-xs px-3"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 mr-1" />
-                    刷新
-                  </Button>
-                  {selectedQuotationIds.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleBatchDeleteQuotations}
-                      className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-1" />
-                      批量删除 ({selectedQuotationIds.length})
-                    </Button>
-                  )}
-                </div>
-                <p className="text-[14px] text-gray-600">共 {filteredQuotations.length} 条供应商报价</p>
-              </div>
-              
-              {filteredQuotations.length === 0 ? (
-                <div className="text-center py-12 border border-gray-200 rounded">
-                  <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">暂无供应商报价</p>
-                  <p className="text-sm text-gray-400 mt-1">供应商在 Portal 提交报价后，点击「刷新」或切换 Tab 后会自动拉取</p>
-                </div>
-              ) : (
-                <div className="border border-gray-200 rounded overflow-hidden">
-                  <table className="w-full text-[14px]">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                          <input 
-                            type="checkbox" 
-                            className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                            checked={selectedQuotationIds.length === filteredQuotations.length && filteredQuotations.length > 0}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedQuotationIds(filteredQuotations.map(q => q.id));
-                              } else {
-                                setSelectedQuotationIds([]);
-                              }
-                            }}
-                          />
-                        </th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">报价单号</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">供应商</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">关联询价</th>
-                        <th className="text-right py-1.5 px-2 font-medium text-gray-700">报价金额</th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700">产品数</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">报价日期</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">有效期至</th>
-                        <th className="text-left py-1.5 px-2 font-medium text-gray-700">状态</th>
-                        <th className="text-center py-1.5 px-2 font-medium text-gray-700">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredQuotations.map((quotation, idx) => (
-                        <tr key={quotation.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-                          <td className="py-2 px-2 text-center">
-                            <input 
-                              type="checkbox" 
-                              className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                              checked={selectedQuotationIds.includes(quotation.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedQuotationIds([...selectedQuotationIds, quotation.id]);
-                                } else {
-                                  setSelectedQuotationIds(selectedQuotationIds.filter(id => id !== quotation.id));
-                                }
-                              }}
-                            />
-                          </td>
-                          <td className="py-2 px-2 text-center text-gray-500">
-                            {idx + 1}
-                          </td>
-                          <td className="py-2 px-2">
-                            <button
-                              onClick={() => {
-                                setSelectedSupplierQuotation(quotation);
-                                setShowSupplierQuotationDialog(true);
-                              }}
-                              className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
-                            >
-                              {quotation.quotationNo}
-                            </button>
-                            <div className="text-[12px] text-gray-500">{quotation.submittedDate || quotation.quotationDate}</div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="text-gray-900">{quotation.supplierName}</div>
-                            <div className="text-[12px] text-gray-500">{quotation.supplierCompany}</div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="text-gray-900">{quotation.sourceXJ || '-'}</div>
-                            {quotation.sourceQR && <div className="text-[12px] text-blue-600 font-mono">{quotation.sourceQR}</div>}
-                            {(quotation.projectCode || quotation.projectRevisionCode || quotation.finalQuotationNumber) && (
-                              <div className="text-[12px] text-purple-600 font-mono">
-                                基线: {quotation.projectCode || quotation.projectName || '项目'} / {quotation.projectRevisionCode || 'Rev'}{quotation.finalQuotationNumber ? ` / ${quotation.finalQuotationNumber}` : ''}
-                              </div>
-                            )}
-                          </td>
-                          <td className="py-2 px-2 text-right">
-                            <div className="font-semibold text-green-600">
-                              {quotation.currency === 'CNY' ? '¥' : '$'}{quotation.totalAmount?.toLocaleString() || 0}
-                            </div>
-                            <div className="text-[12px] text-gray-500">{quotation.currency}</div>
-                          </td>
-                          <td className="py-2 px-2 text-center">
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
-                              {quotation.items?.length || 0}
-                            </span>
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="text-gray-900">{quotation.quotationDate}</div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="text-gray-900">{quotation.validUntil}</div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${
-                              quotation.status === 'submitted' ? 'bg-blue-50 text-blue-700 border-blue-200' : 
-                              quotation.status === 'accepted' ? 'bg-green-50 text-green-700 border-green-200' : 
-                              'bg-red-50 text-red-700 border-red-200'
-                            }`}>
-                              {quotation.status === 'submitted' ? '待审核' 
-                                : quotation.status === 'accepted' ? '已接受'
-                                : '已拒绝'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-2 text-center">
-                            <div className="flex gap-1 justify-center">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setSelectedSupplierQuotation(quotation);
-                                  setShowSupplierQuotationDialog(true);
-                                }}
-                                className="h-6 text-[12px] px-2"
-                              >
-                                <Eye className="w-3 h-3 mr-1" />
-                                查看
-                              </Button>
-                              
-                              {quotation.status === 'submitted' && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    onClick={async () => {
-                                      try {
-                                        await saveSupplierQuotation({ ...quotation, status: 'accepted' } as any);
-                                      } catch (e: any) {
-                                        console.warn('⚠️ 接受报价 Supabase 同步失败:', e?.message);
-                                        toast.error('接受报价失败：Supabase 写入未成功');
-                                        return;
-                                      }
-                                      applyLocalQuotationStatus(quotation.id, 'accepted');
-                                      await loadSupplierQuotationsFromApi();
-                                      setAcceptedQuotationNo(quotation.quotationNo || quotation.id);
-                                      setShowFeedbackReminderDialog(true);
-                                    }}
-                                    className="h-6 text-[12px] bg-green-600 hover:bg-green-700 px-2"
-                                  >
-                                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                                    接受
-                                  </Button>
-                                  
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={async () => {
-                                      try {
-                                        await saveSupplierQuotation({ ...quotation, status: 'rejected' } as any);
-                                      } catch (e: any) {
-                                        console.warn('⚠️ 拒绝报价 Supabase 同步失败:', e?.message);
-                                        toast.error('拒绝报价失败：Supabase 写入未成功');
-                                        return;
-                                      }
-                                      applyLocalQuotationStatus(quotation.id, 'rejected');
-                                      await loadSupplierQuotationsFromApi();
-                                      toast.info(
-                                        <div className="space-y-1">
-                                          <p className="font-semibold">❌ 已拒绝报价</p>
-                                          <p className="text-sm">报价单号: {quotation.quotationNo}</p>
-                                          <p className="text-xs text-slate-500">状态已更新</p>
-                                        </div>
-                                      );
-                                    }}
-                                    className="h-6 text-[12px] text-red-600 hover:text-red-700 hover:bg-red-50 px-2"
-                                  >
-                                    <AlertCircle className="w-3 h-3 mr-1" />
-                                    拒绝
-                                  </Button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </TabsContent>
+          <SupplierQuotationsTab
+            supplierQuotations={supplierQuotations}
+            quotationSearchTerm={quotationSearchTerm}
+            setQuotationSearchTerm={setQuotationSearchTerm}
+            loadSupplierQuotationsFromApi={loadSupplierQuotationsFromApi}
+            selectedQuotationIds={selectedQuotationIds}
+            setSelectedQuotationIds={setSelectedQuotationIds}
+            handleBatchDeleteQuotations={handleBatchDeleteQuotations}
+            filteredQuotations={filteredQuotations}
+            setSelectedSupplierQuotation={setSelectedSupplierQuotation}
+            setShowSupplierQuotationDialog={setShowSupplierQuotationDialog}
+            applyLocalQuotationStatus={applyLocalQuotationStatus}
+            setAcceptedQuotationNo={setAcceptedQuotationNo}
+            setShowFeedbackReminderDialog={setShowFeedbackReminderDialog}
+          />
 
           <ProcurementRequestsTab
             procurementRequestSearchTerm={procurementRequestSearchTerm}
@@ -3807,57 +2930,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
       {/* 接受报价后的智能反馈引导弹窗 */}
       {showFeedbackReminderDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowFeedbackReminderDialog(false)} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-4">
-            {/* 标题 */}
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <p className="font-semibold text-gray-900 text-base">✅ 已接受供应商报价</p>
-                <p className="text-sm text-gray-500 mt-0.5">报价单号：{acceptedQuotationNo}</p>
-              </div>
-            </div>
-
-            {/* 提醒内容 */}
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
-              <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-              <div className="space-y-1.5">
-                <p className="text-sm font-semibold text-amber-800">⚠️ 请记得反馈成本价给业务员</p>
-                <p className="text-sm text-amber-700">
-                  接受报价后，业务员还不知道采购成本，请前往
-                  <span className="font-semibold text-amber-900">「报价请求池」</span>
-                  找到对应需求，点击
-                  <span className="font-semibold text-amber-900">「智能反馈」</span>
-                  按钮，将供应商报价成本一键反馈给业务员，以便其制作销售报价单。
-                </p>
-              </div>
-            </div>
-
-            {/* 操作按钮 */}
-            <div className="flex gap-3 justify-end pt-1">
-              <Button
-                variant="outline"
-                className="text-gray-600"
-                onClick={() => setShowFeedbackReminderDialog(false)}
-              >
-                稍后处理
-              </Button>
-              <Button
-                className="bg-rose-600 hover:bg-rose-700 text-white gap-1.5"
-                onClick={() => {
-                  setShowFeedbackReminderDialog(false);
-                  setActiveTab('requirements');
-                }}
-              >
-                <Calculator className="w-4 h-4" />
-                立即前往报价请求池
-              </Button>
-            </div>
-          </div>
-        </div>
+        <FeedbackReminderDialog
+          acceptedQuotationNo={acceptedQuotationNo}
+          onClose={() => setShowFeedbackReminderDialog(false)}
+          onNavigateToRequirements={() => {
+            setShowFeedbackReminderDialog(false);
+            setActiveTab('requirements');
+          }}
+        />
       )}
     </div>
   );

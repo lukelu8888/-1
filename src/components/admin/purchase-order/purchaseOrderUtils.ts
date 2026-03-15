@@ -682,3 +682,182 @@ export const buildXJDocumentSnapshot = (xj: XJ): XJData => {
     },
   };
 };
+
+// ─── Pass A: Pure helpers extracted from PurchaseOrderManagementEnhanced ─────
+
+/** Normalise DB status field to typed union — Supabase-first, no front-end re-computation. */
+export const calculateRequirementStatus = (req: QuoteRequirement): 'pending' | 'partial' | 'processing' | 'completed' => {
+  const s = req.status as string;
+  if (s === 'completed') return 'completed';
+  if (s === 'processing' || s === 'in_progress') return 'processing';
+  if (s === 'partial') return 'partial';
+  return 'pending';
+};
+
+/** Canonical key for an XJ record (supplierXjNo preferred, falls back to xjNumber). */
+export const getXJKey = (xj: any): string => String(xj?.supplierXjNo || xj?.xjNumber || '').trim();
+
+/** Canonical key for a supplier quotation's source-XJ reference. */
+export const getQuotationXJKey = (q: any): string => String(q?.sourceXJ || q?.sourceXJNumber || '').trim();
+
+/** Human-readable label for a procurement request runtime status. */
+export const getProcurementRequestStatusText = (status: string): string => {
+  if (status === 'allocated_completed') return '已分配完成';
+  if (status === 'partial_allocated') return '部分分配';
+  return '待分配供应商';
+};
+
+/** Parse any date-like value (string/number/Date) to a Date, or undefined if invalid. */
+export const parseDateLike = (value: unknown): Date | undefined => {
+  const raw = String(value || '').trim();
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+};
+
+/** Format a Date to YYYY-MM-DD for storage; returns '' when date is absent. */
+export const formatDateForStorage = (date?: Date): string => {
+  if (!date) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/** Coerce any value to a finite number, defaulting to 0 for NaN / Infinity. */
+export const toNumericAmount = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * Extract the line-items array from various quotation shapes:
+ * quotation.items → quotation.quoteData.items → quotation.documentData.products (mapped).
+ */
+export const getQuotationItems = (quotation: any): any[] => {
+  if (Array.isArray(quotation?.items)) return quotation.items;
+  if (Array.isArray(quotation?.quoteData?.items)) return quotation.quoteData.items;
+  if (Array.isArray(quotation?.documentData?.products)) {
+    return quotation.documentData.products.map((p: any) => ({
+      id: p?.id || p?.productId || '',
+      productName: p?.description || p?.productName || '',
+      modelNo: getFormalBusinessModelNo(p),
+      unitPrice: p?.unitPrice || 0,
+      currency: p?.currency || quotation?.currency || '',
+    }));
+  }
+  return [];
+};
+
+/** Render a date string as YYYY-MM-DD, falling back to today when absent or invalid. */
+export const toDateText = (value?: string): string => {
+  if (!value) return new Date().toISOString().split('T')[0];
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? new Date().toISOString().split('T')[0] : d.toISOString().split('T')[0];
+};
+
+/** Format a UTC timestamp as "YYMMdd UTC HH:mm" compact display string. */
+export const formatCompactUtcMinute = (raw?: string): string => {
+  if (!raw) return '—';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  const yy = String(d.getUTCFullYear()).slice(-2);
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mi = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${yy}${mm}${dd} UTC ${hh}:${mi}`;
+};
+
+/**
+ * Assemble an XJData document preview from a persisted XJ record.
+ * Re-parameterised (Pass A): accepts purchaseRequirements explicitly instead of closing over component state.
+ */
+export const buildXJPreviewData = (xj: XJ, purchaseRequirements: QuoteRequirement[]): XJData => {
+  const raw = xj.documentData && typeof xj.documentData === 'object' && !Array.isArray(xj.documentData)
+    ? (xj.documentData as any)
+    : {};
+  const rawBuyer = raw.buyer && typeof raw.buyer === 'object' ? raw.buyer : {};
+  const rawSupplier = raw.supplier && typeof raw.supplier === 'object' ? raw.supplier : {};
+  const rawTerms = raw.terms && typeof raw.terms === 'object' ? raw.terms : {};
+  const sourceProducts = Array.isArray(raw.products)
+    ? raw.products
+    : Array.isArray(xj.products)
+      ? xj.products
+      : [];
+  const dateFallback = toDateText(xj.quotationDeadline || xj.createdDate);
+  const relatedRequirement = purchaseRequirements.find((req) =>
+    [
+      (xj as any).requirementNo,
+      (xj as any).sourceQRNumber,
+      (xj as any).sourceQrNumber,
+      (xj as any).sourceRef,
+    ]
+      .filter(Boolean)
+      .includes(req.requirementNo),
+  );
+  const fallbackConditionSource = relatedRequirement || {
+    tradeTerms: rawTerms.deliveryTerms,
+    paymentTerms: rawTerms.paymentTerms,
+    deliveryDate: raw.requiredDeliveryDate || rawTerms.deliveryRequirement,
+    qualityRequirements: rawTerms.inspectionMethod || rawTerms.qualityStandard,
+    packagingRequirements: rawTerms.packaging,
+    remarks: rawTerms.remarks,
+    items: sourceProducts,
+    notes: raw.inquiryDescription,
+  };
+
+  return {
+    xjNo: String(raw.xjNo || xj.supplierXjNo || xj.xjNumber || ''),
+    xjDate: toDateText(raw.xjDate || xj.createdDate),
+    requiredResponseDate: toDateText(raw.requiredResponseDate || raw.quoteDeadline || raw.deadline || xj.quotationDeadline || dateFallback),
+    requiredDeliveryDate: toDateText(raw.requiredDeliveryDate || xj.quotationDeadline || dateFallback),
+    inquiryDescription: String(raw.inquiryDescription || ''),
+    buyer: {
+      name: String(rawBuyer.name || rawBuyer.companyName || '福建高盛达富建材有限公司'),
+      nameEn: String(rawBuyer.nameEn || rawBuyer.companyNameEn || 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.'),
+      address: String(rawBuyer.address || '福建省福州市仓山区金山街道浦上大道216号'),
+      addressEn: String(rawBuyer.addressEn || 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China'),
+      contactPerson: String(rawBuyer.contactPerson || '采购部'),
+      tel: String(rawBuyer.tel || '+86-591-8888-8888'),
+      email: String(rawBuyer.email || 'purchase@cosun.com'),
+    },
+    supplier: {
+      companyName: String(rawSupplier.companyName || xj.supplierName || ''),
+      supplierCode: String(rawSupplier.supplierCode || xj.supplierCode || ''),
+      contactPerson: String(rawSupplier.contactPerson || ''),
+      tel: String(rawSupplier.tel || ''),
+      email: String(rawSupplier.email || xj.supplierEmail || ''),
+      address: String(rawSupplier.address || ''),
+    },
+    products: sourceProducts.map((p: any, i: number) => ({
+      no: i + 1,
+      description: String(p?.description || p?.productName || p?.name || ''),
+      specification: String(p?.specification || '-'),
+      quantity: Number(p?.quantity || 0),
+      unit: String(p?.unit || '件'),
+      modelNo: getFormalBusinessModelNo(p) || undefined,
+      imageUrl: p?.imageUrl ? String(p.imageUrl) : undefined,
+      targetPrice: p?.targetPrice ? String(p.targetPrice) : undefined,
+    })),
+    conditionGroups:
+      Array.isArray(raw.conditionGroups) && raw.conditionGroups.length > 0
+        ? raw.conditionGroups
+        : buildProcurementConditionGroups(fallbackConditionSource, 'xj'),
+    terms: {
+      paymentTerms: String(rawTerms.paymentTerms || 'T/T 30% 预付，70% 发货前付清'),
+      deliveryTerms: String(rawTerms.deliveryTerms || 'EXW 工厂交货'),
+      currency: String(rawTerms.currency || 'USD'),
+      deliveryAddress: rawTerms.deliveryAddress ? String(rawTerms.deliveryAddress) : undefined,
+      deliveryRequirement: rawTerms.deliveryRequirement ? String(rawTerms.deliveryRequirement) : undefined,
+      qualityStandard: rawTerms.qualityStandard ? String(rawTerms.qualityStandard) : undefined,
+      inspectionMethod: rawTerms.inspectionMethod ? String(rawTerms.inspectionMethod) : undefined,
+      packaging: rawTerms.packaging ? String(rawTerms.packaging) : undefined,
+      shippingMarks: rawTerms.shippingMarks ? String(rawTerms.shippingMarks) : undefined,
+      inspectionRequirement: rawTerms.inspectionRequirement ? String(rawTerms.inspectionRequirement) : undefined,
+      technicalDocuments: rawTerms.technicalDocuments ? String(rawTerms.technicalDocuments) : undefined,
+      confidentiality: rawTerms.confidentiality ? String(rawTerms.confidentiality) : undefined,
+      remarks: rawTerms.remarks ? String(rawTerms.remarks) : undefined,
+    },
+  };
+};
