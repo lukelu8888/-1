@@ -27,6 +27,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { QuoteRequirement, QuoteRequirementFeedback } from '../../contexts/QuoteRequirementContext';
+import { sanitizePurchaserFeedbackForSales } from '../../utils/purchaserFeedbackSanitizer';
 
 interface PurchaserFeedbackViewProps {
   open: boolean;
@@ -42,7 +43,7 @@ export function PurchaserFeedbackView({
   onCreateQuotation
 }: PurchaserFeedbackViewProps) {
   
-  const feedback = qr.purchaserFeedback;
+  const feedback = sanitizePurchaserFeedbackForSales(qr.purchaserFeedback, 'Sales_Rep');
   
   if (!feedback) {
     return null;

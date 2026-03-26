@@ -27,6 +27,7 @@ import { ProformaInvoiceDocument } from './templates/ProformaInvoiceDocument';
 import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
 import { QuotationDocument } from './templates/QuotationDocument';
 import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument';
+import { getStoredAdminOrgProfile } from '../../contexts/AdminOrganizationContext';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -345,16 +346,27 @@ export function DocumentTemplateSelector({
 
 // 获取示例数据（简化版，实际应该从真实业务数据中获取）
 function getSampleDataForTemplate(templateId: string): any {
+  const adminOrg = getStoredAdminOrgProfile();
+  const companyNameCn = String(adminOrg.nameCN || '').trim();
+  const companyNameEn = String(adminOrg.nameEN || companyNameCn || '').trim();
+  const companyAddressCn = String(adminOrg.addressCN || '').trim();
+  const companyAddressEn = String(adminOrg.addressEN || companyAddressCn || '').trim();
+  const companyTel = String(adminOrg.phone || '').trim();
+  const companyEmail = String(adminOrg.email || '').trim();
+  const companyWebsite = String(adminOrg.website || '').trim();
+  const usdBank = adminOrg.bankUSD;
+
   // 这里返回各个模板的示例数据
   // 实际使用时应该从业务系统中获取真实数据
   const commonData = {
     company: {
-      name: '福建高盛达富建材有限公司',
-      nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-      address: '福建省厦门市XX区XX路XX号',
-      addressEn: 'XX Road, XX District, Xiamen, Fujian, China',
-      tel: '+86-592-1234-5678',
-      email: 'info@cosun-bm.com'
+      name: companyNameCn,
+      nameEn: companyNameEn,
+      address: companyAddressCn,
+      addressEn: companyAddressEn,
+      tel: companyTel,
+      email: companyEmail,
+      website: companyWebsite
     },
     customer: {
       companyName: 'ABC Trading Corporation',
@@ -365,6 +377,34 @@ function getSampleDataForTemplate(templateId: string): any {
       address: '123 Main Street, Suite 500, Los Angeles, CA 90001',
       country: 'United States'
     }
+  };
+  const baseProducts = [
+    {
+      no: 1,
+      productName: 'GFCI Outlet',
+      specification: '20A, 125V, Tamper-Resistant',
+      quantity: 5000,
+      unit: 'pcs',
+      unitPrice: 2.85,
+      currency: 'USD',
+      amount: 14250.0,
+    },
+  ];
+  const quotationTradeTerms = {
+    incoterms: 'FOB XIAMEN',
+    paymentTerms: 'T/T, 30% deposit, 70% before shipment',
+    deliveryTime: 'Within 30 days after receiving deposit',
+    packing: 'Export standard carton packing',
+    portOfLoading: 'Xiamen, China',
+    portOfDestination: 'Los Angeles, USA',
+    warranty: '12 months from shipment date',
+    inspection: 'Seller self-inspection before shipment',
+  };
+  const salesPerson = {
+    name: String(adminOrg.contactPerson || adminOrg.defaultSignatory || 'Luke'),
+    position: 'Sales Representative',
+    email: companyEmail,
+    phone: companyTel,
   };
 
   // 根据不同模板返回对应的示例数据
@@ -402,22 +442,16 @@ function getSampleDataForTemplate(templateId: string): any {
         validUntil: '2026-01-10',
         inquiryNo: 'ING-NA-20251210-001',
         region: 'NA',
-        supplier: commonData.company,
-        buyer: commonData.customer,
-        products: [
-          {
-            no: 1,
-            productName: 'GFCI Outlet',
-            specification: '20A, 125V, Tamper-Resistant',
-            quantity: 5000,
-            unit: 'pcs',
-            unitPrice: 2.85,
-            currency: 'USD',
-            amount: 14250.00
-          }
-        ],
-        tradeTerms: 'FOB XIAMEN',
-        paymentTerms: 'T/T, 30% deposit, 70% before shipment'
+        company: commonData.company,
+        customer: commonData.customer,
+        products: baseProducts.map((item) => ({
+          ...item,
+          modelNo: '-',
+          specification: `${item.specification}, White with LED`,
+        })),
+        tradeTerms: quotationTradeTerms,
+        remarks: 'Prices are quoted in USD and valid for 30 days.',
+        salesPerson,
       };
 
     case 'sc':
@@ -425,54 +459,82 @@ function getSampleDataForTemplate(templateId: string): any {
         contractNo: 'SC-NA-20251220-001',
         contractDate: '2025-12-20',
         quotationNo: 'QT-NA-20251210-001',
-        seller: commonData.company,
-        buyer: commonData.customer,
-        products: [
-          {
-            no: 1,
-            productName: 'GFCI Outlet',
-            specification: '20A, 125V, Tamper-Resistant',
-            quantity: 5000,
-            unit: 'pcs',
-            unitPrice: 2.85,
+        region: 'NA',
+        seller: {
+          ...commonData.company,
+          legalRepresentative: String(adminOrg.contactPerson || adminOrg.defaultSignatory || ''),
+          bankInfo: {
+            bankName: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
+            accountName: String(usdBank.accountNameEN || usdBank.accountNameCN || companyNameEn || companyNameCn),
+            accountNumber: String(usdBank.accountNumber || ''),
+            swiftCode: String(usdBank.swiftCode || ''),
+            bankAddress: String(usdBank.bankAddress || ''),
             currency: 'USD',
-            amount: 14250.00
-          }
-        ],
-        tradeTerms: 'FOB XIAMEN',
-        paymentTerms: 'T/T, 30% deposit, 70% before shipment',
-        portOfLoading: 'Xiamen, China',
-        portOfDestination: 'Los Angeles, USA',
-        deliveryTime: 'Within 30 days after receiving deposit',
-        packingRequirements: 'Export standard carton packing'
+            paymentNote: String(usdBank.paymentNote || ''),
+          },
+        },
+        buyer: {
+          companyName: commonData.customer.companyName,
+          address: commonData.customer.address,
+          country: commonData.customer.country,
+          contactPerson: commonData.customer.contactPerson,
+          tel: commonData.customer.phone,
+          email: commonData.customer.email,
+        },
+        products: baseProducts.map((item) => ({
+          no: item.no,
+          modelNo: '-',
+          description: 'GFCI Outlet - 20A, 125V, Tamper-Resistant, Weather-Resistant, UL Listed, White with LED',
+          specification: '20A, 125V, Tamper-Resistant, Weather-Resistant, UL Listed, White with LED',
+          quantity: item.quantity,
+          unit: item.unit,
+          unitPrice: item.unitPrice,
+          currency: item.currency,
+          amount: item.amount,
+        })),
+        terms: {
+          totalAmount: 14250.0,
+          currency: 'USD',
+          tradeTerms: quotationTradeTerms.incoterms,
+          paymentTerms: quotationTradeTerms.paymentTerms,
+          depositAmount: 4275.0,
+          balanceAmount: 9975.0,
+          deliveryTime: quotationTradeTerms.deliveryTime,
+          portOfLoading: quotationTradeTerms.portOfLoading,
+          portOfDestination: quotationTradeTerms.portOfDestination || '',
+          packing: quotationTradeTerms.packing,
+          inspection: quotationTradeTerms.inspection || '',
+          warranty: quotationTradeTerms.warranty,
+        },
       };
 
     case 'cg':
       return {
-        poNo: 'CG-20251205-001',
-        poDate: '2025-12-05',
-        contractNo: 'SC-NA-20251220-001',
+        contractNo: 'CG-20251205-001',
+        contractDate: '2025-12-05',
+        expectedDeliveryDate: '2026-01-25',
         buyer: commonData.company,
         supplier: {
           companyName: 'Supplier Company Ltd.',
+          supplierCode: 'SUP-GD-001',
           address: 'Supplier Address',
-          tel: '+86-123-4567-8900',
-          contact: 'Supplier Contact'
+          contactPerson: 'Supplier Contact',
+          phone: '+86-123-4567-8900',
+          email: 'sales@supplier.com',
         },
         products: [
           {
             no: 1,
-            productName: 'GFCI Outlet Components',
+            modelNo: 'ITEM-GFCI-001',
+            productName: 'GFCI Outlet Components - Main Housing',
             specification: 'According to technical drawing',
             quantity: 5000,
             unit: 'pcs',
-            unitPrice: 1.50,
+            unitPrice: 1.5,
             currency: 'USD',
-            amount: 7500.00
-          }
+            amount: 7500.0,
+          },
         ],
-        paymentTerms: 'T/T, 30% deposit, 70% before delivery',
-        deliveryTime: 'Within 20 days after order confirmation'
       };
 
     case 'ci':
@@ -521,11 +583,10 @@ function getSampleDataForTemplate(templateId: string): any {
           voyageNo: 'V123'
         },
         packing: {
-          totalPackages: 50,
-          packageType: 'CARTONS',
+          totalCartons: 50,
           totalGrossWeight: 1250,
           totalNetWeight: 1100,
-          measurement: 12.5
+          totalMeasurement: 12.5
         }
       };
 
@@ -570,31 +631,52 @@ function getSampleDataForTemplate(templateId: string): any {
     case 'pi':
       return {
         invoiceNo: 'PI-20251215-001',
+        scNo: 'SC-NA-20251220-001',
         invoiceDate: '2025-12-15',
-        quotationNo: 'QT-NA-20251210-001',
-        seller: commonData.company,
-        buyer: commonData.customer,
+        seller: {
+          name: companyNameCn,
+          nameEn: companyNameEn,
+          address: companyAddressCn,
+          addressEn: companyAddressEn,
+          tel: companyTel,
+          email: companyEmail,
+          logoUrl: undefined,
+        },
+        buyer: {
+          companyName: commonData.customer.companyName,
+          contactPerson: commonData.customer.contactPerson,
+          phone: commonData.customer.phone,
+          address: commonData.customer.address,
+          country: commonData.customer.country,
+        },
         products: [
           {
-            no: 1,
-            productName: 'GFCI Outlet',
+            seqNo: 1,
+            description: 'GFCI Outlet',
             specification: '20A, 125V, Tamper-Resistant',
             quantity: 5000,
             unit: 'pcs',
             unitPrice: 2.85,
             currency: 'USD',
-            amount: 14250.00
-          }
+            extendedValue: 14250.0,
+          },
         ],
-        tradeTerms: 'FOB XIAMEN',
-        paymentTerms: 'T/T, 30% deposit ($4,275.00), 70% before shipment ($9,975.00)',
-        deliveryTime: 'Within 30 days after receiving deposit',
-        validUntil: '2026-01-15',
-        bankDetails: {
-          bankName: 'Bank of China Xiamen Branch',
-          accountName: commonData.company.nameEn,
-          accountNo: '1234567890',
-          swiftCode: 'BKCHCNBJ'
+        totalValue: 14250.0,
+        totalCurrency: 'USD',
+        priceTerms: 'FOB XIAMEN',
+        bankInfo: {
+          beneficiary: String(usdBank.accountNameEN || usdBank.accountNameCN || companyNameEn || companyNameCn),
+          beneficiaryAddress: companyAddressEn || companyAddressCn,
+          accountNo: String(usdBank.accountNumber || ''),
+          bank: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
+          bankAddress: String(usdBank.bankAddress || ''),
+          swiftCode: String(usdBank.swiftCode || ''),
+        },
+        remarks: {
+          priceTerms: 'Price Term: FOB XIAMEN',
+          paymentTerms: 'Term of payment: 30% deposit, 70% before shipment',
+          portOfLoading: 'Port of Loading: XIAMEN',
+          shipmentDate: 'Date of Shipment: WITHIN 30 DAYS AFTER RECEIVING DEPOSIT',
         }
       };
 
@@ -602,10 +684,25 @@ function getSampleDataForTemplate(templateId: string): any {
       return {
         statementNo: 'SOA-20251231-001',
         statementDate: '2025-12-31',
-        periodFrom: '2025-10-01',
-        periodTo: '2025-12-31',
-        company: commonData.company,
-        customer: commonData.customer,
+        periodStart: '2025-10-01',
+        periodEnd: '2025-12-31',
+        company: {
+          ...commonData.company,
+          accountName: String(usdBank.accountNameEN || usdBank.accountNameCN || commonData.company.nameEn || commonData.company.name || ''),
+          bankName: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
+          accountNumber: String(usdBank.accountNumber || ''),
+          swiftCode: String(usdBank.swiftCode || ''),
+          bankAddress: String(usdBank.bankAddress || ''),
+          paymentNote: String(usdBank.paymentNote || ''),
+        },
+        customer: {
+          customerCode: 'CUST-NA-001',
+          companyName: commonData.customer.companyName,
+          address: commonData.customer.address,
+          contactPerson: commonData.customer.contactPerson,
+          email: commonData.customer.email,
+          tel: commonData.customer.phone,
+        },
         openingBalance: {
           amount: 0,
           currency: 'USD',

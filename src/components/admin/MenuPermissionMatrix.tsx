@@ -6,11 +6,11 @@ import { Button } from '../ui/button';
 const ALL_ROLES = [
   { id: 'CEO', label: 'CEO', color: 'purple' },
   { id: 'CFO', label: 'CFO', color: 'blue' },
-  { id: 'Sales_Manager', label: '销售总监', color: 'green' },
+  { id: 'Sales_Director', label: '销售总监', color: 'green' },
   { id: 'Regional_Manager', label: '区域主管', color: 'teal' },
   { id: 'Sales_Rep', label: '业务员', color: 'cyan' },
-  { id: 'Finance', label: '财务专员', color: 'indigo' },
-  { id: 'Procurement', label: '采购专员', color: 'orange' },
+  { id: 'Finance', label: '内部财务', color: 'indigo' },
+  { id: 'Procurement', label: '采购员', color: 'orange' },
   { id: 'Marketing_Ops', label: '运营专员', color: 'pink' },
   { id: 'Admin', label: '系统管理员', color: 'gray' }
 ];

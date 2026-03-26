@@ -18,9 +18,9 @@ import { DatePicker } from '../../ui/date-picker';
 import { getFormalBusinessModelNo } from '../../../utils/productModelDisplay';
 
 type CreateXJAndHistoryDialogsProps = {
-  showCreateRFQDialog: boolean;
-  setShowCreateRFQDialog: React.Dispatch<React.SetStateAction<boolean>>;
-  selectedRequirementForRFQ: QuoteRequirement | null;
+  showCreateXJDialog: boolean;
+  setShowCreateXJDialog: React.Dispatch<React.SetStateAction<boolean>>;
+  selectedRequirementForXJ: QuoteRequirement | null;
   selectedProductIds: string[];
   setSelectedProductIds: React.Dispatch<React.SetStateAction<string[]>>;
   selectedSuppliers: Supplier[];
@@ -28,23 +28,23 @@ type CreateXJAndHistoryDialogsProps = {
   supplierSearchTerm: string;
   setSupplierSearchTerm: React.Dispatch<React.SetStateAction<string>>;
   allSuppliers: Supplier[];
-  handlePreviewRFQ: (supplier: Supplier) => void;
+  handlePreviewXJ: (supplier: Supplier) => void;
   xjDeadline: Date | undefined;
   setXJDeadline: React.Dispatch<React.SetStateAction<Date | undefined>>;
   xjRemarks: string;
-  setRFQRemarks: React.Dispatch<React.SetStateAction<string>>;
+  setXJRemarks: React.Dispatch<React.SetStateAction<string>>;
   handleSubmitXJ: () => void;
   submittingXJ: boolean;
-  showRFQHistoryDialog: boolean;
-  setShowRFQHistoryDialog: React.Dispatch<React.SetStateAction<boolean>>;
+  showXJHistoryDialog: boolean;
+  setShowXJHistoryDialog: React.Dispatch<React.SetStateAction<boolean>>;
   selectedProductForHistory: any;
   setSelectedProductForHistory: React.Dispatch<React.SetStateAction<any>>;
 };
 
 export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps> = ({
-  showCreateRFQDialog,
-  setShowCreateRFQDialog,
-  selectedRequirementForRFQ,
+  showCreateXJDialog,
+  setShowCreateXJDialog,
+  selectedRequirementForXJ,
   selectedProductIds,
   setSelectedProductIds,
   selectedSuppliers,
@@ -52,15 +52,15 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
   supplierSearchTerm,
   setSupplierSearchTerm,
   allSuppliers,
-  handlePreviewRFQ,
+  handlePreviewXJ,
   xjDeadline,
   setXJDeadline,
   xjRemarks,
-  setRFQRemarks,
+  setXJRemarks,
   handleSubmitXJ,
   submittingXJ,
-  showRFQHistoryDialog,
-  setShowRFQHistoryDialog,
+  showXJHistoryDialog,
+  setShowXJHistoryDialog,
   selectedProductForHistory,
   setSelectedProductForHistory,
 }) => {
@@ -87,7 +87,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
 
   return (
     <>
-      <Dialog open={showCreateRFQDialog} onOpenChange={setShowCreateRFQDialog}>
+      <Dialog open={showCreateXJDialog} onOpenChange={setShowCreateXJDialog}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader className="border-b border-gray-200 pb-4">
             <DialogTitle className="text-base">创建询价单 - 采购询价</DialogTitle>
@@ -95,14 +95,14 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto py-4 space-y-4">
-            {selectedRequirementForRFQ && (
+            {selectedRequirementForXJ && (
               <div className="bg-gray-50 border border-gray-200 rounded p-4">
                 <h4 className="text-xs font-semibold text-gray-900 mb-3">📋 采购需求信息</h4>
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div><span className="text-gray-600">需求编号:</span><span className="ml-2 font-semibold text-gray-900">{selectedRequirementForRFQ.requirementNo}</span></div>
-                  <div><span className="text-gray-600">客户:</span><span className="ml-2 font-semibold text-gray-900">{selectedRequirementForRFQ.customerName}</span></div>
-                  <div><span className="text-gray-600">要求日期:</span><span className="ml-2 font-semibold text-gray-900">{selectedRequirementForRFQ.requiredDate}</span></div>
-                  <div><span className="text-gray-600">产品数量:</span><span className="ml-2 font-semibold text-gray-900">{selectedRequirementForRFQ.items?.length || 0} 项</span></div>
+                  <div><span className="text-gray-600">需求编号:</span><span className="ml-2 font-semibold text-gray-900">{selectedRequirementForXJ.requirementNo}</span></div>
+                  <div><span className="text-gray-600">客户:</span><span className="ml-2 font-semibold text-gray-900">{selectedRequirementForXJ.customerName}</span></div>
+                  <div><span className="text-gray-600">要求日期:</span><span className="ml-2 font-semibold text-gray-900">{selectedRequirementForXJ.requiredDate}</span></div>
+                  <div><span className="text-gray-600">产品数量:</span><span className="ml-2 font-semibold text-gray-900">{selectedRequirementForXJ.items?.length || 0} 项</span></div>
                 </div>
 
                 <div className="mt-3">
@@ -115,10 +115,10 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
                             <input
                               type="checkbox"
                               className="w-4 h-4 cursor-pointer"
-                              checked={selectedProductIds.length === selectedRequirementForRFQ.items?.length && selectedProductIds.length > 0}
+                              checked={selectedProductIds.length === selectedRequirementForXJ.items?.length && selectedProductIds.length > 0}
                               onChange={(e) => {
                                 if (e.target.checked) {
-                                  setSelectedProductIds(selectedRequirementForRFQ.items?.map((item) => String(item.id)) || []);
+                                  setSelectedProductIds(selectedRequirementForXJ.items?.map((item) => String(item.id)) || []);
                                 } else {
                                   setSelectedProductIds([]);
                                 }
@@ -134,7 +134,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedRequirementForRFQ.items?.map((item, idx) => (
+                        {selectedRequirementForXJ.items?.map((item, idx) => (
                           <tr key={item.id || idx} className="border-t border-gray-100 hover:bg-gray-50">
                             <td className="py-1.5 px-2 text-center">
                               <input
@@ -161,7 +161,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
                                 <button
                                   onClick={() => {
                                     setSelectedProductForHistory(item);
-                                    setShowRFQHistoryDialog(true);
+                                    setShowXJHistoryDialog(true);
                                   }}
                                   className="text-xs px-2 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded hover:bg-green-100 transition-colors cursor-pointer"
                                 >
@@ -222,7 +222,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
                             variant="outline"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handlePreviewRFQ(supplier);
+                              handlePreviewXJ(supplier);
                             }}
                             className="h-7 text-xs px-2 flex items-center gap-1"
                           >
@@ -248,7 +248,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
               <Label className="text-xs font-semibold text-gray-900 mb-2 block">备注说明</Label>
               <Textarea
                 value={xjRemarks}
-                onChange={(e) => setRFQRemarks(e.target.value)}
+                onChange={(e) => setXJRemarks(e.target.value)}
                 placeholder="向供应商说明特殊要求、注意事项等..."
                 rows={3}
                 className="text-xs resize-none"
@@ -257,7 +257,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
           </div>
 
           <DialogFooter className="border-t border-gray-200 pt-4">
-            <Button variant="outline" onClick={() => setShowCreateRFQDialog(false)} className="text-xs">取消</Button>
+            <Button variant="outline" onClick={() => setShowCreateXJDialog(false)} className="text-xs">取消</Button>
             <Button onClick={handleSubmitXJ} disabled={submittingXJ || selectedSuppliers.length === 0 || !xjDeadline} className="bg-blue-600 hover:bg-blue-700 text-xs">
               {submittingXJ ? '创建中...' : `创建询价单 (${selectedSuppliers.length} 个供应商)`}
             </Button>
@@ -265,7 +265,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showRFQHistoryDialog} onOpenChange={setShowRFQHistoryDialog}>
+      <Dialog open={showXJHistoryDialog} onOpenChange={setShowXJHistoryDialog}>
         <DialogContent className="max-w-2xl">
           <DialogHeader className="border-b border-gray-200 pb-4">
             <DialogTitle className="text-base">询价历史记录</DialogTitle>
@@ -316,7 +316,7 @@ export const CreateXJAndHistoryDialogs: React.FC<CreateXJAndHistoryDialogsProps>
           </div>
 
           <DialogFooter className="border-t border-gray-200 pt-4">
-            <Button variant="outline" onClick={() => setShowRFQHistoryDialog(false)} className="text-xs">关闭</Button>
+            <Button variant="outline" onClick={() => setShowXJHistoryDialog(false)} className="text-xs">关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

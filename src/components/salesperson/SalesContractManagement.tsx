@@ -31,13 +31,16 @@ import {
   FileCheck,
   DollarSign,
   ShoppingCart,
-  FileText // 🔥 新增：文档图标
+  FileText, // 🔥 新增：文档图标
+  Zap       // Phase 4: active-production icon for SC 'production' status
 } from 'lucide-react';
 import { SalesContractContext, useSalesContracts } from '../../contexts/SalesContractContext';
 import { useOrders } from '../../contexts/OrderContext';
 import { useApproval } from '../../contexts/ApprovalContext'; // 🔥 添加审批Context
 import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext'; // 🔥 新增：采购订单Context
 import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
+import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // Phase 6a: estimated profit from QT
+import { computeSCProfit, ACTUAL_UNAVAILABLE_LABEL, ACTUAL_UNAVAILABLE_TOOLTIP, ACTUAL_UNAVAILABLE_ICON } from '../../utils/scProfitUtils'; // Phase 6a/6c: SC profit utility
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { nextPRNumber } from '../../utils/xjNumberGenerator';
 import { toast } from 'sonner@2.0.3';
@@ -49,17 +52,19 @@ import {
   buildQuoteRequirementDocumentSnapshot,
 } from '../admin/purchase-order/purchaseOrderUtils';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { matchesBusinessOwnerEmail } from '../../utils/quotationOwnership';
 
 interface SalesContractManagementProps {
   highlightScNumber?: string; // 🔥 高亮显示的销售合同号
 }
 
 export function SalesContractManagement({ highlightScNumber }: SalesContractManagementProps = {}) {
-  const { contracts, deleteContract, submitForApproval, sendToCustomer, clearAllContracts, updateContract, refreshFromBackend } = useSalesContracts();
+  const { contracts, deleteContract, submitForApproval, sendToCustomer, clearAllContracts, updateContract, refreshFromBackend, confirmBalancePayment, advanceSCToShipped, advanceSCToCompleted, markPRInitiated } = useSalesContracts();
   const { orders } = useOrders(); // 🔥 获取订单数据
   const { addApprovalRequest } = useApproval(); // 🔥 审批功能
   const { purchaseOrders, addPurchaseOrder, updatePurchaseOrder } = usePurchaseOrders(); // 🔥 新增：采购订单功能
   const { addRequirement } = useQuoteRequirements();
+  const { getQuotationByNumber } = useSalesQuotations(); // Phase 6a: QT look-up for estimated profit
   const currentUser = getCurrentUser();
   const ensureBoundSalesContractSnapshot = (contract: any) => {
     const templateSnapshot = contract?.templateSnapshot || contract?.template_snapshot || null;
@@ -91,6 +96,11 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
         requiredDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         urgency: 'high',
         createdBy: currentUser?.email || 'system',
+        requestedBy: contract.salesPerson || null,
+        requestedByName: contract.salesPersonName || null,
+        ownerEmail: contract.salesPerson || null,
+        ownerName: contract.salesPersonName || null,
+        ownerRole: 'Sales_Rep',
         createdDate: new Date().toISOString(),
         specialRequirements: contract.projectRevisionId
           ? `由业务员下推采购，采购单号: ${poNumber}\nExecution Baseline: ${contract.projectCode ? `${contract.projectCode} · ` : ''}${contract.projectName || 'Project'} / Rev ${contract.projectRevisionCode || '-'} / Final QT ${contract.finalQuotationNumber || contract.quotationNumber || '-'}`
@@ -193,12 +203,36 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   
   // 🔥 状态管理
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'pending' | 'approved' | 'rejected' | 'sent' | 'confirmed'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'pending' | 'approved' | 'rejected' | 'sent' | 'confirmed' | 'profit_unavailable' | 'profit_alert' | 'profit_deviation'>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
   // 🔥 新增：文档预览状态
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
   const [selectedContract, setSelectedContract] = useState<any>(null);
+
+  // Phase 6b: inline edit state for SC-level additional cost
+  const [editingAdditionalCostId, setEditingAdditionalCostId] = useState<string | null>(null);
+  const [additionalCostDraft, setAdditionalCostDraft] = useState('');
+  const handleSaveAdditionalCost = async (contractId: string) => {
+    const parsed = parseFloat(additionalCostDraft);
+    if (isNaN(parsed) || parsed < 0) return;
+    await updateContract(contractId, { additionalCost: parsed });
+    setEditingAdditionalCostId(null);
+  };
+  // Phase 8: FX rate inline editing — one row per foreign-currency CG currency.
+  // editingFxKey is "${contractId}::${CURRENCY}" so each currency on each contract
+  // has its own independent edit state without extra state arrays.
+  const [editingFxKey, setEditingFxKey] = useState<string | null>(null);
+  const [fxRateDraft, setFxRateDraft] = useState('');
+  const handleSaveFxRate = async (contractId: string, currency: string) => {
+    const parsed = parseFloat(fxRateDraft);
+    if (isNaN(parsed) || parsed <= 0) return;
+    const contract = contracts.find(c => c.id === contractId);
+    if (!contract) return;
+    const updatedRates = { ...(contract.fxRates ?? {}), [currency]: parsed };
+    await updateContract(contractId, { fxRates: updatedRates });
+    setEditingFxKey(null);
+  };
   const requestProcurementFromContract = async (contract: any) => {
     if (!ensureBoundSalesContractSnapshot(contract)) {
       return;
@@ -276,6 +310,9 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
         ? `📋 业务员请求采购（不含供应商信息）\n来源销售合同: ${contract.contractNumber}\n来源询价: ${contract.inquiryNumber || ''}\nExecution Baseline: ${contract.projectCode ? `${contract.projectCode} · ` : ''}${contract.projectName || 'Project'} / Rev ${contract.projectRevisionCode || '-'} / Final QT ${contract.finalQuotationNumber || contract.quotationNumber || '-'}\n待采购员分配供应商`
         : `📋 业务员请求采购（不含供应商信息）\n来源销售合同: ${contract.contractNumber}\n来源询价: ${contract.inquiryNumber || ''}\n待采购员分配供应商`,
       createdBy: currentUser?.email || 'system',
+      ownerEmail: contract.salesPerson || null,
+      ownerName: contract.salesPersonName || null,
+      ownerRole: 'Sales_Rep',
       createdDate: new Date().toISOString(),
       procurementRequestStatus: 'pending_procurement_assignment',
     } as any;
@@ -313,6 +350,21 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       return;
     }
 
+    // Phase 3a: SC write-back — close the SC → PR initiation loop.
+    // Both PR-side records (purchase_orders + quote_requirements) were created above.
+    // Now advance the SC to po_generated and record the PR number on the SC.
+    // If this write fails, the PR records are already committed; surface the error so the
+    // user knows the contract status needs a manual refresh, but do not block the PR creation.
+    try {
+      await markPRInitiated(contract.id, poNumber);
+    } catch (err: any) {
+      toast.error('采购请求已创建，但合同状态同步失败', {
+        description: `采购单号 ${poNumber} 已记录。请刷新页面以同步合同状态。`,
+        duration: 7000,
+      });
+      return;
+    }
+
     toast.success('✅ 已请求采购', {
       description: `采购单号：${poNumber}（待采购员分配供应商）`,
       duration: 4500
@@ -325,7 +377,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   
   // 🔥 全选/取消全选
   const handleSelectAll = (checked: boolean) => {
-    const deletableIds = myContracts.filter((c) => isContractDeletable(c)).map((c) => c.id);
+    const deletableIds = filteredContracts.filter((c) => isContractDeletable(c)).map((c) => c.id);
     if (checked) {
       setSelectedIds(deletableIds);
     } else {
@@ -373,15 +425,15 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     // 🔥 获取主管和总监信息
     const getRegionalManager = (region: string) => {
       const managers: Record<string, string> = {
-        'NA': 'john.smith@cosun.com',          // 北美区主管：刘建国
-        'SA': 'carlos.silva@cosun.com',        // 南美区主管：陈明华
-        'EA': 'hans.mueller@cosun.com',      // 欧非区主管：赵国强
+        'NA': 'salesmanager-na@cosunchina.com', // 北美区主管：刘建国
+        'SA': 'salesmanager-sa@cosunchina.com', // 南美区主管：陈明华
+        'EA': 'salesmanager-ea@cosunchina.com', // 欧非区主管：赵国强
       };
       return managers[region] || managers['NA'];
     };
     
     const managerEmail = getRegionalManager(contract.region);
-    const directorEmail = 'sales.director@cosun.com'; // 销售总监：王强
+    const directorEmail = 'sales.director@cosunchina.com'; // 销售总监：王强
     
     // 🔥 产品摘要
     const productCount = contract.products.length;
@@ -395,8 +447,8 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       relatedDocumentId: contract.contractNumber,
       relatedDocumentType: '销售合同',
       relatedDocument: contract,
-      submittedBy: currentUser?.email || '',
-      submittedByName: currentUser?.name || currentUser?.email || '',
+      submittedBy: contract.salesPerson || currentUser?.email || '',
+      submittedByName: contract.salesPersonName || currentUser?.name || currentUser?.email || '',
       submittedByRole: currentUser?.role || 'Salesperson',
       submittedAt: new Date().toISOString(),
       region: contract.region,
@@ -441,6 +493,9 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     sendToCustomer(contract.id);
   };
 
+  // Phase 6c: statuses where the profit block is shown and profit filters are applied.
+  const PROFIT_VISIBLE_STATUSES = ['po_generated', 'production', 'balance_confirmed', 'shipped', 'completed'];
+
   const formatContractNumberForDisplay = (contractNumber: string) => {
     return String(contractNumber || '')
       .replace('SC-North America-', 'SC-NA-')
@@ -458,7 +513,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       const sourceRef = String(po?.sourceRef || '').trim();
       const sourceSONumber = String(po?.sourceSONumber || '').trim();
       const salesContractNumber = String(po?.salesContractNumber || '').trim();
-      const reqStatus = String((po as any)?.procurementRequestStatus || '').trim();
+      const reqStatus = String(po?.procurementRequestStatus || '').trim();
       const isCq = poNo.startsWith('CQ-');
       if (!isCq) return false;
       // 已下推供应商后的历史请求不阻止再次“请求采购”
@@ -484,6 +539,16 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     })));
     
     return contracts.filter(contract => {
+      if (!matchesBusinessOwnerEmail(
+        contract.ownerEmail || contract.salesPerson,
+        currentUser?.email,
+        contract.region,
+        contract.ownerUserId,
+        currentUser?.id,
+      )) {
+        return false;
+      }
+
       // 🔥 数据来自接口：后端已按登录用户过滤，前端不再按 salesPerson 硬过滤
       console.log(`  - ${contract.contractNumber}: salesPerson=${contract.salesPerson}`);
 
@@ -491,10 +556,26 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       if (filterStatus !== 'all') {
         if (filterStatus === 'pending' && !['pending_supervisor', 'pending_director'].includes(contract.status)) {
           return false;
-        } else if (filterStatus === 'sent' && !['sent_to_customer', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes'].includes(contract.status)) {
+        } else if (filterStatus === 'sent' && !['sent', 'sent_to_customer', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes'].includes(contract.status)) {
           return false;
         } else if (filterStatus === 'confirmed' && contract.status !== 'customer_confirmed') {
           return false;
+        } else if (filterStatus === 'profit_unavailable') {
+          // Phase 6c: show SCs in procurement phases where actual profit cannot yet be computed
+          if (!PROFIT_VISIBLE_STATUSES.includes(contract.status)) return false;
+          const p = computeSCProfit(contract, getQuotationByNumber(contract.quotationNumber) ?? null, purchaseOrders);
+          if (p.actual.available) return false;
+        } else if (filterStatus === 'profit_alert') {
+          // Phase 6c: show SCs where actual profit is negative
+          if (!PROFIT_VISIBLE_STATUSES.includes(contract.status)) return false;
+          const p = computeSCProfit(contract, getQuotationByNumber(contract.quotationNumber) ?? null, purchaseOrders);
+          if (!p.actual.available || p.actual.actualMargin >= 0) return false;
+        } else if (filterStatus === 'profit_deviation') {
+          // Phase 6d: show SCs where actual margin underperforms estimated by > 5pp
+          if (!PROFIT_VISIBLE_STATUSES.includes(contract.status)) return false;
+          const p = computeSCProfit(contract, getQuotationByNumber(contract.quotationNumber) ?? null, purchaseOrders);
+          if (!p.actual.available || !p.estimated) return false;
+          if ((p.actual.actualMargin - p.estimated.estimatedMargin) >= -0.05) return false;
         } else if (!['pending', 'sent', 'confirmed'].includes(filterStatus) && contract.status !== filterStatus) {
           return false;
         }
@@ -515,7 +596,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       
       return true;
     });
-  }, [contracts, currentUser, filterStatus, searchTerm]);
+  }, [contracts, currentUser, filterStatus, searchTerm, getQuotationByNumber, purchaseOrders]);
   
   // 🔥 统计信息
   const stats = useMemo(() => {
@@ -524,38 +605,83 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     const pending = myContracts.filter(c => ['pending_supervisor', 'pending_director'].includes(c.status)).length;
     const approved = myContracts.filter(c => c.status === 'approved').length;
     const rejected = myContracts.filter(c => c.status === 'rejected').length;
-    const sent = myContracts.filter(c => ['sent_to_customer', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes'].includes(c.status)).length;
+    const sent = myContracts.filter(c => ['sent', 'sent_to_customer', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes'].includes(c.status)).length;
     const confirmed = myContracts.filter(c => c.status === 'customer_confirmed').length;
-    
-    return { total, draft, pending, approved, rejected, sent, confirmed };
-  }, [myContracts]);
+    // Phase 6c: profit-state counts — only over procurement-phase SCs
+    const profitUnavailable = myContracts.filter(c => {
+      if (!PROFIT_VISIBLE_STATUSES.includes(c.status)) return false;
+      const p = computeSCProfit(c, getQuotationByNumber(c.quotationNumber) ?? null, purchaseOrders);
+      return !p.actual.available;
+    }).length;
+    const profitAlert = myContracts.filter(c => {
+      if (!PROFIT_VISIBLE_STATUSES.includes(c.status)) return false;
+      const p = computeSCProfit(c, getQuotationByNumber(c.quotationNumber) ?? null, purchaseOrders);
+      return p.actual.available && p.actual.actualMargin < 0;
+    }).length;
+    // Phase 6d: actual margin underperforms estimated by > 5pp (both values must be present)
+    const profitDeviation = myContracts.filter(c => {
+      if (!PROFIT_VISIBLE_STATUSES.includes(c.status)) return false;
+      const p = computeSCProfit(c, getQuotationByNumber(c.quotationNumber) ?? null, purchaseOrders);
+      if (!p.actual.available || !p.estimated) return false;
+      return (p.actual.actualMargin - p.estimated.estimatedMargin) < -0.05;
+    }).length;
+    return { total, draft, pending, approved, rejected, sent, confirmed, profitUnavailable, profitAlert, profitDeviation };
+  }, [myContracts, getQuotationByNumber, purchaseOrders]);
+
+  const filteredContracts = myContracts;
   
   // 🔥 获取状态Badge
   const getStatusBadge = (status: string) => {
-    const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
+    const statusConfig: Record<string, { label: string; color: string; icon: any; tooltip?: string }> = {
       draft: { label: '草稿', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: Edit },
       pending_supervisor: { label: '待主管审批', color: 'bg-yellow-100 text-yellow-700 border-yellow-300', icon: Clock },
       pending_director: { label: '待总监审批', color: 'bg-orange-100 text-orange-700 border-orange-300', icon: AlertCircle },
-      approved: { label: '已批准', color: 'bg-green-100 text-green-700 border-green-300', icon: CheckCircle },
+      // Phase 4: approved lightened so it doesn't read as the terminal 'completed' state.
+      approved: { label: '已批准', color: 'bg-green-50 text-green-600 border-green-200', icon: CheckCircle },
       rejected: { label: '已驳回', color: 'bg-red-100 text-red-700 border-red-300', icon: XCircle },
       sent_to_customer: { label: '已发送客户', color: 'bg-blue-100 text-blue-700 border-blue-300', icon: Send },
       sent: { label: '已发送客户', color: 'bg-blue-100 text-blue-700 border-blue-300', icon: Send }, // 🔥 添加sent状态映射
       customer_confirmed: { label: '客户确认·等待定金', color: 'bg-emerald-100 text-emerald-700 border-emerald-300', icon: DollarSign }, // 🔥 修改：更清晰的状态描述，使用金钱图标
       deposit_uploaded: { label: '定金已上传·待财务确认', color: 'bg-purple-100 text-purple-700 border-purple-300', icon: FileCheck }, // 🔥 新增：定金已上传状态
       deposit_confirmed: { label: '定金已确认·可生成PO', color: 'bg-teal-100 text-teal-700 border-teal-300', icon: CheckCircle }, // 🔥 新增：定金已确认状态
+      // Phase 4: po_generated — this is a procurement-queue state, not manufacturing readiness.
+      // Amber signals "admin action pending". ShoppingCart icon represents procurement initiation.
+      po_generated: {
+        label: '采购请求已创建·待分配供应商',
+        color: 'bg-amber-100 text-amber-700 border-amber-300',
+        icon: ShoppingCart,
+        tooltip: '采购请求已发送管理员，待供应商分配',
+      },
+      // Phase 4: production — all CGs pushed to suppliers; manufacturing is active (not waiting).
+      // Zap icon replaces Package to signal active execution rather than a static artifact.
+      production: {
+        label: '生产中',
+        color: 'bg-indigo-100 text-indigo-700 border-indigo-300',
+        icon: Zap,
+        tooltip: '所有供应商采购单已下推，供应商已开始执行',
+      },
+      balance_confirmed: { label: '尾款已确认·可发货', color: 'bg-lime-100 text-lime-700 border-lime-300', icon: DollarSign }, // 🔥 Phase 2a
+      shipped: { label: '已发货', color: 'bg-sky-100 text-sky-700 border-sky-300', icon: Truck },
+      // Phase 4: completed uses richer green to distinguish from the lighter 'approved' state.
+      completed: { label: '已完成', color: 'bg-green-200 text-green-900 border-green-400', icon: CheckCircle },
       customer_rejected: { label: '客户已拒绝', color: 'bg-red-100 text-red-700 border-red-300', icon: XCircle },
       customer_requested_changes: { label: '客户要求修改', color: 'bg-purple-100 text-purple-700 border-purple-300', icon: AlertCircle },
     };
-    
+
     const config = statusConfig[status] || statusConfig.draft;
     const Icon = config.icon;
-    
-    return (
+
+    const badge = (
       <Badge className={`h-5 px-2 text-xs border ${config.color} flex items-center gap-1`}>
         <Icon className="h-3 w-3" />
         {config.label}
       </Badge>
     );
+
+    // Wrap in a span to surface tooltip via native title — keeps badge JSX unchanged.
+    return config.tooltip
+      ? <span title={config.tooltip}>{badge}</span>
+      : badge;
   };
   
   return (
@@ -674,12 +800,41 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                 >
                   已发送 ({stats.sent})
                 </Button>
-                <Button 
+                <Button
                   variant={filterStatus === 'confirmed' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setFilterStatus('confirmed')}
                 >
                   已确认 ({stats.confirmed})
+                </Button>
+                {/* Phase 6c: profit-state filters */}
+                <Button
+                  variant={filterStatus === 'profit_unavailable' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilterStatus('profit_unavailable')}
+                  title="实际利润数据尚未齐备的采购执行中合同"
+                  className={filterStatus !== 'profit_unavailable' ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'bg-amber-500 hover:bg-amber-600'}
+                >
+                  ⏳ 实际待定 ({stats.profitUnavailable})
+                </Button>
+                <Button
+                  variant={filterStatus === 'profit_alert' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilterStatus('profit_alert')}
+                  title="实际毛利率为负的合同（亏损预警）"
+                  className={filterStatus !== 'profit_alert' ? 'border-red-300 text-red-600 hover:bg-red-50' : 'bg-red-500 hover:bg-red-600'}
+                >
+                  ⚠ 利润预警 ({stats.profitAlert})
+                </Button>
+                {/* Phase 6d: negative-deviation filter */}
+                <Button
+                  variant={filterStatus === 'profit_deviation' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFilterStatus('profit_deviation')}
+                  title="实际毛利率低于估算超过5个百分点的合同"
+                  className={filterStatus !== 'profit_deviation' ? 'border-orange-300 text-orange-600 hover:bg-orange-50' : 'bg-orange-500 hover:bg-orange-600'}
+                >
+                  ↓ 偏差较大 ({stats.profitDeviation})
                 </Button>
               </div>
             </div>
@@ -695,7 +850,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                   <Checkbox
                     checked={
                       selectedIds.length > 0 &&
-                      selectedIds.length === myContracts.filter((c) => isContractDeletable(c)).length
+                      selectedIds.length === filteredContracts.filter((c) => isContractDeletable(c)).length
                     }
                     onCheckedChange={handleSelectAll}
                   />
@@ -712,22 +867,37 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
               </TableRow>
             </TableHeader>
             <TableBody className="text-[12px]">
-              {myContracts.length === 0 ? (
+              {filteredContracts.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={10} className="text-center py-12 text-gray-500">
                     <AlertCircle className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-                    <p>暂无销售合同</p>
-                    <p className="text-sm mt-1">在报价管理模块中，客户接受报价后可生成销售合同</p>
+                    <p>{myContracts.length === 0 ? '暂无销售合同' : '没有符合当前筛选条件的合同'}</p>
+                    <p className="text-sm mt-1">
+                      {myContracts.length === 0
+                        ? '在报价管理模块中，客户接受报价后可生成销售合同'
+                        : '试试调整搜索词或切换上方状态/利润筛选'}
+                    </p>
                   </TableCell>
                 </TableRow>
               ) : (
-                myContracts.map((contract, index) => {
+                filteredContracts.map((contract, index) => {
                   const isHighlighted = highlightedId === contract.id; // 🔥 判断是否高亮
                   
                   // 🔥 查找对应的订单数据，检查定金支付状态
                   const correspondingOrder = orders.find(o => o.orderNumber === contract.contractNumber);
                   const depositConfirmed = correspondingOrder?.depositPaymentProof?.status === 'confirmed';
                   const hasLiveProcurementRequest = getLivePurchaseOrdersForContract(contract).length > 0;
+                  // Phase 2b-i: ship-first mode flag (balance paid AFTER shipment)
+                  const isShipFirst = contract.paymentMode === 'tt_deposit_balance_against_bl' ||
+                    contract.paymentMode === 'dp' || contract.paymentMode === 'oa';
+                  // Phase 2b-ii: LC mode flag — balance_confirmed means LC readiness, not a cash receipt
+                  const isLC = contract.paymentMode === 'lc_100' || contract.paymentMode === 'deposit_plus_lc';
+                  // Phase 2b-ii: procurement-eligible — aligned with generatePurchaseOrder gate in context
+                  // lc_100: no deposit stage, trigger from customer_confirmed onwards
+                  // all other modes: keep existing depositConfirmed gate (order-level confirmed flag)
+                  const procurementEligible = contract.paymentMode === 'lc_100'
+                    ? ['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'po_generated', 'production'].includes(contract.status)
+                    : depositConfirmed;
                   
                   return (
                     <TableRow 
@@ -827,6 +997,228 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                           <div className="text-gray-500 text-[10px]">
                             余款 {contract.balancePercentage}%: {contract.currency} {contract.balanceAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
+                          {/* Phase 6a/6b: SC profit block ───────────────────────────────────────
+                              Shown from po_generated onward (procurement has started).
+                              Revenue   = SC.totalAmount
+                              Estimated = QT.totalCost/totalProfit (Phase 6a)
+                              Actual    = sum(CG.totalAmount) + SC.additionalCost (Phase 6b)
+                              Phase 5 rule: no SC state is changed here — read-only derived view. */}
+                          {PROFIT_VISIBLE_STATUSES.includes(contract.status) && (() => {
+                            const profit = computeSCProfit(
+                              contract,
+                              getQuotationByNumber(contract.quotationNumber) ?? null,
+                              purchaseOrders,
+                            );
+                            const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
+                            // Phase 6c: absolute-amount formatter in SC currency
+                            const sym = contract.currency === 'USD' ? '$'
+                                      : contract.currency === 'EUR' ? '€'
+                                      : contract.currency === 'GBP' ? '£'
+                                      : contract.currency;
+                            const fmtAmt = (n: number) =>
+                              `${n < 0 ? '-' : ''}${sym}${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+                            const addCost = contract.additionalCost ?? 0;
+                            const isEditingThis = editingAdditionalCostId === contract.id;
+                            return (
+                              <div className="border-t border-gray-100 mt-1 pt-1 space-y-0.5">
+                                {/* Estimated line — from QT.totalProfit; always shown (暂无 when QT data absent) */}
+                                <div className="text-[10px] text-gray-400 italic flex justify-between gap-2">
+                                  <span>估算毛利</span>
+                                  {profit.estimated ? (
+                                    <span className="text-right">
+                                      <span>~{fmtPct(profit.estimated.estimatedMargin)}</span>
+                                      <span className="mx-0.5 opacity-40">/</span>
+                                      <span>~{fmtAmt(profit.estimated.estimatedProfit)}</span>
+                                    </span>
+                                  ) : (
+                                    <span title="报价单成本数据未录入">暂无</span>
+                                  )}
+                                </div>
+                                {/* Actual line — from CGs + additionalCost; always shown */}
+                                <div className="text-[10px] flex justify-between gap-2">
+                                  <span className="text-gray-500">实际毛利</span>
+                                  {profit.actual.available ? (
+                                    <span className={`text-right font-medium ${profit.actual.actualMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                      <span>{fmtPct(profit.actual.actualMargin)}</span>
+                                      <span className="mx-0.5 opacity-40">/</span>
+                                      <span>{fmtAmt(profit.actual.actualProfit)}</span>
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className="text-gray-400 cursor-help"
+                                      title={ACTUAL_UNAVAILABLE_TOOLTIP[profit.actual.reason]}
+                                    >
+                                      {ACTUAL_UNAVAILABLE_ICON[profit.actual.reason]}{' '}{ACTUAL_UNAVAILABLE_LABEL[profit.actual.reason]}
+                                    </span>
+                                  )}
+                                </div>
+                                {/* Actual cost line — shown when actual is available; helps verify margin */}
+                                {profit.actual.available && (
+                                  <div className="text-[10px] flex justify-between gap-2">
+                                    <span className="text-gray-400">实际成本</span>
+                                    <span className="text-gray-400">{fmtAmt(profit.actual.actualCost)}</span>
+                                  </div>
+                                )}
+                                {/* Phase 6d: deviation line — only when actual underperforms estimated by > 5pp */}
+                                {profit.actual.available && profit.estimated && (() => {
+                                  const delta = profit.actual.actualMargin - profit.estimated.estimatedMargin;
+                                  if (delta >= -0.05) return null;
+                                  return (
+                                    <div className="text-[10px] flex justify-between gap-2">
+                                      <span className="text-orange-600">毛利偏差</span>
+                                      <span className="text-orange-600 font-medium">
+                                        ↓ −{Math.abs(delta * 100).toFixed(1)}pp
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
+                                {/* Phase 6b: additional cost — display + inline edit ─────────── */}
+                                {isEditingThis ? (
+                                  <div className="text-[10px] flex justify-between gap-1 items-center pt-0.5">
+                                    <span className="text-gray-400 shrink-0">附加成本 ({contract.currency})</span>
+                                    <span className="flex items-center gap-0.5">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        className="w-20 text-right text-[10px] border border-gray-300 rounded px-1 leading-4 focus:outline-none focus:border-blue-400"
+                                        value={additionalCostDraft}
+                                        onChange={e => setAdditionalCostDraft(e.target.value)}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') handleSaveAdditionalCost(contract.id);
+                                          if (e.key === 'Escape') setEditingAdditionalCostId(null);
+                                        }}
+                                        autoFocus
+                                      />
+                                      <button
+                                        className="text-green-600 hover:text-green-700 px-0.5"
+                                        title="保存"
+                                        onClick={() => handleSaveAdditionalCost(contract.id)}
+                                      >✓</button>
+                                      <button
+                                        className="text-gray-400 hover:text-gray-600 px-0.5"
+                                        title="取消"
+                                        onClick={() => setEditingAdditionalCostId(null)}
+                                      >✕</button>
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="text-[10px] flex justify-between gap-2 items-center group/addcost">
+                                    <span className="text-gray-400">附加成本</span>
+                                    <span className="flex items-center gap-1">
+                                      {addCost > 0 ? (
+                                        <span className="text-gray-500">+{contract.currency} {addCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                      ) : (
+                                        <span className="text-gray-300">—</span>
+                                      )}
+                                      <button
+                                        className="invisible group-hover/addcost:visible text-gray-400 hover:text-gray-600 leading-none"
+                                        title="编辑附加成本（运费/关税等）"
+                                        onClick={() => {
+                                          setAdditionalCostDraft(String(addCost === 0 ? '' : addCost));
+                                          setEditingAdditionalCostId(contract.id);
+                                        }}
+                                      >✎</button>
+                                    </span>
+                                  </div>
+                                )}
+                                {/* Phase 8: FX rate rows — one per foreign-currency CG currency ─────── */}
+                                {(() => {
+                                  const scCcy = String(contract.currency || '').toUpperCase();
+                                  const neededCurrencies = [...new Set(
+                                    purchaseOrders
+                                      .filter(po =>
+                                        String(po.salesContractNumber || '').trim() === String(contract.contractNumber || '').trim() &&
+                                        String(po.poNumber || '').trim().startsWith('CG-')
+                                      )
+                                      .map(po => String(po.currency || '').toUpperCase())
+                                      .filter(c => c && c !== scCcy)
+                                  )].sort();
+                                  if (neededCurrencies.length === 0) return null;
+                                  return (
+                                    <>
+                                      {neededCurrencies.map(ccy => {
+                                        const fxKey = `${contract.id}::${ccy}`;
+                                        const isEditingFx = editingFxKey === fxKey;
+                                        const storedRate = (contract.fxRates ?? {})[ccy];
+                                        const hasRate = storedRate && storedRate > 0;
+                                        return (
+                                          <div key={ccy}>
+                                            {isEditingFx ? (
+                                              <div className="text-[10px] flex justify-between gap-1 items-center pt-0.5">
+                                                <span className="text-gray-400 shrink-0">汇率 {ccy}（1 {contract.currency} = ?）</span>
+                                                <span className="flex items-center gap-0.5">
+                                                  <input
+                                                    type="number"
+                                                    min="0.0001"
+                                                    step="0.01"
+                                                    className="w-20 text-right text-[10px] border border-gray-300 rounded px-1 leading-4 focus:outline-none focus:border-blue-400"
+                                                    value={fxRateDraft}
+                                                    onChange={e => setFxRateDraft(e.target.value)}
+                                                    onKeyDown={e => {
+                                                      if (e.key === 'Enter') handleSaveFxRate(contract.id, ccy);
+                                                      if (e.key === 'Escape') setEditingFxKey(null);
+                                                    }}
+                                                    autoFocus
+                                                  />
+                                                  <button
+                                                    className="text-green-600 hover:text-green-700 px-0.5"
+                                                    title="保存"
+                                                    onClick={() => handleSaveFxRate(contract.id, ccy)}
+                                                  >✓</button>
+                                                  <button
+                                                    className="text-gray-400 hover:text-gray-600 px-0.5"
+                                                    title="取消"
+                                                    onClick={() => setEditingFxKey(null)}
+                                                  >✕</button>
+                                                </span>
+                                              </div>
+                                            ) : (
+                                              <div className="text-[10px] flex justify-between gap-2 items-center group/fxrow">
+                                                <span className="text-gray-400">汇率 {ccy}（1 {contract.currency} = ? {ccy}）</span>
+                                                <span className="flex items-center gap-1">
+                                                  {hasRate ? (
+                                                    <span className="text-gray-500">{storedRate.toLocaleString('en-US', { maximumFractionDigits: 4 })}</span>
+                                                  ) : (
+                                                    <span className="text-amber-500">未设置</span>
+                                                  )}
+                                                  <button
+                                                    className="invisible group-hover/fxrow:visible text-gray-400 hover:text-gray-600 leading-none"
+                                                    title={`设置汇率：1 ${contract.currency} = ? ${ccy}`}
+                                                    onClick={() => {
+                                                      setFxRateDraft(hasRate ? String(storedRate) : '');
+                                                      setEditingFxKey(fxKey);
+                                                    }}
+                                                  >✎</button>
+                                                </span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </>
+                                  );
+                                })()}
+                                {/* Phase 7B: frozen profit snapshot — read-only, shown once SC is completed */}
+                                {contract.status === 'completed' && contract.profitSnapshot && (() => {
+                                  const snap = contract.profitSnapshot;
+                                  return (
+                                    <div
+                                      className="text-[10px] flex justify-between gap-2 pt-0.5 border-t border-gray-100 mt-0.5"
+                                      title="合同完成时冻结的利润数据"
+                                    >
+                                      <span className="text-gray-700 font-medium">最终毛利</span>
+                                      <span className={`text-right font-semibold ${snap.finalMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                        <span>{fmtPct(snap.finalMargin)}</span>
+                                        <span className="mx-0.5 opacity-40">/</span>
+                                        <span>{fmtAmt(snap.finalProfit)}</span>
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
@@ -951,16 +1343,87 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             </Button>
                           )}
                           
-                          {/* 🔥 定金已确认即可请求采购：不再受合同状态字符串卡死 */}
-                          {depositConfirmed && (
+                          {/* 🔥 Phase 2b-ii: 请求采购 — procurement-eligible gate aligned with context generatePurchaseOrder
+                              lc_100          : show from customer_confirmed (no deposit required)
+                              deposit_plus_lc : keeps existing depositConfirmed gate (deposit stage required)
+                              other modes     : keeps existing depositConfirmed gate */}
+                          {procurementEligible && (
                             <Button
                               size="sm"
                               onClick={() => requestProcurementFromContract(contract)}
                               className="gap-1 bg-[#F96302] hover:bg-[#e05502] text-white h-7 text-[11px]"
-                              title={hasLiveProcurementRequest ? '已存在采购请求，点击可重新激活' : '定金已确认，点击请求采购（由采购员分配供应商）'}
+                              title={hasLiveProcurementRequest
+                                ? '已存在采购请求，点击可重新激活'
+                                : contract.paymentMode === 'lc_100'
+                                  ? '客户已确认（LC模式无需定金），点击请求采购'
+                                  : '定金已确认，点击请求采购（由采购员分配供应商）'}
                             >
                               <ShoppingCart className="h-3 w-3" />
                               请求采购
+                            </Button>
+                          )}
+
+                          {/* 🔥 Phase 2b-ii: 确认尾款 / 确认信用证已落实
+                              Mode 1/null     : show at deposit_confirmed | po_generated | production (pre-ship)
+                              Ship-first      : also show at shipped (post-ship balance confirmation)
+                              lc_100          : show at po_generated | production (no deposit stage)
+                              deposit_plus_lc : show at deposit_confirmed | po_generated | production */}
+                          {(
+                            ['deposit_confirmed', 'po_generated', 'production'].includes(contract.status) ||
+                            (isShipFirst && contract.status === 'shipped')
+                          ) && (
+                            <Button
+                              size="sm"
+                              onClick={() => confirmBalancePayment(contract.id, currentUser?.name || 'finance')}
+                              className="gap-1 bg-lime-600 hover:bg-lime-700 text-white h-7 text-[11px]"
+                              title={isShipFirst
+                                ? '财务确认尾款已到账（发货后收款），合同可标记完成'
+                                : isLC
+                                  ? '确认信用证已落实（LC到位），合同可进入发货流程'
+                                  : '财务确认尾款已到账，合同可进入发货流程'}
+                            >
+                              <DollarSign className="h-3 w-3" />
+                              {isLC ? '确认信用证已落实' : '确认尾款'}
+                            </Button>
+                          )}
+
+                          {/* 🔥 Phase 2b-i: 标记发货
+                              Mode 1/null : show only at balance_confirmed (balance already received)
+                              Ship-first  : show at customer_confirmed | deposit_confirmed | po_generated | production (ship before balance) */}
+                          {(
+                            (isShipFirst && ['customer_confirmed', 'deposit_confirmed', 'po_generated', 'production'].includes(contract.status)) ||
+                            (!isShipFirst && contract.status === 'balance_confirmed')
+                          ) && (
+                            <Button
+                              size="sm"
+                              onClick={() => advanceSCToShipped(contract.id)}
+                              className="gap-1 bg-sky-600 hover:bg-sky-700 text-white h-7 text-[11px]"
+                              title={isShipFirst
+                                ? '尾款将在发货后结算，立即安排发货'
+                                : '尾款已确认，标记合同为已发货'}
+                            >
+                              <Truck className="h-3 w-3" />
+                              标记发货
+                            </Button>
+                          )}
+
+                          {/* 🔥 Phase 2b-i: 完成合同
+                              Mode 1/null : show at shipped (balance was already received pre-ship)
+                              Ship-first  : show at balance_confirmed (post-ship balance received → ready to complete) */}
+                          {(
+                            (isShipFirst && contract.status === 'balance_confirmed') ||
+                            (!isShipFirst && contract.status === 'shipped')
+                          ) && (
+                            <Button
+                              size="sm"
+                              onClick={() => advanceSCToCompleted(contract.id)}
+                              className="gap-1 bg-green-600 hover:bg-green-700 text-white h-7 text-[11px]"
+                              title={isShipFirst
+                                ? '尾款已到账，货物已发出，完成合同'
+                                : '货物已发出，标记合同为已完成'}
+                            >
+                              <CheckCircle className="h-3 w-3" />
+                              完成合同
                             </Button>
                           )}
                         </div>
@@ -978,9 +1441,16 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       {showDocumentPreview && selectedContract && (
         <Dialog open={showDocumentPreview} onOpenChange={setShowDocumentPreview}>
           <DialogContent className="max-w-[95vw] h-[95vh] p-0">
+            {(() => {
+              const templateSnapshot = selectedContract.templateSnapshot || selectedContract.template_snapshot || null;
+              const templateVersion = templateSnapshot?.version || null;
+              return (
             <DialogHeader className="px-6 py-4 border-b">
-              <DialogTitle className="text-lg font-semibold">
-                📄 销售合同文档 - {selectedContract.contractNumber}
+              <DialogTitle className="flex items-center gap-3 text-lg font-semibold">
+                <span>📄 销售合同文档 - {selectedContract.contractNumber}</span>
+                <Badge variant="outline" className="text-xs font-semibold">
+                  模板版本：{templateVersion?.version || '未绑定'}
+                </Badge>
               </DialogTitle>
               <DialogDescription>
                 {selectedContract.projectRevisionId
@@ -988,6 +1458,8 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                   : 'Sales Contract Document - 福建高盛达富建材有限公司'}
               </DialogDescription>
             </DialogHeader>
+              );
+            })()}
             
             <div className="overflow-y-auto p-6" style={{ height: 'calc(95vh - 80px)' }}>
               {(() => {

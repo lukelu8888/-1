@@ -10,7 +10,8 @@
  */
 
 import { getAllSuppliers, getSuppliersAsPersonnel } from './supplier-store';
-import { DEMO_USERS } from './rbac-config';
+import { staffDirectoryService } from './supabaseService';
+import { canonicalizePersonnelEmail } from './personnelEmail';
 import { 
   routeToSalesRep, 
   getRecommendedRecipientsForStep1 
@@ -44,29 +45,7 @@ export interface Personnel {
 }
 
 export const normalizePersonnelEmail = (email?: string | null, region?: string | null): string => {
-  const normalized = String(email || '').trim().toLowerCase();
-  if (!normalized) return '';
-
-  if (normalized.endsWith('@cosun.com')) {
-    return normalized;
-  }
-
-  const regionValue = String(region || '').trim().toLowerCase();
-  if (!normalized.endsWith('@gsd.com')) {
-    return normalized;
-  }
-
-  if (normalized === 'zhangwei@gsd.com' || normalized === 'wangjian@gsd.com' || normalized === 'liming@gsd.com' || regionValue === 'north america' || regionValue === 'na' || regionValue === 'north_america' || regionValue === 'north-america' || regionValue === '北美') {
-    return 'zhangwei@cosun.com';
-  }
-  if (normalized === 'lifang@gsd.com' || normalized === 'chenlei@gsd.com' || normalized === 'zhaoting@gsd.com' || regionValue === 'south america' || regionValue === 'sa' || regionValue === 'south_america' || regionValue === 'south-america' || regionValue === '南美') {
-    return 'lifang@cosun.com';
-  }
-  if (normalized === 'wangfang@gsd.com' || normalized === 'zhaoyong@gsd.com' || normalized === 'sunli@gsd.com' || regionValue === 'europe & africa' || regionValue === 'ea' || regionValue === 'emea' || regionValue === 'europe_africa' || regionValue === 'europe-africa' || regionValue === '欧非') {
-    return 'wangfang@cosun.com';
-  }
-
-  return normalized;
+  return canonicalizePersonnelEmail(email, region);
 };
 
 const regionToLegacyLabel: Record<'NA' | 'SA' | 'EA', Region> = {
@@ -81,30 +60,85 @@ const regionToChineseLabel: Record<'NA' | 'SA' | 'EA', string> = {
   EA: '欧非区',
 };
 
-const salesManagerByRegion = DEMO_USERS
-  .filter((user) => user.role === 'Sales_Manager' && user.region && user.region !== 'all')
-  .map<Personnel>((user) => ({
-    name: user.name,
-    nameEn: user.name,
-    role: '区域业务主管',
-    roleEn: 'Regional Sales Manager',
-    region: regionToLegacyLabel[user.region as 'NA' | 'SA' | 'EA'],
-    displayName: `${user.name} (${regionToChineseLabel[user.region as 'NA' | 'SA' | 'EA']})`,
-    email: user.email,
-  }));
+const mapRegionCodeToLegacyRegion = (region?: string | null): Region | undefined => {
+  const value = String(region || '').trim().toUpperCase();
+  if (value === 'NA') return 'north_america';
+  if (value === 'SA') return 'south_america';
+  if (value === 'EA') return 'europe_africa';
+  return undefined;
+};
 
-const salesRepPersonnel = DEMO_USERS
-  .filter((user) => user.role === 'Sales_Rep' && user.region && user.region !== 'all')
-  .map<Personnel>((user) => ({
-    name: user.name,
-    nameEn: user.name,
-    role: '业务员',
-    roleEn: 'Sales Rep',
-    region: regionToLegacyLabel[user.region as 'NA' | 'SA' | 'EA'],
-    displayName: `${user.name} (${regionToChineseLabel[user.region as 'NA' | 'SA' | 'EA']})`,
-    workload: 0,
-    email: user.email,
-  }));
+const mapRegionCodeToChineseLabel = (region?: string | null): string => {
+  const value = String(region || '').trim().toUpperCase();
+  if (value === 'NA') return '北美区';
+  if (value === 'SA') return '南美区';
+  if (value === 'EA') return '欧非区';
+  return '未知区域';
+};
+
+const cachedSalesStaff = staffDirectoryService.getCachedSalesStaff();
+
+const internalStaffSource = cachedSalesStaff.map((row) => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  role: row.rbacRole,
+  region: String(row.region || '').toUpperCase(),
+}));
+
+const internalPersonnelFromStaff = (role: string): Personnel[] => {
+  const regionMap: Record<string, Region | undefined> = {
+    NA: 'north_america',
+    SA: 'south_america',
+    EA: 'europe_africa',
+  };
+
+  const roleMap: Record<string, { zh: string; en: string }> = {
+    Regional_Manager: { zh: '区域业务主管', en: 'Regional Sales Manager' },
+    Sales_Director: { zh: '销售总监', en: 'Sales Director' },
+    Sales_Rep: { zh: '业务员', en: 'Sales Rep' },
+    Procurement: { zh: '采购', en: 'Procurement' },
+    Finance: { zh: '财务', en: 'Finance' },
+  };
+
+  const mappedRole = roleMap[role];
+  if (!mappedRole) return [];
+
+  return internalStaffSource
+    .filter((user) => user.role === role)
+    .map<Personnel>((user) => ({
+      name: user.name,
+      nameEn: user.name,
+      role: mappedRole.zh,
+      roleEn: mappedRole.en,
+      region: regionMap[user.region],
+      displayName: mappedRole.zh === '区域业务主管' && user.region
+        ? `${user.name} (${mapRegionCodeToChineseLabel(user.region)})`
+        : user.name,
+      workload: mappedRole.zh === '业务员' ? 0 : undefined,
+      email: user.email,
+    }));
+};
+
+const salesManagerByRegion = internalPersonnelFromStaff('Regional_Manager')
+  .filter((person) => person.region);
+
+const salesDirectorPersonnel = internalPersonnelFromStaff('Sales_Director');
+
+const procurementPersonnel = internalPersonnelFromStaff('Procurement');
+
+const financePersonnel = internalPersonnelFromStaff('Finance');
+
+const adminPersonnel = internalPersonnelFromStaff('Admin');
+
+const ceoPersonnel = internalPersonnelFromStaff('CEO');
+
+const cfoPersonnel = internalPersonnelFromStaff('CFO');
+
+const marketingOpsPersonnel = internalPersonnelFromStaff('Marketing_Ops');
+
+const salesRepPersonnel = internalPersonnelFromStaff('Sales_Rep')
+  .filter((person) => person.region);
 
 // 完整的人员列表（带区域信息）
 export const personnelList: Personnel[] = [
@@ -113,10 +147,10 @@ export const personnelList: Personnel[] = [
   { name: 'Brasil Construction Co.', nameEn: 'Brasil Construction Co.', role: '客户', roleEn: 'Customer', region: 'south_america', displayName: 'Brasil Construction Co. (南美区)' },
   { name: 'Europa Trading GmbH', nameEn: 'Europa Trading GmbH', role: '客户', roleEn: 'Customer', region: 'europe_africa', displayName: 'Europa Trading GmbH (欧非区)' },
   
-  // === 高层管理（全局）===
-  { name: '张明', nameEn: 'Zhang Ming', role: '老板', roleEn: 'CEO', region: 'china', displayName: '张明' },
-  { name: '李华', nameEn: 'Li Hua', role: '财务总监', roleEn: 'CFO', displayName: '李华' },
-  { name: '王强', nameEn: 'Wang Qiang', role: '销售总监', roleEn: 'Sales Director', region: 'china', displayName: '王强' },
+  // === 我方内部人员（全部来自真实账号缓存）===
+  ...ceoPersonnel.map((person) => ({ ...person, role: '老板', roleEn: 'CEO', displayName: person.displayName || person.name })),
+  ...cfoPersonnel.map((person) => ({ ...person, role: '财务总监', roleEn: 'CFO', displayName: person.displayName || person.name })),
+  ...salesDirectorPersonnel.map((person) => ({ ...person, role: '销售总监', roleEn: 'Sales Director', displayName: person.displayName || person.name })),
   
   // === 北美区团队 ===
   ...salesManagerByRegion.filter((person) => person.region === 'north_america'),
@@ -131,10 +165,10 @@ export const personnelList: Personnel[] = [
   ...salesRepPersonnel.filter((person) => person.region === 'europe_africa'),
   
   // === 其他角色（无区域限制）===
-  { name: '赵敏', nameEn: 'Zhao Min', role: '财务', roleEn: 'Finance', displayName: '赵敏' },
-  { name: '刘刚', nameEn: 'Liu Gang', role: '采购', roleEn: 'Procurement', displayName: '刘刚' },
-  { name: '李娜', nameEn: 'Li Na', role: '运营专员', roleEn: 'Operations', displayName: '李娜' },
-  { name: '系统管理员', nameEn: 'System Admin', role: '系统管理员', roleEn: 'System', displayName: '系统管理员' },
+  ...financePersonnel.map((person) => ({ ...person, role: '财务', roleEn: 'Finance', displayName: person.displayName || person.name })),
+  ...procurementPersonnel.map((person) => ({ ...person, role: '采购', roleEn: 'Procurement', displayName: person.displayName || person.name })),
+  ...marketingOpsPersonnel.map((person) => ({ ...person, role: '运营专员', roleEn: 'Operations', displayName: person.displayName || person.name })),
+  ...adminPersonnel.map((person) => ({ ...person, role: '系统管理员', roleEn: 'System', displayName: person.displayName || person.name })),
   { name: '福建XX建材', nameEn: 'Fujian XX Materials', role: '供应商', roleEn: 'Supplier', displayName: '福建XX建材' },
   { name: '广东YY五金', nameEn: 'Guangdong YY Hardware', role: '供应商', roleEn: 'Supplier', displayName: '广东YY五金' },
   { name: '吴师傅', nameEn: 'Wu Master', role: '验货员', roleEn: 'Inspector', displayName: '吴师傅' },
@@ -254,7 +288,7 @@ export function getWorkloadLevel(workload: number): { level: string; color: stri
  * 🔥 智能推荐业务员（基于区域和负载均衡）
  */
 export function getRecommendedSalesRep(region: Region): Personnel | null {
-  const regionalSalesReps = personnelList
+  const regionalSalesReps = salesRepPersonnel
     .filter(p => p.role === '业务员' && p.region === region)
     .sort((a, b) => (a.workload || 0) - (b.workload || 0));
   
@@ -281,19 +315,19 @@ export function getRecommendedRecipientsGrouped(notifier?: Personnel): Recipient
   // 规则1: 如果是客户，推荐同区域的业务员、业务主管和销售总监
   if (notifier.role === '客户' && notifier.region) {
     // 优先推荐：同区域业务员（按负载排序）
-    const regionalSalesReps = personnelList
+    const regionalSalesReps = salesRepPersonnel
       .filter(p => p.role === '业务员' && p.region === notifier.region)
       .sort((a, b) => (a.workload || 0) - (b.workload || 0));
     
     // 管理层：同区域主管 + 销售总监
     const management: Personnel[] = [];
-    const regionalManager = personnelList.find(p => 
+    const regionalManager = salesManagerByRegion.find(p => 
       p.role === '区域业务主管' && p.region === notifier.region
     );
     if (regionalManager) {
       management.push(regionalManager);
     }
-    const salesDirector = personnelList.find(p => p.role === '销售总监');
+    const salesDirector = salesDirectorPersonnel[0];
     if (salesDirector) {
       management.push(salesDirector);
     }
@@ -308,13 +342,13 @@ export function getRecommendedRecipientsGrouped(notifier?: Personnel): Recipient
   // 规则2: 如果是业务员，推荐同区域主管、销售总监
   if (notifier.role === '业务员' && notifier.region) {
     const management: Personnel[] = [];
-    const regionalManager = personnelList.find(p => 
+    const regionalManager = salesManagerByRegion.find(p => 
       p.role === '区域业务主管' && p.region === notifier.region
     );
     if (regionalManager) {
       management.push(regionalManager);
     }
-    const salesDirector = personnelList.find(p => p.role === '销售总监');
+    const salesDirector = salesDirectorPersonnel[0];
     if (salesDirector) {
       management.push(salesDirector);
     }
@@ -328,8 +362,8 @@ export function getRecommendedRecipientsGrouped(notifier?: Personnel): Recipient
   
   // 规则3: 如果是供应商，推荐采购、业务员
   if (notifier.role === '供应商') {
-    const procurement = personnelList.filter(p => p.role === '采购');
-    const salesReps = personnelList.filter(p => p.role === '业务员');
+    const procurement = procurementPersonnel;
+    const salesReps = salesRepPersonnel;
     
     return {
       priority: procurement,

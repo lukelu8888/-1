@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useState, useEffect, ReactNode } from 'react';
-import { approvalRecordService } from '../lib/supabaseService';
+import { approvalRecordService, fromApprovalRow } from '../lib/supabaseService';
+import { getCurrentUser } from '../utils/dataIsolation';
 import { supabase } from '../lib/supabase';
 
 // 🎯 审批类型
@@ -57,6 +58,7 @@ export interface ApprovalRequest {
 interface ApprovalContextType {
   requests: ApprovalRequest[];
   loading: boolean;
+  reloadApprovals: () => Promise<void>;
   addApprovalRequest: (request: Omit<ApprovalRequest, 'id' | 'approvalHistory'>) => Promise<ApprovalRequest>;
   updateApprovalRequest: (id: string, updates: Partial<ApprovalRequest>) => Promise<void>;
   getApprovalRequest: (id: string) => ApprovalRequest | undefined;
@@ -78,14 +80,19 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
 
   const loadFromSupabase = useCallback(async () => {
+    // Prefer Supabase auth session; fall back to localStorage user for apps
+    // that authenticate via the local RBAC system rather than Supabase auth.
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user?.email) return;
+    const email = session?.user?.email || getCurrentUser()?.email || '';
+    if (!email) return;
     setLoading(true);
     try {
-      const data = await approvalRecordService.getForApprover(session.user.email);
+      const data = await approvalRecordService.getForApprover(email);
       if (data && Array.isArray(data)) {
         setRequests(data.filter(Boolean) as ApprovalRequest[]);
       }
+    } catch (err: any) {
+      console.error('[ApprovalContext] loadFromSupabase failed:', err?.message || err);
     } finally {
       setLoading(false);
     }
@@ -94,12 +101,30 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void loadFromSupabase();
 
+    // Re-load when Supabase auth state changes (real login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user?.email) void loadFromSupabase();
       else if (event === 'SIGNED_OUT') setRequests([]);
     });
 
-    return () => { subscription.unsubscribe(); };
+    // Re-load when localStorage user changes (role switching via RBAC system)
+    const onStorageChange = (e: StorageEvent) => {
+      if (e.key === 'cosun_current_user' || e.key === 'cosun_auth_user') {
+        void loadFromSupabase();
+      }
+    };
+    window.addEventListener('storage', onStorageChange);
+
+    // Re-load when the same-tab role switcher fires `userChanged`
+    // (window.storage only fires in OTHER tabs, so we also listen to this custom event)
+    const onUserChanged = () => { void loadFromSupabase(); };
+    window.addEventListener('userChanged', onUserChanged);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('storage', onStorageChange);
+      window.removeEventListener('userChanged', onUserChanged);
+    };
   }, [loadFromSupabase]);
 
   // Realtime：监听 approval_records 变化（任意审批者操作后实时更新）
@@ -114,7 +139,9 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'approval_records' }, (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload;
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
-          const updated = newRow as ApprovalRequest;
+          // Map snake_case DB row → camelCase ApprovalRequest so currentApprover etc. are populated
+          const updated = fromApprovalRow(newRow) as ApprovalRequest;
+          if (!updated) return;
           setRequests(prev => {
             const exists = prev.find(r => r.id === updated.id);
             return exists
@@ -276,6 +303,7 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
   return (
     <ApprovalContext.Provider value={{
       requests, loading,
+      reloadApprovals: loadFromSupabase,
       addApprovalRequest, updateApprovalRequest, getApprovalRequest,
       getPendingApprovals, getApprovedApprovals, getRejectedApprovals, getMySubmitted,
       approveRequest, rejectRequest, forwardRequest, cancelRequest,

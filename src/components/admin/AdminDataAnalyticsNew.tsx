@@ -172,7 +172,7 @@ export default function AdminDataAnalyticsNew() {
       return SALES_REPS.filter(rep => rep.id === 'all' || rep.id === currentUser.id);
     }
     
-    if (currentUser.role === 'Sales_Manager') {
+    if (currentUser.role === 'Sales_Manager' || currentUser.role === 'Sales_Director' || currentUser.role === 'Regional_Manager') {
       if (selectedRegion === 'all') {
         return SALES_REPS.filter(rep => rep.region === 'all' || rep.region === currentUser.region);
       }
@@ -365,7 +365,7 @@ export default function AdminDataAnalyticsNew() {
       )}
 
       {/* 🔥 区域分析 - 完整独立视图（主管/业务员） */}
-      {(currentUser.role === 'Sales_Manager' || currentUser.role === 'Sales_Rep') && (
+      {(currentUser.role === 'Sales_Manager' || currentUser.role === 'Sales_Director' || currentUser.role === 'Regional_Manager' || currentUser.role === 'Sales_Rep') && (
         <RegionalAnalytics 
           canViewSensitive={canViewProfitMargin || canViewCostPrice}
           userRole={currentUser.role}

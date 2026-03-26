@@ -6,7 +6,7 @@
  */
 
 import { QuoteRequirement, QuoteRequirementFeedback, QuoteRequirementFeedbackProduct } from '../contexts/QuoteRequirementContext';
-import { RFQ } from '../contexts/XJContext';
+import { XJ } from '../contexts/XJContext';
 import { getFormalBusinessModelNo } from './productModelDisplay';
 
 interface SupplierQuotation {
@@ -43,14 +43,14 @@ interface SupplierQuotation {
 /**
  * 🔥 自动从BJ提取数据，填充QR的采购反馈
  * @param qr 采购需求单
- * @param rfqs 所有XJ询价单列表
+ * @param xjs 所有XJ询价单列表
  * @param supplierQuotations 所有供应商报价单列表
  * @param currentUserName 当前采购员姓名
  * @returns 自动生成的采购反馈对象
  */
 export function autoPopulateFeedbackFromBJ(
   qr: QuoteRequirement,
-  rfqs: XJ[],
+  xjs: XJ[],
   supplierQuotations: any[],
   currentUserName: string
 ): PurchaserFeedback | null {
@@ -60,7 +60,7 @@ export function autoPopulateFeedbackFromBJ(
   
   // 🔥 步骤1：找到关联的XJ（询价单）
   // 通过 sourceQRNumber 或 requirementNo 匹配
-  const relatedXJs = rfqs.filter(xj => 
+  const relatedXJs = xjs.filter(xj => 
     xj.sourceQRNumber === qr.requirementNo || 
     xj.requirementNo === qr.requirementNo
   );

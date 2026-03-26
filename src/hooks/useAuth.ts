@@ -5,22 +5,43 @@
 import { useState, useEffect } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { User, hasPermission, Permission } from '../lib/rbac-config';
+import { normalizeManagedAdminIdentity } from '../lib/internalAdminIdentity';
 
-const INTERNAL_ROLES = [
-  'CEO', 'CFO', 'Sales_Director', 'Regional_Manager', 'Sales_Manager',
-  'Sales_Rep', 'Finance', 'Procurement', 'Admin', 'Marketing_Ops',
-  'Documentation_Officer',
-] as const;
+const RBAC_USER_KEY = 'cosun_current_user';
+const SWITCHED_RBAC_USER_KEY = 'cosun_switched_user';
 
 function buildRbacUser(stored: any): User | null {
   if (!stored?.email) return null;
-  return {
+  return normalizeManagedAdminIdentity({
     id: stored.id ?? stored.email,
     name: stored.name ?? stored.email.split('@')[0],
     email: stored.email,
     role: stored.role ?? 'Admin',
     region: stored.region ?? 'all',
-  };
+  });
+}
+
+function readPersistedRbacUser(authEmail?: string | null): User | null {
+  try {
+    const switchedRaw = localStorage.getItem(SWITCHED_RBAC_USER_KEY);
+    if (switchedRaw) {
+      const switched = buildRbacUser(JSON.parse(switchedRaw));
+      if (switched && (!authEmail || switched.email === authEmail)) {
+        return switched;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const stored = localStorage.getItem(RBAC_USER_KEY);
+    if (stored) return buildRbacUser(JSON.parse(stored));
+  } catch {
+    // ignore
+  }
+
+  return null;
 }
 
 export function useAuth() {
@@ -28,11 +49,7 @@ export function useAuth() {
 
   // RBAC 角色状态：初始从 localStorage 读取（用于 Admin 内部角色切换）
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try {
-      const stored = localStorage.getItem('cosun_current_user');
-      if (stored) return buildRbacUser(JSON.parse(stored));
-    } catch { /* ignore */ }
-    return null;
+    return readPersistedRbacUser();
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -42,53 +59,46 @@ export function useAuth() {
     if (!authUser) {
       // 登出时清空 RBAC 用户
       setCurrentUser(null);
-      localStorage.removeItem('cosun_current_user');
+      localStorage.removeItem(RBAC_USER_KEY);
+      localStorage.removeItem(SWITCHED_RBAC_USER_KEY);
       return;
     }
 
     if (authUser.type === 'admin') {
-      // 检查 localStorage 里是否已有同一账号的 RBAC 角色记录
-      try {
-        const stored = localStorage.getItem('cosun_current_user');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          // 同一账号：保留已有的 RBAC 角色，不重复 setCurrentUser 避免循环
-          if (parsed.email === authUser.email) return;
-        }
-      } catch { /* ignore */ }
+      const persisted = readPersistedRbacUser(authUser.email);
+      if (persisted?.email === authUser.email) {
+        setCurrentUser(persisted);
+        return;
+      }
 
       // 新登录：用 Supabase session 数据初始化 RBAC 用户
-      const rbacUser: User = {
+      const rbacUser: User = normalizeManagedAdminIdentity({
         id: authUser.id ?? authUser.email,
         name: authUser.name ?? authUser.email.split('@')[0],
         email: authUser.email,
         role: (authUser.role as any) ?? 'Admin',
         region: (authUser.region as any) ?? 'all',
-      };
+      });
       setCurrentUser(rbacUser);
-      localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser));
-      localStorage.setItem('cosun_auth_user', JSON.stringify({ email: authUser.email, type: 'admin' }));
+      localStorage.setItem(RBAC_USER_KEY, JSON.stringify(rbacUser));
     }
   }, [authUser?.email, authUser?.type]);
 
   // 监听 RBAC 角色切换事件（UserRoleSwitcher 发出）
   useEffect(() => {
     const handleUserChange = (event: CustomEvent) => {
-      const rbacUser = buildRbacUser(event.detail);
+      const rbacUser = buildRbacUser(event.detail) || readPersistedRbacUser(authUser?.email || null);
       if (rbacUser) setCurrentUser(rbacUser);
     };
     window.addEventListener('userChanged', handleUserChange as EventListener);
     return () => window.removeEventListener('userChanged', handleUserChange as EventListener);
-  }, []);
+  }, [authUser?.email]);
 
   // Admin 内部角色切换（不触发 Supabase 重新登录）
   const switchUser = (user: User) => {
     setCurrentUser(user);
-    localStorage.setItem('cosun_current_user', JSON.stringify(user));
-    localStorage.setItem('cosun_auth_user', JSON.stringify({
-      email: user.email,
-      type: INTERNAL_ROLES.includes(user.role as any) ? 'admin' : 'customer',
-    }));
+    localStorage.setItem(RBAC_USER_KEY, JSON.stringify(user));
+    localStorage.setItem(SWITCHED_RBAC_USER_KEY, JSON.stringify(user));
     window.dispatchEvent(new CustomEvent('userChanged', { detail: user }));
   };
 

@@ -522,6 +522,97 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['companies']['Insert']>;
       };
 
+      customer_organizations: {
+        Row: {
+          id: string;
+          auth_user_id: string;
+          company_name: string;
+          contact_person: string;
+          email: string;
+          phone: string;
+          mobile: string;
+          address: string;
+          website: string;
+          business_type: string;
+          logo_url: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['customer_organizations']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['customer_organizations']['Insert']>;
+      };
+
+      customer_portal_profiles: {
+        Row: {
+          id: string;
+          auth_user_id: string;
+          display_name: string;
+          login_email: string;
+          portal_role: string;
+          avatar_url: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['customer_portal_profiles']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['customer_portal_profiles']['Insert']>;
+      };
+
+      customer_enterprise_members: {
+        Row: {
+          id: string;
+          enterprise_auth_user_id: string;
+          linked_auth_user_id: string | null;
+          name: string;
+          title: string;
+          business_email: string;
+          login_email: string;
+          role: string;
+          status: string;
+          can_login: boolean;
+          last_login_at: string;
+          permissions: any;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['customer_enterprise_members']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['customer_enterprise_members']['Insert']>;
+      };
+
+      customer_enterprise_invitations: {
+        Row: {
+          id: string;
+          enterprise_auth_user_id: string;
+          member_id: string;
+          login_email: string;
+          business_email: string;
+          role: string;
+          status: string;
+          invite_token: string;
+          invited_by_email: string;
+          invite_url: string;
+          expires_at: string | null;
+          last_sent_at: string | null;
+          accepted_at: string | null;
+          linked_auth_user_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['customer_enterprise_invitations']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['customer_enterprise_invitations']['Insert']>;
+      };
+
       number_sequences: {
         Row: {
           id: string;
@@ -540,6 +631,47 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database['public']['Tables']['number_sequences']['Insert']>;
+      };
+
+      supplier_organizations: {
+        Row: {
+          id: string;
+          auth_user_id: string;
+          name_cn: string;
+          name_en: string;
+          description: string;
+          phone: string;
+          address: string;
+          website: string;
+          contact_person: string;
+          logo_url: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['supplier_organizations']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['supplier_organizations']['Insert']>;
+      };
+
+      supplier_portal_profiles: {
+        Row: {
+          id: string;
+          auth_user_id: string;
+          display_name: string;
+          login_email: string;
+          portal_role: string;
+          role_label: string;
+          avatar_url: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['supplier_portal_profiles']['Row'], 'created_at' | 'updated_at'> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['supplier_portal_profiles']['Insert']>;
       };
 
       user_profiles: {

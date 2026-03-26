@@ -240,7 +240,7 @@ export function XJDebugger() {
             </div>
           </div>
 
-          {/* XJContext中的rfqs */}
+          {/* XJContext中的xjs */}
           <div>
             <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-purple-500"></div>

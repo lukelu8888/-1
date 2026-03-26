@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useUser } from '../contexts/UserContext';
+import { useOptionalUser } from '../contexts/UserContext';
 import { useRouter } from '../contexts/RouterContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -11,6 +11,7 @@ import { User, Building2, Mail, Lock, Eye, EyeOff, Shield } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
 import { toast } from 'sonner';
 import { signInWithEmail, fetchProfile } from '../hooks/useSupabaseAuth';
+import { upsertPortalPasswordMirror } from '../lib/portalPasswordMirror';
 
 const REMEMBER_CUSTOMER_KEY = 'cosun_remember_customer';
 const REMEMBER_SUPPLIER_KEY = 'cosun_remember_supplier';
@@ -100,13 +101,22 @@ function persistFallbackAuthState(params: {
   }
 }
 
-function completeLoginNavigation(navigateTo: (page: string) => void) {
-  navigateTo('dashboard');
+function completeLoginNavigation(
+  navigateTo: (page: string) => void,
+  portalRole: 'customer' | 'supplier' | 'admin'
+) {
+  const targetPage = portalRole === 'supplier'
+    ? 'supplier'
+    : portalRole === 'admin'
+      ? 'admin-login'
+      : 'dashboard';
+
+  navigateTo(targetPage);
   window.dispatchEvent(new CustomEvent('userChanged'));
 
-  const dashboardHash = '#/dashboard';
-  if (window.location.hash !== dashboardHash) {
-    window.location.hash = dashboardHash;
+  const targetHash = `#/${targetPage}`;
+  if (window.location.hash !== targetHash) {
+    window.location.hash = targetHash;
   }
 }
 
@@ -150,7 +160,8 @@ function migrateRememberKeys() {
 
 export function Login() {
   const { t } = useLanguage();
-  const { setUser } = useUser();
+  const userContext = useOptionalUser();
+  const setUser = userContext?.setUser ?? (() => {});
   const { navigateTo } = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [isCustomerSubmitting, setIsCustomerSubmitting] = useState(false);
@@ -225,6 +236,13 @@ export function Login() {
         rbacRole: profile?.rbac_role,
         region: profile?.region,
       });
+      upsertPortalPasswordMirror({
+        portalType: 'customer',
+        loginEmail: session.user.email!,
+        displayName: profile?.name ?? session.user.email!.split('@')[0],
+        password: customerData.password,
+        source: 'login_capture',
+      });
 
       if (customerData.rememberMe) {
         localStorage.setItem(REMEMBER_CUSTOMER_KEY, email);
@@ -233,7 +251,7 @@ export function Login() {
       }
 
       toast.success(degraded ? 'Login successful. Some profile data will load later.' : 'Login successful');
-      completeLoginNavigation(navigateTo);
+      completeLoginNavigation(navigateTo, 'customer');
     } catch (err: any) {
       const msg = normalizeErrorMessage(err);
       console.error('[Login] customer login failed:', err);
@@ -287,6 +305,13 @@ export function Login() {
         rbacRole: profile?.rbac_role,
         region: profile?.region,
       });
+      upsertPortalPasswordMirror({
+        portalType: 'supplier',
+        loginEmail: session.user.email!,
+        displayName: profile?.name ?? session.user.email!.split('@')[0],
+        password: manufacturerData.password,
+        source: 'login_capture',
+      });
 
       if (manufacturerData.rememberMe) {
         localStorage.setItem(REMEMBER_SUPPLIER_KEY, email);
@@ -295,7 +320,7 @@ export function Login() {
       }
 
       toast.success(degraded ? 'Login successful. Some profile data will load later.' : 'Login successful');
-      completeLoginNavigation(navigateTo);
+      completeLoginNavigation(navigateTo, 'supplier');
     } catch (err: any) {
       const msg = normalizeErrorMessage(err);
       console.error('[Login] supplier login failed:', err);

@@ -33,11 +33,11 @@ import { Textarea } from '../ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox'; // 🔥 新增
 import { useOrders } from '../../contexts/OrderContext';
-import { useSalesContracts } from '../../contexts/SalesContractContext';
+import { useSalesContracts, type ElectronicSignature } from '../../contexts/SalesContractContext';
 import { useUser } from '../../contexts/UserContext';
 import { sendNotificationToUser } from '../../utils/notificationUtils';
 import { contractService } from '../../lib/supabaseService';
-import { useFinance } from '../../contexts/FinanceContext';
+// useFinance removed: AR creation is now handled inside customerConfirmContract()
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument'; // 🔥 使用文档中心模板
 import { adaptOrderToSalesContract } from '../../utils/documentDataAdapters'; // 🔥 使用数据适配器
@@ -80,7 +80,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   const [isPaymentProofOpen, setIsPaymentProofOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
-  const { contracts } = useSalesContracts();
+  const { contracts, customerConfirmContract } = useSalesContracts();
   const [paymentNotes, setPaymentNotes] = useState('');
   const [paymentFile, setPaymentFile] = useState('');
   const [paymentType, setPaymentType] = useState<'deposit' | 'balance'>('deposit'); // 🔥 新增：区分定金还是余款
@@ -93,7 +93,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   // 🔥 使用Context获取真实数据
   const { orders: allOrders, updateOrder, deleteOrder } = useOrders();
   const { user } = useUser();
-  const { addAccountReceivable } = useFinance();
+  // addAccountReceivable removed: AR creation is now handled inside customerConfirmContract()
   const currentUser = getCurrentUser() as any;
   const effectiveUpdateOrder = onUpdateOrder || updateOrder;
 
@@ -1067,170 +1067,124 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                 if ((responseType === 'negotiate' || responseType === 'reject') && !responseMessage.trim()) return;
 
                 const orderId = selectedOrder.id || selectedOrder.orderNumber;
+                const customerFeedbackPayload = {
+                  type: responseType,
+                  message: responseMessage.trim(),
+                  submittedAt: new Date().toISOString(),
+                };
                 try {
-                  await contractService.updateStatus(orderId, responseType === 'accept' ? 'customer_confirmed' : responseType === 'reject' ? 'cancelled' : 'sent_to_customer', {
-                    customer_feedback: { type: responseType, message: responseMessage.trim(), submittedAt: new Date().toISOString() },
-                  });
-                  window.dispatchEvent(new CustomEvent('ordersUpdated'));
-
                   if (responseType === 'accept') {
                     const orderNumber = selectedOrder.orderNumber || selectedOrder.id;
                     const orderCurrency = selectedOrder.currency || 'USD';
                     const orderTotalAmount = selectedOrder.totalAmount;
                     const depositAmount = Math.round(orderTotalAmount * 0.3 * 100) / 100;
                     const balanceAmount = Math.round(orderTotalAmount * 0.7 * 100) / 100;
+                    const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
                     // 步骤2️⃣: 立即发送定金付款通知给客户（客户提交的瞬间收到）
-                    const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                  sendNotificationToUser(user.email, {
-                    type: 'payment_reminder',
-                    title: `💰 Deposit Payment Required - ${orderNumber}`,
-                    message: `Thank you for accepting the contract! Please arrange deposit payment of ${orderCurrency} ${depositAmount.toLocaleString()} (30%) within 7 business days. After payment, please upload your payment proof in Active Orders. Production will commence upon receipt.`,
-                    relatedId: orderNumber,
-                    relatedType: 'payment',
-                    sender: 'finance@gaoshengda.com',
-                    metadata: {
-                      customerName: selectedOrder.customer || user.name,
-                      orderNumber: orderNumber,
-                      totalAmount: `${orderCurrency} ${orderTotalAmount.toLocaleString()}`,
-                      depositAmount: `${orderCurrency} ${depositAmount.toLocaleString()}`,
-                      balanceAmount: `${orderCurrency} ${balanceAmount.toLocaleString()}`,
-                      dueDate: dueDate,
-                      paymentTerms: '30% T/T deposit, 70% balance before shipment'
-                    }
-                  });
+                    sendNotificationToUser(user.email, {
+                      type: 'payment_reminder',
+                      title: `💰 Deposit Payment Required - ${orderNumber}`,
+                      message: `Thank you for accepting the contract! Please arrange deposit payment of ${orderCurrency} ${depositAmount.toLocaleString()} (30%) within 7 business days. After payment, please upload your payment proof in Active Orders. Production will commence upon receipt.`,
+                      relatedId: orderNumber,
+                      relatedType: 'payment',
+                      sender: 'finance@gaoshengda.com',
+                      metadata: {
+                        customerName: selectedOrder.customer || user.name,
+                        orderNumber: orderNumber,
+                        totalAmount: `${orderCurrency} ${orderTotalAmount.toLocaleString()}`,
+                        depositAmount: `${orderCurrency} ${depositAmount.toLocaleString()}`,
+                        balanceAmount: `${orderCurrency} ${balanceAmount.toLocaleString()}`,
+                        dueDate: dueDate,
+                        paymentTerms: '30% T/T deposit, 70% balance before shipment'
+                      }
+                    });
 
-                  // 步骤3️⃣: 发送确认通知给Admin
-                  sendNotificationToUser('admin@cosun.com', {
-                    type: 'order_confirmed',
-                    title: '✅ Customer Accepted Contract',
-                    message: `${selectedOrder.customer || user.name} has accepted the sales contract for order ${orderNumber}. Related Quotation: ${selectedOrder.quotationNumber || 'N/A'}`,
-                    relatedId: orderNumber,
-                    relatedType: 'order',
-                    sender: user.email,
-                    metadata: {
-                      customerName: selectedOrder.customer || user.name,
-                      orderNumber: orderNumber,
-                      quotationNumber: selectedOrder.quotationNumber || 'N/A',
-                      amount: `${orderCurrency} ${orderTotalAmount.toLocaleString()}`,
-                      confirmedAt: new Date().toISOString()
-                    }
-                  });
+                    // 步骤3️⃣: 发送确认通知给Admin
+                    sendNotificationToUser('admin@cosun.com', {
+                      type: 'order_confirmed',
+                      title: '✅ Customer Accepted Contract',
+                      message: `${selectedOrder.customer || user.name} has accepted the sales contract for order ${orderNumber}. Related Quotation: ${selectedOrder.quotationNumber || 'N/A'}`,
+                      relatedId: orderNumber,
+                      relatedType: 'order',
+                      sender: user.email,
+                      metadata: {
+                        customerName: selectedOrder.customer || user.name,
+                        orderNumber: orderNumber,
+                        quotationNumber: selectedOrder.quotationNumber || 'N/A',
+                        amount: `${orderCurrency} ${orderTotalAmount.toLocaleString()}`,
+                        confirmedAt: new Date().toISOString()
+                      }
+                    });
 
-                  // 步骤4️⃣: 自动流转合同给财务并创建应收账款
-                  // 🔢 生成应收款编号: YS-{REGION}-YYMMDD-XXXX
-                  const now = new Date();
-                  const yy = String(now.getFullYear()).slice(2);
-                  const mm = String(now.getMonth() + 1).padStart(2, '0');
-                  const dd = String(now.getDate()).padStart(2, '0');
-                  const dateStr = `${yy}${mm}${dd}`;
-                  
-                  // 从订单号中提取区域代码 (ORD-{REGION}-YYMMDD-XXXX)
-                  const region = orderNumber.split('-')[1] || 'NA';
-                  
-                  // 生成当日同区域的应收款序列号
-                  // TODO: 在实际环境中，需要从财务系统查询当日同区域的应收款数量
-                  const sequence = '0001'; // 简化实现，实际应该查询已有记录
-                  
-                  const arNumber = `YS-${region}-${dateStr}-${sequence}`;
-                  
-                  const newAR = {
-                    id: `ar-${Date.now()}`,
-                    arNumber: arNumber,
-                    orderNumber: orderNumber,
-                    quotationNumber: selectedOrder.quotationNumber,
-                    contractNumber: orderNumber,
-                    customerName: selectedOrder.customer || user.name,
-                    customerEmail: user.email,
-                    region: region,
-                    invoiceDate: new Date().toISOString().split('T')[0],
-                    dueDate: dueDate,
-                    totalAmount: orderTotalAmount,
-                    paidAmount: 0,
-                    remainingAmount: orderTotalAmount,
-                    currency: orderCurrency,
-                    status: 'pending',
-                    paymentTerms: '30% T/T deposit, 70% balance before shipment',
-                    products: (selectedOrder.products || []).map((p: any) => ({
-                      name: p.name,
-                      quantity: p.quantity || p.qty || 0,
-                      unitPrice: p.unitPrice || p.price || 0,
-                      totalPrice: p.totalPrice || ((p.quantity || p.qty || 0) * (p.unitPrice || p.price || 0))
-                    })),
-                    paymentHistory: [],
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                    createdBy: 'system-auto',
-                    notes: `Auto-generated from customer contract acceptance. Quotation: ${selectedOrder.quotationNumber || 'N/A'}`
-                  };
-                  // 通过 Context 更新内存（当前会话）
-                  addAccountReceivable(newAR);
-                  // 直接写 localStorage（客户端不在 FinanceProvider 内，确保财务切换角色后可读到）
-                  try {
-                    const AR_KEY = 'accountsReceivable_admin@cosun.com';
-                    const existingARs: any[] = JSON.parse(localStorage.getItem(AR_KEY) || '[]');
-                    const alreadyExists = existingARs.some((ar: any) => ar.orderNumber === orderNumber);
-                    if (!alreadyExists) {
-                      existingARs.unshift(newAR);
-                      localStorage.setItem(AR_KEY, JSON.stringify(existingARs));
-                      window.dispatchEvent(new CustomEvent('financeDataUpdated'));
-                      console.log(`✅ [ActiveOrders] AR 已直接写入 localStorage: ${arNumber}`);
-                    }
-                  } catch { /* ignore */ }
+                    // 步骤4️⃣: 单一写入路径 — 合同状态 + 签名 + customer_feedback + AR 自动创建（由 customerConfirmContract 完成）
+                    const syntheticSig: ElectronicSignature = {
+                      signedBy: user.name || user.email,
+                      signedByEmail: user.email,
+                      signedAt: new Date().toISOString(),
+                      signatureData: `Electronically confirmed via customer portal`,
+                    };
+                    await customerConfirmContract(orderId, syntheticSig, true, customerFeedbackPayload);
 
-                  // 步骤5️⃣: 通知财务部门新的应收账款
-                  sendNotificationToUser('finance@gaoshengda.com', {
-                    type: 'contract_review',
-                    title: `📄 New Sales Contract - ${orderNumber}`,
-                    message: `Sales contract for order ${orderNumber} has been accepted by customer. Accounts Receivable ${arNumber} created. Related Quotation: ${selectedOrder.quotationNumber || 'N/A'}`,
-                    relatedId: arNumber,
-                    relatedType: 'accounts_receivable',
-                    sender: 'system-auto',
-                    metadata: {
-                      customerName: selectedOrder.customer || user.name,
-                      orderNumber: orderNumber,
-                      quotationNumber: selectedOrder.quotationNumber || 'N/A',
-                      arNumber: arNumber,
-                      amount: `${orderCurrency} ${orderTotalAmount.toLocaleString()}`,
-                      depositAmount: `${orderCurrency} ${depositAmount.toLocaleString()}`,
-                      paymentTerms: '30% T/T deposit, 70% balance before shipment',
-                      dueDate: dueDate
-                    }
-                  });
+                    // 步骤5️⃣: 通知财务部门新的应收账款
+                    sendNotificationToUser('finance@gaoshengda.com', {
+                      type: 'contract_review',
+                      title: `📄 New Sales Contract - ${orderNumber}`,
+                      message: `Sales contract for order ${orderNumber} has been accepted by customer. AR auto-created and routed to finance. Related Quotation: ${selectedOrder.quotationNumber || 'N/A'}`,
+                      relatedId: orderNumber,
+                      relatedType: 'accounts_receivable',
+                      sender: 'system-auto',
+                      metadata: {
+                        customerName: selectedOrder.customer || user.name,
+                        orderNumber: orderNumber,
+                        quotationNumber: selectedOrder.quotationNumber || 'N/A',
+                        amount: `${orderCurrency} ${orderTotalAmount.toLocaleString()}`,
+                        depositAmount: `${orderCurrency} ${depositAmount.toLocaleString()}`,
+                        paymentTerms: '30% T/T deposit, 70% balance before shipment',
+                        dueDate: dueDate
+                      }
+                    });
 
-                  // 步骤6️⃣: 显示成功提示
-                  toast.success('✅ Contract Accepted Successfully!', {
-                    description: `Deposit payment notification sent. Accounts Receivable ${arNumber} created and routed to finance.`,
-                    duration: 6000
-                  });
+                    window.dispatchEvent(new CustomEvent('ordersUpdated'));
 
-                } else {
-                  // 协商或取消（已落库，仅发通知 + 提示）
-                  const notificationTitle = responseType === 'reject' ? 'Customer Cancelled Order' : 'Customer Requested Changes';
-                  const notificationMessage = `${selectedOrder.customer || user.name} responded to order ${selectedOrder.orderNumber || selectedOrder.id}: ${responseMessage}`;
+                    // 步骤6️⃣: 显示成功提示
+                    toast.success('✅ Contract Accepted Successfully!', {
+                      description: `Deposit payment notification sent. Accounts Receivable auto-created and routed to finance.`,
+                      duration: 6000
+                    });
 
-                  sendNotificationToUser('admin@cosun.com', {
-                    type: responseType === 'reject' ? 'order_cancelled' : 'order_feedback',
-                    title: notificationTitle,
-                    message: notificationMessage,
-                    relatedId: selectedOrder.orderNumber || selectedOrder.id,
-                    relatedType: 'order',
-                    sender: user.email,
-                    metadata: {
-                      customerName: selectedOrder.customer || user.name,
-                      feedbackType: responseType,
-                      feedbackMessage: responseMessage,
-                      orderNumber: selectedOrder.orderNumber || selectedOrder.id
-                    }
-                  });
+                  } else {
+                    // 协商或取消：reject → cancelled（真实取消）；negotiate → customer_requested_changes
+                    await contractService.updateStatus(orderId, responseType === 'reject' ? 'cancelled' : 'customer_requested_changes', {
+                      customer_feedback: customerFeedbackPayload,
+                    });
+                    window.dispatchEvent(new CustomEvent('ordersUpdated'));
 
-                  toast.success('Response submitted successfully!', {
-                    description: responseType === 'reject' 
-                      ? 'The order has been cancelled.'
-                      : 'We will review your request and get back to you soon.',
-                    duration: 3000
-                  });
-                }
+                    const notificationTitle = responseType === 'reject' ? 'Customer Cancelled Order' : 'Customer Requested Changes';
+                    const notificationMessage = `${selectedOrder.customer || user.name} responded to order ${selectedOrder.orderNumber || selectedOrder.id}: ${responseMessage}`;
+
+                    sendNotificationToUser('admin@cosun.com', {
+                      type: responseType === 'reject' ? 'order_cancelled' : 'order_feedback',
+                      title: notificationTitle,
+                      message: notificationMessage,
+                      relatedId: selectedOrder.orderNumber || selectedOrder.id,
+                      relatedType: 'order',
+                      sender: user.email,
+                      metadata: {
+                        customerName: selectedOrder.customer || user.name,
+                        feedbackType: responseType,
+                        feedbackMessage: responseMessage,
+                        orderNumber: selectedOrder.orderNumber || selectedOrder.id
+                      }
+                    });
+
+                    toast.success('Response submitted successfully!', {
+                      description: responseType === 'reject'
+                        ? 'The order has been cancelled.'
+                        : 'We will review your request and get back to you soon.',
+                      duration: 3000
+                    });
+                  }
 
                 } catch (e: any) {
                   toast.error(e?.message || '提交失败，请重试');

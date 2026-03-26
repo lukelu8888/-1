@@ -75,7 +75,71 @@ export interface CommercialInvoiceData {
     totalNetWeight: number;
     totalMeasurement: number;
   };
+
+  templateSettings?: {
+    goodsTableColumns?: CommercialInvoiceGoodsTableColumn[];
+  };
 }
+
+export type CommercialInvoiceGoodsTableColumnKey =
+  | 'no'
+  | 'description'
+  | 'hsCode'
+  | 'quantity'
+  | 'unit'
+  | 'unitPrice'
+  | 'amount';
+
+export interface CommercialInvoiceGoodsTableColumn {
+  key: CommercialInvoiceGoodsTableColumnKey;
+  label: string;
+  widthPercent: number;
+}
+
+export const DEFAULT_COMMERCIAL_INVOICE_GOODS_TABLE_COLUMNS: CommercialInvoiceGoodsTableColumn[] = [
+  { key: 'no', label: 'No.', widthPercent: 5 },
+  { key: 'description', label: 'Description & Specification', widthPercent: 41 },
+  { key: 'hsCode', label: 'HS Code', widthPercent: 14 },
+  { key: 'quantity', label: 'Quantity', widthPercent: 10 },
+  { key: 'unit', label: 'Unit', widthPercent: 8 },
+  { key: 'unitPrice', label: 'Unit Price', widthPercent: 11 },
+  { key: 'amount', label: 'Amount', widthPercent: 11 },
+];
+
+export const normalizeCommercialInvoiceGoodsTableColumns = (
+  value?: CommercialInvoiceGoodsTableColumn[] | null,
+): CommercialInvoiceGoodsTableColumn[] => {
+  const incoming = Array.isArray(value) ? value : [];
+  const normalized = DEFAULT_COMMERCIAL_INVOICE_GOODS_TABLE_COLUMNS.map((fallbackColumn) => {
+    const matched = incoming.find((column) => column?.key === fallbackColumn.key);
+    const widthPercent = Number(matched?.widthPercent);
+
+    return {
+      key: fallbackColumn.key,
+      label: String(matched?.label || fallbackColumn.label).trim() || fallbackColumn.label,
+      widthPercent: Number.isFinite(widthPercent) ? Math.max(4, widthPercent) : fallbackColumn.widthPercent,
+    };
+  });
+
+  const total = normalized.reduce((sum, column) => sum + column.widthPercent, 0) || 100;
+
+  return normalized.map((column, index) => {
+    if (index === normalized.length - 1) {
+      const allocated = normalized
+        .slice(0, -1)
+        .reduce((sum, item) => sum + Number(((item.widthPercent / total) * 100).toFixed(2)), 0);
+      return {
+        ...column,
+        widthPercent: Number((100 - allocated).toFixed(2)),
+      };
+    }
+
+    return {
+      ...column,
+      widthPercent: Number(((column.widthPercent / total) * 100).toFixed(2)),
+    };
+  });
+};
 
 interface CommercialInvoiceDocumentProps {
   data: CommercialInvoiceData;
@@ -84,9 +148,13 @@ interface CommercialInvoiceDocumentProps {
 
 export const CommercialInvoiceDocument = forwardRef<HTMLDivElement, CommercialInvoiceDocumentProps>(
   ({ data, layoutConfig }, ref) => {
-    
+    const exporterDisplayName = data.exporter.nameEn || data.exporter.name;
+    const exporterDisplayAddress = data.exporter.addressEn || data.exporter.address;
     const total = data.goods.reduce((sum, item) => sum + item.amount, 0);
     const currency = data.goods[0]?.currency || 'USD';
+    const goodsTableColumns = normalizeCommercialInvoiceGoodsTableColumns(
+      data.templateSettings?.goodsTableColumns,
+    );
     const documentWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
     const documentMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
     const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '9pt';
@@ -178,8 +246,8 @@ export const CommercialInvoiceDocument = forwardRef<HTMLDivElement, CommercialIn
           <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
             <div className="border border-black p-3">
               <h3 className="font-semibold mb-2 underline">EXPORTER (Seller):</h3>
-              <p className="font-semibold">{data.exporter.nameEn}</p>
-              <p>{data.exporter.addressEn}</p>
+              <p className="font-semibold">{exporterDisplayName}</p>
+              <p>{exporterDisplayAddress}</p>
               <p>Tel: {data.exporter.tel}</p>
             </div>
             <div className="border border-black p-3">
@@ -207,43 +275,59 @@ export const CommercialInvoiceDocument = forwardRef<HTMLDivElement, CommercialIn
             <table className="w-full border-collapse border-2 border-black text-xs">
               <thead>
                 <tr className="bg-gray-200">
-                  <th className="border border-black px-1 py-1 w-8">No.</th>
-                  <th className="border border-black px-1 py-1">Description & Specification</th>
-                  <th className="border border-black px-1 py-1 w-20">HS Code</th>
-                  <th className="border border-black px-1 py-1 w-16">Quantity</th>
-                  <th className="border border-black px-1 py-1 w-20">Unit Price</th>
-                  <th className="border border-black px-1 py-1 w-20">Amount</th>
+                  {goodsTableColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      className={`border border-black px-1 py-1 ${
+                        column.key === 'quantity' || column.key === 'unitPrice' || column.key === 'amount'
+                          ? 'text-right'
+                          : column.key === 'unit'
+                            ? 'text-center'
+                            : ''
+                      }`}
+                      style={{ width: `${column.widthPercent}%` }}
+                    >
+                      {column.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {data.goods.map((item) => (
                   <tr key={item.no}>
-                    <td className="border border-black px-1 py-1 text-center">{item.no}</td>
-                    <td className="border border-black px-1 py-1">{item.description}</td>
-                    <td className="border border-black px-1 py-1 text-center">{item.hsCode}</td>
-                    <td className="border border-black px-1 py-1 text-right">
-                      {item.quantity.toLocaleString()} {item.unit}
-                    </td>
-                    <td className="border border-black px-1 py-1 text-right">
-                      {item.currency} {item.unitPrice.toFixed(2)}
-                    </td>
-                    <td className="border border-black px-1 py-1 text-right font-semibold">
-                      {item.currency} {item.amount.toFixed(2)}
-                    </td>
+                    {goodsTableColumns.map((column) => {
+                      switch (column.key) {
+                        case 'no':
+                          return <td key={column.key} className="border border-black px-1 py-1 text-center">{item.no}</td>;
+                        case 'description':
+                          return <td key={column.key} className="border border-black px-1 py-1">{item.description}</td>;
+                        case 'hsCode':
+                          return <td key={column.key} className="border border-black px-1 py-1 text-center">{item.hsCode}</td>;
+                        case 'quantity':
+                          return <td key={column.key} className="border border-black px-1 py-1 text-right">{item.quantity.toLocaleString()}</td>;
+                        case 'unit':
+                          return <td key={column.key} className="border border-black px-1 py-1 text-center">{item.unit}</td>;
+                        case 'unitPrice':
+                          return <td key={column.key} className="border border-black px-1 py-1 text-right">{item.unitPrice.toFixed(2)}</td>;
+                        case 'amount':
+                        default:
+                          return <td key={column.key} className="border border-black px-1 py-1 text-right font-semibold">{item.amount.toFixed(2)}</td>;
+                      }
+                    })}
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="font-semibold">
-                  <td colSpan={5} className="border border-black px-1 py-1 text-right">
-                    TOTAL:
+                  <td colSpan={Math.max(goodsTableColumns.length - 1, 1)} className="border border-black px-1 py-1 text-right">
+                    TOTAL({currency}):
                   </td>
                   <td className="border border-black px-1 py-1 text-right">
-                    {currency} {total.toFixed(2)}
+                    {total.toFixed(2)}
                   </td>
                 </tr>
                 <tr>
-                  <td colSpan={6} className="border border-black px-2 py-1 text-xs">
+                  <td colSpan={7} className="border border-black px-2 py-1 text-xs">
                     <span className="font-semibold">SAY TOTAL: </span>
                     {numberToWords(total)}
                   </td>

@@ -12,12 +12,35 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useRe
 import { toast } from 'sonner@2.0.3';
 import { useOptionalApproval } from './ApprovalContext'; // 客户端可在无审批 Provider 时继续运行
 import { useOrders } from './OrderContext'; // 🔥 新增：同步订单到客户端，以及监听客户确认状态
+import { useOptionalPurchaseOrders } from './PurchaseOrderContext'; // Phase 7A: snapshot needs CG data
+import { useSalesQuotations } from './SalesQuotationContext'; // Phase 7A: snapshot needs QT data
+import { computeSCProfit } from '../utils/scProfitUtils'; // Phase 7A: reuse Phase 6 actual profit logic
 import { getCurrentUser, getStoredPortalRole, isStoredStaffPortalRole } from '../utils/dataIsolation';
 import { addTombstones, filterNotDeleted, listTombstones, removeTombstones } from '../lib/erp-core/deletion-tombstone';
 import { salesContractsDb, fromContractRow } from '../lib/supabase-db';
-import { contractService, orderService } from '../lib/supabaseService';
+import { contractService, orderService, arService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 import type { SalesContractData } from '../components/documents/templates/SalesContractDocument';
+import type { PaymentMode } from './SalesQuotationContext';
+import { assertBusinessOwnerEmail } from '../utils/quotationOwnership';
+import { buildIdentityAuditMetadata, buildIdentityPersistenceFields } from '../utils/dataIsolation';
+
+// ── Phase 7A: Profit snapshot — frozen at SC completion ───────────────────────
+/**
+ * Written ONCE when SC.status transitions to 'completed'.
+ * Captures actual profit at that moment. Never recalculated or overwritten.
+ * If actual profit was unavailable at completion, this field is absent (null).
+ */
+export interface ProfitSnapshot {
+  finalRevenue:   number;   // SC.totalAmount at snapshot time
+  finalCost:      number;   // sum(CG.totalAmount) + additionalCost
+  finalProfit:    number;   // finalRevenue − finalCost
+  finalMargin:    number;   // decimal 0–1  (finalProfit / finalRevenue)
+  cgCount:        number;   // CG records included in finalCost
+  additionalCost: number;   // SC.additionalCost at snapshot time
+  currency:       string;   // SC.currency (context for all amounts)
+  snapshotAt:     string;   // ISO 8601 timestamp
+}
 
 // 🔥 销售合同产品接口
 export interface SalesContractProduct {
@@ -69,7 +92,7 @@ export interface SalesContract {
   id: string;                          // 合同ID
   contractNumber: string;              // 合同编号: SC-{REGION}-{YYMMDD}-{序号}
   quotationNumber: string;             // 关联的报价单号（QT）- 一对一
-  inquiryNumber?: string;              // 原始询价单号（INQ）
+  inquiryNumber?: string;              // 原始询价单号（ING）
   projectId?: string | null;
   projectCode?: string | null;
   projectName?: string | null;
@@ -93,6 +116,19 @@ export interface SalesContract {
   // 业务信息
   salesPerson: string;                 // 业务员邮箱
   salesPersonName: string;             // 业务员姓名
+  ownerUserId?: string | null;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+  operatorUserId?: string | null;
+  operatorEmail?: string | null;
+  operatorRole?: string | null;
+  actingUserId?: string | null;
+  actingUserEmail?: string | null;
+  actingUserRole?: string | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserEmail?: string | null;
+  authenticatedUserRole?: string | null;
   supervisor?: string;                 // 主管邮箱
   region: 'NA' | 'SA' | 'EA';       // 区域
   
@@ -103,32 +139,40 @@ export interface SalesContract {
   totalAmount: number;
   currency: 'USD' | 'EUR' | 'GBP';
   tradeTerms: string;                  // FOB/CIF/EXW等
-  paymentTerms: string;                // 付款条款
+  paymentTerms: string;                // 付款条款（自由文本，文档渲染用）
+  paymentMode?: PaymentMode | null;    // 结构化付款模式（Phase 1: 仅存储，不影响闸门逻辑）
   depositPercentage: number;           // 定金比例（默认30%）
   depositAmount: number;               // 定金金额
   balancePercentage: number;           // 余款比例（默认70%）
   balanceAmount: number;               // 余款金额
+  additionalCost?: number;             // 附加成本（运费/关税等，SC币种）Phase 6b
+  fxRates?: Record<string, number>;    // Phase 8: FX map — fxRates[foreignCcy] = units per 1 SC-ccy unit
+  profitSnapshot?: ProfitSnapshot | null; // Phase 7A: frozen profit at completion (null = skipped)
   deliveryTime: string;                // 交货期
   portOfLoading: string;               // 装运港
   portOfDestination: string;           // 目的港
   packing: string;                     // 包装要求
   
   // 🔥 状态流转（更新完整流程）
-  status: 
-    | 'draft'                    // 草稿
-    | 'pending_supervisor'       // 待主管审批
-    | 'pending_director'         // 待总监审批
-    | 'approved'                 // 审批通过
-    | 'rejected'                 // 审批驳回
-    | 'sent'                     // 已发送给客户
-    | 'customer_confirmed'       // 客户已确认
-    | 'deposit_uploaded'         // 客户已上传定金凭证
-    | 'deposit_confirmed'        // 财务已确认收到定金（可以生成PO）
-    | 'po_generated'             // 已生成PO
-    | 'production'               // 生产中
-    | 'shipped'                  // 已发货
-    | 'completed'                // 已完成
-    | 'cancelled';               // 已取消
+  // ⚠️ Normalized status dictionary — do NOT use 'sent_to_customer', 'pending' (bare) for SC writes.
+  status:
+    | 'draft'                       // 草稿
+    | 'pending_supervisor'          // 待主管审批
+    | 'pending_director'            // 待总监审批
+    | 'approved'                    // 审批通过
+    | 'rejected'                    // 内部审批驳回
+    | 'sent'                        // 已发送给客户（normalized from 'sent_to_customer'）
+    | 'customer_confirmed'          // 客户已确认
+    | 'customer_rejected'           // 客户拒绝合同
+    | 'customer_requested_changes'  // 客户要求修改合同
+    | 'deposit_uploaded'            // 客户已上传定金凭证
+    | 'deposit_confirmed'           // 财务已确认收到定金（可以生成PO）
+    | 'po_generated'                // 已生成PO（SC-side procurement placeholder）
+    | 'production'                  // 生产中（NOTE: no in-app write path exists yet — set externally if needed）
+    | 'balance_confirmed'           // 财务已确认收到尾款 [Phase 2a]
+    | 'shipped'                     // 已发货
+    | 'completed'                   // 已完成
+    | 'cancelled';                  // 已取消（内部/业务取消）
   
   // 审批流程
   approvalFlow: ContractApprovalFlow;
@@ -161,7 +205,8 @@ export interface SalesContract {
   approvedAt?: string;                 // 审批通过时间
   sentToCustomerAt?: string;           // 发送给客户时间
   customerConfirmedAt?: string;        // 客户确认时间
-  
+  customerFeedback?: Record<string, any>; // 客户反馈（accept/reject/negotiate）
+
   // 其他
   remarks?: string;
   attachments?: Array<{
@@ -193,20 +238,41 @@ interface SalesContractContextType {
   approveContract: (id: string, approverRole: 'supervisor' | 'director', notes?: string) => Promise<void>;
   rejectContract: (id: string, reason: string, approverRole: 'supervisor' | 'director') => Promise<void>;
   sendToCustomer: (id: string) => void;
-  customerConfirmContract: (id: string, signature: ElectronicSignature) => void;
-  customerRejectContract: (id: string, reason: string) => void;
-  customerRequestChanges: (id: string, requestedChanges: string) => void;
-  
+  customerConfirmContract: (id: string, signature: ElectronicSignature, silent?: boolean, customerFeedback?: Record<string, any>) => Promise<void>;
+  customerRejectContract: (id: string, reason: string) => Promise<void>;
+  customerRequestChanges: (id: string, requestedChanges: string) => Promise<void>;
+
   // 🔥 定金管理
-  uploadDepositProof: (id: string, fileName: string, fileUrl: string, uploadedBy: string) => void;
-  confirmDeposit: (id: string, confirmedBy: string, notes?: string) => void;
-  
-  // 🔥 采购订单生成
-  generatePurchaseOrder: (id: string) => string[];  // 返回生成的PO编号列表
+  uploadDepositProof: (id: string, fileName: string, fileUrl: string, uploadedBy: string) => Promise<void>;
+  confirmDeposit: (id: string, confirmedBy: string, notes?: string) => Promise<void>;
+
+  // ⚠️ DEPRECATED (Phase 3a): Non-authoritative SC-side placeholder. Does NOT create purchase_orders
+  // rows. Superseded by markPRInitiated() which is called by the real live procurement trigger.
+  // Retained for backward compatibility; do not call from new code.
+  generatePurchaseOrder: (id: string) => Promise<string[]>;
+
+  // Phase 3a: SC → PR initiation write-back
+  // Called by the real SC-side procurement trigger (requestProcurementFromContract) after the PR
+  // record is successfully created in purchase_orders. Advances SC.status to 'po_generated' and
+  // appends the PR number to SC.purchaseOrderNumbers. Does NOT create purchase_orders rows.
+  markPRInitiated: (id: string, prNumber: string) => Promise<void>;
+
+  // Phase 3c: procurement-execution mirror — resolves SC.production orphan status.
+  // Called by PurchaseOrderManagementEnhanced after ALL standard-path CG records under a PR
+  // reach procurementRequestStatus === 'pushed_supplier'. Advances SC.status to 'production'.
+  // Accepts the SC contract number (not id) because the caller only has the contract number
+  // from the PR record's salesContractNumber / sourceRef field.
+  // Safety: only advances from 'po_generated' — does NOT overwrite any later SC status.
+  advanceSCToProduction: (contractNumber: string) => Promise<void>;
+
+  // 🔥 尾款确认 & 履约推进 [Phase 2a: Mode 1 / null default]
+  confirmBalancePayment: (id: string, confirmedBy: string, notes?: string) => Promise<void>;
+  advanceSCToShipped: (id: string) => Promise<void>;
+  advanceSCToCompleted: (id: string) => Promise<void>;
   
   // 电子签名
-  addSellerSignature: (id: string, signature: ElectronicSignature) => void;
-  addBuyerSignature: (id: string, signature: ElectronicSignature) => void;
+  addSellerSignature: (id: string, signature: ElectronicSignature) => Promise<void>;
+  addBuyerSignature: (id: string, signature: ElectronicSignature) => Promise<void>;
 
   // 🔥 接口化：手动刷新（用于确保进入订单管理Tab时一定发起请求）
   refreshFromBackend: () => Promise<void>;
@@ -225,6 +291,51 @@ const assertSalesContractPersistedBinding = (contract: Partial<SalesContract>) =
     throw new Error(`SC ${contract.contractNumber || contract.id || ''} 缺少模板绑定字段，Supabase 返回结果不完整`);
   }
 };
+
+const normalizeSalesContractWritePayload = (contract: SalesContract): SalesContract => {
+  const ownerEmail = assertBusinessOwnerEmail(contract.salesPerson, contract.region, '销售合同');
+  return {
+    ...contract,
+    salesPerson: ownerEmail,
+    ownerEmail,
+    ownerName: contract.salesPersonName || null,
+    ownerRole: 'Sales_Rep',
+    ...buildIdentityPersistenceFields({
+      ownerEmail,
+      ownerName: contract.salesPersonName || null,
+      ownerRole: 'Sales_Rep',
+    }),
+    documentRenderMeta: {
+      ...(contract.documentRenderMeta || {}),
+      ...buildIdentityAuditMetadata({
+        ownerEmail,
+        ownerName: contract.salesPersonName || null,
+        ownerRole: 'Sales_Rep',
+        region: contract.region || null,
+      }),
+    },
+  };
+};
+
+// ─── paymentMode classification helpers ───────────────────────────────────────
+// Ship-first modes: balance payment is received AFTER shipment
+// (tt_deposit_balance_against_bl = Mode 2, dp = Mode 5, oa = Mode 6)
+const isShipFirstMode = (mode: PaymentMode | null | undefined): boolean =>
+  mode === 'tt_deposit_balance_against_bl' || mode === 'dp' || mode === 'oa';
+
+// No-deposit modes: skip the deposit stage entirely
+// lc_100: 100% LC — no deposit required; oa: open account — no deposit required
+const isNoDepositMode = (mode: PaymentMode | null | undefined): boolean =>
+  mode === 'oa' || mode === 'lc_100';
+
+// LC modes: payment secured via Letter of Credit (Phase 2b-ii)
+// balance_confirmed is reused as the unified pre-shipment financial clearance gate,
+// meaning "LC readiness confirmed" rather than a cash balance payment.
+// lc_100         — no deposit, pre-ship balance gate required
+// deposit_plus_lc — deposit required, then LC covers the remainder (pre-ship balance gate)
+const isLCMode = (mode: PaymentMode | null | undefined): boolean =>
+  mode === 'lc_100' || mode === 'deposit_plus_lc';
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function SalesContractProvider({ children }: { children: ReactNode }) {
   // 迁移历史 tombstone：将错误写入 order 域的合同删除标记迁移到 contract 域
@@ -260,6 +371,11 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   
   // 🔥 获取订单Context（用于同步订单到客户端，以及监听客户确认状态）
   const { addOrder, orders: allOrders } = useOrders();
+
+  // Phase 7A: profit snapshot at completion — needs CG cost data and QT estimates
+  const purchaseOrderContext = useOptionalPurchaseOrders();
+  const purchaseOrders = purchaseOrderContext?.purchaseOrders || [];
+  const { getQuotationByNumber } = useSalesQuotations();
 
   // 🔥 从 Supabase 加载合同列表（Supabase-first）
   useEffect(() => {
@@ -608,16 +724,18 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       documentDataSnapshot: contractData.documentDataSnapshot,
       documentRenderMeta: contractData.documentRenderMeta || null,
     };
+
+    const normalizedContract = normalizeSalesContractWritePayload(newContract);
+
     
-    
-    assertSalesContractWritePayload(newContract);
-    const saved = await contractService.upsert(newContract);
+    assertSalesContractWritePayload(normalizedContract);
+    const saved = await contractService.upsert(normalizedContract);
     if (!saved) {
-      throw new Error(`销售合同 ${newContract.contractNumber} 创建失败`);
+      throw new Error(`销售合同 ${normalizedContract.contractNumber} 创建失败`);
     }
     assertSalesContractPersistedBinding(saved as SalesContract);
     setContracts(prev => [...prev.filter(c => c.id !== saved.id), saved as SalesContract]);
-    toast.success(`销售合同 ${newContract.contractNumber} 创建成功！`);
+    toast.success(`销售合同 ${normalizedContract.contractNumber} 创建成功！`);
     return saved as SalesContract;
   };
   
@@ -625,7 +743,7 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   const updateContract = async (id: string, updates: Partial<SalesContract>) => {
     const targetContract = contracts.find(c => c.id === id);
     if (!targetContract) return;
-    const merged = { ...targetContract, ...updates, updatedAt: new Date().toISOString() } as SalesContract;
+    const merged = normalizeSalesContractWritePayload({ ...targetContract, ...updates, updatedAt: new Date().toISOString() } as SalesContract);
     if (updates.totalAmount && updates.totalAmount !== targetContract.totalAmount) {
       const requiresDirectorApproval = updates.totalAmount >= 20000;
       merged.approvalFlow = {
@@ -779,8 +897,8 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       toast.error('只能发送审批通过的合同！');
       return;
     }
-    // 仅按合同状态判断是否已发送（改回“未发送”后可再次发送，不依赖订单列表）
-    if (contract.sentToCustomerAt || contract.status === 'sent_to_customer' || contract.status === 'sent') {
+    // 仅按合同状态判断是否已发送（规范化：仅检查 'sent'，不再使用 'sent_to_customer'）
+    if (contract.sentToCustomerAt || contract.status === 'sent') {
       toast.warning('该合同已发送给客户！请勿重复操作。');
       return;
     }
@@ -826,13 +944,6 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       }
 
 
-      // 更新合同状态（同时写入已解析的 customerEmail，防止后续操作丢失）
-      setContracts(prev => prev.map(c =>
-        c.id === contract.id
-          ? { ...c, status: 'sent_to_customer' as const, sentToCustomerAt: now, updatedAt: now, customerEmail: resolvedCustomerEmail || c.customerEmail }
-          : c
-      ));
-
       // 构建订单数据
       const orderData = {
         id: contract.id,
@@ -874,10 +985,29 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         console.warn('⚠️ [sendToCustomer] Supabase orders 写入失败，仅本地处理');
       }
 
-      // 2. 同时走 context addOrder（更新当前 React state）
+      // 2. 持久化 SC 状态到 sales_contracts（status='sent' + sent_to_customer_at）
+      // 仅在 email 有变化时额外写入 customer_email，防止覆盖为空值
+      try {
+        const scExtra: Record<string, any> = { sent_to_customer_at: now };
+        if (resolvedCustomerEmail && resolvedCustomerEmail !== contract.customerEmail) {
+          scExtra.customer_email = resolvedCustomerEmail;
+        }
+        await contractService.updateStatus(id, 'sent', scExtra);
+      } catch (_e) {
+        console.warn('⚠️ [sendToCustomer] Supabase sales_contracts 状态写入失败，仅本地处理');
+      }
+
+      // 3. 更新本地 React state（DB write 完成后同步）
+      setContracts(prev => prev.map(c =>
+        c.id === contract.id
+          ? { ...c, status: 'sent' as const, sentToCustomerAt: now, updatedAt: now, customerEmail: resolvedCustomerEmail || c.customerEmail }
+          : c
+      ));
+
+      // 4. 同时走 context addOrder（更新当前 React state）
       addOrder(orderData);
 
-      // 3. 广播事件，触发客户端 OrderContext 重新加载
+      // 5. 广播事件，触发客户端 OrderContext 重新加载
       window.dispatchEvent(new CustomEvent('ordersUpdated', {
         detail: { action: 'add', orderNumber: orderData.orderNumber, customerEmail: resolvedCustomerEmail }
       }));
@@ -889,146 +1019,503 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     void doLocalSend();
   };
   
-  // 🔥 客户确认合同
-  const customerConfirmContract = (id: string, signature: ElectronicSignature) => {
-    setContracts(prev => prev.map(contract => {
-      if (contract.id === id) {
-        return {
-          ...contract,
-          status: 'customer_confirmed',
-          buyerSignature: signature,
-          customerConfirmedAt: new Date().toISOString()
-        };
+  // 🔥 客户确认合同 — 单一写入路径（状态 + 签名 + feedback + AR 自动创建）
+  const customerConfirmContract = async (
+    id: string,
+    signature: ElectronicSignature,
+    silent = false,
+    customerFeedback?: Record<string, any>,
+  ): Promise<void> => {
+    const now = new Date().toISOString();
+
+    // Single authoritative DB write — bypasses full upsert assertion, writes all confirmation columns atomically
+    const saved = await contractService.updateStatus(id, 'customer_confirmed', {
+      buyer_signature: signature,
+      customer_confirmed_at: now,
+      customer_feedback: customerFeedback || null,
+    });
+
+    // Sync local state: update in-place if present, otherwise no-op (realtime subscription will catch it)
+    setContracts(prev => {
+      const idx = prev.findIndex(c => c.id === id);
+      if (idx === -1) return prev;
+      const merged = saved
+        ? { ...prev[idx], ...saved }
+        : { ...prev[idx], status: 'customer_confirmed' as const, buyerSignature: signature, customerConfirmedAt: now, customerFeedback: customerFeedback };
+      return [...prev.slice(0, idx), merged, ...prev.slice(idx + 1)];
+    });
+
+    // AR auto-creation with idempotency guard
+    const contract = contracts.find(c => c.id === id) || saved;
+    const contractNumber = (contract as any)?.contractNumber || (contract as any)?.contract_number;
+    if (contractNumber) {
+      try {
+        const existing = await arService.getByOrderNumber(contractNumber);
+        if (existing) {
+          console.log(`[SC→AR] AR already exists for ${contractNumber}, skipping.`);
+        } else {
+          const c = contract as any;
+          const region = contractNumber.split('-')[1] || 'NA';
+          const d = new Date();
+          const dateStr = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+          const arNumber = `YS-${region}-${dateStr}-0001`;
+          const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          const newAR = {
+            id: `ar-${Date.now()}`,
+            arNumber,
+            orderNumber: contractNumber,
+            quotationNumber: c.quotationNumber || null,
+            contractNumber,
+            customerName: c.customerName || '',
+            customerEmail: c.customerEmail || '',
+            region,
+            invoiceDate: d.toISOString().split('T')[0],
+            dueDate,
+            totalAmount: c.totalAmount || 0,
+            paidAmount: 0,
+            remainingAmount: c.totalAmount || 0,
+            currency: c.currency || 'USD',
+            status: 'pending',
+            paymentTerms: c.paymentTerms || '30% T/T deposit, 70% balance before shipment',
+            products: (c.products || []).map((p: any) => ({
+              name: p.productName || p.name || '',
+              quantity: p.quantity || 0,
+              unitPrice: p.unitPrice || 0,
+              totalPrice: p.amount || p.totalPrice || (p.quantity || 0) * (p.unitPrice || 0),
+            })),
+            paymentHistory: [],
+            createdAt: now,
+            updatedAt: now,
+            createdBy: 'system-auto',
+            notes: `Auto-generated from customer contract acceptance. Quotation: ${c.quotationNumber || 'N/A'}`,
+          };
+          await arService.upsert(newAR);
+          console.log(`✅ [SC→AR] AR created: ${arNumber} for contract ${contractNumber}`);
+        }
+      } catch (arErr: any) {
+        console.warn(`⚠️ [SC→AR] AR auto-creation failed for ${contractNumber}:`, arErr?.message);
       }
-      return contract;
-    }));
-    
-    toast.success('客户已确认合同！');
+    }
+
+    if (!silent) toast.success('客户已确认合同！应收账款已自动创建。');
   };
   
   // 🔥 客户拒绝合同
-  const customerRejectContract = (id: string, reason: string) => {
+  // Note: writes to rejection_reason column, same column used by internal rejectContract().
+  // Schema debt — accepted as temporary. Separate column for customer rejection reason is out of scope.
+  const customerRejectContract = async (id: string, reason: string): Promise<void> => {
+    try {
+      await contractService.updateStatus(id, 'customer_rejected', {
+        rejection_reason: reason,
+      });
+    } catch (err: any) {
+      toast.error(`客户拒绝状态保存失败：${err?.message || '请重试'}`);
+      return;
+    }
+
     setContracts(prev => prev.map(contract => {
       if (contract.id === id) {
-        return {
-          ...contract,
-          status: 'customer_rejected',
-          rejectionReason: reason
-        };
+        return { ...contract, status: 'customer_rejected' as const, rejectionReason: reason, updatedAt: new Date().toISOString() };
       }
       return contract;
     }));
-    
+
     toast.error('客户拒绝了合同！');
   };
   
   // 🔥 客户请求修改
-  const customerRequestChanges = (id: string, requestedChanges: string) => {
-    setContracts(prev => prev.map(contract => {
-      if (contract.id === id) {
-        return {
-          ...contract,
-          status: 'customer_requested_changes',
-          remarks: `客户修改意见：${requestedChanges}\n\n${contract.remarks || ''}`
-        };
+  const customerRequestChanges = async (id: string, requestedChanges: string): Promise<void> => {
+    const contract = contracts.find(c => c.id === id);
+    const updatedRemarks = `客户修改意见：${requestedChanges}\n\n${contract?.remarks || ''}`;
+
+    try {
+      await contractService.updateStatus(id, 'customer_requested_changes', {
+        remarks: updatedRemarks,
+      });
+    } catch (err: any) {
+      toast.error(`客户修改请求保存失败：${err?.message || '请重试'}`);
+      return;
+    }
+
+    setContracts(prev => prev.map(c => {
+      if (c.id === id) {
+        return { ...c, status: 'customer_requested_changes' as const, remarks: updatedRemarks, updatedAt: new Date().toISOString() };
       }
-      return contract;
+      return c;
     }));
-    
+
     toast.info('客户请求修改合同内容！');
   };
   
   // 🔥 添加卖方签名
-  const addSellerSignature = (id: string, signature: ElectronicSignature) => {
+  const addSellerSignature = async (id: string, signature: ElectronicSignature): Promise<void> => {
+    // Read current status at call time to avoid writing a stale status from closure
+    const currentStatus = contracts.find(c => c.id === id)?.status;
+    if (!currentStatus) return;
+
+    try {
+      await contractService.updateStatus(id, currentStatus, {
+        seller_signature: signature,
+      });
+    } catch (err: any) {
+      toast.error(`卖方签名保存失败：${err?.message || '请重试'}`);
+      return;
+    }
+
     setContracts(prev => prev.map(contract => {
       if (contract.id === id) {
-        return {
-          ...contract,
-          sellerSignature: signature
-        };
+        return { ...contract, sellerSignature: signature, updatedAt: new Date().toISOString() };
       }
       return contract;
     }));
-    
+
     toast.success('卖方签名已添加！');
   };
   
   // 🔥 添加买方签名
-  const addBuyerSignature = (id: string, signature: ElectronicSignature) => {
+  const addBuyerSignature = async (id: string, signature: ElectronicSignature): Promise<void> => {
+    // Read current status at call time to avoid writing a stale status from closure
+    const currentStatus = contracts.find(c => c.id === id)?.status;
+    if (!currentStatus) return;
+
+    try {
+      await contractService.updateStatus(id, currentStatus, {
+        buyer_signature: signature,
+      });
+    } catch (err: any) {
+      toast.error(`买方签名保存失败：${err?.message || '请重试'}`);
+      return;
+    }
+
     setContracts(prev => prev.map(contract => {
       if (contract.id === id) {
-        return {
-          ...contract,
-          buyerSignature: signature
-        };
+        return { ...contract, buyerSignature: signature, updatedAt: new Date().toISOString() };
       }
       return contract;
     }));
-    
+
     toast.success('买方签名已添加！');
   };
   
   // 🔥 上传定金凭证
-  const uploadDepositProof = (id: string, fileName: string, fileUrl: string, uploadedBy: string) => {
+  const uploadDepositProof = async (id: string, fileName: string, fileUrl: string, uploadedBy: string): Promise<void> => {
+    const uploadedAt = new Date().toISOString();
+    const depositProofPayload = { fileName, fileUrl, uploadedBy, uploadedAt };
+
+    try {
+      await contractService.updateStatus(id, 'deposit_uploaded', {
+        deposit_proof: depositProofPayload,
+      });
+    } catch (err: any) {
+      toast.error(`定金凭证上传失败：${err?.message || '请重试'}`);
+      return;
+    }
+
     setContracts(prev => prev.map(contract => {
       if (contract.id === id) {
         return {
           ...contract,
-          status: 'deposit_uploaded',
-          depositProof: {
-            fileName,
-            fileUrl,
-            uploadedBy,
-            uploadedAt: new Date().toISOString()
-          }
+          status: 'deposit_uploaded' as const,
+          depositProof: depositProofPayload,
+          updatedAt: uploadedAt,
         };
       }
       return contract;
     }));
-    
+
     toast.success('定金凭证已上传！');
   };
   
   // 🔥 确认定金
-  const confirmDeposit = (id: string, confirmedBy: string, notes?: string) => {
+  const confirmDeposit = async (id: string, confirmedBy: string, notes?: string): Promise<void> => {
+    const confirmedAt = new Date().toISOString();
+
+    try {
+      await contractService.updateStatus(id, 'deposit_confirmed', {
+        deposit_confirmed_by: confirmedBy,
+        deposit_confirmed_at: confirmedAt,
+        deposit_confirm_notes: notes || null,
+      });
+    } catch (err: any) {
+      toast.error(`定金确认失败：${err?.message || '请重试'}`);
+      return;
+    }
+
     setContracts(prev => prev.map(contract => {
       if (contract.id === id) {
         return {
           ...contract,
-          status: 'deposit_confirmed',
+          status: 'deposit_confirmed' as const,
           depositConfirmedBy: confirmedBy,
-          depositConfirmedAt: new Date().toISOString(),
-          depositConfirmNotes: notes
+          depositConfirmedAt: confirmedAt,
+          depositConfirmNotes: notes,
+          updatedAt: confirmedAt,
         };
       }
       return contract;
     }));
-    
+
     toast.success('定金已确认！现在可以生成采购订单了。');
   };
   
-  // 🔥 生成采购订单
-  const generatePurchaseOrder = (id: string) => {
+  // ⚠️ DEPRECATED (Phase 3a): Non-authoritative SC-side placeholder.
+  // Does NOT create a purchase_orders row. Has NO live UI callers.
+  // Superseded by markPRInitiated(), which is called by the real procurement trigger
+  // (requestProcurementFromContract in SalesContractManagement.tsx).
+  // Retained for backward compatibility — do NOT call from new code.
+  const generatePurchaseOrder = async (id: string): Promise<string[]> => {
     const contract = contracts.find(c => c.id === id);
-    if (contract && contract.status === 'deposit_confirmed') {
-      const poNumber = `PO-${contract.contractNumber}`;
-      contract.purchaseOrderNumbers = [poNumber];
-      
-      setContracts(prev => prev.map(c => {
-        if (c.id === id) {
-          return contract;
-        }
-        return c;
-      }));
-      
-      toast.success(`采购订单 ${poNumber} 已生成！`);
-      return [poNumber];
+
+    // Phase 2b-ii: isNoDepositMode covers both oa and lc_100 — no deposit stage, so PO can be
+    // generated from customer_confirmed onwards. deposit_plus_lc still requires deposit_confirmed
+    // first (deposit stage must complete before procurement). All other modes: deposit_confirmed.
+    const poEligible: string[] = isNoDepositMode(contract?.paymentMode)
+      ? ['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'po_generated', 'production']
+      : ['deposit_confirmed', 'po_generated', 'production'];
+
+    if (!contract || !poEligible.includes(contract.status)) {
+      toast.error(isNoDepositMode(contract?.paymentMode)
+        ? '无法生成采购订单，请确认合同已被客户确认。'
+        : '无法生成采购订单，请确认定金已收到。');
+      return [];
     }
-    
-    toast.error('无法生成采购订单，请确认定金已收到。');
-    return [];
+
+    const poNumber = `PO-${contract.contractNumber}`;
+
+    try {
+      await contractService.updateStatus(id, 'po_generated', {
+        purchase_order_numbers: [poNumber],
+      });
+    } catch (err: any) {
+      toast.error(`采购订单生成失败：${err?.message || '请重试'}`);
+      return [];
+    }
+
+    setContracts(prev => prev.map(c =>
+      c.id === id
+        ? { ...c, status: 'po_generated' as const, purchaseOrderNumbers: [poNumber], updatedAt: new Date().toISOString() }
+        : c
+    ));
+
+    toast.success(`采购订单 ${poNumber} 已生成！`);
+    return [poNumber];
   };
-  
+
+  // Phase 3a: SC → PR initiation write-back ─────────────────────────────────────────────────────
+  // The real SC-side procurement trigger (requestProcurementFromContract in
+  // SalesContractManagement.tsx) calls this after successfully creating the PR record in
+  // purchase_orders. This is the authoritative path that sets SC.status = 'po_generated'.
+  //
+  // Behaviour:
+  //   • Advances SC.status to 'po_generated' via contractService.updateStatus (minimal write —
+  //     no full upsert assertion required)
+  //   • Appends prNumber to SC.purchaseOrderNumbers — preserves any previously recorded numbers
+  //   • Updates local React state so the UI reflects the change immediately without a reload
+  //   • Does NOT create purchase_orders rows (that is requestProcurementFromContract's job)
+  //   • Does NOT show a toast (the caller shows its own success/failure toast)
+  const markPRInitiated = async (id: string, prNumber: string): Promise<void> => {
+    const contract = contracts.find(c => c.id === id);
+    if (!contract) return;
+
+    // Append to any already-recorded numbers; deduplicate to guard against re-triggers
+    const existing = contract.purchaseOrderNumbers ?? [];
+    const updated = existing.includes(prNumber) ? existing : [...existing, prNumber];
+
+    try {
+      await contractService.updateStatus(id, 'po_generated', {
+        purchase_order_numbers: updated,
+      });
+    } catch (err: any) {
+      throw new Error(`SC 采购启动状态写入失败：${err?.message || '请重试'}`);
+    }
+
+    setContracts(prev => prev.map(c =>
+      c.id === id
+        ? { ...c, status: 'po_generated' as const, purchaseOrderNumbers: updated, updatedAt: new Date().toISOString() }
+        : c
+    ));
+  };
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+  // Phase 3c: procurement-execution mirror ──────────────────────────────────────────────────────
+  // Called by PurchaseOrderManagementEnhanced (handlePushPurchaseToSupplier) after ALL standard-
+  // path CG records for a given PR have reached procurementRequestStatus === 'pushed_supplier'.
+  // Resolves the SC.production orphan status by giving it a real, automated write path.
+  //
+  // Parameter: contractNumber (SC-xxx) — the PR record carries this in salesContractNumber /
+  //   sourceRef; the admin component does not have the SC internal id.
+  //
+  // Safety gate: only advances SC from 'po_generated'. Statuses at or after 'production'
+  //   (balance_confirmed, shipped, completed) are NOT overwritten. This is a one-way advancement
+  //   only; there is no rollback.
+  //
+  // ⚠️  Phase 5 rule: this is the TERMINAL automated SC reflection point.
+  //     SC mirrors CG execution up to 'production' only.
+  //     SC does NOT auto-sync further CG states ('producing', 'shipped', 'completed').
+  //     SC.shipped → advanceSCToShipped (salesperson-triggered, manual).
+  //     SC.completed → advanceSCToCompleted (salesperson-triggered, manual).
+  //     Do NOT add further auto-advance steps to this function or create new callers
+  //     that would push SC beyond 'production' based on CG state changes.
+  const advanceSCToProduction = async (contractNumber: string): Promise<void> => {
+    const contract = contracts.find(c => c.contractNumber === contractNumber);
+    if (!contract) return;
+
+    // Conservative eligibility: only advance from po_generated.
+    // po_generated is the expected SC state when the PR has been initiated (Phase 3a) and
+    // supplier allocation is complete. Do not overwrite any status that comes after production.
+    if (contract.status !== 'po_generated') return;
+
+    try {
+      await contractService.updateStatus(contract.id, 'production');
+    } catch (err: any) {
+      throw new Error(`SC 生产状态写入失败：${err?.message || '请重试'}`);
+    }
+
+    setContracts(prev => prev.map(c =>
+      c.id === contract.id
+        ? { ...c, status: 'production' as const, updatedAt: new Date().toISOString() }
+        : c
+    ));
+  };
+  // ─────────────────────────────────────────────────────────────────────────────────────────────
+
+  // 🔥 确认尾款收到 / 确认信用证落实 [Phase 2b-ii: mode-aware eligible statuses]
+  // For LC modes, balance_confirmed means "LC readiness confirmed" rather than a cash receipt.
+  const confirmBalancePayment = async (id: string, confirmedBy: string, notes?: string): Promise<void> => {
+    const contract = contracts.find(c => c.id === id);
+    if (!contract) return;
+
+    // Ship-first modes (2/5/6): balance confirmed AFTER shipment — includes 'shipped' in eligible set.
+    // lc_100: no deposit stage — eligible from po_generated / production (LC readiness confirmation).
+    // deposit_plus_lc / Mode 1 / null: eligible from deposit_confirmed / po_generated / production.
+    const ELIGIBLE: string[] = isShipFirstMode(contract.paymentMode)
+      ? ['deposit_confirmed', 'po_generated', 'production', 'shipped']
+      : contract.paymentMode === 'lc_100'
+        ? ['po_generated', 'production']
+        : ['deposit_confirmed', 'po_generated', 'production'];
+
+    if (!ELIGIBLE.includes(contract.status)) {
+      toast.error(isLCMode(contract.paymentMode)
+        ? '当前合同状态不支持确认信用证落实'
+        : '当前合同状态不支持确认尾款');
+      return;
+    }
+    try {
+      await contractService.updateStatus(id, 'balance_confirmed');
+      setContracts(prev => prev.map(c =>
+        c.id === id ? { ...c, status: 'balance_confirmed' as const, updatedAt: new Date().toISOString() } : c
+      ));
+      toast.success(isShipFirstMode(contract.paymentMode)
+        ? '尾款已确认！合同可以标记为完成。'
+        : isLCMode(contract.paymentMode)
+          ? '信用证已落实！合同现在可以安排发货。'
+          : '尾款已确认！合同现在可以安排发货。');
+    } catch (err: any) {
+      toast.error(`确认失败：${err?.message || '请重试'}`);
+    }
+  };
+
+  // 🔥 推进合同到已发货 [Phase 2b-i: mode-aware ship gate]
+  // Phase 5 rule: SC.shipped is a SALES-CONTROLLED action. It is triggered by the salesperson
+  // via a UI button in SalesContractManagement — never by CG state changes.
+  // No automated caller should invoke this function based on CG.status or CG.procurementRequestStatus.
+  const advanceSCToShipped = async (id: string): Promise<void> => {
+    const contract = contracts.find(c => c.id === id);
+    if (!contract) return;
+
+    // Phase 2b-ii:
+    //   OA (no deposit, ship-first): can ship from customer_confirmed / po_generated / production
+    //   Ship-first Mode 2 / 5: can ship from deposit_confirmed / po_generated / production
+    //   lc_100 / deposit_plus_lc / Mode 1 / null: balance_confirmed required before shipment
+    //   (for LC modes, balance_confirmed = LC readiness confirmed — same gate, different business meaning)
+    const shipEligible: string[] = isShipFirstMode(contract.paymentMode)
+      ? (isNoDepositMode(contract.paymentMode)
+          ? ['customer_confirmed', 'deposit_confirmed', 'po_generated', 'production']
+          : ['deposit_confirmed', 'po_generated', 'production'])
+      : ['balance_confirmed'];
+
+    if (!shipEligible.includes(contract.status)) {
+      toast.error(isShipFirstMode(contract.paymentMode)
+        ? '请先完成采购生产流程再发货'
+        : isLCMode(contract.paymentMode)
+          ? '发货前必须先确认信用证已落实'
+          : '发货前必须先确认尾款已到账');
+      return;
+    }
+    try {
+      await contractService.updateStatus(id, 'shipped');
+      setContracts(prev => prev.map(c =>
+        c.id === id ? { ...c, status: 'shipped' as const, updatedAt: new Date().toISOString() } : c
+      ));
+      toast.success('合同已标记为已发货！');
+    } catch (err: any) {
+      toast.error(`标记发货失败：${err?.message || '请重试'}`);
+    }
+  };
+
+  // 🔥 推进合同到已完成 [Phase 2b-i: mode-aware complete gate]
+  // Phase 5 rule: SC.completed is a SALES-CONTROLLED action. It is triggered by the salesperson
+  // via a UI button in SalesContractManagement — never by CG state changes.
+  // No automated caller should invoke this function based on CG.status or CG.procurementRequestStatus.
+  const advanceSCToCompleted = async (id: string): Promise<void> => {
+    const contract = contracts.find(c => c.id === id);
+    if (!contract) return;
+
+    // Phase 2b-ii:
+    //   Ship-first modes (2, 5, 6): balance confirmed post-shipment → gate on balance_confirmed
+    //   lc_100 / deposit_plus_lc / Mode 1 / null: balance_confirmed is pre-shipment → gate on shipped
+    //   (LC modes are NOT ship-first, so they correctly gate on 'shipped' here — no change needed)
+    const completeGate = isShipFirstMode(contract.paymentMode) ? 'balance_confirmed' : 'shipped';
+
+    if (contract.status !== completeGate) {
+      toast.error(isShipFirstMode(contract.paymentMode)
+        ? '合同完成前须先确认尾款已到账'
+        : '合同必须先标记发货后才能完成');
+      return;
+    }
+    // Phase 7A rule:
+    // Profit snapshot is written ONLY once at SC completion.
+    // It captures ACTUAL profit at that moment.
+    // It must NOT be recalculated or overwritten later.
+    // If actual profit is unavailable, snapshot is skipped intentionally.
+    let snapshotExtra: Record<string, any> | undefined;
+    if (!contract.profitSnapshot) {
+      const profit = computeSCProfit(
+        contract,
+        getQuotationByNumber(contract.quotationNumber) ?? null,
+        purchaseOrders,
+      );
+      if (profit.actual.available === true) {
+        const snapshot: ProfitSnapshot = {
+          finalRevenue:   contract.totalAmount,
+          finalCost:      profit.actual.actualCost,
+          finalProfit:    profit.actual.actualProfit,
+          finalMargin:    profit.actual.actualMargin,
+          cgCount:        profit.actual.cgCount,
+          additionalCost: contract.additionalCost ?? 0,
+          currency:       contract.currency,
+          snapshotAt:     new Date().toISOString(),
+        };
+        snapshotExtra = { profit_snapshot: snapshot };
+      }
+    }
+
+    try {
+      await contractService.updateStatus(id, 'completed', snapshotExtra);
+      setContracts(prev => prev.map(c =>
+        c.id === id ? {
+          ...c,
+          status: 'completed' as const,
+          updatedAt: new Date().toISOString(),
+          ...(snapshotExtra ? { profitSnapshot: snapshotExtra.profit_snapshot as ProfitSnapshot } : {}),
+        } : c
+      ));
+      toast.success('合同已完成！');
+    } catch (err: any) {
+      toast.error(`标记完成失败：${err?.message || '请重试'}`);
+    }
+  };
+
   const value: SalesContractContextType = {
     contracts,
     createContract,
@@ -1048,6 +1535,11 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     uploadDepositProof,
     confirmDeposit,
     generatePurchaseOrder,
+    markPRInitiated,
+    advanceSCToProduction,
+    confirmBalancePayment,
+    advanceSCToShipped,
+    advanceSCToCompleted,
     addSellerSignature,
     addBuyerSignature,
     refreshFromBackend

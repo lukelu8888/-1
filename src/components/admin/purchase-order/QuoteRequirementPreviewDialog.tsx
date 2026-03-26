@@ -3,9 +3,10 @@ import { Download, Printer } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { generatePDFFilename, exportToPDFPrint } from '../../../utils/pdfExport';
 import { QuoteRequirement } from '../../../contexts/QuoteRequirementContext';
-import { QuoteRequirementDocument } from '../../documents/templates/QuoteRequirementDocument';
+import { QuoteRequirementDocumentA4Pages } from '../../documents/templates/paginated/QuoteRequirementDocumentA4';
 import { Button } from '../../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
+import { sanitizeQuoteRequirementDocumentForSales } from '../../../utils/purchaserFeedbackSanitizer';
 
 type QuoteRequirementPreviewDialogProps = {
   showRequirementDialog: boolean;
@@ -20,16 +21,19 @@ export const QuoteRequirementPreviewDialog: React.FC<QuoteRequirementPreviewDial
   viewRequirement,
   userRole,
 }) => {
-  const dialogWidth = 'min(calc(210mm + 8px), calc(100vw - 16px))';
   const templateSnapshot = viewRequirement?.templateSnapshot || viewRequirement?.template_snapshot || null;
   const templateVersion = templateSnapshot?.version || null;
-  const documentData = viewRequirement?.documentDataSnapshot || viewRequirement?.document_data_snapshot || null;
+  const rawDocumentData = viewRequirement?.documentDataSnapshot || viewRequirement?.document_data_snapshot || null;
+  const documentData = sanitizeQuoteRequirementDocumentForSales(
+    rawDocumentData,
+    viewRequirement?.purchaserFeedback,
+    userRole,
+  );
 
   return (
     <Dialog open={showRequirementDialog} onOpenChange={setShowRequirementDialog}>
       <DialogContent
-        className="w-auto max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] overflow-hidden p-0 gap-0 border-0 [&>button]:hidden"
-        style={{ width: dialogWidth }}
+        className="w-[calc(210mm+56px)] max-w-[calc(100vw-2rem)] max-h-[95vh] overflow-hidden border-none bg-[#525659] p-0 gap-0 shadow-2xl [&>button]:hidden"
       >
         <DialogTitle className="sr-only">报价请求单详情</DialogTitle>
         <DialogDescription className="sr-only">查看完整的报价请求单信息和产品详情</DialogDescription>
@@ -88,11 +92,11 @@ export const QuoteRequirementPreviewDialog: React.FC<QuoteRequirementPreviewDial
 
         <div
           id="qr-document-view"
-          className="overflow-y-auto overflow-x-hidden max-h-[calc(100vh-16px)] bg-[#f5f5f5] px-1 py-1"
+          className="overflow-y-auto overflow-x-auto max-h-[95vh] bg-[#525659] px-3 py-4"
         >
           {templateVersion && documentData ? (
-            <div className="mx-auto w-[210mm] max-w-full">
-              <QuoteRequirementDocument data={documentData} />
+            <div className="mx-auto flex min-w-[210mm] flex-col items-center gap-4">
+              <QuoteRequirementDocumentA4Pages data={documentData} />
             </div>
           ) : (
             <div className="flex min-h-[240px] items-center justify-center text-sm text-gray-500">

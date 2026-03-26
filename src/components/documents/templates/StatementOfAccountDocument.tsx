@@ -29,6 +29,8 @@ export interface StatementOfAccountData {
     bankName?: string;          // 银行名称
     accountNumber?: string;     // 银行账号
     swiftCode?: string;         // SWIFT代码
+    bankAddress?: string;       // 银行地址
+    paymentNote?: string;       // 收款备注
   };
   
   // 客户信息
@@ -257,18 +259,18 @@ export const StatementOfAccountDocument = forwardRef<HTMLDivElement, StatementOf
                     </td>
                     <td className="border border-gray-400 px-2 py-1 text-right">
                       {transaction.debit 
-                        ? `${transaction.currency} ${transaction.debit.toFixed(2)}`
+                        ? transaction.debit.toFixed(2)
                         : '-'
                       }
                     </td>
                     <td className="border border-gray-400 px-2 py-1 text-right">
                       {transaction.credit 
-                        ? `${transaction.currency} ${transaction.credit.toFixed(2)}`
+                        ? transaction.credit.toFixed(2)
                         : '-'
                       }
                     </td>
                     <td className="border border-gray-400 px-2 py-1 text-right font-semibold">
-                      {transaction.currency} {transaction.balance.toFixed(2)}
+                      {transaction.balance.toFixed(2)}
                     </td>
                   </tr>
                 ))}
@@ -279,10 +281,10 @@ export const StatementOfAccountDocument = forwardRef<HTMLDivElement, StatementOf
                     TOTAL:
                   </td>
                   <td className="border border-gray-400 px-2 py-1.5 text-right font-bold text-black">
-                    {data.closingBalance.currency} {totalDebit.toFixed(2)}
+                    {totalDebit.toFixed(2)}
                   </td>
                   <td className="border border-gray-400 px-2 py-1.5 text-right font-bold text-black">
-                    {data.closingBalance.currency} {totalCredit.toFixed(2)}
+                    {totalCredit.toFixed(2)}
                   </td>
                   <td className="border border-gray-400 px-2 py-1.5"></td>
                 </tr>
@@ -374,6 +376,18 @@ export const StatementOfAccountDocument = forwardRef<HTMLDivElement, StatementOf
                       </>
                     )}
                   </tr>
+                  {data.company.bankAddress && (
+                    <tr>
+                      <td className="border border-gray-400 px-2 py-1 bg-gray-50 font-semibold">Bank Address:</td>
+                      <td className="border border-gray-400 px-2 py-1" colSpan={3}>{data.company.bankAddress}</td>
+                    </tr>
+                  )}
+                  {data.company.paymentNote && (
+                    <tr>
+                      <td className="border border-gray-400 px-2 py-1 bg-gray-50 font-semibold">Payment Note:</td>
+                      <td className="border border-gray-400 px-2 py-1" colSpan={3}>{data.company.paymentNote}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

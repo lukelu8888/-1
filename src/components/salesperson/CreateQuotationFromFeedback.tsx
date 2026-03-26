@@ -6,7 +6,7 @@
  * 2. 根据建议利润率计算售价
  * 3. 业务员可调整售价、利润率
  * 4. 生成 QT-区域-YYMMDD-编号 格式的客户报价单
- * 5. 自动关联 QR、INQ
+ * 5. 自动关联 QR、ING
  */
 
 import React, { useState, useEffect } from 'react';
@@ -36,6 +36,8 @@ import { getCurrentUser } from '../../utils/dataIsolation';
 import { supabase } from '../../lib/supabase';
 import { adaptSalesQuotationToDocumentData } from '../../utils/documentDataAdapters';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { desensitizePurchaserFeedbackText, sanitizePurchaserFeedbackForSales } from '../../utils/purchaserFeedbackSanitizer';
+import { resolveQuoteRequirementOwner } from '../../utils/quotationOwnership';
 
 interface CreateQuotationFromFeedbackProps {
   open: boolean;
@@ -50,7 +52,7 @@ export function CreateQuotationFromFeedback({
   qr,
   feedback
 }: CreateQuotationFromFeedbackProps) {
-  
+  const salesSafeFeedback = sanitizePurchaserFeedbackForSales(feedback, 'Sales_Rep') || feedback;
   const { addQuotation } = useSalesQuotations();
   const { inquiries } = useInquiries();
   const currentUser = getCurrentUser();
@@ -84,7 +86,7 @@ export function CreateQuotationFromFeedback({
           costPrice: p.costPrice,
           selectedSupplier: '已隐藏',
           selectedSupplierName: '已隐藏',
-          selectedBJ: feedback.linkedBJ || '已隐藏',
+          selectedBJ: salesSafeFeedback.linkedBJ || '已隐藏',
           
           // 销售报价
           salesPrice: parseFloat(salesPrice.toFixed(2)),
@@ -243,6 +245,7 @@ export function CreateQuotationFromFeedback({
     const validUntilDate = new Date();
     validUntilDate.setDate(validUntilDate.getDate() + validityDays);
     const validUntil = validUntilDate.toISOString().split('T')[0];
+    const quotationOwner = resolveQuoteRequirementOwner(qr, inquiries, currentUser);
     
     const quotation: SalesQuotation = {
       id: `qt-${Date.now()}`,
@@ -259,8 +262,8 @@ export function CreateQuotationFromFeedback({
       customerCompany: relatedInquiry.companyName,
       
       // 业务员信息
-      salesPerson: currentUser?.email || '',
-      salesPersonName: currentUser?.name || '',
+      salesPerson: quotationOwner.email || currentUser?.email || '',
+      salesPersonName: quotationOwner.name || currentUser?.name || '',
       
       // 报价产品
       items,
@@ -297,7 +300,10 @@ export function CreateQuotationFromFeedback({
       // 🔥 备注：分离客户备注和内部备注
       customerNotes: notes || '', // ✅ 给客户看的备注
       remarks: notes || '', // ✅ 给客户看的备注（用于文档显示）
-      internalNotes: `基于采购反馈 ${qr.requirementNo} 创建\n采购员建议利润率：${feedback.suggestedMargin}%\n实际利润率：${(profitRate * 100).toFixed(2)}%\n\n采购员建议：\n${feedback.purchaserRemarks}`, // 🔒 内部敏感信息
+      internalNotes: `基于采购反馈 ${qr.requirementNo} 创建\n采购员建议利润率：${feedback.suggestedMargin}%\n实际利润率：${(profitRate * 100).toFixed(2)}%\n\n采购员建议：\n${desensitizePurchaserFeedbackText(feedback.purchaserRemarks || '', feedback, 'Sales_Rep')}`, // 🔒 内部敏感信息
+      templateId: (qr as any).templateId || (qr as any).template_id || null,
+      templateVersionId: (qr as any).templateVersionId || (qr as any).template_version_id || null,
+      templateSnapshot: (qr as any).templateSnapshot || (qr as any).template_snapshot || { pendingResolution: true },
       
       // 🔥 贸易条款（用于文档生成）
       tradeTerms: {
@@ -578,7 +584,7 @@ export function CreateQuotationFromFeedback({
             <AlertTitle className="text-yellow-800">采购员建议（内部参考）</AlertTitle>
             <AlertDescription className="text-yellow-700 text-sm">
               <div className="whitespace-pre-wrap max-h-32 overflow-y-auto">
-                {feedback.purchaserRemarks}
+                {salesSafeFeedback.purchaserRemarks}
               </div>
             </AlertDescription>
           </Alert>

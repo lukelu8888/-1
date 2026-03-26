@@ -68,7 +68,7 @@ const QuotationTemplateA4 = forwardRef<HTMLDivElement, QuotationTemplateProps>(
             },
             {
               label: '詢價單號碼',
-              labelEn: 'INQ No.',
+              labelEn: 'ING No.',
               value: quotation.inquiryNumber,
             },
             {

@@ -49,7 +49,7 @@ export function QuotationForm({
           <div className="flex justify-between items-start">
             <div>
               <h1 className="text-3xl text-red-600 mb-1">QUOTATION</h1>
-              <p className="text-sm text-gray-600">Proforma Invoice</p>
+              <p className="text-sm text-gray-600">Sales Quotation</p>
             </div>
             <div className="text-right">
               <div className="bg-red-600 text-white px-4 py-2 rounded mb-2">

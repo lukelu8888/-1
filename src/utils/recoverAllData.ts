@@ -367,7 +367,7 @@ export function recoverAllData(customerEmail: string = 'customer@example.com') {
   
   return {
     orders: testOrders.length,
-    rfqs: testXJs.length,
+    xjs: testXJs.length,
     quotations: testQuotations.length,
     accountsReceivable: testARs.length,
     notifications: testNotifications.length
@@ -379,7 +379,7 @@ export function clearAllData(customerEmail: string = 'customer@example.com') {
   console.log('🗑️ [Data Cleanup] 开始清除所有数据...');
   
   localStorage.removeItem(`orders_${customerEmail}`);
-  localStorage.removeItem(`rfqs_${customerEmail}`);
+  localStorage.removeItem(`xjs_${customerEmail}`);
   localStorage.removeItem(`quotations_${customerEmail}`);
   localStorage.removeItem(`notifications_${customerEmail}`);
   localStorage.removeItem(`accountsReceivable_admin@cosun.com`);
@@ -404,9 +404,9 @@ export function checkDataStatus(customerEmail: string = 'customer@example.com') 
   }
   
   // 检查询价单
-  const rfqs = JSON.parse(localStorage.getItem(`rfqs_${customerEmail}`) || '[]');
-  console.log(`\n📋 询价单 (rfqs_${customerEmail}):`);
-  console.log(`  - 数量: ${rfqs.length}`);
+  const xjs = JSON.parse(localStorage.getItem(`xjs_${customerEmail}`) || '[]');
+  console.log(`\n📋 询价单 (xjs_${customerEmail}):`);
+  console.log(`  - 数量: ${xjs.length}`);
   
   // 检查报价单
   const quotations = JSON.parse(localStorage.getItem(`quotations_${customerEmail}`) || '[]');
@@ -435,7 +435,7 @@ export function checkDataStatus(customerEmail: string = 'customer@example.com') 
   
   return {
     orders: orders.length,
-    rfqs: rfqs.length,
+    xjs: xjs.length,
     quotations: quotations.length,
     accountsReceivable: ars.length,
     notifications: notifications.length

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { ZoomIn, ZoomOut } from 'lucide-react';
 
 interface TemplatePreviewShellProps {
@@ -40,6 +40,31 @@ export function TemplatePreviewShell({
   controlButtonClassName = '',
   zoomTextClassName = '',
 }: TemplatePreviewShellProps) {
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
+  const scale = zoom / 100;
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    const measure = () => {
+      setContentSize({
+        width: content.scrollWidth || content.offsetWidth,
+        height: content.scrollHeight || content.offsetHeight,
+      });
+    };
+
+    measure();
+
+    const observer = new ResizeObserver(() => {
+      measure();
+    });
+
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [children]);
+
   return (
     <div className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-[#525659] ${shellClassName}`.trim()}>
       <div className={`sticky top-0 z-10 flex items-center justify-between border-b border-[#3c3f41] bg-[#3c3f41] px-4 py-2.5 flex-shrink-0 ${headerClassName}`.trim()}>
@@ -74,13 +99,22 @@ export function TemplatePreviewShell({
       <div className={`min-h-0 flex-1 overflow-auto bg-[#525659] p-8 ${bodyClassName}`.trim()}>
         <div className={`flex min-h-full justify-center ${contentWrapperClassName}`.trim()}>
           <div
-            data-rfq-content
             style={{
-              zoom: `${zoom}%`,
-              width: 'fit-content',
+              width: contentSize.width ? `${contentSize.width * scale}px` : undefined,
+              height: contentSize.height ? `${contentSize.height * scale}px` : undefined,
             }}
           >
-            {children}
+            <div
+              ref={contentRef}
+              data-rfq-content
+              style={{
+                width: 'fit-content',
+                transform: `scale(${scale})`,
+                transformOrigin: 'top center',
+              }}
+            >
+              {children}
+            </div>
           </div>
         </div>
       </div>

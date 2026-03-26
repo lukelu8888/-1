@@ -1,10 +1,14 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
 import { emitErpEvent } from '../lib/erp-core/event-bus';
-import { filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
+import { filterNotDeleted, removeTombstonesByMarkers } from '../lib/erp-core/deletion-tombstone';
 import { salesQuotationService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 import type { QuotationData } from '../components/documents/templates/QuotationDocument';
+import { assertBusinessOwnerEmail, matchesBusinessOwnerEmail } from '../utils/quotationOwnership';
+import { buildIdentityAuditMetadata, buildIdentityPersistenceFields } from '../utils/dataIsolation';
+
+const TRACE_QT_NUMBER = 'QT-NA-260326-0001';
 
 // 🎯 销售报价单（QT）- 业务员创建，需要审批
 
@@ -35,13 +39,21 @@ export interface SalesQuotationItem {
   remarks?: string;
 }
 
+export type PaymentMode =
+  | 'tt_deposit_balance_before_shipment'
+  | 'tt_deposit_balance_against_bl'
+  | 'lc_100'
+  | 'deposit_plus_lc'
+  | 'dp'
+  | 'oa';
+
 export interface SalesQuotation {
   id: string;
   qtNumber: string; // QT-NA-251219-6789
   
   // 关联单据
   qrNumber: string; // QR-NA-251219-1234（采购需求单）
-  inqNumber: string; // INQ-NA-251219-0001（客户询价单）
+  inqNumber: string; // ING-NA-251219-0001（客户询价单）
   
   // 区域和客户
   region: 'NA' | 'SA' | 'EU';
@@ -60,6 +72,19 @@ export interface SalesQuotation {
   // 业务员信息
   salesPerson: string; // 业务员邮箱
   salesPersonName: string;
+  ownerUserId?: string | null;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+  operatorUserId?: string | null;
+  operatorEmail?: string | null;
+  operatorRole?: string | null;
+  actingUserId?: string | null;
+  actingUserEmail?: string | null;
+  actingUserRole?: string | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserEmail?: string | null;
+  authenticatedUserRole?: string | null;
   
   // 报价产品
   items: SalesQuotationItem[];
@@ -72,7 +97,8 @@ export interface SalesQuotation {
   
   // 付款和交付条件
   currency: string; // USD, EUR, etc.
-  paymentTerms: string; // 30天账期, T/T, L/C等
+  paymentTerms: string; // 30天账期, T/T, L/C等（自由文本，文档渲染用）
+  paymentMode?: PaymentMode | null; // 结构化付款模式（Phase 1: 仅存储，不影响闸门逻辑）
   deliveryTerms: string; // FOB, CIF, EXW等
   deliveryDate: string;
   
@@ -165,8 +191,33 @@ const assertSalesQuotationPersistedBinding = (quotation: Partial<SalesQuotation>
   }
 };
 
+const normalizeSalesQuotationWritePayload = (quotation: SalesQuotation): SalesQuotation => {
+  const ownerEmail = assertBusinessOwnerEmail(quotation.salesPerson, quotation.region, '销售报价单');
+  return {
+    ...quotation,
+    salesPerson: ownerEmail,
+    ownerEmail,
+    ownerName: quotation.salesPersonName || null,
+    ownerRole: 'Sales_Rep',
+    ...buildIdentityPersistenceFields({
+      ownerEmail,
+      ownerName: quotation.salesPersonName || null,
+      ownerRole: 'Sales_Rep',
+    }),
+    documentRenderMeta: {
+      ...(quotation.documentRenderMeta || {}),
+      ...buildIdentityAuditMetadata({
+        ownerEmail,
+        ownerName: quotation.salesPersonName || null,
+        ownerRole: 'Sales_Rep',
+        region: quotation.region || null,
+      }),
+    },
+  };
+};
+
 const getSalesQuotationMarkers = (quotation: Partial<SalesQuotation>): string[] => {
-  // 仅使用报价单自身标识，避免误伤同一 QR/INQ 下后续新建报价单。
+  // 仅使用报价单自身标识，避免误伤同一 QR/ING 下后续新建报价单。
   return [quotation.id, quotation.qtNumber]
     .filter(Boolean)
     .map((v) => String(v));
@@ -198,6 +249,10 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
     if (!session) return;
     const data = await salesQuotationService.getAll();
     if (data && Array.isArray(data)) {
+      removeTombstonesByMarkers(
+        'qt',
+        data.flatMap((q) => [q?.id, q?.qtNumber]),
+      );
       const filtered = filterNotDeleted('qt', data as SalesQuotation[], (q) => getSalesQuotationMarkers(q));
       setQuotations(filtered);
     }
@@ -249,16 +304,34 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
   }, []);
 
   const addQuotation = async (quotation: SalesQuotation) => {
-    assertSalesQuotationWritePayload(quotation);
-    const saved = await salesQuotationService.upsert(quotation);
+    const normalizedQuotation = normalizeSalesQuotationWritePayload(quotation);
+    assertSalesQuotationWritePayload(normalizedQuotation);
+    if (String(quotation.qtNumber || '').trim() === TRACE_QT_NUMBER) {
+      console.warn('🔎 [TRACE QT context] upsert start', {
+        id: quotation.id,
+        qtNumber: quotation.qtNumber,
+        qrNumber: quotation.qrNumber,
+        createdAt: quotation.createdAt,
+      });
+    }
+    const saved = await salesQuotationService.upsert(normalizedQuotation);
     if (!saved) {
       throw new Error('Supabase upsert sales quotation failed');
     }
+    if (String((saved as SalesQuotation)?.qtNumber || '').trim() === TRACE_QT_NUMBER) {
+      console.warn('🔎 [TRACE QT context] upsert returned', {
+        id: (saved as SalesQuotation).id,
+        qtNumber: (saved as SalesQuotation).qtNumber,
+        qrNumber: (saved as SalesQuotation).qrNumber,
+        createdAt: (saved as SalesQuotation).createdAt,
+        updatedAt: (saved as SalesQuotation).updatedAt,
+      });
+    }
     assertSalesQuotationPersistedBinding(saved as SalesQuotation);
     setQuotations(prev => [saved as SalesQuotation, ...prev]);
-    emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, quotation, {
-      approvalStatus: quotation.approvalStatus,
-      customerStatus: quotation.customerStatus,
+    emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, normalizedQuotation, {
+      approvalStatus: normalizedQuotation.approvalStatus,
+      customerStatus: normalizedQuotation.customerStatus,
     });
   };
 
@@ -267,7 +340,7 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
     if (!currentQuotation) {
       throw new Error(`Sales quotation ${id} not found`);
     }
-    const merged = { ...currentQuotation, ...updates, updatedAt: new Date().toISOString() } as SalesQuotation;
+    const merged = normalizeSalesQuotationWritePayload({ ...currentQuotation, ...updates, updatedAt: new Date().toISOString() } as SalesQuotation);
     assertSalesQuotationWritePayload(merged);
     const saved = await salesQuotationService.upsert(merged);
     if (!saved) {
@@ -307,7 +380,14 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
   };
 
   const getQuotationsBySalesPerson = (salesPersonEmail: string) => {
-    return quotations.filter(qt => qt.salesPerson === salesPersonEmail);
+    return quotations.filter((qt) =>
+      matchesBusinessOwnerEmail(
+        qt.ownerEmail || qt.salesPerson,
+        salesPersonEmail,
+        qt.region,
+        qt.ownerUserId,
+      ),
+    );
   };
 
   return (

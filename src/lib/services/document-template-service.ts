@@ -66,6 +66,20 @@ export const DOCUMENT_TEMPLATES = [
     order: 3.5
   },
   {
+    id: 'bj',
+    name: '供应商报价单',
+    nameEn: 'Supplier Quotation',
+    category: 'procurement',
+    icon: '💵',
+    description: '供应商基于采购询价单返回的正式报价单',
+    roles: ['Procurement', 'Sales_Rep', 'Sales_Manager', 'CEO'],
+    component: 'SupplierQuotationDocument',
+    dataInterface: 'SupplierQuotationData',
+    color: '#0EA5E9',
+    businessStage: '供应商报价阶段',
+    order: 3.8
+  },
+  {
     id: 'pi',
     name: '形式发票',
     nameEn: 'Proforma Invoice',
@@ -92,6 +106,20 @@ export const DOCUMENT_TEMPLATES = [
     color: '#EF4444',
     businessStage: '合同签订阶段',
     order: 5
+  },
+  {
+    id: 'pr',
+    name: '采购请求单',
+    nameEn: 'Procurement Request',
+    category: 'procurement',
+    icon: '🧩',
+    description: '采购员基于销售合同进行供应商分配与采购拆单的桥梁单据',
+    roles: ['Procurement', 'Sales_Rep', 'Sales_Manager', 'CEO'],
+    component: 'QuoteRequirementDocument',
+    dataInterface: 'QuoteRequirementDocumentData',
+    color: '#F97316',
+    businessStage: '采购分配阶段',
+    order: 5.5
   },
   {
     id: 'cg',

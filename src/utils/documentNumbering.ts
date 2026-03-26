@@ -2,13 +2,13 @@
  * 🔢 7级单据编号体系配置
  * 
  * 完整业务流程：
- * 1. INQ (客户询价) → 2. QR (采购需求) → 3. XJ (询价比价) → 4. BJ (供应商报价) 
- * → 5. QT (销售报价) → 6. SO (销售订单) → 7. PO (采购订单)
+ * 1. ING (客户询价) → 2. QR (内部报价请求) → 3. XJ (采购询价) → 4. BJ (供应商报价)
+ * → 5. QT (销售报价) → 6. SC (销售合同) → 7. PR/CG (采购执行)
  */
 
 export interface DocumentLevel {
   level: number; // 级别序号 1-7
-  code: string; // 单据代码 INQ/QR/XJ/BJ/QT/SO/PO
+  code: string; // 单据代码 ING/QR/XJ/BJ/QT/SC/PR/CG
   name: string; // 中文名称
   enName: string; // 英文名称
   color: string; // 显示颜色
@@ -16,9 +16,9 @@ export interface DocumentLevel {
 }
 
 export const DOCUMENT_LEVELS: Record<string, DocumentLevel> = {
-  'INQ': {
+  'ING': {
     level: 1,
-    code: 'INQ',
+    code: 'ING',
     name: '客户询价',
     enName: 'Customer Inquiry',
     color: 'blue'
@@ -51,34 +51,29 @@ export const DOCUMENT_LEVELS: Record<string, DocumentLevel> = {
     enName: 'Sales Quotation',
     color: 'cyan'
   },
-  'SO': {
+  'SC': {
     level: 6,
-    code: 'SO',
-    name: '销售订单',
-    enName: 'Sales Order',
+    code: 'SC',
+    name: '销售合同',
+    enName: 'Sales Contract',
     color: 'pink'
   },
-  'PO': {
+  'CG': {
     level: 7,
-    code: 'PO',
-    name: '采购订单',
-    enName: 'Purchase Order',
+    code: 'CG',
+    name: '采购合同',
+    enName: 'Procurement Contract',
     color: 'red'
   }
 };
 
 /**
  * 从单据编号中提取单据类型代码
- * @param documentNumber 单据编号，如 "QR-NA-251225-0001" 或 "INQ-NA-251225-0001"
- * @returns 单据类型代码，如 "QR" 或 "INQ"
+ * @param documentNumber 单据编号，如 "QR-NA-251225-0001" 或 "ING-NA-251225-0001"
+ * @returns 单据类型代码，如 "QR" 或 "ING"
  */
 export function extractDocumentCode(documentNumber: string): string {
   if (!documentNumber) return '';
-  
-  // 处理 RFQ 开头的情况（映射到 INQ）
-  if (documentNumber.startsWith('RFQ-')) {
-    return 'XJ';
-  }
   
   // 提取第一个 "-" 之前的部分
   const parts = documentNumber.split('-');

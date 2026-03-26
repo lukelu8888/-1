@@ -522,3 +522,17 @@ html {
 .animate-slide-down {
   animation: slide-down 0.3s ease-out;
 }
+
+/* Sonner toast readability fixes */
+.toaster [data-description],
+.toaster [data-sonner-toast] [data-description],
+.toaster [data-sonner-toast] [data-title] + div {
+  color: var(--popover-foreground) !important;
+  opacity: 0.9 !important;
+}
+
+.toaster [data-sonner-toast][data-type="success"] [data-description],
+.toaster [data-sonner-toast][data-type="success"] [data-title] + div {
+  color: #374151 !important;
+  opacity: 1 !important;
+}

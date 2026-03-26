@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -7,8 +7,10 @@ import {
   FileText, Download, Send, Eye, Filter, Calendar,
   Search, Globe, Building2, Package, Ship, FileCheck,
   Clock, CheckCircle2, MailCheck, FolderOpen,
-  Archive, Users, X, ChevronDown, ChevronRight,
-  Layers, AlertCircle, ExternalLink, MoreVertical
+  Archive, Users, X, ChevronRight, ChevronLeft,
+  Layers, AlertCircle, ExternalLink, MoreVertical, Settings2,
+  ArrowUp, ArrowDown,
+  GripVertical, Pencil, Check
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
@@ -31,33 +33,69 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { DOCUMENT_CATEGORIES, DOCUMENT_TEMPLATES } from '../../lib/services/document-template-service';
 import { DOCUMENT_TEMPLATE_MAPPING } from '../../config/documentTemplateMapping';
-import { templateCenterService } from '../../lib/supabaseService';
+import { templateCenterService, xjService, isTemplateCenterSupabaseUnreachable, retryTemplateCenterSupabase } from '../../lib/supabaseService';
 import {
-  QuoteRequirementDocument,
   type QuoteRequirementDocumentData,
   type QuoteRequirementPreviewLayout,
   type QuoteRequirementTextOverrides,
   DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT,
   buildDefaultQuoteRequirementTextOverrides,
 } from '../documents/templates/QuoteRequirementDocument';
-import { XJDocument, type XJData } from '../documents/templates/XJDocument';
-import { SalesContractDocument, type SalesContractData } from '../documents/templates/SalesContractDocument';
-import { PurchaseOrderDocument, type PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument';
-import { ProformaInvoiceDocument, type ProformaInvoiceData } from '../documents/templates/ProformaInvoiceDocument';
-import { CommercialInvoiceDocument, type CommercialInvoiceData } from '../documents/templates/CommercialInvoiceDocument';
-import { PackingListDocument, type PackingListData } from '../documents/templates/PackingListDocument';
-import { StatementOfAccountDocument, type StatementOfAccountData } from '../documents/templates/StatementOfAccountDocument';
+import { type XJData } from '../documents/templates/XJDocument';
 import {
-  CustomerInquiryDocument,
+  DEFAULT_SALES_CONTRACT_PRODUCT_TABLE_COLUMNS,
+  type SalesContractData,
+} from '../documents/templates/SalesContractDocument';
+import {
+  DEFAULT_PURCHASE_ORDER_PRODUCT_TABLE_COLUMNS,
+  type PurchaseOrderData,
+} from '../documents/templates/PurchaseOrderDocument';
+import {
+  DEFAULT_PROFORMA_INVOICE_GOODS_TABLE_COLUMNS,
+  type ProformaInvoiceData,
+} from '../documents/templates/ProformaInvoiceDocument';
+import { type CommercialInvoiceData } from '../documents/templates/CommercialInvoiceDocument';
+import { type PackingListData } from '../documents/templates/PackingListDocument';
+import { type StatementOfAccountData } from '../documents/templates/StatementOfAccountDocument';
+import {
   CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+  DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS,
   type CustomerInquiryData,
 } from '../documents/templates/CustomerInquiryDocument';
-import { QuotationDocument, type QuotationData } from '../documents/templates/QuotationDocument';
-import { QuotationDocumentA4Pages } from '../documents/templates/paginated/QuotationDocumentA4';
-import { PurchaseOrderDocumentA4Pages } from '../documents/templates/paginated/PurchaseOrderDocumentA4';
-import { TemplatePreviewShell } from '../documents/TemplatePreviewShell';
+import { DEFAULT_COMMERCIAL_INVOICE_GOODS_TABLE_COLUMNS } from '../documents/templates/CommercialInvoiceDocument';
+import {
+  DEFAULT_QUOTATION_PRODUCT_TABLE_COLUMNS,
+  type QuotationData,
+} from '../documents/templates/QuotationDocument';
+import { type SupplierQuotationData } from '../documents/templates/SupplierQuotationDocument';
+import {
+  BASELINE_BJ_TEMPLATE_SEED,
+  BASELINE_CG_TEMPLATE_SEED,
+  BASELINE_CI_TEMPLATE_SEED,
+  BASELINE_ING_TEMPLATE_SEED,
+  BASELINE_PI_TEMPLATE_SEED,
+  BASELINE_PL_TEMPLATE_SEED,
+  BASELINE_PR_TEMPLATE_SEED,
+  BASELINE_QR_TEMPLATE_SEED,
+  BASELINE_QT_TEMPLATE_SEED,
+  BASELINE_SC_TEMPLATE_SEED,
+  BASELINE_SOA_TEMPLATE_SEED,
+  BASELINE_XJ_TEMPLATE_SEED,
+  INITIAL_PR_TEXT_OVERRIDES,
+  buildQrSalesDeptNotesFromInquiry,
+  EMPTY_XJ_TERMS,
+  INITIAL_QR_TEXT_OVERRIDES,
+  XJ_TERMS_PRESETS,
+} from './document-center/templateCenterSeeds';
+import { VersionHistoryPanel } from './document-center/VersionHistoryPanel';
+import { buildTemplateEditorContentProps } from './document-center/buildTemplateEditorContentProps';
+import { buildTemplatePreviewContentProps } from './document-center/buildTemplatePreviewContentProps';
+import { TemplateEditorContent } from './document-center/TemplateEditorContent';
+import { TemplatePreviewContent } from './document-center/TemplatePreviewContent';
 import { TemplateCenterPreviewViewport } from '../documents/TemplateCenterPreviewViewport';
-import type { DocumentConditionGroup } from '../../types/documentConditions';
+import { useAdminOrganization, type AdminOrgProfile } from '../../contexts/AdminOrganizationContext';
+import { getCustomerProfile } from '../dashboard/CustomerProfile';
+import { findSupplier, toSupplierProfile } from '../../data/suppliersData';
 
 // 单证类型
 type DocumentType = 'SC' | 'CI' | 'PL' | 'BL';
@@ -130,6 +168,15 @@ interface WorkspacePreviewLayout {
   contentPaddingBottomMm: number;
   fontSizePt: number;
   lineHeight: number;
+  qtLogoWidthPx?: number;
+  qtLogoHeightPx?: number;
+  qtInfoTableWidthPx?: number;
+  qtTableCellPaddingY?: number;
+  qtCompanyTableWidthPercent?: number;
+  qtProductsTableWidthPercent?: number;
+  qtTermsTableWidthPercent?: number;
+  qtRemarksTableWidthPercent?: number;
+  qtPreparedByTableWidthPercent?: number;
 }
 
 interface QrTemplateVersionRecord {
@@ -144,6 +191,8 @@ interface QrTemplateVersionRecord {
   textOverrides: QuoteRequirementTextOverrides;
 }
 
+interface PrTemplateVersionRecord extends QrTemplateVersionRecord {}
+
 interface XjTemplateVersionRecord {
   id: string;
   version: string;
@@ -152,6 +201,17 @@ interface XjTemplateVersionRecord {
   savedBy: string;
   note: string;
   data: XJData;
+  layout: WorkspacePreviewLayout;
+}
+
+interface BjTemplateVersionRecord {
+  id: string;
+  version: string;
+  status: QrVersionRecordStatus;
+  savedAt: string;
+  savedBy: string;
+  note: string;
+  data: SupplierQuotationData;
   layout: WorkspacePreviewLayout;
 }
 
@@ -243,6 +303,21 @@ interface QuotationTemplateVersionRecord {
   layout: WorkspacePreviewLayout;
 }
 
+interface LoadedTemplateVersionMeta {
+  version: string;
+  status: TemplatePublishStatus;
+  savedAt: string;
+  savedBy: string;
+  note: string;
+}
+
+interface XjTermsPreset {
+  id: string;
+  name: string;
+  description: string;
+  terms: Partial<XJData['terms']>;
+}
+
 const TEMPLATE_WORKSPACE_META: Record<string, {
   currentVersion: string;
   status: TemplatePublishStatus;
@@ -253,7 +328,9 @@ const TEMPLATE_WORKSPACE_META: Record<string, {
   ing: { currentVersion: 'v1.2.0', status: 'published', lastPublishedAt: '2026-03-01 10:20', lastEditedBy: 'Admin', schemaMode: 'legacy-v1' },
   qt: { currentVersion: 'v1.4.0', status: 'published', lastPublishedAt: '2026-03-02 09:40', lastEditedBy: 'Sales Admin', schemaMode: 'legacy-v1' },
   qr: { currentVersion: 'v2.0.0', status: 'published', lastPublishedAt: '2026-03-04 14:30', lastEditedBy: 'Template Admin', schemaMode: 'template-center-ready' },
+  pr: { currentVersion: 'v1.0.0', status: 'draft', lastPublishedAt: '2026-03-25 15:00', lastEditedBy: 'Procurement Admin', schemaMode: 'template-center-ready' },
   xj: { currentVersion: 'v1.1.0', status: 'published', lastPublishedAt: '2026-03-03 16:40', lastEditedBy: 'Procurement Admin', schemaMode: 'template-center-ready' },
+  bj: { currentVersion: 'v1.0.0', status: 'published', lastPublishedAt: '2026-03-03 10:20', lastEditedBy: 'Procurement Admin', schemaMode: 'template-center-ready' },
   pi: { currentVersion: 'v1.0.0', status: 'draft', lastPublishedAt: '2026-02-27 16:00', lastEditedBy: 'Finance Admin', schemaMode: 'legacy-v1' },
   sc: { currentVersion: 'v2.1.0', status: 'published', lastPublishedAt: '2026-03-03 18:15', lastEditedBy: 'Contract Admin', schemaMode: 'template-center-ready' },
   cg: { currentVersion: 'v1.3.0', status: 'published', lastPublishedAt: '2026-03-03 11:50', lastEditedBy: 'Procurement Admin', schemaMode: 'template-center-ready' },
@@ -262,707 +339,19 @@ const TEMPLATE_WORKSPACE_META: Record<string, {
   soa: { currentVersion: 'v0.9.0', status: 'draft', lastPublishedAt: '2026-02-20 09:00', lastEditedBy: 'Finance Admin', schemaMode: 'legacy-v1' },
 };
 
+const TEMPLATE_HUB_TAB_ORDER_STORAGE_KEY = 'templateHubTabOrder_v1';
+const TEMPLATE_HUB_TAB_NAME_OVERRIDES_STORAGE_KEY = 'templateHubTabNameOverrides_v1';
+
 function normalizeWorkspaceTemplateId(templateId: string) {
   return templateId;
 }
 
-const SAMPLE_QR_CONDITION_GROUPS: DocumentConditionGroup[] = [
-  {
-    key: 'business-instructions',
-    title: '业务部说明',
-    titleEn: 'SALES DEPT INSTRUCTIONS',
-    items: [
-      { key: 'packaging', label: '1. 客户包装要求', value: '外箱需要英文唛头，零售包装需挂卡设计，适合北美商超陈列。' },
-      { key: 'payment', label: '2. 付款方式', value: '请优先争取 T/T 30% 预付款 + 70% 出货前付清。' },
-      { key: 'quality', label: '3. 质量要求', value: '必须满足 UL / FCC / RoHS，重点确认批量稳定性。' },
-      { key: 'delivery', label: '4. 交期要求', value: '首批交付目标 30 天内，超过 35 天需单独说明原因。' },
-    ],
-  },
-];
-
-const SAMPLE_QR_TEMPLATE_DATA: QuoteRequirementDocumentData = {
-  requirementNo: 'QR-NA-260304-0001',
-  requirementDate: '2026-03-04',
-  sourceInquiryNo: 'ING-NA-260303-0012',
-  requiredResponseDate: '2026-03-08',
-  requiredDeliveryDate: '2026-04-10',
-  customer: {
-    companyName: 'ABC Trading Corporation',
-    contactPerson: 'John Smith',
-    email: 'john.smith@abctrading.com',
-    phone: '+1-323-555-0123',
-    address: '123 Main Street, Suite 500, Los Angeles, CA 90001, USA',
-    region: 'North America',
-    businessType: '建材分销',
-  },
-  products: [
-    {
-      no: 1,
-      modelNo: 'GFCI-001',
-      productName: 'GFCI Outlet',
-      specification: '20A, 125V, Tamper-Resistant, Weather-Resistant, UL Listed',
-      quantity: 5000,
-      unit: 'PCS',
-      unitPrice: 2.5,
-      totalPrice: 12500,
-      remarks: '白色，带LED指示灯',
-    },
-    {
-      no: 2,
-      modelNo: 'WRC-001',
-      productName: 'Weather-Resistant Cover',
-      specification: 'IP66 rated, single gang, clear polycarbonate',
-      quantity: 2000,
-      unit: 'PCS',
-      unitPrice: 1.45,
-      totalPrice: 2900,
-      remarks: '适配北美户外插座',
-    },
-  ],
-  customerRequirements: {
-    deliveryTerms: 'FOB Xiamen / CIF Los Angeles',
-    paymentTerms: 'T/T or L/C at sight',
-    qualityStandard: 'UL, FCC, CE, RoHS',
-    packaging: '出口纸箱 + 木托盘，适合海运',
-    specialRequirements: '需要英文说明书与安装指南，并确认零售包装结构。',
-  },
-  conditionGroups: SAMPLE_QR_CONDITION_GROUPS,
-  salesDeptNotes: [
-    '1. Price Terms / 价格条款',
-    'Original: FOB Xiamen / CIF Los Angeles',
-    '中文: FOB 厦门 / CIF 洛杉矶',
-    '',
-    '2. Delivery Time / 交期要求',
-    'Original: Within 30 days after order confirmation',
-    '中文: 订单确认后30天内',
-    '',
-    '3. Payment Terms / 付款条款',
-    'Original: T/T or L/C at sight',
-    '中文: T/T 或即期信用证',
-  ].join('\n'),
-  purchaseDeptFeedback: '此区域为流程节点实际反馈区域，模板中心仅用于定义结构与初始占位文案。',
-  urgency: 'high',
-  createdBy: 'template.admin@cosun.com',
-};
-
-const SAMPLE_XJ_TEMPLATE_DATA: XJData = {
-  xjNo: 'XJ-251218-1001',
-  xjDate: '2025-12-18',
-  requiredResponseDate: '2025-12-25',
-  requiredDeliveryDate: '2026-01-15',
-  inquiryDescription: '围绕五金配件系列产品进行首轮正式询价，请提供完整报价和交期说明。',
-  buyer: {
-    name: '福建高盛达富建材有限公司',
-    nameEn: 'FUJIAN GOSUNDA FU BUILDING MATERIALS CO., LTD.',
-    address: '福建省福州市仓山区金山工业区',
-    addressEn: 'Jinshan Industrial Zone, Cangshan District, Fuzhou, Fujian, China',
-    tel: '+86-591-8888-8888',
-    email: 'purchasing@gosundafu.com',
-    contactPerson: '张采购',
-  },
-  supplier: {
-    companyName: '深圳市优质五金制品有限公司',
-    address: '广东省深圳市宝安区西乡工业园',
-    contactPerson: '李经理',
-    tel: '+86-755-2888-8888',
-    email: 'sales@supplier.com',
-    supplierCode: 'SUP-ELEC-001',
-  },
-  products: [
-    {
-      no: 1,
-      modelNo: 'WJ-2024-001',
-      description: '不锈钢门锁',
-      specification: '304不锈钢材质，带钥匙3把，表面拉丝处理',
-      quantity: 1000,
-      unit: '套',
-      targetPrice: 'USD 12.50',
-      remarks: '需配备安装说明书',
-    },
-    {
-      no: 2,
-      modelNo: 'WJ-2024-002',
-      description: '铝合金门把手',
-      specification: '6063铝合金，长度150mm，银色阳极氧化',
-      quantity: 2000,
-      unit: '个',
-      targetPrice: 'USD 3.80',
-    },
-    {
-      no: 3,
-      modelNo: 'WJ-2024-003',
-      description: '铜合金铰链',
-      specification: '4寸静音铰链，承重80kg，镀铬处理',
-      quantity: 3000,
-      unit: '个',
-      targetPrice: 'USD 2.20',
-    },
-  ],
-  terms: {
-    currency: 'USD',
-    paymentTerms: 'T/T 30% 预付，70% 发货前付清',
-    deliveryTerms: 'EXW 工厂交货',
-    deliveryAddress: '福建省福州市仓山区金山工业区',
-    qualityStandard: '产品需符合国家GB/T 27922-2011标准，并优先提供 ISO 9001 / CE 等认证材料。',
-    inspectionMethod: '到货后进行外观和功能检测，抽检率5%，不合格品按比例扣款或退换货处理。',
-    deliveryRequirement: '要求交货日期：2026-01-15，如无法按期交货需提前7天告知并说明原因。',
-    packaging: '标准出口包装，内层气泡膜，外层纸箱+木托盘，需防潮防震。',
-    shippingMarks: '中性唛头，不显示最终客户信息。',
-    inspectionRequirement: '出货前需提供产品照片和装箱照片，必要时安排第三方检验。',
-    technicalDocuments: '需提供产品说明书（中英文）、材质检测报告、RoHS检测报告。',
-    ipRights: '供应商确认所供产品不侵犯任何第三方知识产权。',
-    confidentiality: '双方对价格信息、技术资料、客户信息承担保密义务。',
-    sampleRequirement: '首次合作需提供2-3个样品供质量确认。',
-    moq: '请在报价中注明最小起订量（MOQ）要求。',
-    remarks: '报价有效期请不少于30天，交货周期请明确标注。',
-  },
-};
-
-const SAMPLE_SC_TEMPLATE_DATA: SalesContractData = {
-  contractNo: 'SC-NA-20251220-001',
-  contractDate: '2025-12-20',
-  quotationNo: 'QT-NA-20251210-001',
-  region: 'NA',
-  seller: {
-    name: '福建高盛达富建材有限公司',
-    nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-    address: '福建省厦门市XX区XX路XX号',
-    addressEn: 'XX Road, XX District, Xiamen, Fujian, China 361000',
-    tel: '+86-592-1234-5678',
-    fax: '+86-592-1234-5679',
-    email: 'sales@gaoshengdafu.com',
-    legalRepresentative: 'Wang Ming',
-    businessLicense: '91350200MA2XXX123X',
-  },
-  buyer: {
-    companyName: 'ABC Trading Corporation',
-    contactPerson: 'John Smith',
-    address: '123 Main Street, Suite 500, Los Angeles, CA 90001, USA',
-    country: 'United States',
-    email: 'john.smith@abctrading.com',
-    tel: '+1-323-555-0123',
-  },
-  products: [
-    {
-      no: 1,
-      description: 'GFCI Outlet - 20A, 125V, Tamper-Resistant, Weather-Resistant, UL Listed, White with LED',
-      specification: '20A, 125V, Tamper-Resistant, Weather-Resistant, UL Listed, White with LED',
-      hsCode: '8536.6990',
-      quantity: 5000,
-      unit: 'pcs',
-      unitPrice: 2.85,
-      currency: 'USD',
-      amount: 14250,
-      deliveryTime: '25-30 days',
-    },
-    {
-      no: 2,
-      description: 'Weather-Resistant Cover - IP66, Single Gang, Clear Polycarbonate',
-      specification: 'IP66, Single Gang, Clear Polycarbonate',
-      hsCode: '3926.9090',
-      quantity: 2000,
-      unit: 'pcs',
-      unitPrice: 1.65,
-      currency: 'USD',
-      amount: 3300,
-      deliveryTime: '20-25 days',
-    },
-    {
-      no: 3,
-      description: 'Decora Wall Plate - Screwless Design, UV Resistant, Multi-color',
-      specification: 'Screwless Design, UV Resistant, Multi-color',
-      hsCode: '3926.9090',
-      quantity: 3000,
-      unit: 'pcs',
-      unitPrice: 0.95,
-      currency: 'USD',
-      amount: 2850,
-      deliveryTime: '20-25 days',
-    },
-    {
-      no: 4,
-      description: 'USB Wall Outlet - Dual USB Ports, 4.2A Total Output, Smart Charging Technology',
-      specification: 'Dual USB-A ports, 4.2A combined, tamper-resistant receptacles, UL certified',
-      hsCode: '8536.6990',
-      quantity: 3500,
-      unit: 'pcs',
-      unitPrice: 3.95,
-      currency: 'USD',
-      amount: 13825,
-      deliveryTime: '30-35 days',
-    },
-  ],
-  terms: {
-    totalAmount: 34225,
-    currency: 'USD',
-    tradeTerms: 'FOB Xiamen, China',
-    paymentTerms: '30% T/T deposit upon order confirmation, 70% T/T before shipment',
-    depositAmount: 10267.5,
-    balanceAmount: 23957.5,
-    deliveryTime: '35-45 days after receiving deposit',
-    portOfLoading: 'Xiamen Port, China',
-    portOfDestination: 'Los Angeles Port, USA',
-    packing: 'Export standard carton with wooden pallets, shrink-wrapped, suitable for ocean freight',
-    inspection: 'Buyer inspection or third-party inspection before shipment.',
-    warranty: '12 months warranty for manufacturing defects from delivery date.',
-  },
-  liabilityTerms: {
-    sellerDefault: 'If seller fails to deliver on time without valid reason or force majeure, buyer may request deposit refund and compensation.',
-    buyerDefault: 'If buyer fails to pay within agreed time, seller may suspend shipment and claim related losses.',
-    forceMajeure: 'Both parties are exempted from liabilities arising from force majeure events beyond reasonable control.',
-  },
-  disputeResolution: {
-    governingLaw: 'Laws of the People’s Republic of China.',
-    arbitration: 'Disputes shall be settled by friendly negotiation, failing which CIETAC Xiamen shall arbitrate.',
-  },
-  signature: {
-    sellerSignatory: 'Wang Ming (Legal Representative)',
-    buyerSignatory: 'John Smith (Purchasing Manager)',
-    signDate: '2025-12-20',
-  },
-};
-
-const SAMPLE_CG_TEMPLATE_DATA: PurchaseOrderData = {
-  poNo: 'CG-20251220-001',
-  poDate: '2025-12-20',
-  requiredDeliveryDate: '2026-01-25',
-  buyer: {
-    name: '福建高盛达富建材有限公司',
-    nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-    address: '福建省厦门市XX区XX路XX号',
-    addressEn: 'XX Road, XX District, Xiamen, Fujian, China 361000',
-    tel: '+86-592-1234-5678',
-    email: 'procurement@gaoshengdafu.com',
-    contactPerson: 'Li Ming (Procurement Manager)',
-  },
-  supplier: {
-    companyName: 'Shenzhen Electronics Manufacturing Co., Ltd.',
-    address: 'No.88 Industrial Road, Baoan District, Shenzhen, Guangdong, China',
-    contactPerson: 'Chen Wei',
-    tel: '+86-755-8888-9999',
-    email: 'sales@szelec.com',
-    supplierCode: 'SUP-GD-001',
-    bankInfo: {
-      bankName: '中国工商银行深圳宝安支行',
-      accountName: 'Shenzhen Electronics Manufacturing Co., Ltd.',
-      accountNumber: '4000 0212 0920 1234 567',
-      swiftCode: 'ICBKCNBJSZN',
-      bankAddress: 'No.123 Baoan Avenue, Baoan District, Shenzhen, Guangdong, China',
-      currency: 'CNY/USD',
-    },
-  },
-  products: [
-    {
-      no: 1,
-      itemCode: 'ITEM-GFCI-001',
-      description: 'GFCI Outlet Components - Main Housing',
-      specification: '20A, 125V rated, Fire-resistant PC plastic, UL94 V-0',
-      quantity: 5000,
-      unit: 'pcs',
-      unitPrice: 1.85,
-      currency: 'USD',
-      amount: 9250,
-      deliveryDate: '2026-01-20',
-      remarks: 'White color, with mounting holes',
-    },
-    {
-      no: 2,
-      itemCode: 'ITEM-GFCI-002',
-      description: 'GFCI Circuit Board Assembly',
-      specification: 'PCB with IC chip, LED indicator, certified components',
-      quantity: 5000,
-      unit: 'pcs',
-      unitPrice: 0.95,
-      currency: 'USD',
-      amount: 4750,
-      deliveryDate: '2026-01-20',
-    },
-    {
-      no: 3,
-      itemCode: 'ITEM-WRC-001',
-      description: 'Weather-Resistant Cover Raw Material',
-      specification: 'Clear Polycarbonate sheets, IP66 grade, UV stabilized',
-      quantity: 100,
-      unit: 'kg',
-      unitPrice: 8.5,
-      currency: 'USD',
-      amount: 850,
-      deliveryDate: '2026-01-15',
-    },
-  ],
-  terms: {
-    totalAmount: 14850,
-    currency: 'USD',
-    paymentTerms: '30 days after delivery and inspection',
-    deliveryTerms: 'EXW Shenzhen Factory',
-    deliveryAddress: 'Fujian Gaoshengdafu Building Materials Co., Ltd., XX Road, XX District, Xiamen, Fujian, China 361000',
-    qualityStandard: 'Meet UL, CE, RoHS standards. Samples must be approved before bulk production.',
-    inspectionMethod: 'Third-party inspection (SGS or equivalent) or buyer inspection at supplier factory',
-    packaging: '采用出口标准纸箱包装，每箱需标注采购单号、物料编码、数量、毛重净重。外包装需防潮、防震处理。',
-    shippingMarks: '唛头需注明"COSUN"字样、合同编号CG-20251220-001、目的地厦门，并标注"小心轻放"、"防潮"标识。',
-    deliveryPenalty: '供应商未能按约定时间交货的，每延误一天，应按延误交货部分货款的0.5%支付违约金，但违约金总额不超过延误交货部分货款的5%。',
-    qualityPenalty: '产品质量不符合约定标准的，采购方有权拒收。如已收货发现质量问题，供应商应在7个工作日内无条件退换货，并承担由此产生的一切费用及损失。',
-    warrantyPeriod: '12个月（自交货验收合格之日起计算）',
-    warrantyTerms: '质保期内因产品质量问题造成的损失，供应商应负责免费维修或更换，并承担相关运费。',
-    returnPolicy: '到货后7个工作日内完成验收，验收不合格的产品采购方有权退货。',
-    confidentiality: '双方对本合同内容及合作过程中知悉的商业秘密承担保密义务。',
-    ipRights: '供应商保证所供产品不侵犯任何第三方知识产权。',
-    forceMajeure: '因不可抗力导致合同无法履行的，双方可协商延期履行或解除合同。',
-    disputeResolution: '协商不成的，任何一方均可向采购方所在地人民法院提起诉讼。',
-    applicableLaw: '中华人民共和国法律（不含冲突法规则）',
-    contractValidity: '本采购合同自双方签章之日起生效，至所有产品交付验收合格且付款完成后自动终止。',
-    modification: '任何修改或补充必须经双方书面同意并签署补充协议。',
-    termination: '如一方严重违约且在收到书面通知后15日内仍未纠正，守约方有权解除合同。',
-  },
-};
-
-const SAMPLE_PI_TEMPLATE_DATA: ProformaInvoiceData = {
-  invoiceNo: 'B125051209',
-  costNo: 'KH13100001',
-  scNo: '',
-  invoiceDate: 'May 12, 2025',
-  seller: {
-    name: '福建COSUN TUFF建材有限公司',
-    nameEn: 'FUJIAN COSUN TUFF BUILDING MATERIALS CO., LTD',
-    unit: 'Unit1807',
-    building: 'C1# Building',
-    zone: 'Zone C',
-    plaza: 'Wanda Plaza',
-    district: 'Cangshan Dist',
-    city: 'Fuzhou',
-    province: 'Fujian',
-    country: 'China',
-    cell: '+86 13799993309',
-    email: 'luis@cosunchina.com',
-  },
-  buyer: {
-    companyName: 'Aluminium & Light Industries Co. (ALICO) Ltd',
-    poBox: 'Box 6011 Sharjah UAE',
-    contactPerson: 'Mohan MV +971655824441(90)',
-  },
-  products: [
-    {
-      seqNo: 1,
-      itemNo: '1605909',
-      description: '5101# Block Materials- ABS',
-      specification: 'Color: in white',
-      quantity: 10000,
-      unit: 'pc',
-      unitPrice: 0.245,
-      currency: 'US$',
-      extendedValue: 2450,
-    },
-  ],
-  freight: {
-    type: 'Air Freight',
-    terms: 'collected by the buyer',
-  },
-  totalValue: 2450,
-  totalCurrency: 'US$',
-  priceTerms: 'EX.W (XIAMEN)',
-  bankInfo: {
-    beneficiary: 'Fujian Cosun Tuff Building Materials Company Limited',
-    beneficiaryAddress: 'Unit 1807, C1# building, Zone C, Wanda Plaza, Cangshan Dist., Fuzhou City, Fujian Province, China',
-    accountNo: '4208583481447',
-    bank: 'Bank of China Fujian Branch',
-    bankAddress: 'No.136, West Rd. Gulou Dist., Fuzhou City, Fujian Province, PRC',
-    swiftCode: 'BKCHCNBJ720',
-  },
-  remarks: {
-    priceTerms: 'Price Term: EX WARE OF XIAMEN',
-    containerType: 'Container Type: 1 x in bulk',
-    paymentTerms: 'Term of payment: 100% prepayment before preparation of samples and mass production',
-    portOfLoading: 'Port of Loading: XIAMEN',
-    shipmentDate: 'Date of Shipment: MAY 5, 2025',
-    others: [
-      '',
-      '1. Delivery date:',
-      '   Samples: none',
-      '   Mass production: 15 days on confirming the samples.',
-      '2. Approved drawing of the Art #5101 confirmed by "mohan.mv@alicolite.net" on 3 April 2016',
-      '3. Extra fee $100 / charge ≈ 10000pcs/order',
-    ],
-  },
-  footer: {
-    tagline: 'One-stop Project Sourcing Solution Provider',
-    currentPage: 1,
-    totalPages: 2,
-  },
-};
-
-const SAMPLE_CI_TEMPLATE_DATA: CommercialInvoiceData = {
-  invoiceNo: 'CI-20260215-001',
-  invoiceDate: '2026-02-15',
-  contractNo: 'SC-NA-20251220-001',
-  exporter: {
-    name: '福建高盛达富建材有限公司',
-    nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-    address: '福建省厦门市XX区XX路XX号',
-    addressEn: 'XX Road, XX District, Xiamen, Fujian, China 361000',
-    tel: '+86-592-1234-5678',
-  },
-  importer: {
-    name: 'ABC TRADING CORPORATION',
-    address: '123 Main Street, Suite 500, Los Angeles, CA 90001',
-    country: 'United States of America',
-    tel: '+1-323-555-0123',
-  },
-  shippingMarks: {
-    mainMark: 'ABC-LA-001',
-    sideMark: 'C/NO. 1-50',
-    cautionMark: 'MADE IN CHINA\nFRAGILE - HANDLE WITH CARE',
-  },
-  goods: [
-    {
-      no: 1,
-      description: 'GFCI Outlet, 20A 125V, Tamper-Resistant, Weather-Resistant, UL Listed',
-      hsCode: '8536.6990',
-      quantity: 5000,
-      unit: 'PCS',
-      unitPrice: 2.85,
-      currency: 'USD',
-      amount: 14250,
-      grossWeight: 0.25,
-      netWeight: 0.22,
-    },
-    {
-      no: 2,
-      description: 'Weather-Resistant Cover, IP66, Single Gang, Clear Polycarbonate',
-      hsCode: '3926.9090',
-      quantity: 2000,
-      unit: 'PCS',
-      unitPrice: 1.65,
-      currency: 'USD',
-      amount: 3300,
-      grossWeight: 0.15,
-      netWeight: 0.12,
-    },
-  ],
-  shipping: {
-    tradeTerms: 'FOB XIAMEN',
-    paymentTerms: 'T/T',
-    portOfLoading: 'Xiamen Port, China',
-    portOfDischarge: 'Los Angeles Port, USA',
-    finalDestination: 'Los Angeles, California, USA',
-    vesselName: 'COSCO PACIFIC',
-    blNo: 'COSU1234567890',
-  },
-  packing: {
-    totalCartons: 50,
-    totalGrossWeight: 1550,
-    totalNetWeight: 1350,
-    totalMeasurement: 3.75,
-  },
-};
-
-const SAMPLE_PL_TEMPLATE_DATA: PackingListData = {
-  plNo: 'PL-20260215-001',
-  invoiceNo: 'CI-20260215-001',
-  date: '2026-02-15',
-  exporter: {
-    name: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-    address: 'XX Road, XX District, Xiamen, Fujian, China 361000',
-  },
-  importer: {
-    name: 'ABC TRADING CORPORATION',
-    address: '123 Main Street, Suite 500, Los Angeles, CA 90001, USA',
-  },
-  shippingMarks: 'ABC-LA-001\nC/NO. 1-50\nMADE IN CHINA\nFRAGILE - HANDLE WITH CARE',
-  packages: [
-    {
-      cartonNo: '1-25',
-      description: 'GFCI Outlet, 20A 125V, TR/WR, UL Listed',
-      qtyPerCarton: 200,
-      totalCartons: 25,
-      totalQty: 5000,
-      unit: 'PCS',
-      netWeight: 22,
-      grossWeight: 25,
-      measurement: 0.06,
-      totalNW: 550,
-      totalGW: 625,
-      totalCBM: 1.5,
-    },
-    {
-      cartonNo: '26-50',
-      description: 'Weather-Resistant Cover, IP66, Clear PC',
-      qtyPerCarton: 80,
-      totalCartons: 25,
-      totalQty: 2000,
-      unit: 'PCS',
-      netWeight: 12,
-      grossWeight: 14,
-      measurement: 0.05,
-      totalNW: 300,
-      totalGW: 350,
-      totalCBM: 1.25,
-    },
-  ],
-  shipping: {
-    portOfLoading: 'Xiamen Port, China',
-    portOfDischarge: 'Los Angeles Port, USA',
-    vesselName: 'COSCO PACIFIC',
-    blNo: 'COSU1234567890',
-  },
-};
-
-const SAMPLE_SOA_TEMPLATE_DATA: StatementOfAccountData = {
-  statementNo: 'SOA-202512-001',
-  statementDate: '2025-12-31',
-  periodStart: '2025-12-01',
-  periodEnd: '2025-12-31',
-  company: {
-    name: '福建高盛达富建材有限公司',
-    nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-    address: '福建省厦门市XX区XX路XX号',
-    addressEn: 'XX Road, XX District, Xiamen, Fujian, China 361000',
-    tel: '+86-592-1234-5678',
-    email: 'finance@gaoshengdafu.com',
-    accountName: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-    bankName: 'Bank of China, Xiamen Branch',
-    accountNumber: '1234567890123456',
-    swiftCode: 'BKCHCNBJ950',
-  },
-  customer: {
-    customerCode: 'CUST-NA-001',
-    companyName: 'ABC Trading Corporation',
-    address: '123 Main Street, Suite 500, Los Angeles, CA 90001, USA',
-    contactPerson: 'John Smith',
-    email: 'john.smith@abctrading.com',
-    tel: '+1-323-555-0123',
-  },
-  openingBalance: {
-    amount: 0,
-    currency: 'USD',
-    type: 'debit',
-  },
-  transactions: [
-    { date: '2025-12-01', type: 'invoice', referenceNo: 'INV-20251201-001', description: 'Sales Invoice - Order #12345', debit: 15800, balance: 15800, currency: 'USD' },
-    { date: '2025-12-05', type: 'payment', referenceNo: 'PMT-20251205-001', description: 'T/T Payment Received', credit: 8000, balance: 7800, currency: 'USD' },
-    { date: '2025-12-15', type: 'invoice', referenceNo: 'INV-20251215-002', description: 'Sales Invoice - Order #12346', debit: 20400, balance: 28200, currency: 'USD' },
-    { date: '2025-12-18', type: 'payment', referenceNo: 'PMT-20251218-002', description: 'T/T Payment Received', credit: 7800, balance: 20400, currency: 'USD' },
-    { date: '2025-12-20', type: 'invoice', referenceNo: 'INV-20251220-003', description: 'Sales Invoice - Order #12347', debit: 12600, balance: 33000, currency: 'USD' },
-    { date: '2025-12-28', type: 'payment', referenceNo: 'PMT-20251228-003', description: 'T/T Payment Received (Partial)', credit: 10000, balance: 23000, currency: 'USD' },
-  ],
-  closingBalance: {
-    amount: 23000,
-    currency: 'USD',
-    type: 'debit',
-  },
-  agingAnalysis: {
-    current: 12600,
-    days30: 10400,
-    days60: 0,
-    days90Plus: 0,
-  },
-  remarks: 'Payment terms: 30% deposit, 70% before shipment. Please settle outstanding balance within 30 days. For any queries, please contact our finance department.',
-};
-
-const SAMPLE_INQUIRY_TEMPLATE_DATA: CustomerInquiryData = {
-  inquiryNo: 'ING-NA-20251210-001',
-  inquiryDate: '2025-12-10',
-  region: 'NA',
-  customer: {
-    companyName: 'ABC Trading Corporation',
-    contactPerson: 'John Smith',
-    position: 'Purchasing Manager',
-    email: 'john.smith@abctrading.com',
-    phone: '+1-323-555-0123',
-    address: '123 Main Street, Suite 500, Los Angeles, CA 90001',
-    country: 'United States',
-  },
-  products: [
-    {
-      no: 1,
-      productName: 'GFCI Outlet',
-      specification: '20A, 125V, Tamper-Resistant, Weather-Resistant, UL Listed',
-      quantity: 5000,
-      unit: 'pcs',
-      targetPrice: 2.5,
-      currency: 'USD',
-      description: 'White color with LED indicator, standard duplex size',
-    },
-    {
-      no: 2,
-      productName: 'Weather-Resistant Cover',
-      specification: 'IP66 rated, for single gang outlet, clear polycarbonate',
-      quantity: 2000,
-      unit: 'pcs',
-      targetPrice: 1.45,
-      currency: 'USD',
-    },
-    {
-      no: 3,
-      productName: 'Decora Wall Plate',
-      specification: 'Standard size, screwless design, UV resistant',
-      quantity: 3000,
-      unit: 'pcs',
-      targetPrice: 0.85,
-      currency: 'USD',
-      description: 'Colors: white, ivory, light almond (1000pcs each)',
-    },
-  ],
-  requirements: {
-    deliveryTime: 'Within 30 days after order confirmation',
-    portOfDestination: 'Los Angeles / Jebel Ali / Door delivery to Houston',
-    paymentTerms: '30% T/T deposit, 70% before shipment',
-    tradeTerms: 'FOB Xiamen / CIF Los Angeles',
-    packingRequirements: 'Export cartons with pallet, each carton with SKU label',
-    certifications: ['UL', 'ETL', 'CE', 'FCC', 'RoHS'],
-    otherRequirements: 'Need logo printing, English manual, and sample approval before mass production',
-  },
-  remarks: 'This is our first order with your company. We are a well-established distributor in the Los Angeles area with 15 years of experience. Quality and on-time delivery are critical to our business. We are looking for a long-term supplier and expect to place regular orders if this trial order is successful. Please provide your best pricing and confirm your production capacity.',
-};
-
-const SAMPLE_QUOTATION_TEMPLATE_DATA: QuotationData = {
-  quotationNo: 'QT-NA-20251210-001',
-  quotationDate: '2025-12-10',
-  validUntil: '2026-01-10',
-  inquiryNo: 'ING-NA-20251210-001',
-  region: 'NA',
-  company: {
-    name: '福建高盛达富建材有限公司',
-    nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-    address: '福建省厦门市XX区XX路XX号',
-    addressEn: 'XX Road, XX District, Xiamen, Fujian, China 361000',
-    tel: '+86-592-1234-5678',
-    fax: '+86-592-1234-5679',
-    email: 'sales@gaoshengdafu.com',
-    website: 'www.gaoshengdafu.com',
-  },
-  customer: {
-    companyName: 'ABC Trading Corporation',
-    contactPerson: 'John Smith',
-    address: '123 Main Street, Suite 500, Los Angeles, CA 90001, USA',
-    email: 'john.smith@abctrading.com',
-    phone: '+1-323-555-0123',
-  },
-  products: [
-    { no: 1, productName: 'GFCI Outlet', specification: '20A, 125V, Tamper-Resistant, Weather-Resistant, UL Listed, White with LED', hsCode: '8536.6990', quantity: 5000, unit: 'pcs', unitPrice: 2.85, currency: 'USD', amount: 14250, moq: 3000, leadTime: '25-30 days' },
-    { no: 2, productName: 'Weather-Resistant Cover', specification: 'IP66, Single Gang, Clear Polycarbonate', hsCode: '3926.9090', quantity: 2000, unit: 'pcs', unitPrice: 1.65, currency: 'USD', amount: 3300, moq: 1000, leadTime: '20-25 days' },
-    { no: 3, productName: 'Decora Wall Plate', specification: 'Screwless Design, UV Resistant, Multi-color', hsCode: '3926.9090', quantity: 3000, unit: 'pcs', unitPrice: 0.95, currency: 'USD', amount: 2850, moq: 2000, leadTime: '20-25 days' },
-  ],
-  tradeTerms: {
-    incoterms: 'FOB Xiamen, China',
-    paymentTerms: '30% T/T deposit upon order confirmation, 70% T/T before shipment',
-    deliveryTime: '25-30 days after receiving deposit',
-    packing: 'Export standard carton with wooden pallets, shrink-wrapped',
-    portOfLoading: 'Xiamen Port, China',
-    portOfDestination: 'Los Angeles Port, USA',
-    warranty: '12 months from delivery date against manufacturing defects',
-    inspection: "Seller's factory inspection before shipment, buyer has the right to re-inspect upon arrival",
-  },
-  remarks: 'Above prices are based on current raw material costs and are valid for 30 days. CIF Los Angeles price available upon request. All products come with English manual and installation guide. Free samples available for quality testing.',
-  salesPerson: {
-    name: 'Zhang Wei',
-    position: 'Senior Sales Manager',
-    email: 'zhangwei@gaoshengdafu.com',
-    phone: '+86-139-5923-4567',
-    whatsapp: '+86-139-5923-4567',
-  },
-};
-
-const INITIAL_QR_TEXT_OVERRIDES = buildDefaultQuoteRequirementTextOverrides(SAMPLE_QR_TEMPLATE_DATA);
+function deriveTemplateNameEnFromCn(nameCn: string, fallbackNameEn: string) {
+  const normalized = String(nameCn || '').trim().toUpperCase();
+  if (!normalized) return fallbackNameEn;
+  if (/^[A-Z]{2,4}$/.test(normalized)) return normalized;
+  return fallbackNameEn;
+}
 
 const DEFAULT_WORKSPACE_PREVIEW_LAYOUT: WorkspacePreviewLayout = {
   canvasWidthMm: 210,
@@ -971,12 +360,238 @@ const DEFAULT_WORKSPACE_PREVIEW_LAYOUT: WorkspacePreviewLayout = {
   contentPaddingBottomMm: 12,
   fontSizePt: 10,
   lineHeight: 1.5,
+  qtLogoWidthPx: 80,
+  qtLogoHeightPx: 70,
+  qtInfoTableWidthPx: 240,
+  qtTableCellPaddingY: 6,
+  qtCompanyTableWidthPercent: 100,
+  qtProductsTableWidthPercent: 100,
+  qtTermsTableWidthPercent: 100,
+  qtRemarksTableWidthPercent: 100,
+  qtPreparedByTableWidthPercent: 100,
 };
 
 const cloneQrState = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const normalizeWorkspacePreviewLayout = (layout?: Partial<WorkspacePreviewLayout> | null): WorkspacePreviewLayout => ({
   ...DEFAULT_WORKSPACE_PREVIEW_LAYOUT,
   ...(layout || {}),
+});
+
+const normalizeQuotationCompanyFromAdminOrg = (
+  quotation: QuotationData,
+  adminOrg: AdminOrgProfile,
+  adminUserEmail?: string,
+): QuotationData => ({
+  ...quotation,
+  company: {
+    ...quotation.company,
+    name: adminOrg.nameCN || quotation.company.name,
+    nameEn: adminOrg.nameEN || adminOrg.nameCN || quotation.company.nameEn,
+    address: adminOrg.addressCN || adminOrg.addressEN || quotation.company.address,
+    addressEn: adminOrg.addressEN || adminOrg.addressCN || quotation.company.addressEn,
+    tel: adminOrg.phone || quotation.company.tel,
+    fax: '',
+    email: adminOrg.email || adminUserEmail || quotation.company.email,
+    website: adminOrg.website || quotation.company.website,
+    logo: adminOrg.logoUrl || quotation.company.logo,
+  },
+});
+
+const normalizeXjBuyerFromAdminOrg = (
+  data: XJData,
+  adminOrg: AdminOrgProfile,
+  adminUserEmail?: string,
+  adminUserName?: string,
+): XJData => ({
+  ...data,
+  buyer: {
+    ...data.buyer,
+    name: adminOrg.nameCN || data.buyer.name,
+    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.buyer.nameEn,
+    address: adminOrg.addressCN || adminOrg.addressEN || data.buyer.address,
+    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.buyer.addressEn,
+    tel: adminOrg.phone || data.buyer.tel,
+    email: adminOrg.email || adminUserEmail || data.buyer.email,
+    contactPerson:
+      adminOrg.contactPerson ||
+      adminOrg.documentDefaults.defaultSignatory ||
+      adminUserName ||
+      data.buyer.contactPerson,
+  },
+});
+
+const normalizeBjBuyerFromAdminOrg = (
+  data: SupplierQuotationData,
+  adminOrg: AdminOrgProfile,
+  adminUserEmail?: string,
+  adminUserName?: string,
+): SupplierQuotationData => ({
+  ...data,
+  buyer: {
+    ...data.buyer,
+    name: adminOrg.nameCN || data.buyer.name,
+    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.buyer.nameEn,
+    address: adminOrg.addressCN || adminOrg.addressEN || data.buyer.address,
+    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.buyer.addressEn,
+    tel: adminOrg.phone || data.buyer.tel,
+    email: adminOrg.email || adminUserEmail || data.buyer.email,
+    contactPerson:
+      adminOrg.contactPerson ||
+      adminOrg.documentDefaults.defaultSignatory ||
+      adminUserName ||
+      data.buyer.contactPerson,
+  },
+});
+
+const normalizeScSellerFromAdminOrg = (
+  data: SalesContractData,
+  adminOrg: AdminOrgProfile,
+  adminUserEmail?: string,
+): SalesContractData => ({
+  ...data,
+  seller: {
+    ...data.seller,
+    name: adminOrg.nameCN || data.seller.name,
+    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.seller.nameEn,
+    address: adminOrg.addressCN || adminOrg.addressEN || data.seller.address,
+    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.seller.addressEn,
+    tel: adminOrg.phone || data.seller.tel,
+    fax: '',
+    email: adminOrg.email || adminUserEmail || data.seller.email,
+    businessLicense: adminOrg.taxId || data.seller.businessLicense,
+    legalRepresentative:
+      adminOrg.contactPerson ||
+      adminOrg.documentDefaults.defaultSignatory ||
+      data.seller.legalRepresentative,
+    bankInfo: {
+      ...(data.seller.bankInfo || {}),
+      bankName: adminOrg.bankUSD.bankName || data.seller.bankInfo?.bankName || '',
+      accountName: adminOrg.bankUSD.accountName || data.seller.bankInfo?.accountName || '',
+      accountNumber: adminOrg.bankUSD.accountNumber || data.seller.bankInfo?.accountNumber || '',
+      swiftCode: adminOrg.bankUSD.swift || data.seller.bankInfo?.swiftCode || '',
+      bankAddress: adminOrg.bankUSD.bankAddress || data.seller.bankInfo?.bankAddress || '',
+      currency: data.seller.bankInfo?.currency || 'USD',
+      routingNumber: data.seller.bankInfo?.routingNumber || '',
+      iban: data.seller.bankInfo?.iban || '',
+      paymentNote: data.seller.bankInfo?.paymentNote || adminOrg.bankUSD.paymentNote || '',
+    },
+  },
+  signature: {
+    ...data.signature,
+    sellerSignatory:
+      adminOrg.documentDefaults.defaultSignatory ||
+      adminOrg.contactPerson ||
+      data.signature?.sellerSignatory ||
+      '',
+  },
+});
+
+const normalizeCgBuyerFromAdminOrg = (
+  data: PurchaseOrderData,
+  adminOrg: AdminOrgProfile,
+  adminUserEmail?: string,
+): PurchaseOrderData => ({
+  ...data,
+  buyer: {
+    ...data.buyer,
+    name: adminOrg.nameCN || data.buyer.name,
+    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.buyer.nameEn,
+    address: adminOrg.addressCN || adminOrg.addressEN || data.buyer.address,
+    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.buyer.addressEn,
+    tel: adminOrg.phone || data.buyer.tel,
+    email: adminOrg.email || adminUserEmail || data.buyer.email,
+    contactPerson:
+      adminOrg.contactPerson ||
+      adminOrg.documentDefaults.defaultSignatory ||
+      data.buyer.contactPerson,
+  },
+});
+
+const normalizePiFromAdminOrg = (
+  data: ProformaInvoiceData,
+  adminOrg: AdminOrgProfile,
+  adminUserEmail?: string,
+): ProformaInvoiceData => ({
+  ...data,
+  seller: {
+    ...data.seller,
+    name: adminOrg.nameCN || data.seller.name,
+    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.seller.nameEn,
+    address: adminOrg.addressCN || adminOrg.addressEN || data.seller.address,
+    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.seller.addressEn,
+    unit: data.seller.unit,
+    building: data.seller.building,
+    zone: data.seller.zone,
+    plaza: data.seller.plaza,
+    district: data.seller.district,
+    city: data.seller.city,
+    province: data.seller.province,
+    country: data.seller.country,
+    cell: adminOrg.phone || data.seller.cell,
+    email: adminOrg.email || adminUserEmail || data.seller.email,
+    logoUrl: adminOrg.logoUrl || data.seller.logoUrl,
+  },
+  bankInfo: {
+    ...data.bankInfo,
+    beneficiary: adminOrg.bankUSD.accountName || data.bankInfo.beneficiary,
+    beneficiaryAddress:
+      adminOrg.addressEN || adminOrg.addressCN || data.bankInfo.beneficiaryAddress,
+    accountNo: adminOrg.bankUSD.accountNumber || data.bankInfo.accountNo,
+    bank: adminOrg.bankUSD.bankName || data.bankInfo.bank,
+    bankAddress: adminOrg.bankUSD.bankAddress || data.bankInfo.bankAddress,
+    swiftCode: adminOrg.bankUSD.swift || data.bankInfo.swiftCode,
+  },
+});
+
+const normalizeCiExporterFromAdminOrg = (
+  data: CommercialInvoiceData,
+  adminOrg: AdminOrgProfile,
+): CommercialInvoiceData => ({
+  ...data,
+  exporter: {
+    ...data.exporter,
+    name: adminOrg.nameCN || data.exporter.name,
+    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.exporter.nameEn,
+    address: adminOrg.addressCN || adminOrg.addressEN || data.exporter.address,
+    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.exporter.addressEn,
+    tel: adminOrg.phone || data.exporter.tel,
+    taxId: adminOrg.taxId || data.exporter.taxId,
+  },
+});
+
+const normalizePlExporterFromAdminOrg = (
+  data: PackingListData,
+  adminOrg: AdminOrgProfile,
+): PackingListData => ({
+  ...data,
+  exporter: {
+    ...data.exporter,
+    name: adminOrg.nameEN || adminOrg.nameCN || data.exporter.name,
+    address: adminOrg.addressEN || adminOrg.addressCN || data.exporter.address,
+  },
+});
+
+const normalizeSoaCompanyFromAdminOrg = (
+  data: StatementOfAccountData,
+  adminOrg: AdminOrgProfile,
+  adminUserEmail?: string,
+): StatementOfAccountData => ({
+  ...data,
+  company: {
+    ...data.company,
+    name: adminOrg.nameCN || data.company.name,
+    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.company.nameEn,
+    address: adminOrg.addressCN || adminOrg.addressEN || data.company.address,
+    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.company.addressEn,
+    tel: adminOrg.phone || data.company.tel,
+    email: adminOrg.email || adminUserEmail || data.company.email,
+    accountName: adminOrg.bankUSD.accountName || data.company.accountName,
+    bankName: adminOrg.bankUSD.bankName || data.company.bankName,
+    accountNumber: adminOrg.bankUSD.accountNumber || data.company.accountNumber,
+    swiftCode: adminOrg.bankUSD.swift || data.company.swiftCode,
+    bankAddress: adminOrg.bankUSD.bankAddress || data.company.bankAddress,
+    paymentNote: adminOrg.bankUSD.paymentNote || data.company.paymentNote,
+  },
 });
 const normalizeQrPreviewLayout = (
   layout?: Partial<QuoteRequirementPreviewLayout> | null
@@ -1008,6 +623,7 @@ const bumpSemanticVersion = (version: string, mode: 'patch' | 'minor') => {
 };
 
 export default function DocumentCenter({ userRole = 'admin', userEmail }: DocumentCenterProps) {
+  const { adminOrg, adminUserProfile } = useAdminOrganization();
   const [adminWorkspaceMode, setAdminWorkspaceMode] = useState<AdminWorkspaceMode>('template-hub');
   const [expandedRows, setExpandedRows] = useState<string[]>([]);
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
@@ -1019,22 +635,39 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   const [templateSearchTerm, setTemplateSearchTerm] = useState('');
   const [templateCategoryFilter, setTemplateCategoryFilter] = useState<string>('all');
   const [selectedTemplateId, setSelectedTemplateId] = useState('qr');
-  const [qrTemplateData, setQrTemplateData] = useState<QuoteRequirementDocumentData>(SAMPLE_QR_TEMPLATE_DATA);
+  const [templateHubManagerOpen, setTemplateHubManagerOpen] = useState(false);
+  const [templateHubTabOrder, setTemplateHubTabOrder] = useState<string[]>([]);
+  const [templateHubTabNameOverrides, setTemplateHubTabNameOverrides] = useState<Record<string, string>>({});
+  const hasLocalTemplateHubOrderRef = useRef(false);
+  const templateHubOrderPersistTimerRef = useRef<number | null>(null);
+  const pendingTemplateHubOrderRef = useRef<string[] | null>(null);
+  const isPersistingTemplateHubOrderRef = useRef(false);
+  const [qrTemplateData, setQrTemplateData] = useState<QuoteRequirementDocumentData>(() => ({
+    ...BASELINE_QR_TEMPLATE_SEED,
+    salesDeptNotes: buildQrSalesDeptNotesFromInquiry(BASELINE_ING_TEMPLATE_SEED),
+  }));
   const [qrTemplateLayout, setQrTemplateLayout] = useState<QuoteRequirementPreviewLayout>(DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT);
   const [qrTemplateTextOverrides, setQrTemplateTextOverrides] = useState<QuoteRequirementTextOverrides>(
     INITIAL_QR_TEXT_OVERRIDES
   );
-  const [xjTemplateData, setXjTemplateData] = useState<XJData>(SAMPLE_XJ_TEMPLATE_DATA);
-  const [scTemplateData, setScTemplateData] = useState<SalesContractData>(SAMPLE_SC_TEMPLATE_DATA);
-  const [cgTemplateData, setCgTemplateData] = useState<PurchaseOrderData>(SAMPLE_CG_TEMPLATE_DATA);
-  const [piTemplateData, setPiTemplateData] = useState<ProformaInvoiceData>(SAMPLE_PI_TEMPLATE_DATA);
-  const [ciTemplateData, setCiTemplateData] = useState<CommercialInvoiceData>(SAMPLE_CI_TEMPLATE_DATA);
-  const [plTemplateData, setPlTemplateData] = useState<PackingListData>(SAMPLE_PL_TEMPLATE_DATA);
-  const [soaTemplateData, setSoaTemplateData] = useState<StatementOfAccountData>(SAMPLE_SOA_TEMPLATE_DATA);
-  const [inquiryTemplateData, setInquiryTemplateData] = useState<CustomerInquiryData>(SAMPLE_INQUIRY_TEMPLATE_DATA);
+  const [prTemplateData, setPrTemplateData] = useState<QuoteRequirementDocumentData>(BASELINE_PR_TEMPLATE_SEED);
+  const [prTemplateLayout, setPrTemplateLayout] = useState<QuoteRequirementPreviewLayout>(DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT);
+  const [prTemplateTextOverrides, setPrTemplateTextOverrides] = useState<QuoteRequirementTextOverrides>(
+    INITIAL_PR_TEXT_OVERRIDES
+  );
+  const [xjTemplateData, setXjTemplateData] = useState<XJData>(BASELINE_XJ_TEMPLATE_SEED);
+  const [bjTemplateData, setBjTemplateData] = useState<SupplierQuotationData>(BASELINE_BJ_TEMPLATE_SEED);
+  const [scTemplateData, setScTemplateData] = useState<SalesContractData>(BASELINE_SC_TEMPLATE_SEED);
+  const [cgTemplateData, setCgTemplateData] = useState<PurchaseOrderData>(BASELINE_CG_TEMPLATE_SEED);
+  const [piTemplateData, setPiTemplateData] = useState<ProformaInvoiceData>(BASELINE_PI_TEMPLATE_SEED);
+  const [ciTemplateData, setCiTemplateData] = useState<CommercialInvoiceData>(BASELINE_CI_TEMPLATE_SEED);
+  const [plTemplateData, setPlTemplateData] = useState<PackingListData>(BASELINE_PL_TEMPLATE_SEED);
+  const [soaTemplateData, setSoaTemplateData] = useState<StatementOfAccountData>(BASELINE_SOA_TEMPLATE_SEED);
+  const [inquiryTemplateData, setInquiryTemplateData] = useState<CustomerInquiryData>(BASELINE_ING_TEMPLATE_SEED);
   const [activeInquiryRequirementField, setActiveInquiryRequirementField] = useState<string | null>(null);
-  const [quotationTemplateData, setQuotationTemplateData] = useState<QuotationData>(SAMPLE_QUOTATION_TEMPLATE_DATA);
+  const [quotationTemplateData, setQuotationTemplateData] = useState<QuotationData>(BASELINE_QT_TEMPLATE_SEED);
   const [xjTemplateLayout, setXjTemplateLayout] = useState<WorkspacePreviewLayout>(cloneQrState(DEFAULT_WORKSPACE_PREVIEW_LAYOUT));
+  const [bjTemplateLayout, setBjTemplateLayout] = useState<WorkspacePreviewLayout>(cloneQrState(DEFAULT_WORKSPACE_PREVIEW_LAYOUT));
   const [scTemplateLayout, setScTemplateLayout] = useState<WorkspacePreviewLayout>(cloneQrState(DEFAULT_WORKSPACE_PREVIEW_LAYOUT));
   const [cgTemplateLayout, setCgTemplateLayout] = useState<WorkspacePreviewLayout>(cloneQrState(DEFAULT_WORKSPACE_PREVIEW_LAYOUT));
   const [piTemplateLayout, setPiTemplateLayout] = useState<WorkspacePreviewLayout>(cloneQrState(DEFAULT_WORKSPACE_PREVIEW_LAYOUT));
@@ -1047,8 +680,12 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   const [qrTemplateVersionNote, setQrTemplateVersionNote] = useState(
     '调整标题、业务部说明和A4版式参数'
   );
+  const [prVersionHistory, setPrVersionHistory] = useState<PrTemplateVersionRecord[]>([]);
+  const [prTemplateVersionNote, setPrTemplateVersionNote] = useState('采购请求单模板作为 SC 和 CG 之间的采购拆单桥梁。');
   const [xjVersionHistory, setXjVersionHistory] = useState<XjTemplateVersionRecord[]>([]);
   const [xjTemplateVersionNote, setXjTemplateVersionNote] = useState('采购询价单模板接入真实字段编辑和真实预览。');
+  const [bjVersionHistory, setBjVersionHistory] = useState<BjTemplateVersionRecord[]>([]);
+  const [bjTemplateVersionNote, setBjTemplateVersionNote] = useState('供应商报价单模板接入真实字段编辑和真实预览。');
   const [scVersionHistory, setScVersionHistory] = useState<ScTemplateVersionRecord[]>([]);
   const [scTemplateVersionNote, setScTemplateVersionNote] = useState('销售合同模板接入真实字段编辑和真实预览。');
   const [cgVersionHistory, setCgVersionHistory] = useState<CgTemplateVersionRecord[]>([]);
@@ -1061,6 +698,20 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   const [plTemplateVersionNote, setPlTemplateVersionNote] = useState('装箱单模板接入真实字段编辑和真实预览。');
   const [soaVersionHistory, setSoaVersionHistory] = useState<SoaTemplateVersionRecord[]>([]);
   const [soaTemplateVersionNote, setSoaTemplateVersionNote] = useState('对账单模板接入真实字段编辑和真实预览。');
+  const [collapsedTemplateVersionHistoryMap, setCollapsedTemplateVersionHistoryMap] = useState<Record<string, boolean>>({
+    qr: true,
+    pr: true,
+    xj: true,
+    bj: true,
+    sc: true,
+    cg: true,
+    pi: true,
+    ci: true,
+    pl: true,
+    soa: true,
+    ing: true,
+    qt: true,
+  });
   const [inquiryVersionHistory, setInquiryVersionHistory] = useState<InquiryTemplateVersionRecord[]>([]);
   const [inquiryTemplateVersionNote, setInquiryTemplateVersionNote] = useState('客户询价单模板接入真实字段编辑和真实预览。');
   const [quotationVersionHistory, setQuotationVersionHistory] = useState<QuotationTemplateVersionRecord[]>([]);
@@ -1072,10 +723,262 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     templateKey: string;
     status: QrVersionRecordStatus;
   } | null>(null);
+  const [loadedTemplateVersionMap, setLoadedTemplateVersionMap] = useState<Record<string, LoadedTemplateVersionMeta>>({});
   const [templateHubView, setTemplateHubView] = useState<'detail' | 'editor'>('detail');
   const [previewScale, setPreviewScale] = useState(80);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
+  const [editingTemplateTabId, setEditingTemplateTabId] = useState<string | null>(null);
+  const [editingTemplateTabName, setEditingTemplateTabName] = useState('');
+  const [draggedTemplateTabId, setDraggedTemplateTabId] = useState<string | null>(null);
+  const [dragOverTemplateTabId, setDragOverTemplateTabId] = useState<string | null>(null);
+  const [xjBindingStatusRows, setXjBindingStatusRows] = useState<Array<{
+    nodeCode: string;
+    templateVersionId: string | null;
+    version: string | null;
+    status: string | null;
+    publishedAt: string | null;
+    updatedAt: string | null;
+    isDefault: boolean;
+  }>>([]);
+  const [xjRecentVersionStats, setXjRecentVersionStats] = useState<Array<{ version: string; count: number }>>([]);
+  const [xjRecentUnboundCount, setXjRecentUnboundCount] = useState(0);
+
+  useEffect(() => {
+    const nextSalesDeptNotes = buildQrSalesDeptNotesFromInquiry(inquiryTemplateData);
+    setQrTemplateData((prev) =>
+      prev.salesDeptNotes === nextSalesDeptNotes
+        ? prev
+        : { ...prev, salesDeptNotes: nextSalesDeptNotes }
+    );
+  }, [inquiryTemplateData]);
+
+  useEffect(() => {
+    const customerProfile = getCustomerProfile();
+    if (!customerProfile) return;
+
+    setInquiryTemplateData((prev) => ({
+      ...prev,
+      customer: {
+        ...prev.customer,
+        companyName: customerProfile.companyName || prev.customer.companyName,
+        contactPerson: customerProfile.contactPerson || prev.customer.contactPerson,
+        email: customerProfile.email || prev.customer.email,
+        phone: customerProfile.phone || prev.customer.phone,
+        address: customerProfile.address || prev.customer.address,
+      },
+    }));
+  }, []);
+
+  useEffect(() => {
+    const rawSupplier = findSupplier({
+      code: xjTemplateData.supplier?.supplierCode,
+      email: xjTemplateData.supplier?.email,
+      name: xjTemplateData.supplier?.companyName,
+    });
+    const supplierProfile = rawSupplier ? toSupplierProfile(rawSupplier) : null;
+
+    setXjTemplateData((prev) => {
+      const normalizedPrev = normalizeXjBuyerFromAdminOrg(prev, adminOrg, adminUserProfile.email, adminUserProfile.name);
+      const nextBuyer = normalizedPrev.buyer;
+
+      const nextSupplier = supplierProfile
+        ? {
+            ...normalizedPrev.supplier,
+            companyName: supplierProfile.name || normalizedPrev.supplier.companyName,
+            address: supplierProfile.address || normalizedPrev.supplier.address,
+            contactPerson: supplierProfile.contactPerson || normalizedPrev.supplier.contactPerson,
+            tel: supplierProfile.phone || normalizedPrev.supplier.tel,
+            email: supplierProfile.email || normalizedPrev.supplier.email,
+            supplierCode: supplierProfile.code || normalizedPrev.supplier.supplierCode,
+          }
+        : normalizedPrev.supplier;
+
+      const buyerChanged = JSON.stringify(nextBuyer) !== JSON.stringify(prev.buyer);
+      const supplierChanged = JSON.stringify(nextSupplier) !== JSON.stringify(prev.supplier);
+      if (!buyerChanged && !supplierChanged) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        buyer: nextBuyer,
+        supplier: nextSupplier,
+      };
+    });
+  }, [
+    adminOrg.addressCN,
+    adminOrg.addressEN,
+    adminOrg.contactPerson,
+    adminOrg.email,
+    adminOrg.nameCN,
+    adminOrg.nameEN,
+    adminOrg.phone,
+    adminUserProfile.email,
+    adminUserProfile.name,
+    xjTemplateData.supplier?.companyName,
+    xjTemplateData.supplier?.email,
+    xjTemplateData.supplier?.supplierCode,
+  ]);
+
+  useEffect(() => {
+    const rawSupplier = findSupplier({
+      code: bjTemplateData.supplier?.supplierCode,
+      email: bjTemplateData.supplier?.email,
+      name: bjTemplateData.supplier?.companyName,
+    });
+    const supplierProfile = rawSupplier ? toSupplierProfile(rawSupplier) : null;
+
+    setBjTemplateData((prev) => {
+      const normalizedPrev = normalizeBjBuyerFromAdminOrg(prev, adminOrg, adminUserProfile.email, adminUserProfile.name);
+      const nextBuyer = normalizedPrev.buyer;
+
+      const nextSupplier = supplierProfile
+        ? {
+            ...normalizedPrev.supplier,
+            companyName: supplierProfile.name || normalizedPrev.supplier.companyName,
+            address: supplierProfile.address || normalizedPrev.supplier.address,
+            contactPerson: supplierProfile.contactPerson || normalizedPrev.supplier.contactPerson,
+            tel: supplierProfile.phone || normalizedPrev.supplier.tel,
+            email: supplierProfile.email || normalizedPrev.supplier.email,
+            supplierCode: supplierProfile.code || normalizedPrev.supplier.supplierCode,
+          }
+        : normalizedPrev.supplier;
+
+      const buyerChanged = JSON.stringify(nextBuyer) !== JSON.stringify(prev.buyer);
+      const supplierChanged = JSON.stringify(nextSupplier) !== JSON.stringify(prev.supplier);
+      if (!buyerChanged && !supplierChanged) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        buyer: nextBuyer,
+        supplier: nextSupplier,
+      };
+    });
+  }, [
+    adminOrg.addressCN,
+    adminOrg.addressEN,
+    adminOrg.contactPerson,
+    adminOrg.documentDefaults.defaultSignatory,
+    adminOrg.email,
+    adminOrg.nameCN,
+    adminOrg.nameEN,
+    adminOrg.phone,
+    adminUserProfile.email,
+    adminUserProfile.name,
+    bjTemplateData.supplier?.companyName,
+    bjTemplateData.supplier?.email,
+    bjTemplateData.supplier?.supplierCode,
+  ]);
+
+  useEffect(() => {
+    setPiTemplateData((prev) => normalizePiFromAdminOrg(prev, adminOrg, adminUserProfile.email));
+  }, [adminOrg, adminUserProfile.email]);
+
+  useEffect(() => {
+    setQuotationTemplateData((prev) =>
+      normalizeQuotationCompanyFromAdminOrg(prev, adminOrg, adminUserProfile.email),
+    );
+  }, [adminOrg, adminUserProfile.email]);
+
+  useEffect(() => {
+    setScTemplateData((prev) => normalizeScSellerFromAdminOrg(prev, adminOrg, adminUserProfile.email));
+  }, [adminOrg, adminUserProfile.email]);
+
+  useEffect(() => {
+    setCgTemplateData((prev) => normalizeCgBuyerFromAdminOrg(prev, adminOrg, adminUserProfile.email));
+  }, [adminOrg, adminUserProfile.email]);
+
+  useEffect(() => {
+    setCiTemplateData((prev) => normalizeCiExporterFromAdminOrg(prev, adminOrg));
+  }, [adminOrg]);
+
+  useEffect(() => {
+    setPlTemplateData((prev) => normalizePlExporterFromAdminOrg(prev, adminOrg));
+  }, [adminOrg]);
+
+  useEffect(() => {
+    setSoaTemplateData((prev) => normalizeSoaCompanyFromAdminOrg(prev, adminOrg, adminUserProfile.email));
+  }, [adminOrg, adminUserProfile.email]);
+
+  useEffect(() => {
+    setQuotationTemplateData((prev) => ({
+      ...prev,
+      inquiryNo: inquiryTemplateData.inquiryNo || prev.inquiryNo,
+      region: inquiryTemplateData.region || prev.region,
+      customer: {
+        ...prev.customer,
+        companyName: inquiryTemplateData.customer.companyName || prev.customer.companyName,
+        contactPerson: inquiryTemplateData.customer.contactPerson || prev.customer.contactPerson,
+        address: inquiryTemplateData.customer.address || prev.customer.address,
+        email: inquiryTemplateData.customer.email || prev.customer.email,
+        phone: inquiryTemplateData.customer.phone || prev.customer.phone,
+      },
+    }));
+  }, [inquiryTemplateData]);
+
+  useEffect(() => {
+    if (!draggedTemplateTabId) return;
+
+    const stopDraggingTemplateTab = () => {
+      setDraggedTemplateTabId(null);
+      setDragOverTemplateTabId(null);
+    };
+
+    window.addEventListener('mouseup', stopDraggingTemplateTab);
+    window.addEventListener('touchend', stopDraggingTemplateTab);
+
+    return () => {
+      window.removeEventListener('mouseup', stopDraggingTemplateTab);
+      window.removeEventListener('touchend', stopDraggingTemplateTab);
+    };
+  }, [draggedTemplateTabId]);
+
+  const mergeTemplateWorkspaceData = <T,>(fallbackData: T, incomingData: unknown): T => {
+    if (Array.isArray(fallbackData)) {
+      return (Array.isArray(incomingData) ? incomingData : fallbackData) as T;
+    }
+
+    if (
+      fallbackData &&
+      typeof fallbackData === 'object' &&
+      incomingData &&
+      typeof incomingData === 'object' &&
+      !Array.isArray(incomingData)
+    ) {
+      const fallbackRecord = fallbackData as Record<string, unknown>;
+      const incomingRecord = incomingData as Record<string, unknown>;
+      const merged: Record<string, unknown> = { ...incomingRecord };
+
+      Object.keys(fallbackRecord).forEach((key) => {
+        merged[key] = mergeTemplateWorkspaceData(fallbackRecord[key], incomingRecord[key]);
+      });
+
+      return merged as T;
+    }
+
+    return (incomingData ?? fallbackData) as T;
+  };
+
+  const hasTemplateWorkspaceValue = (value: unknown): boolean => {
+    if (value == null) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (typeof value === 'number' || typeof value === 'boolean') return true;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') {
+      return Object.values(value as Record<string, unknown>).some((entry) => hasTemplateWorkspaceValue(entry));
+    }
+    return false;
+  };
+
+  const resolveTemplateWorkspaceRecordData = <T,>(fallbackData: T, incomingData: unknown): T => {
+    if (!hasTemplateWorkspaceValue(incomingData)) {
+      return cloneQrState(fallbackData);
+    }
+    return cloneQrState(incomingData as T);
+  };
 
   const applyWorkspaceRecords = <TRecord extends { data: any; layout: WorkspacePreviewLayout }>(
     records: any[] | null,
@@ -1083,16 +986,88 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     setHistory: React.Dispatch<React.SetStateAction<TRecord[]>>,
     setData: React.Dispatch<React.SetStateAction<any>>,
     setLayout: React.Dispatch<React.SetStateAction<WorkspacePreviewLayout>>,
+    normalizeData?: (data: any) => any,
   ) => {
     if (!records || records.length === 0) return;
     const mapped = records.map((record) => ({
       ...record,
-      data: cloneQrState(record.data || fallbackData),
+      data: normalizeData
+        ? normalizeData(resolveTemplateWorkspaceRecordData(cloneQrState(fallbackData), cloneQrState(record.data)))
+        : resolveTemplateWorkspaceRecordData(cloneQrState(fallbackData), cloneQrState(record.data)),
       layout: normalizeWorkspacePreviewLayout(record.layout),
     })) as TRecord[];
     setHistory(mapped);
-    setData(cloneQrState(mapped[0].data));
+    setData(
+      cloneQrState(
+        normalizeData
+          ? normalizeData(resolveTemplateWorkspaceRecordData(cloneQrState(fallbackData), mapped[0].data))
+          : resolveTemplateWorkspaceRecordData(cloneQrState(fallbackData), mapped[0].data)
+      )
+    );
     setLayout(cloneQrState(mapped[0].layout));
+  };
+
+  const updateLoadedTemplateVersion = (
+    templateKey: string,
+    record: { version: string; status: QrVersionRecordStatus; savedAt: string; savedBy: string; note: string },
+  ) => {
+    setLoadedTemplateVersionMap((prev) => ({
+      ...prev,
+      [templateKey]: {
+        version: record.version,
+        status: record.status === 'published' ? 'published' : 'draft',
+        savedAt: record.savedAt,
+        savedBy: record.savedBy,
+        note: record.note,
+      },
+    }));
+  };
+
+  const syncTemplateVersionNote = (templateKey: string, note: string) => {
+    if (!note) return;
+    if (templateKey === 'qr') {
+      setQrTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'xj') {
+      setXjTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'bj') {
+      setBjTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'sc') {
+      setScTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'cg') {
+      setCgTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'pi') {
+      setPiTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'ci') {
+      setCiTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'pl') {
+      setPlTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'soa') {
+      setSoaTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'ing') {
+      setInquiryTemplateVersionNote(note);
+      return;
+    }
+    if (templateKey === 'qt') {
+      setQuotationTemplateVersionNote(note);
+    }
   };
 
   // 模拟单证数据
@@ -1274,6 +1249,81 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
 
   const orderGroups = groupDocumentsByContract(filteredDocuments);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const savedOrder = JSON.parse(window.localStorage.getItem(TEMPLATE_HUB_TAB_ORDER_STORAGE_KEY) || '[]');
+      const savedNames = JSON.parse(window.localStorage.getItem(TEMPLATE_HUB_TAB_NAME_OVERRIDES_STORAGE_KEY) || '{}');
+      if (Array.isArray(savedOrder)) {
+        const normalizedSavedOrder = savedOrder.filter((value): value is string => typeof value === 'string');
+        hasLocalTemplateHubOrderRef.current = normalizedSavedOrder.length > 0;
+        setTemplateHubTabOrder(normalizedSavedOrder);
+      }
+      if (savedNames && typeof savedNames === 'object' && !Array.isArray(savedNames)) {
+        setTemplateHubTabNameOverrides(
+          Object.fromEntries(
+            Object.entries(savedNames).filter(
+              (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'
+            )
+          )
+        );
+      }
+    } catch {
+      // Ignore malformed persisted template tab preferences.
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const persistedPrefs = await templateCenterService.getTemplateWorkspacePrefs();
+        if (cancelled) return;
+        const persistedOrder = Object.entries(persistedPrefs)
+          .filter(([, value]) => Number.isFinite(Number(value.displayOrder)))
+          .sort((a, b) => Number(a[1].displayOrder || 0) - Number(b[1].displayOrder || 0))
+          .map(([key]) => key);
+
+        if (persistedOrder.length > 0 && !hasLocalTemplateHubOrderRef.current) {
+          setTemplateHubTabOrder(persistedOrder);
+        }
+
+        setTemplateHubTabNameOverrides((prev) => ({
+          ...prev,
+          ...Object.fromEntries(
+            Object.entries(persistedPrefs).map(([key, value]) => [key, value.nameCn || prev[key] || ''])
+          ),
+        }));
+      } catch (error) {
+        console.warn('[DocumentCenter] load persisted template workspace prefs failed:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(TEMPLATE_HUB_TAB_ORDER_STORAGE_KEY, JSON.stringify(templateHubTabOrder));
+  }, [templateHubTabOrder]);
+
+  useEffect(() => () => {
+    if (templateHubOrderPersistTimerRef.current !== null) {
+      window.clearTimeout(templateHubOrderPersistTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      TEMPLATE_HUB_TAB_NAME_OVERRIDES_STORAGE_KEY,
+      JSON.stringify(templateHubTabNameOverrides)
+    );
+  }, [templateHubTabNameOverrides]);
+
   // 切换行展开
   const toggleRow = (contractNumber: string) => {
     setExpandedRows(prev =>
@@ -1409,7 +1459,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   };
 
   const templateWorkspaceItems = useMemo(() => {
-    return DOCUMENT_TEMPLATES.map((template) => {
+    const baseItems = DOCUMENT_TEMPLATES.map((template) => {
       const canonicalTemplateId = normalizeWorkspaceTemplateId(template.id);
       const mapping = Object.values(DOCUMENT_TEMPLATE_MAPPING).find((item) =>
         item.templateComponent.includes(template.component)
@@ -1434,14 +1484,35 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         usedInModules,
         usageCount: usedInModules.length,
       };
-    }).sort((a, b) => a.order - b.order);
-  }, []);
+    });
+
+    const baseOrder = [...baseItems].sort((a, b) => a.order - b.order).map((item) => item.id);
+    const preferredOrder = [
+      ...templateHubTabOrder.filter((id) => baseOrder.includes(id)),
+      ...baseOrder.filter((id) => !templateHubTabOrder.includes(id)),
+    ];
+
+    return preferredOrder
+      .map((id, index) => {
+        const item = baseItems.find((candidate) => candidate.id === id);
+        if (!item) return null;
+        const customName = templateHubTabNameOverrides[id]?.trim();
+        return {
+          ...item,
+          order: index + 1,
+          displayName: customName || item.name,
+          customName: customName || '',
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  }, [templateHubTabNameOverrides, templateHubTabOrder]);
 
   const filteredTemplateWorkspaceItems = useMemo(() => {
     return templateWorkspaceItems.filter((item) => {
       const keyword = templateSearchTerm.trim().toLowerCase();
       const matchesKeyword =
         !keyword ||
+        item.displayName.toLowerCase().includes(keyword) ||
         item.name.toLowerCase().includes(keyword) ||
         item.nameEn.toLowerCase().includes(keyword) ||
         item.id.toLowerCase().includes(keyword) ||
@@ -1458,6 +1529,211 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     templateWorkspaceItems[0];
 
   useEffect(() => {
+    if (activeTemplate?.id !== 'xj') return;
+    let active = true;
+
+    Promise.all([
+      templateCenterService.getTemplateBindingsStatus('xj', ['xj-create']),
+      xjService.getAll(),
+    ])
+      .then(([bindingRows, xjRows]) => {
+        if (!active) return;
+        setXjBindingStatusRows(Array.isArray(bindingRows) ? bindingRows : []);
+
+        const recentRows = Array.isArray(xjRows) ? xjRows.slice(0, 50) : [];
+        const statsMap = new Map<string, number>();
+        let unboundCount = 0;
+
+        recentRows.forEach((row: any) => {
+          const version =
+            String(
+              row?.templateSnapshot?.version?.version ||
+              row?.template_snapshot?.version?.version ||
+              row?.templateVersion ||
+              row?.template_version ||
+              '',
+            ).trim() || null;
+          if (!version) {
+            unboundCount += 1;
+            return;
+          }
+          statsMap.set(version, (statsMap.get(version) || 0) + 1);
+        });
+
+        setXjRecentVersionStats(
+          Array.from(statsMap.entries())
+            .map(([version, count]) => ({ version, count }))
+            .sort((a, b) => b.count - a.count),
+        );
+        setXjRecentUnboundCount(unboundCount);
+      })
+      .catch(() => {
+        if (!active) return;
+        setXjBindingStatusRows([]);
+        setXjRecentVersionStats([]);
+        setXjRecentUnboundCount(0);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeTemplate?.id]);
+
+  const getResolvedTemplateHubOrder = (savedOrder: string[]) => {
+    const baseOrder = templateWorkspaceItems.map((item) => item.id);
+    return [
+      ...savedOrder.filter((id) => baseOrder.includes(id)),
+      ...baseOrder.filter((id) => !savedOrder.includes(id)),
+    ];
+  };
+
+  const moveTemplateHubItem = (templateId: string, direction: 'left' | 'right') => {
+    const currentOrder = templateHubTabOrder.length > 0
+      ? getResolvedTemplateHubOrder(templateHubTabOrder)
+      : templateWorkspaceItems.map((item) => item.id);
+    const currentIndex = currentOrder.indexOf(templateId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= currentOrder.length) return;
+    const nextOrder = [...currentOrder];
+    const [moved] = nextOrder.splice(currentIndex, 1);
+    nextOrder.splice(targetIndex, 0, moved);
+    setTemplateHubTabOrder(nextOrder);
+    void persistTemplateHubTabOrder(nextOrder);
+  };
+
+  const templateHubManagerItems = useMemo(() => {
+    const currentOrder = templateHubTabOrder.length > 0
+      ? getResolvedTemplateHubOrder(templateHubTabOrder)
+      : templateWorkspaceItems.map((item) => item.id);
+
+    return currentOrder
+      .map((id) => templateWorkspaceItems.find((item) => item.id === id))
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  }, [getResolvedTemplateHubOrder, templateHubTabOrder, templateWorkspaceItems]);
+
+  const reorderTemplateHubItems = (draggedId: string, targetId: string) => {
+    if (!draggedId || !targetId || draggedId === targetId) return;
+    const currentOrder = templateHubTabOrder.length > 0
+      ? getResolvedTemplateHubOrder(templateHubTabOrder)
+      : templateWorkspaceItems.map((item) => item.id);
+    const draggedIndex = currentOrder.indexOf(draggedId);
+    const targetIndex = currentOrder.indexOf(targetId);
+    if (draggedIndex === -1 || targetIndex === -1) return;
+    const nextOrder = [...currentOrder];
+    const [draggedItem] = nextOrder.splice(draggedIndex, 1);
+    nextOrder.splice(targetIndex, 0, draggedItem);
+    setTemplateHubTabOrder(nextOrder);
+    void persistTemplateHubTabOrder(nextOrder);
+  };
+
+  const updateTemplateHubTabName = (templateId: string, value: string) => {
+    setTemplateHubTabNameOverrides((prev) => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        const { [templateId]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return {
+        ...prev,
+        [templateId]: value,
+      };
+    });
+  };
+
+  const persistTemplateHubTabName = async (templateId: string, value: string) => {
+    const template = templateWorkspaceItems.find((item) => item.id === templateId);
+    if (!template) return;
+
+    const trimmed = value.trim();
+    const nextNameCn = trimmed || template.name;
+    const nextNameEn = deriveTemplateNameEnFromCn(nextNameCn, template.nameEn);
+
+    try {
+      await templateCenterService.updateTemplateDisplayName({
+        templateKey: templateId,
+        nameCn: nextNameCn,
+        nameEn: nextNameEn,
+      });
+      updateTemplateHubTabName(templateId, nextNameCn);
+      toast.success(`模板名称已永久保存为“${nextNameCn}”`);
+    } catch (error) {
+      console.error('[DocumentCenter] persist template tab name failed:', error);
+      toast.error(`模板名称保存失败：${(error as Error)?.message || '请重试'}`);
+    }
+  };
+
+  const flushTemplateHubTabOrderPersist = async () => {
+    if (isPersistingTemplateHubOrderRef.current) return;
+
+    const nextOrder = pendingTemplateHubOrderRef.current;
+    if (!nextOrder || nextOrder.length === 0) return;
+
+    pendingTemplateHubOrderRef.current = null;
+    isPersistingTemplateHubOrderRef.current = true;
+
+    try {
+      await templateCenterService.updateTemplateDisplayOrder(nextOrder);
+    } catch (error) {
+      console.error('[DocumentCenter] persist template tab order failed:', error);
+      toast.error(`模板顺序保存失败：${(error as Error)?.message || '请重试'}`);
+    } finally {
+      isPersistingTemplateHubOrderRef.current = false;
+      if (pendingTemplateHubOrderRef.current?.length) {
+        void flushTemplateHubTabOrderPersist();
+      }
+    }
+  };
+
+  const persistTemplateHubTabOrder = (nextOrder: string[]) => {
+    pendingTemplateHubOrderRef.current = nextOrder;
+
+    if (templateHubOrderPersistTimerRef.current !== null) {
+      window.clearTimeout(templateHubOrderPersistTimerRef.current);
+    }
+
+    templateHubOrderPersistTimerRef.current = window.setTimeout(() => {
+      templateHubOrderPersistTimerRef.current = null;
+      void flushTemplateHubTabOrderPersist();
+    }, 400);
+  };
+
+  const resetTemplateHubTabs = () => {
+    const defaultOrder = [...DOCUMENT_TEMPLATES]
+      .sort((a, b) => a.order - b.order)
+      .map((item) => normalizeWorkspaceTemplateId(item.id));
+
+    setTemplateHubTabOrder(defaultOrder);
+    setTemplateHubTabNameOverrides({});
+    void (async () => {
+      try {
+        await templateCenterService.resetTemplateWorkspacePrefs();
+        toast.success('模板条名称和顺序已恢复默认并保存到 Supabase');
+      } catch (error) {
+        console.error('[DocumentCenter] reset template workspace prefs failed:', error);
+        toast.error(`恢复默认失败：${(error as Error)?.message || '请重试'}`);
+      }
+    })();
+  };
+
+  const beginTemplateTabRename = (templateId: string, currentName: string) => {
+    setEditingTemplateTabId(templateId);
+    setEditingTemplateTabName(currentName);
+  };
+
+  const commitTemplateTabRename = () => {
+    if (!editingTemplateTabId) return;
+    void persistTemplateHubTabName(editingTemplateTabId, editingTemplateTabName);
+    setEditingTemplateTabId(null);
+    setEditingTemplateTabName('');
+  };
+
+  const cancelTemplateTabRename = () => {
+    setEditingTemplateTabId(null);
+    setEditingTemplateTabName('');
+  };
+
+  useEffect(() => {
     if (!activeTemplate) return;
     let cancelled = false;
     const templateKey = activeTemplate.id;
@@ -1472,15 +1748,17 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       }
 
       let records: any[] | null = null;
+      let syncErrorMessage = '';
       try {
         records = await Promise.race([
           templateCenterService.getVersionHistory(templateKey),
           new Promise<null>((resolve) => {
-            window.setTimeout(() => resolve(null), 8000);
+            window.setTimeout(() => resolve(null), 45000);
           }),
         ]);
-      } catch {
+      } catch (error) {
         records = null;
+        syncErrorMessage = error instanceof Error ? error.message : String(error || '');
       } finally {
         if (!cancelled) {
           setHydratingTemplateVersionKeys((prev) => prev.filter((key) => key !== templateKey));
@@ -1490,18 +1768,44 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       if (cancelled) return;
 
       if (records === null) {
+        if (templateKey === 'ing') {
+          const localFallbackRecord: InquiryTemplateVersionRecord = {
+            id: `local-ing-${Date.now()}`,
+            version: latestInquiryVersionRecord?.version || resolvedActiveTemplateMeta?.currentVersion || 'v1.2.0',
+            status: 'draft',
+            savedAt: formatVersionTime(),
+            savedBy: userEmail || 'Template Center Local Cache',
+            note: 'Supabase 版本历史暂不可用，当前使用本地编辑快照继续工作。',
+            data: cloneQrState(inquiryTemplateData),
+            layout: cloneQrState(normalizeWorkspacePreviewLayout(inquiryTemplateLayout)),
+          };
+          setInquiryVersionHistory([localFallbackRecord]);
+          setFailedTemplateVersionKeys((prev) => prev.filter((key) => key !== templateKey));
+          setTemplateVersionSyncError('ING 版本历史暂不可用，已切换到本地编辑快照。可继续调整模板，等数据库恢复后再保存/发布。');
+          const isUnreachable = syncErrorMessage.includes('unreachable') || syncErrorMessage.includes('timed out');
+          toast.warning(isUnreachable
+            ? '⚠️ 数据库暂时无法连接，已切换本地模式继续编辑。数据库恢复后可正常保存。'
+            : 'ING 版本历史同步失败，已切换到本地编辑快照继续编辑。'
+          );
+          return;
+        }
+
         setFailedTemplateVersionKeys((prev) => (
           prev.includes(templateKey) ? prev : [...prev, templateKey]
         ));
-        setTemplateVersionSyncError(`模板 ${templateKey.toUpperCase()} 版本同步失败。当前只认 Supabase，请先修复后再继续编辑。`);
-        toast.error(`模板 ${templateKey.toUpperCase()} 版本同步失败。`);
+        const isUnreachable = syncErrorMessage.includes('unreachable') || syncErrorMessage.includes('timed out');
+        const specificMessage = isUnreachable
+          ? `⚠️ 数据库暂时无法连接，${templateKey.toUpperCase()} 版本历史不可用。等服务恢复后刷新重试。`
+          : (syncErrorMessage || `模板 ${templateKey.toUpperCase()} 版本同步失败，请稍后重试。`);
+        setTemplateVersionSyncError(specificMessage);
+        toast.error(specificMessage);
         return;
       }
 
       if (templateKey === 'qr') {
         if (records.length === 0) return;
         const mapped = records.map((record) => {
-          const data = cloneQrState(record.data || SAMPLE_QR_TEMPLATE_DATA);
+          const data = cloneQrState(record.data || BASELINE_QR_TEMPLATE_SEED);
           return {
             ...record,
             data,
@@ -1513,43 +1817,175 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         setQrTemplateData(cloneQrState(mapped[0].data));
         setQrTemplateLayout(cloneQrState(mapped[0].layout));
         setQrTemplateTextOverrides(cloneQrState(mapped[0].textOverrides));
+        updateLoadedTemplateVersion('qr', mapped[0]);
+        syncTemplateVersionNote('qr', mapped[0].note);
+        return;
+      }
+
+      if (templateKey === 'pr') {
+        if (records.length === 0) return;
+        const mapped = records.map((record) => {
+          const data = cloneQrState(resolveTemplateWorkspaceRecordData(BASELINE_PR_TEMPLATE_SEED, record.data));
+          return {
+            ...record,
+            data,
+            layout: normalizeQrPreviewLayout(record.layout),
+            textOverrides: cloneQrState(record.textOverrides || {
+              ...buildDefaultQuoteRequirementTextOverrides(data),
+              ...INITIAL_PR_TEXT_OVERRIDES,
+            }),
+          };
+        }) as PrTemplateVersionRecord[];
+        setPrVersionHistory(mapped);
+        setPrTemplateData(cloneQrState(mapped[0].data));
+        setPrTemplateLayout(cloneQrState(mapped[0].layout));
+        setPrTemplateTextOverrides(cloneQrState(mapped[0].textOverrides));
+        updateLoadedTemplateVersion('pr', mapped[0]);
+        syncTemplateVersionNote('pr', mapped[0].note);
         return;
       }
 
       if (templateKey === 'xj') {
-        applyWorkspaceRecords<XjTemplateVersionRecord>(records, SAMPLE_XJ_TEMPLATE_DATA, setXjVersionHistory, setXjTemplateData, setXjTemplateLayout);
+        applyWorkspaceRecords<XjTemplateVersionRecord>(
+          records,
+          BASELINE_XJ_TEMPLATE_SEED,
+          setXjVersionHistory,
+          setXjTemplateData,
+          setXjTemplateLayout,
+          (data) => normalizeXjBuyerFromAdminOrg(data, adminOrg, adminUserProfile.email, adminUserProfile.name),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('xj', records[0] as XjTemplateVersionRecord);
+          syncTemplateVersionNote('xj', (records[0] as XjTemplateVersionRecord).note);
+        }
+        return;
+      }
+      if (templateKey === 'bj') {
+        applyWorkspaceRecords<BjTemplateVersionRecord>(
+          records,
+          BASELINE_BJ_TEMPLATE_SEED,
+          setBjVersionHistory,
+          setBjTemplateData,
+          setBjTemplateLayout,
+          (data) => normalizeBjBuyerFromAdminOrg(data, adminOrg, adminUserProfile.email, adminUserProfile.name),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('bj', records[0] as BjTemplateVersionRecord);
+          syncTemplateVersionNote('bj', (records[0] as BjTemplateVersionRecord).note);
+        }
         return;
       }
       if (templateKey === 'sc') {
-        applyWorkspaceRecords<ScTemplateVersionRecord>(records, SAMPLE_SC_TEMPLATE_DATA, setScVersionHistory, setScTemplateData, setScTemplateLayout);
+        applyWorkspaceRecords<ScTemplateVersionRecord>(
+          records,
+          BASELINE_SC_TEMPLATE_SEED,
+          setScVersionHistory,
+          setScTemplateData,
+          setScTemplateLayout,
+          (data) => normalizeScSellerFromAdminOrg(data, adminOrg, adminUserProfile.email),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('sc', records[0] as ScTemplateVersionRecord);
+          syncTemplateVersionNote('sc', (records[0] as ScTemplateVersionRecord).note);
+        }
         return;
       }
       if (templateKey === 'cg') {
-        applyWorkspaceRecords<CgTemplateVersionRecord>(records, SAMPLE_CG_TEMPLATE_DATA, setCgVersionHistory, setCgTemplateData, setCgTemplateLayout);
+        applyWorkspaceRecords<CgTemplateVersionRecord>(
+          records,
+          BASELINE_CG_TEMPLATE_SEED,
+          setCgVersionHistory,
+          setCgTemplateData,
+          setCgTemplateLayout,
+          (data) => normalizeCgBuyerFromAdminOrg(data, adminOrg, adminUserProfile.email),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('cg', records[0] as CgTemplateVersionRecord);
+          syncTemplateVersionNote('cg', (records[0] as CgTemplateVersionRecord).note);
+        }
         return;
       }
       if (templateKey === 'pi') {
-        applyWorkspaceRecords<PiTemplateVersionRecord>(records, SAMPLE_PI_TEMPLATE_DATA, setPiVersionHistory, setPiTemplateData, setPiTemplateLayout);
+        applyWorkspaceRecords<PiTemplateVersionRecord>(
+          records,
+          BASELINE_PI_TEMPLATE_SEED,
+          setPiVersionHistory,
+          setPiTemplateData,
+          setPiTemplateLayout,
+          (data) => normalizePiFromAdminOrg(data, adminOrg, adminUserProfile.email),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('pi', records[0] as PiTemplateVersionRecord);
+          syncTemplateVersionNote('pi', (records[0] as PiTemplateVersionRecord).note);
+        }
         return;
       }
       if (templateKey === 'ci') {
-        applyWorkspaceRecords<CiTemplateVersionRecord>(records, SAMPLE_CI_TEMPLATE_DATA, setCiVersionHistory, setCiTemplateData, setCiTemplateLayout);
+        applyWorkspaceRecords<CiTemplateVersionRecord>(
+          records,
+          BASELINE_CI_TEMPLATE_SEED,
+          setCiVersionHistory,
+          setCiTemplateData,
+          setCiTemplateLayout,
+          (data) => normalizeCiExporterFromAdminOrg(data, adminOrg),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('ci', records[0] as CiTemplateVersionRecord);
+          syncTemplateVersionNote('ci', (records[0] as CiTemplateVersionRecord).note);
+        }
         return;
       }
       if (templateKey === 'pl') {
-        applyWorkspaceRecords<PlTemplateVersionRecord>(records, SAMPLE_PL_TEMPLATE_DATA, setPlVersionHistory, setPlTemplateData, setPlTemplateLayout);
+        applyWorkspaceRecords<PlTemplateVersionRecord>(
+          records,
+          BASELINE_PL_TEMPLATE_SEED,
+          setPlVersionHistory,
+          setPlTemplateData,
+          setPlTemplateLayout,
+          (data) => normalizePlExporterFromAdminOrg(data, adminOrg),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('pl', records[0] as PlTemplateVersionRecord);
+          syncTemplateVersionNote('pl', (records[0] as PlTemplateVersionRecord).note);
+        }
         return;
       }
       if (templateKey === 'soa') {
-        applyWorkspaceRecords<SoaTemplateVersionRecord>(records, SAMPLE_SOA_TEMPLATE_DATA, setSoaVersionHistory, setSoaTemplateData, setSoaTemplateLayout);
+        applyWorkspaceRecords<SoaTemplateVersionRecord>(
+          records,
+          BASELINE_SOA_TEMPLATE_SEED,
+          setSoaVersionHistory,
+          setSoaTemplateData,
+          setSoaTemplateLayout,
+          (data) => normalizeSoaCompanyFromAdminOrg(data, adminOrg, adminUserProfile.email),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('soa', records[0] as SoaTemplateVersionRecord);
+          syncTemplateVersionNote('soa', (records[0] as SoaTemplateVersionRecord).note);
+        }
         return;
       }
       if (templateKey === 'ing') {
-        applyWorkspaceRecords<InquiryTemplateVersionRecord>(records, SAMPLE_INQUIRY_TEMPLATE_DATA, setInquiryVersionHistory, setInquiryTemplateData, setInquiryTemplateLayout);
+        applyWorkspaceRecords<InquiryTemplateVersionRecord>(records, BASELINE_ING_TEMPLATE_SEED, setInquiryVersionHistory, setInquiryTemplateData, setInquiryTemplateLayout);
+        if (records[0]) {
+          updateLoadedTemplateVersion('ing', records[0] as InquiryTemplateVersionRecord);
+          syncTemplateVersionNote('ing', (records[0] as InquiryTemplateVersionRecord).note);
+        }
         return;
       }
       if (templateKey === 'qt') {
-        applyWorkspaceRecords<QuotationTemplateVersionRecord>(records, SAMPLE_QUOTATION_TEMPLATE_DATA, setQuotationVersionHistory, setQuotationTemplateData, setQuotationTemplateLayout);
+        applyWorkspaceRecords<QuotationTemplateVersionRecord>(
+          records,
+          BASELINE_QT_TEMPLATE_SEED,
+          setQuotationVersionHistory,
+          setQuotationTemplateData,
+          setQuotationTemplateLayout,
+          (data) => normalizeQuotationCompanyFromAdminOrg(data, adminOrg, adminUserProfile.email),
+        );
+        if (records[0]) {
+          updateLoadedTemplateVersion('qt', records[0] as QuotationTemplateVersionRecord);
+          syncTemplateVersionNote('qt', (records[0] as QuotationTemplateVersionRecord).note);
+        }
       }
     };
 
@@ -1586,10 +2022,18 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   const latestQrPublishedRecord =
     qrVersionHistory.find((record) => record.status === 'published') || latestQrVersionRecord;
   const latestQrDraftRecord = qrVersionHistory.find((record) => record.status === 'draft');
+  const latestPrVersionRecord = prVersionHistory[0];
+  const latestPrPublishedRecord =
+    prVersionHistory.find((record) => record.status === 'published') || latestPrVersionRecord;
+  const latestPrDraftRecord = prVersionHistory.find((record) => record.status === 'draft');
   const latestXjVersionRecord = xjVersionHistory[0];
   const latestXjPublishedRecord =
     xjVersionHistory.find((record) => record.status === 'published') || latestXjVersionRecord;
   const latestXjDraftRecord = xjVersionHistory.find((record) => record.status === 'draft');
+  const latestBjVersionRecord = bjVersionHistory[0];
+  const latestBjPublishedRecord =
+    bjVersionHistory.find((record) => record.status === 'published') || latestBjVersionRecord;
+  const latestBjDraftRecord = bjVersionHistory.find((record) => record.status === 'draft');
   const latestScVersionRecord = scVersionHistory[0];
   const latestScPublishedRecord =
     scVersionHistory.find((record) => record.status === 'published') || latestScVersionRecord;
@@ -1624,79 +2068,97 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   const latestQuotationDraftRecord = quotationVersionHistory.find((record) => record.status === 'draft');
   const qrTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.qr,
-    currentVersion: latestQrPublishedRecord?.version || TEMPLATE_WORKSPACE_META.qr.currentVersion,
-    status: latestQrDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestQrPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.qr.lastPublishedAt,
-    lastEditedBy: latestQrVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.qr.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.qr?.version || latestQrPublishedRecord?.version || TEMPLATE_WORKSPACE_META.qr.currentVersion,
+    status: loadedTemplateVersionMap.qr?.status || (latestQrDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.qr?.savedAt || latestQrPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.qr.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.qr?.savedBy || latestQrVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.qr.lastEditedBy,
+  };
+  const prTemplateRuntimeMeta = {
+    ...TEMPLATE_WORKSPACE_META.pr,
+    currentVersion: loadedTemplateVersionMap.pr?.version || latestPrPublishedRecord?.version || TEMPLATE_WORKSPACE_META.pr.currentVersion,
+    status: loadedTemplateVersionMap.pr?.status || (latestPrDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.pr?.savedAt || latestPrPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.pr.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.pr?.savedBy || latestPrVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.pr.lastEditedBy,
   };
   const xjTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.xj,
-    currentVersion: latestXjPublishedRecord?.version || TEMPLATE_WORKSPACE_META.xj.currentVersion,
-    status: latestXjDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestXjPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.xj.lastPublishedAt,
-    lastEditedBy: latestXjVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.xj.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.xj?.version || latestXjPublishedRecord?.version || TEMPLATE_WORKSPACE_META.xj.currentVersion,
+    status: loadedTemplateVersionMap.xj?.status || (latestXjDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.xj?.savedAt || latestXjPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.xj.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.xj?.savedBy || latestXjVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.xj.lastEditedBy,
+  };
+  const bjTemplateRuntimeMeta = {
+    ...TEMPLATE_WORKSPACE_META.bj,
+    currentVersion: loadedTemplateVersionMap.bj?.version || latestBjPublishedRecord?.version || TEMPLATE_WORKSPACE_META.bj.currentVersion,
+    status: loadedTemplateVersionMap.bj?.status || (latestBjDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.bj?.savedAt || latestBjPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.bj.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.bj?.savedBy || latestBjVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.bj.lastEditedBy,
   };
   const scTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.sc,
-    currentVersion: latestScPublishedRecord?.version || TEMPLATE_WORKSPACE_META.sc.currentVersion,
-    status: latestScDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestScPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.sc.lastPublishedAt,
-    lastEditedBy: latestScVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.sc.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.sc?.version || latestScPublishedRecord?.version || TEMPLATE_WORKSPACE_META.sc.currentVersion,
+    status: loadedTemplateVersionMap.sc?.status || (latestScDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.sc?.savedAt || latestScPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.sc.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.sc?.savedBy || latestScVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.sc.lastEditedBy,
   };
   const cgTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.cg,
-    currentVersion: latestCgPublishedRecord?.version || TEMPLATE_WORKSPACE_META.cg.currentVersion,
-    status: latestCgDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestCgPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.cg.lastPublishedAt,
-    lastEditedBy: latestCgVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.cg.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.cg?.version || latestCgPublishedRecord?.version || TEMPLATE_WORKSPACE_META.cg.currentVersion,
+    status: loadedTemplateVersionMap.cg?.status || (latestCgDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.cg?.savedAt || latestCgPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.cg.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.cg?.savedBy || latestCgVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.cg.lastEditedBy,
   };
   const piTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.pi,
-    currentVersion: latestPiPublishedRecord?.version || TEMPLATE_WORKSPACE_META.pi.currentVersion,
-    status: latestPiDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestPiPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.pi.lastPublishedAt,
-    lastEditedBy: latestPiVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.pi.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.pi?.version || latestPiPublishedRecord?.version || TEMPLATE_WORKSPACE_META.pi.currentVersion,
+    status: loadedTemplateVersionMap.pi?.status || (latestPiDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.pi?.savedAt || latestPiPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.pi.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.pi?.savedBy || latestPiVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.pi.lastEditedBy,
   };
   const ciTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.ci,
-    currentVersion: latestCiPublishedRecord?.version || TEMPLATE_WORKSPACE_META.ci.currentVersion,
-    status: latestCiDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestCiPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.ci.lastPublishedAt,
-    lastEditedBy: latestCiVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.ci.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.ci?.version || latestCiPublishedRecord?.version || TEMPLATE_WORKSPACE_META.ci.currentVersion,
+    status: loadedTemplateVersionMap.ci?.status || (latestCiDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.ci?.savedAt || latestCiPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.ci.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.ci?.savedBy || latestCiVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.ci.lastEditedBy,
   };
   const plTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.pl,
-    currentVersion: latestPlPublishedRecord?.version || TEMPLATE_WORKSPACE_META.pl.currentVersion,
-    status: latestPlDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestPlPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.pl.lastPublishedAt,
-    lastEditedBy: latestPlVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.pl.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.pl?.version || latestPlPublishedRecord?.version || TEMPLATE_WORKSPACE_META.pl.currentVersion,
+    status: loadedTemplateVersionMap.pl?.status || (latestPlDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.pl?.savedAt || latestPlPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.pl.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.pl?.savedBy || latestPlVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.pl.lastEditedBy,
   };
   const soaTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.soa,
-    currentVersion: latestSoaPublishedRecord?.version || TEMPLATE_WORKSPACE_META.soa.currentVersion,
-    status: latestSoaDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestSoaPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.soa.lastPublishedAt,
-    lastEditedBy: latestSoaVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.soa.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.soa?.version || latestSoaPublishedRecord?.version || TEMPLATE_WORKSPACE_META.soa.currentVersion,
+    status: loadedTemplateVersionMap.soa?.status || (latestSoaDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.soa?.savedAt || latestSoaPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.soa.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.soa?.savedBy || latestSoaVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.soa.lastEditedBy,
   };
   const inquiryTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.ing,
-    currentVersion: latestInquiryPublishedRecord?.version || TEMPLATE_WORKSPACE_META.ing.currentVersion,
-    status: latestInquiryDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestInquiryPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.ing.lastPublishedAt,
-    lastEditedBy: latestInquiryVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.ing.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.ing?.version || latestInquiryPublishedRecord?.version || TEMPLATE_WORKSPACE_META.ing.currentVersion,
+    status: loadedTemplateVersionMap.ing?.status || (latestInquiryDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.ing?.savedAt || latestInquiryPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.ing.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.ing?.savedBy || latestInquiryVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.ing.lastEditedBy,
   };
   const quotationTemplateRuntimeMeta = {
     ...TEMPLATE_WORKSPACE_META.qt,
-    currentVersion: latestQuotationPublishedRecord?.version || TEMPLATE_WORKSPACE_META.qt.currentVersion,
-    status: latestQuotationDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus,
-    lastPublishedAt: latestQuotationPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.qt.lastPublishedAt,
-    lastEditedBy: latestQuotationVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.qt.lastEditedBy,
+    currentVersion: loadedTemplateVersionMap.qt?.version || latestQuotationPublishedRecord?.version || TEMPLATE_WORKSPACE_META.qt.currentVersion,
+    status: loadedTemplateVersionMap.qt?.status || (latestQuotationDraftRecord ? 'draft' as TemplatePublishStatus : 'published' as TemplatePublishStatus),
+    lastPublishedAt: loadedTemplateVersionMap.qt?.savedAt || latestQuotationPublishedRecord?.savedAt || TEMPLATE_WORKSPACE_META.qt.lastPublishedAt,
+    lastEditedBy: loadedTemplateVersionMap.qt?.savedBy || latestQuotationVersionRecord?.savedBy || TEMPLATE_WORKSPACE_META.qt.lastEditedBy,
   };
   const resolvedActiveTemplateMeta = activeTemplate
     ? activeTemplate.id === 'qr'
       ? qrTemplateRuntimeMeta
+      : activeTemplate.id === 'pr'
+        ? prTemplateRuntimeMeta
       : activeTemplate.id === 'xj'
         ? xjTemplateRuntimeMeta
+        : activeTemplate.id === 'bj'
+          ? bjTemplateRuntimeMeta
       : activeTemplate.id === 'sc'
         ? scTemplateRuntimeMeta
         : activeTemplate.id === 'cg'
@@ -1715,6 +2177,46 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
                       ? quotationTemplateRuntimeMeta
         : activeTemplate.meta
     : null;
+  const activeLoadedVersion = activeTemplate
+    ? loadedTemplateVersionMap[activeTemplate.id]
+    : null;
+  const templateRuntimeMetaMap: Record<string, typeof qrTemplateRuntimeMeta> = {
+    qr: qrTemplateRuntimeMeta,
+    pr: prTemplateRuntimeMeta,
+    xj: xjTemplateRuntimeMeta,
+    bj: bjTemplateRuntimeMeta,
+    sc: scTemplateRuntimeMeta,
+    cg: cgTemplateRuntimeMeta,
+    pi: piTemplateRuntimeMeta,
+    ci: ciTemplateRuntimeMeta,
+    pl: plTemplateRuntimeMeta,
+    soa: soaTemplateRuntimeMeta,
+    ing: inquiryTemplateRuntimeMeta,
+    qt: quotationTemplateRuntimeMeta,
+  };
+
+  const isVersionHistoryCollapsed = (templateKey: string) => collapsedTemplateVersionHistoryMap[templateKey] ?? true;
+
+  const toggleVersionHistoryCollapsed = (templateKey: string) => {
+    setCollapsedTemplateVersionHistoryMap((prev) => ({
+      ...prev,
+      [templateKey]: !(prev[templateKey] ?? true),
+    }));
+  };
+
+  const renderVersionHistoryPanel = (
+    templateKey: string,
+    count: number,
+    content: React.ReactNode,
+  ) => (
+    <VersionHistoryPanel
+      collapsed={isVersionHistoryCollapsed(templateKey)}
+      count={count}
+      onToggle={() => toggleVersionHistoryCollapsed(templateKey)}
+    >
+      {content}
+    </VersionHistoryPanel>
+  );
 
   const updateQrTemplateData = <K extends keyof QuoteRequirementDocumentData>(key: K, value: QuoteRequirementDocumentData[K]) => {
     setQrTemplateData((prev) => ({ ...prev, [key]: value }));
@@ -1728,8 +2230,24 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     setQrTemplateTextOverrides((prev) => ({ ...prev, [key]: value }));
   };
 
+  const updatePrTemplateData = <K extends keyof QuoteRequirementDocumentData>(key: K, value: QuoteRequirementDocumentData[K]) => {
+    setPrTemplateData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updatePrTemplateLayout = <K extends keyof QuoteRequirementPreviewLayout>(key: K, value: QuoteRequirementPreviewLayout[K]) => {
+    setPrTemplateLayout((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updatePrTemplateText = <K extends keyof QuoteRequirementTextOverrides>(key: K, value: QuoteRequirementTextOverrides[K]) => {
+    setPrTemplateTextOverrides((prev) => ({ ...prev, [key]: value }));
+  };
+
   const updateXjTemplateData = <K extends keyof XJData>(key: K, value: XJData[K]) => {
     setXjTemplateData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updateBjTemplateData = <K extends keyof SupplierQuotationData>(key: K, value: SupplierQuotationData[K]) => {
+    setBjTemplateData((prev) => ({ ...prev, [key]: value }));
   };
 
   const updateScTemplateData = <K extends keyof SalesContractData>(key: K, value: SalesContractData[K]) => {
@@ -1742,6 +2260,58 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
 
   const updateXjTemplateLayout = <K extends keyof WorkspacePreviewLayout>(key: K, value: WorkspacePreviewLayout[K]) => {
     setXjTemplateLayout((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updateBjTemplateLayout = <K extends keyof WorkspacePreviewLayout>(key: K, value: WorkspacePreviewLayout[K]) => {
+    setBjTemplateLayout((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const applyXjTermsPreset = (preset: XjTermsPreset) => {
+    updateXjTemplateData('terms', {
+      ...xjTemplateData.terms,
+      ...preset.terms,
+    });
+    toast.success(`已套用“${preset.name}”`);
+  };
+
+  const clearXjTerms = () => {
+    updateXjTemplateData('terms', { ...EMPTY_XJ_TERMS });
+    toast.success('已清空 XJ 条款');
+  };
+
+  const restoreDefaultXjTerms = () => {
+    updateXjTemplateData('terms', cloneQrState(BASELINE_XJ_TEMPLATE_SEED.terms));
+    toast.success('已恢复默认 XJ 条款');
+  };
+
+  const updateXjProductDescription = (index: number, value: string) => {
+    updateXjTemplateData('products', xjTemplateData.products.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, description: value } : item
+    )));
+  };
+
+  const updateXjProductSpecification = (index: number, value: string) => {
+    updateXjTemplateData('products', xjTemplateData.products.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, specification: value } : item
+    )));
+  };
+
+  const updateXjProductQuantity = (index: number, value: number) => {
+    updateXjTemplateData('products', xjTemplateData.products.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, quantity: value } : item
+    )));
+  };
+
+  const updateXjProductTargetPrice = (index: number, value: string) => {
+    updateXjTemplateData('products', xjTemplateData.products.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, targetPrice: value } : item
+    )));
+  };
+
+  const applyXjTermsPresetById = (presetId: string) => {
+    const preset = XJ_TERMS_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    applyXjTermsPreset(preset);
   };
 
   const updateScTemplateLayout = <K extends keyof WorkspacePreviewLayout>(key: K, value: WorkspacePreviewLayout[K]) => {
@@ -1792,6 +2362,151 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     setInquiryTemplateLayout((prev) => ({ ...prev, [key]: value }));
   };
 
+  const updateInquiryProductTableColumn = (
+    index: number,
+    patch: Partial<NonNullable<NonNullable<CustomerInquiryData['templateSettings']>['productTableColumns']>[number]>,
+  ) => {
+    const currentColumns = inquiryTemplateData.templateSettings?.productTableColumns || DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS;
+    updateInquiryTemplateData('templateSettings', {
+      ...inquiryTemplateData.templateSettings,
+      productTableColumns: currentColumns.map((column, columnIndex) => (
+        columnIndex === index ? { ...column, ...patch } : column
+      )),
+    });
+  };
+
+  const moveInquiryProductTableColumn = (index: number, direction: 'up' | 'down') => {
+    const currentColumns = [
+      ...(inquiryTemplateData.templateSettings?.productTableColumns || DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS),
+    ];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= currentColumns.length) return;
+
+    [currentColumns[index], currentColumns[targetIndex]] = [currentColumns[targetIndex], currentColumns[index]];
+
+    updateInquiryTemplateData('templateSettings', {
+      ...inquiryTemplateData.templateSettings,
+      productTableColumns: currentColumns,
+    });
+  };
+
+  const updateCgProductTableColumn = (
+    index: number,
+    patch: Partial<NonNullable<NonNullable<PurchaseOrderData['templateSettings']>['productTableColumns']>[number]>,
+  ) => {
+    const currentColumns = cgTemplateData.templateSettings?.productTableColumns || DEFAULT_PURCHASE_ORDER_PRODUCT_TABLE_COLUMNS;
+    updateCgTemplateData('templateSettings', {
+      ...cgTemplateData.templateSettings,
+      productTableColumns: currentColumns.map((column, columnIndex) => (
+        columnIndex === index ? { ...column, ...patch } : column
+      )),
+    });
+  };
+
+  const moveCgProductTableColumn = (index: number, direction: 'up' | 'down') => {
+    const currentColumns = [
+      ...(cgTemplateData.templateSettings?.productTableColumns || DEFAULT_PURCHASE_ORDER_PRODUCT_TABLE_COLUMNS),
+    ];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= currentColumns.length) return;
+
+    [currentColumns[index], currentColumns[targetIndex]] = [currentColumns[targetIndex], currentColumns[index]];
+
+    updateCgTemplateData('templateSettings', {
+      ...cgTemplateData.templateSettings,
+      productTableColumns: currentColumns,
+    });
+  };
+
+  const updateScProductTableColumn = (
+    index: number,
+    patch: Partial<NonNullable<NonNullable<SalesContractData['templateSettings']>['productTableColumns']>[number]>,
+  ) => {
+    const currentColumns = scTemplateData.templateSettings?.productTableColumns || DEFAULT_SALES_CONTRACT_PRODUCT_TABLE_COLUMNS;
+    updateScTemplateData('templateSettings', {
+      ...scTemplateData.templateSettings,
+      productTableColumns: currentColumns.map((column, columnIndex) => (
+        columnIndex === index ? { ...column, ...patch } : column
+      )),
+    });
+  };
+
+  const moveScProductTableColumn = (index: number, direction: 'up' | 'down') => {
+    const currentColumns = [
+      ...(scTemplateData.templateSettings?.productTableColumns || DEFAULT_SALES_CONTRACT_PRODUCT_TABLE_COLUMNS),
+    ];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= currentColumns.length) return;
+
+    [currentColumns[index], currentColumns[targetIndex]] = [currentColumns[targetIndex], currentColumns[index]];
+
+    updateScTemplateData('templateSettings', {
+      ...scTemplateData.templateSettings,
+      productTableColumns: currentColumns,
+    });
+  };
+
+  const updatePiGoodsTableColumn = (
+    index: number,
+    patch: Partial<NonNullable<NonNullable<ProformaInvoiceData['templateSettings']>['goodsTableColumns']>[number]>,
+  ) => {
+    const currentColumns = piTemplateData.templateSettings?.goodsTableColumns || DEFAULT_PROFORMA_INVOICE_GOODS_TABLE_COLUMNS;
+    updatePiTemplateData('templateSettings', {
+      ...piTemplateData.templateSettings,
+      goodsTableColumns: currentColumns.map((column, columnIndex) => (
+        columnIndex === index ? { ...column, ...patch } : column
+      )),
+    });
+  };
+
+  const movePiGoodsTableColumn = (index: number, direction: 'up' | 'down') => {
+    const currentColumns = [
+      ...(piTemplateData.templateSettings?.goodsTableColumns || DEFAULT_PROFORMA_INVOICE_GOODS_TABLE_COLUMNS),
+    ];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= currentColumns.length) return;
+
+    [currentColumns[index], currentColumns[targetIndex]] = [currentColumns[targetIndex], currentColumns[index]];
+
+    updatePiTemplateData('templateSettings', {
+      ...piTemplateData.templateSettings,
+      goodsTableColumns: currentColumns,
+    });
+  };
+
+  const updateCiGoodsTableColumn = (
+    index: number,
+    patch: Partial<NonNullable<NonNullable<CommercialInvoiceData['templateSettings']>['goodsTableColumns']>[number]>,
+  ) => {
+    const currentColumns = ciTemplateData.templateSettings?.goodsTableColumns || DEFAULT_COMMERCIAL_INVOICE_GOODS_TABLE_COLUMNS;
+    updateCiTemplateData('templateSettings', {
+      ...ciTemplateData.templateSettings,
+      goodsTableColumns: currentColumns.map((column, columnIndex) => (
+        columnIndex === index ? { ...column, ...patch } : column
+      )),
+    });
+  };
+
+  const moveCiGoodsTableColumn = (index: number, direction: 'up' | 'down') => {
+    const currentColumns = [
+      ...(ciTemplateData.templateSettings?.goodsTableColumns || DEFAULT_COMMERCIAL_INVOICE_GOODS_TABLE_COLUMNS),
+    ];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= currentColumns.length) return;
+
+    [currentColumns[index], currentColumns[targetIndex]] = [currentColumns[targetIndex], currentColumns[index]];
+
+    updateCiTemplateData('templateSettings', {
+      ...ciTemplateData.templateSettings,
+      goodsTableColumns: currentColumns,
+    });
+  };
+
   const updateQuotationTemplateData = <K extends keyof QuotationData>(key: K, value: QuotationData[K]) => {
     setQuotationTemplateData((prev) => ({ ...prev, [key]: value }));
   };
@@ -1800,22 +2515,52 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     setQuotationTemplateLayout((prev) => ({ ...prev, [key]: value }));
   };
 
-  const renderWorkspaceLayoutPanel = (
-    layout: WorkspacePreviewLayout,
-    onChange: <K extends keyof WorkspacePreviewLayout>(key: K, value: WorkspacePreviewLayout[K]) => void
-  ) => (
-    <div className="rounded-lg border border-gray-200 p-3">
-      <p className="text-xs font-semibold text-gray-900 mb-3">版式参数</p>
-      <div className="grid grid-cols-2 gap-2">
-        <div><Label className="text-[11px] text-gray-500">画布宽度(mm)</Label><Input type="number" value={layout.canvasWidthMm} onChange={(e) => onChange('canvasWidthMm', Number(e.target.value) || 210)} className="mt-1 h-7 text-xs" /></div>
-        <div><Label className="text-[11px] text-gray-500">最小高度(mm)</Label><Input type="number" value={layout.canvasMinHeightMm} onChange={(e) => onChange('canvasMinHeightMm', Number(e.target.value) || 297)} className="mt-1 h-7 text-xs" /></div>
-        <div><Label className="text-[11px] text-gray-500">上边距(mm)</Label><Input type="number" value={layout.contentPaddingTopMm} onChange={(e) => onChange('contentPaddingTopMm', Number(e.target.value) || 10)} className="mt-1 h-7 text-xs" /></div>
-        <div><Label className="text-[11px] text-gray-500">下边距(mm)</Label><Input type="number" value={layout.contentPaddingBottomMm} onChange={(e) => onChange('contentPaddingBottomMm', Number(e.target.value) || 12)} className="mt-1 h-7 text-xs" /></div>
-        <div><Label className="text-[11px] text-gray-500">字体(pt)</Label><Input type="number" value={layout.fontSizePt} onChange={(e) => onChange('fontSizePt', Number(e.target.value) || 10)} className="mt-1 h-7 text-xs" /></div>
-        <div><Label className="text-[11px] text-gray-500">行高</Label><Input type="number" step="0.1" value={layout.lineHeight} onChange={(e) => onChange('lineHeight', Number(e.target.value) || 1.5)} className="mt-1 h-7 text-xs" /></div>
-      </div>
-    </div>
-  );
+  const updateQuotationProductTableColumn = (
+    index: number,
+    patch: Partial<NonNullable<NonNullable<QuotationData['templateSettings']>['productTableColumns']>[number]>,
+  ) => {
+    const currentColumns = quotationTemplateData.templateSettings?.productTableColumns || DEFAULT_QUOTATION_PRODUCT_TABLE_COLUMNS;
+    updateQuotationTemplateData('templateSettings', {
+      ...quotationTemplateData.templateSettings,
+      productTableColumns: currentColumns.map((column, columnIndex) => (
+        columnIndex === index ? { ...column, ...patch } : column
+      )),
+    });
+  };
+
+  const moveQuotationProductTableColumn = (index: number, direction: 'up' | 'down') => {
+    const currentColumns = [
+      ...(quotationTemplateData.templateSettings?.productTableColumns || DEFAULT_QUOTATION_PRODUCT_TABLE_COLUMNS),
+    ];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= currentColumns.length) return;
+
+    [currentColumns[index], currentColumns[targetIndex]] = [currentColumns[targetIndex], currentColumns[index]];
+
+    updateQuotationTemplateData('templateSettings', {
+      ...quotationTemplateData.templateSettings,
+      productTableColumns: currentColumns,
+    });
+  };
+
+  const updateQuotationProductName = (index: number, value: string) => {
+    updateQuotationTemplateData('products', quotationTemplateData.products.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, productName: value } : row
+    )));
+  };
+
+  const updateQuotationProductQuantity = (index: number, value: number) => {
+    updateQuotationTemplateData('products', quotationTemplateData.products.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, quantity: value, amount: value * row.unitPrice } : row
+    )));
+  };
+
+  const updateQuotationProductUnitPrice = (index: number, value: number) => {
+    updateQuotationTemplateData('products', quotationTemplateData.products.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, unitPrice: value, amount: value * row.quantity } : row
+    )));
+  };
 
   const renderWorkspacePreviewWrapper = (
     layout: WorkspacePreviewLayout,
@@ -1837,10 +2582,26 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     setQrTemplateTextOverrides(
       cloneQrState(record.textOverrides || buildDefaultQuoteRequirementTextOverrides(record.data))
     );
+    updateLoadedTemplateVersion('qr', record);
+    syncTemplateVersionNote('qr', record.note);
+  };
+
+  const applyPrVersionRecord = (record: PrTemplateVersionRecord) => {
+    const data = cloneQrState(resolveTemplateWorkspaceRecordData(BASELINE_PR_TEMPLATE_SEED, record.data));
+    setPrTemplateData(data);
+    setPrTemplateLayout(cloneQrState(normalizeQrPreviewLayout(record.layout)));
+    setPrTemplateTextOverrides(
+      cloneQrState(record.textOverrides || {
+        ...buildDefaultQuoteRequirementTextOverrides(data),
+        ...INITIAL_PR_TEXT_OVERRIDES,
+      })
+    );
+    updateLoadedTemplateVersion('pr', record);
+    syncTemplateVersionNote('pr', record.note);
   };
 
   const persistTemplateVersion = async (options: {
-    templateKey: 'qr' | 'xj' | 'sc' | 'cg' | 'pi' | 'ci' | 'pl' | 'soa' | 'ing' | 'qt';
+    templateKey: 'qr' | 'pr' | 'xj' | 'bj' | 'sc' | 'cg' | 'pi' | 'ci' | 'pl' | 'soa' | 'ing' | 'qt';
     status: QrVersionRecordStatus;
     baseVersion: string;
     note: string;
@@ -1849,6 +2610,22 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     layout: WorkspacePreviewLayout | QuoteRequirementPreviewLayout;
     textOverrides?: Record<string, any> | null;
   }) => {
+    const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number) => {
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      try {
+        return await Promise.race<T>([
+          promise,
+          new Promise<T>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new Error(`模板保存超时（>${Math.round(timeoutMs / 1000)}秒），请重试`));
+            }, timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
+
     const version =
       options.status === 'published'
         ? bumpSemanticVersion(options.baseVersion, 'minor')
@@ -1860,7 +2637,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       status: options.status,
     });
     try {
-      const persistedRecord = await templateCenterService.saveVersion({
+      const persistedRecord = await withTimeout(templateCenterService.saveVersion({
         templateKey: options.templateKey,
         version,
         status: options.status,
@@ -1869,7 +2646,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         data: cloneQrState(options.data),
         layout: cloneQrState(options.layout),
         textOverrides: options.textOverrides || null,
-      });
+      }), options.status === 'published' ? 60000 : 60000);
 
       if (!persistedRecord) {
         toast.error(`Supabase 保存失败，${version} 未写入。`);
@@ -1893,6 +2670,16 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
             }
           : {}),
       };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg.includes('Supabase unreachable') || msg.includes('unreachable')) {
+        toast.error('⚠️ 数据库暂时无法连接，模板未保存。请稍后重试，或联系管理员检查 Supabase 服务状态。');
+      } else if (msg.includes('timed out') || msg.includes('超时')) {
+        toast.error('⚠️ 数据库响应超时，模板未保存。请检查网络后重试。');
+      } else {
+        toast.error(msg || `模板 ${options.templateKey.toUpperCase()} 保存失败，请重试。`);
+      }
+      return null;
     } finally {
       setPersistingTemplateAction((current) => (
         current?.templateKey === options.templateKey ? null : current
@@ -1914,159 +2701,293 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     });
     if (!record) return;
     setQrVersionHistory((prev) => [record as QrTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('qr', record as QrTemplateVersionRecord);
+    toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
+  };
+
+  const savePrVersion = async (status: QrVersionRecordStatus) => {
+    const baseVersion = latestPrPublishedRecord?.version || 'v1.0.0';
+    const record = await persistTemplateVersion({
+      templateKey: 'pr',
+      status,
+      baseVersion,
+      note: prTemplateVersionNote,
+      savedBy: userEmail || 'Procurement Admin',
+      data: prTemplateData,
+      layout: prTemplateLayout,
+      textOverrides: prTemplateTextOverrides,
+    });
+    if (!record) return;
+    setPrVersionHistory((prev) => [record as PrTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('pr', record as PrTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applyXjVersionRecord = (record: XjTemplateVersionRecord) => {
-    setXjTemplateData(cloneQrState(record.data));
+    setXjTemplateData(
+      normalizeXjBuyerFromAdminOrg(
+        cloneQrState(record.data),
+        adminOrg,
+        adminUserProfile.email,
+        adminUserProfile.name,
+      ),
+    );
     setXjTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('xj', record);
+    syncTemplateVersionNote('xj', record.note);
   };
 
   const saveXjVersion = async (status: QrVersionRecordStatus) => {
     const baseVersion = latestXjPublishedRecord?.version || 'v1.0.0';
+    const normalizedXjTemplateData = normalizeXjBuyerFromAdminOrg(
+      xjTemplateData,
+      adminOrg,
+      adminUserProfile.email,
+      adminUserProfile.name,
+    );
     const record = await persistTemplateVersion({
       templateKey: 'xj',
       status,
       baseVersion,
       note: xjTemplateVersionNote,
       savedBy: userEmail || 'Procurement Admin',
-      data: xjTemplateData,
+      data: normalizedXjTemplateData,
       layout: xjTemplateLayout,
     });
     if (!record) return;
+    setXjTemplateData(normalizedXjTemplateData);
     setXjVersionHistory((prev) => [record as XjTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('xj', record as XjTemplateVersionRecord);
+    toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
+  };
+
+  const applyBjVersionRecord = (record: BjTemplateVersionRecord) => {
+    setBjTemplateData(
+      normalizeBjBuyerFromAdminOrg(
+        cloneQrState(record.data),
+        adminOrg,
+        adminUserProfile.email,
+        adminUserProfile.name,
+      ),
+    );
+    setBjTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('bj', record);
+    syncTemplateVersionNote('bj', record.note);
+  };
+
+  const saveBjVersion = async (status: QrVersionRecordStatus) => {
+    const baseVersion = latestBjPublishedRecord?.version || 'v1.0.0';
+    const normalizedBjTemplateData = normalizeBjBuyerFromAdminOrg(
+      bjTemplateData,
+      adminOrg,
+      adminUserProfile.email,
+      adminUserProfile.name,
+    );
+    const record = await persistTemplateVersion({
+      templateKey: 'bj',
+      status,
+      baseVersion,
+      note: bjTemplateVersionNote,
+      savedBy: userEmail || 'Sales Admin',
+      data: normalizedBjTemplateData,
+      layout: bjTemplateLayout,
+    });
+    if (!record) return;
+    setBjTemplateData(normalizedBjTemplateData);
+    setBjVersionHistory((prev) => [record as BjTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('bj', record as BjTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applyScVersionRecord = (record: ScTemplateVersionRecord) => {
-    setScTemplateData(cloneQrState(record.data));
+    setScTemplateData(
+      normalizeScSellerFromAdminOrg(cloneQrState(record.data), adminOrg, adminUserProfile.email),
+    );
     setScTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('sc', record);
+    syncTemplateVersionNote('sc', record.note);
   };
 
   const saveScVersion = async (status: QrVersionRecordStatus) => {
     const baseVersion = latestScPublishedRecord?.version || 'v1.0.0';
+    const normalizedScTemplateData = normalizeScSellerFromAdminOrg(
+      scTemplateData,
+      adminOrg,
+      adminUserProfile.email,
+    );
     const record = await persistTemplateVersion({
       templateKey: 'sc',
       status,
       baseVersion,
       note: scTemplateVersionNote,
       savedBy: userEmail || 'Contract Admin',
-      data: scTemplateData,
+      data: normalizedScTemplateData,
       layout: scTemplateLayout,
     });
     if (!record) return;
+    setScTemplateData(normalizedScTemplateData);
     setScVersionHistory((prev) => [record as ScTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('sc', record as ScTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applyCgVersionRecord = (record: CgTemplateVersionRecord) => {
-    setCgTemplateData(cloneQrState(record.data));
+    setCgTemplateData(
+      normalizeCgBuyerFromAdminOrg(
+        resolveTemplateWorkspaceRecordData(cloneQrState(BASELINE_CG_TEMPLATE_SEED), cloneQrState(record.data)),
+        adminOrg,
+        adminUserProfile.email,
+      ),
+    );
     setCgTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('cg', record);
+    syncTemplateVersionNote('cg', record.note);
   };
 
   const saveCgVersion = async (status: QrVersionRecordStatus) => {
     const baseVersion = latestCgPublishedRecord?.version || 'v1.0.0';
+    const normalizedCgTemplateData = normalizeCgBuyerFromAdminOrg(
+      cgTemplateData,
+      adminOrg,
+      adminUserProfile.email,
+    );
     const record = await persistTemplateVersion({
       templateKey: 'cg',
       status,
       baseVersion,
       note: cgTemplateVersionNote,
       savedBy: userEmail || 'Procurement Admin',
-      data: cgTemplateData,
+      data: normalizedCgTemplateData,
       layout: cgTemplateLayout,
     });
     if (!record) return;
+    setCgTemplateData(normalizedCgTemplateData);
     setCgVersionHistory((prev) => [record as CgTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('cg', record as CgTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applyPiVersionRecord = (record: PiTemplateVersionRecord) => {
-    setPiTemplateData(cloneQrState(record.data));
+    setPiTemplateData(
+      normalizePiFromAdminOrg(cloneQrState(record.data), adminOrg, adminUserProfile.email),
+    );
     setPiTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('pi', record);
+    syncTemplateVersionNote('pi', record.note);
   };
 
   const savePiVersion = async (status: QrVersionRecordStatus) => {
     const baseVersion = latestPiPublishedRecord?.version || 'v1.0.0';
+    const normalizedPiTemplateData = normalizePiFromAdminOrg(
+      piTemplateData,
+      adminOrg,
+      adminUserProfile.email,
+    );
     const record = await persistTemplateVersion({
       templateKey: 'pi',
       status,
       baseVersion,
       note: piTemplateVersionNote,
       savedBy: userEmail || 'Finance Admin',
-      data: piTemplateData,
+      data: normalizedPiTemplateData,
       layout: piTemplateLayout,
     });
     if (!record) return;
+    setPiTemplateData(normalizedPiTemplateData);
     setPiVersionHistory((prev) => [record as PiTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('pi', record as PiTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applyCiVersionRecord = (record: CiTemplateVersionRecord) => {
-    setCiTemplateData(cloneQrState(record.data));
+    setCiTemplateData(normalizeCiExporterFromAdminOrg(cloneQrState(record.data), adminOrg));
     setCiTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('ci', record);
+    syncTemplateVersionNote('ci', record.note);
   };
 
   const saveCiVersion = async (status: QrVersionRecordStatus) => {
     const baseVersion = latestCiPublishedRecord?.version || 'v1.0.0';
+    const normalizedCiTemplateData = normalizeCiExporterFromAdminOrg(ciTemplateData, adminOrg);
     const record = await persistTemplateVersion({
       templateKey: 'ci',
       status,
       baseVersion,
       note: ciTemplateVersionNote,
       savedBy: userEmail || 'Docs Admin',
-      data: ciTemplateData,
+      data: normalizedCiTemplateData,
       layout: ciTemplateLayout,
     });
     if (!record) return;
+    setCiTemplateData(normalizedCiTemplateData);
     setCiVersionHistory((prev) => [record as CiTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('ci', record as CiTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applyPlVersionRecord = (record: PlTemplateVersionRecord) => {
-    setPlTemplateData(cloneQrState(record.data));
+    setPlTemplateData(normalizePlExporterFromAdminOrg(cloneQrState(record.data), adminOrg));
     setPlTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('pl', record);
+    syncTemplateVersionNote('pl', record.note);
   };
 
   const savePlVersion = async (status: QrVersionRecordStatus) => {
     const baseVersion = latestPlPublishedRecord?.version || 'v1.0.0';
+    const normalizedPlTemplateData = normalizePlExporterFromAdminOrg(plTemplateData, adminOrg);
     const record = await persistTemplateVersion({
       templateKey: 'pl',
       status,
       baseVersion,
       note: plTemplateVersionNote,
       savedBy: userEmail || 'Docs Admin',
-      data: plTemplateData,
+      data: normalizedPlTemplateData,
       layout: plTemplateLayout,
     });
     if (!record) return;
+    setPlTemplateData(normalizedPlTemplateData);
     setPlVersionHistory((prev) => [record as PlTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('pl', record as PlTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applySoaVersionRecord = (record: SoaTemplateVersionRecord) => {
-    setSoaTemplateData(cloneQrState(record.data));
+    setSoaTemplateData(
+      normalizeSoaCompanyFromAdminOrg(cloneQrState(record.data), adminOrg, adminUserProfile.email),
+    );
     setSoaTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('soa', record);
+    syncTemplateVersionNote('soa', record.note);
   };
 
   const saveSoaVersion = async (status: QrVersionRecordStatus) => {
     const baseVersion = latestSoaPublishedRecord?.version || 'v1.0.0';
+    const normalizedSoaTemplateData = normalizeSoaCompanyFromAdminOrg(
+      soaTemplateData,
+      adminOrg,
+      adminUserProfile.email,
+    );
     const record = await persistTemplateVersion({
       templateKey: 'soa',
       status,
       baseVersion,
       note: soaTemplateVersionNote,
       savedBy: userEmail || 'Finance Admin',
-      data: soaTemplateData,
+      data: normalizedSoaTemplateData,
       layout: soaTemplateLayout,
     });
     if (!record) return;
+    setSoaTemplateData(normalizedSoaTemplateData);
     setSoaVersionHistory((prev) => [record as SoaTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('soa', record as SoaTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applyInquiryVersionRecord = (record: InquiryTemplateVersionRecord) => {
-    setInquiryTemplateData(cloneQrState(record.data));
+    setInquiryTemplateData(resolveTemplateWorkspaceRecordData(cloneQrState(BASELINE_ING_TEMPLATE_SEED), cloneQrState(record.data)));
     setInquiryTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('ing', record);
+    syncTemplateVersionNote('ing', record.note);
   };
 
   const saveInquiryVersion = async (status: QrVersionRecordStatus) => {
@@ -2082,28 +3003,258 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     });
     if (!record) return;
     setInquiryVersionHistory((prev) => [record as InquiryTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('ing', record as InquiryTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
 
   const applyQuotationVersionRecord = (record: QuotationTemplateVersionRecord) => {
-    setQuotationTemplateData(cloneQrState(record.data));
+    setQuotationTemplateData(
+      normalizeQuotationCompanyFromAdminOrg(
+        cloneQrState(record.data),
+        adminOrg,
+        adminUserProfile.email,
+      ),
+    );
     setQuotationTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
+    updateLoadedTemplateVersion('qt', record);
+    syncTemplateVersionNote('qt', record.note);
   };
 
   const saveQuotationVersion = async (status: QrVersionRecordStatus) => {
     const baseVersion = latestQuotationPublishedRecord?.version || 'v1.0.0';
+    const normalizedQuotationTemplateData = normalizeQuotationCompanyFromAdminOrg(
+      quotationTemplateData,
+      adminOrg,
+      adminUserProfile.email,
+    );
     const record = await persistTemplateVersion({
       templateKey: 'qt',
       status,
       baseVersion,
       note: quotationTemplateVersionNote,
       savedBy: userEmail || 'Sales Admin',
-      data: quotationTemplateData,
+      data: normalizedQuotationTemplateData,
       layout: quotationTemplateLayout,
     });
     if (!record) return;
+    setQuotationTemplateData(normalizedQuotationTemplateData);
     setQuotationVersionHistory((prev) => [record as QuotationTemplateVersionRecord, ...prev]);
+    updateLoadedTemplateVersion('qt', record as QuotationTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
+  };
+
+  const buildRestoreVersionNote = (record: { version: string; note?: string }) =>
+    `恢复自 ${record.version}${record.note ? ` · ${record.note}` : ''}`;
+
+  const restoreTemplateVersionAsDraft = async (templateKey: 'qr' | 'pr' | 'xj' | 'bj' | 'sc' | 'cg' | 'pi' | 'ci' | 'pl' | 'soa' | 'ing' | 'qt', record: any) => {
+    if (templateKey === 'qr') {
+      applyQrVersionRecord(record as QrTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'qr',
+        status: 'draft',
+        baseVersion: latestQrPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Template Admin',
+        data: cloneQrState(record.data || BASELINE_QR_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeQrPreviewLayout(record.layout)),
+        textOverrides: cloneQrState(record.textOverrides || buildDefaultQuoteRequirementTextOverrides(record.data || BASELINE_QR_TEMPLATE_SEED)),
+      });
+      if (!restored) return;
+      setQrVersionHistory((prev) => [restored as QrTemplateVersionRecord, ...prev]);
+      applyQrVersionRecord(restored as QrTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'pr') {
+      applyPrVersionRecord(record as PrTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'pr',
+        status: 'draft',
+        baseVersion: latestPrPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Procurement Admin',
+        data: cloneQrState(record.data || BASELINE_PR_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeQrPreviewLayout(record.layout)),
+        textOverrides: cloneQrState(record.textOverrides || {
+          ...buildDefaultQuoteRequirementTextOverrides(record.data || BASELINE_PR_TEMPLATE_SEED),
+          ...INITIAL_PR_TEXT_OVERRIDES,
+        }),
+      });
+      if (!restored) return;
+      setPrVersionHistory((prev) => [restored as PrTemplateVersionRecord, ...prev]);
+      applyPrVersionRecord(restored as PrTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'xj') {
+      applyXjVersionRecord(record as XjTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'xj',
+        status: 'draft',
+        baseVersion: latestXjPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Procurement Admin',
+        data: cloneQrState(record.data || BASELINE_XJ_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setXjVersionHistory((prev) => [restored as XjTemplateVersionRecord, ...prev]);
+      applyXjVersionRecord(restored as XjTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'bj') {
+      applyBjVersionRecord(record as BjTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'bj',
+        status: 'draft',
+        baseVersion: latestBjPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Sales Admin',
+        data: cloneQrState(record.data || BASELINE_BJ_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setBjVersionHistory((prev) => [restored as BjTemplateVersionRecord, ...prev]);
+      applyBjVersionRecord(restored as BjTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'sc') {
+      applyScVersionRecord(record as ScTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'sc',
+        status: 'draft',
+        baseVersion: latestScPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Contract Admin',
+        data: cloneQrState(record.data || BASELINE_SC_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setScVersionHistory((prev) => [restored as ScTemplateVersionRecord, ...prev]);
+      applyScVersionRecord(restored as ScTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'cg') {
+      applyCgVersionRecord(record as CgTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'cg',
+        status: 'draft',
+        baseVersion: latestCgPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Procurement Admin',
+        data: cloneQrState(record.data || BASELINE_CG_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setCgVersionHistory((prev) => [restored as CgTemplateVersionRecord, ...prev]);
+      applyCgVersionRecord(restored as CgTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'pi') {
+      applyPiVersionRecord(record as PiTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'pi',
+        status: 'draft',
+        baseVersion: latestPiPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Finance Admin',
+        data: cloneQrState(record.data || BASELINE_PI_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setPiVersionHistory((prev) => [restored as PiTemplateVersionRecord, ...prev]);
+      applyPiVersionRecord(restored as PiTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'ci') {
+      applyCiVersionRecord(record as CiTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'ci',
+        status: 'draft',
+        baseVersion: latestCiPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Docs Admin',
+        data: cloneQrState(record.data || BASELINE_CI_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setCiVersionHistory((prev) => [restored as CiTemplateVersionRecord, ...prev]);
+      applyCiVersionRecord(restored as CiTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'pl') {
+      applyPlVersionRecord(record as PlTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'pl',
+        status: 'draft',
+        baseVersion: latestPlPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Docs Admin',
+        data: cloneQrState(record.data || BASELINE_PL_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setPlVersionHistory((prev) => [restored as PlTemplateVersionRecord, ...prev]);
+      applyPlVersionRecord(restored as PlTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'soa') {
+      applySoaVersionRecord(record as SoaTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'soa',
+        status: 'draft',
+        baseVersion: latestSoaPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Finance Admin',
+        data: cloneQrState(record.data || BASELINE_SOA_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setSoaVersionHistory((prev) => [restored as SoaTemplateVersionRecord, ...prev]);
+      applySoaVersionRecord(restored as SoaTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'ing') {
+      applyInquiryVersionRecord(record as InquiryTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'ing',
+        status: 'draft',
+        baseVersion: latestInquiryPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Admin',
+        data: cloneQrState(record.data || BASELINE_ING_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setInquiryVersionHistory((prev) => [restored as InquiryTemplateVersionRecord, ...prev]);
+      applyInquiryVersionRecord(restored as InquiryTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+      return;
+    }
+    if (templateKey === 'qt') {
+      applyQuotationVersionRecord(record as QuotationTemplateVersionRecord);
+      const restored = await persistTemplateVersion({
+        templateKey: 'qt',
+        status: 'draft',
+        baseVersion: latestQuotationPublishedRecord?.version || record.version || 'v1.0.0',
+        note: buildRestoreVersionNote(record),
+        savedBy: userEmail || 'Sales Admin',
+        data: cloneQrState(record.data || BASELINE_QT_TEMPLATE_SEED),
+        layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
+      });
+      if (!restored) return;
+      setQuotationVersionHistory((prev) => [restored as QuotationTemplateVersionRecord, ...prev]);
+      applyQuotationVersionRecord(restored as QuotationTemplateVersionRecord);
+      toast.success(`已从 ${record.version} 恢复，并生成草稿 ${restored.version}`);
+    }
   };
 
   const handleRestoreLatestQrSaved = () => {
@@ -2116,6 +3267,18 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     if (!latestXjVersionRecord) return;
     applyXjVersionRecord(latestXjVersionRecord);
     toast.success(`已恢复最近版本 ${latestXjVersionRecord.version}`);
+  };
+
+  const handleRestoreLatestPrSaved = () => {
+    if (!latestPrVersionRecord) return;
+    applyPrVersionRecord(latestPrVersionRecord);
+    toast.success(`已恢复最近版本 ${latestPrVersionRecord.version}`);
+  };
+
+  const handleRestoreLatestBjSaved = () => {
+    if (!latestBjVersionRecord) return;
+    applyBjVersionRecord(latestBjVersionRecord);
+    toast.success(`已恢复最近版本 ${latestBjVersionRecord.version}`);
   };
 
   const handleRestoreLatestScSaved = () => {
@@ -2171,8 +3334,16 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       void saveQrVersion('draft');
       return;
     }
+    if (activeTemplate?.id === 'pr') {
+      void savePrVersion('draft');
+      return;
+    }
     if (activeTemplate?.id === 'xj') {
       void saveXjVersion('draft');
+      return;
+    }
+    if (activeTemplate?.id === 'bj') {
+      void saveBjVersion('draft');
       return;
     }
     if (activeTemplate?.id === 'sc') {
@@ -2215,8 +3386,16 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       void saveQrVersion('published');
       return;
     }
+    if (activeTemplate?.id === 'pr') {
+      void savePrVersion('published');
+      return;
+    }
     if (activeTemplate?.id === 'xj') {
       void saveXjVersion('published');
+      return;
+    }
+    if (activeTemplate?.id === 'bj') {
+      void saveBjVersion('published');
       return;
     }
     if (activeTemplate?.id === 'sc') {
@@ -2254,55 +3433,285 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     toast.info(`${activeTemplate?.name || '该模板'} 已进入统一编辑工作台，专属发布逻辑下一步接入。`);
   };
 
-  const handleTemplateRestore = () => {
-    if (activeTemplate?.id === 'qr') {
-      handleRestoreLatestQrSaved();
+  const handleTemplateRestore = async () => {
+    if (activeTemplate?.id === 'qr' && latestQrVersionRecord) {
+      await restoreTemplateVersionAsDraft('qr', latestQrVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'xj') {
-      handleRestoreLatestXjSaved();
+    if (activeTemplate?.id === 'pr' && latestPrVersionRecord) {
+      await restoreTemplateVersionAsDraft('pr', latestPrVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'sc') {
-      handleRestoreLatestScSaved();
+    if (activeTemplate?.id === 'xj' && latestXjVersionRecord) {
+      await restoreTemplateVersionAsDraft('xj', latestXjVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'cg') {
-      handleRestoreLatestCgSaved();
+    if (activeTemplate?.id === 'bj' && latestBjVersionRecord) {
+      await restoreTemplateVersionAsDraft('bj', latestBjVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'pi') {
-      handleRestoreLatestPiSaved();
+    if (activeTemplate?.id === 'sc' && latestScVersionRecord) {
+      await restoreTemplateVersionAsDraft('sc', latestScVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'ci') {
-      handleRestoreLatestCiSaved();
+    if (activeTemplate?.id === 'cg' && latestCgVersionRecord) {
+      await restoreTemplateVersionAsDraft('cg', latestCgVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'pl') {
-      handleRestoreLatestPlSaved();
+    if (activeTemplate?.id === 'pi' && latestPiVersionRecord) {
+      await restoreTemplateVersionAsDraft('pi', latestPiVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'soa') {
-      handleRestoreLatestSoaSaved();
+    if (activeTemplate?.id === 'ci' && latestCiVersionRecord) {
+      await restoreTemplateVersionAsDraft('ci', latestCiVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'ing') {
-      handleRestoreLatestInquirySaved();
+    if (activeTemplate?.id === 'pl' && latestPlVersionRecord) {
+      await restoreTemplateVersionAsDraft('pl', latestPlVersionRecord);
       return;
     }
-    if (activeTemplate?.id === 'qt') {
-      handleRestoreLatestQuotationSaved();
+    if (activeTemplate?.id === 'soa' && latestSoaVersionRecord) {
+      await restoreTemplateVersionAsDraft('soa', latestSoaVersionRecord);
+      return;
+    }
+    if (activeTemplate?.id === 'ing' && latestInquiryVersionRecord) {
+      await restoreTemplateVersionAsDraft('ing', latestInquiryVersionRecord);
+      return;
+    }
+    if (activeTemplate?.id === 'qt' && latestQuotationVersionRecord) {
+      await restoreTemplateVersionAsDraft('qt', latestQuotationVersionRecord);
       return;
     }
     toast.info(`${activeTemplate?.name || '该模板'} 已进入统一编辑工作台，恢复逻辑下一步接入。`);
   };
 
   if (userRole === 'admin' && adminWorkspaceMode === 'template-hub') {
+    const hubPreviewContentProps = activeTemplate
+      ? buildTemplatePreviewContentProps({
+          mode: 'hub',
+          activeTemplate,
+          qrTemplateData,
+          qrTemplateTextOverrides,
+          prTemplateData,
+          prTemplateTextOverrides,
+          xjTemplateData,
+          scTemplateData,
+          cgTemplateData,
+          bjTemplateData,
+          piTemplateData,
+          ciTemplateData,
+          plTemplateData,
+          soaTemplateData,
+          inquiryTemplateData,
+          quotationTemplateData,
+          quotationTemplateLayout,
+        })
+      : null;
 
     if (templateHubView === 'editor' && activeTemplate) {
+      const templateEditorContentProps = buildTemplateEditorContentProps({
+        activeTemplate,
+        activeLoadedVersion,
+        resolvedActiveTemplateMeta,
+        publishStatusMeta,
+        handleTemplateRestore,
+        renderVersionHistoryPanel,
+        latestQrPublishedRecord,
+        latestQrDraftRecord,
+        latestQrVersionRecord,
+        qrTemplateVersionNote,
+        setQrTemplateVersionNote,
+        qrTemplateTextOverrides,
+        updateQrTemplateText,
+        qrTemplateData,
+        updateQrTemplateData,
+        qrTemplateLayout,
+        updateQrTemplateLayout,
+        qrVersionHistory,
+        latestPrPublishedRecord,
+        latestPrDraftRecord,
+        latestPrVersionRecord,
+        prTemplateVersionNote,
+        setPrTemplateVersionNote,
+        prTemplateTextOverrides,
+        updatePrTemplateText,
+        prTemplateData,
+        updatePrTemplateData,
+        prTemplateLayout,
+        updatePrTemplateLayout,
+        prVersionHistory,
+        latestXjPublishedRecord,
+        latestXjDraftRecord,
+        latestXjVersionRecord,
+        xjTemplateVersionNote,
+        setXjTemplateVersionNote,
+        xjTemplateLayout,
+        updateXjTemplateLayout,
+        xjTemplateData,
+        updateXjTemplateData,
+        xjVersionHistory,
+        updateXjProductDescription,
+        updateXjProductSpecification,
+        updateXjProductQuantity,
+        updateXjProductTargetPrice,
+        XJ_TERMS_PRESETS,
+        applyXjTermsPresetById,
+        clearXjTerms,
+        restoreDefaultXjTerms,
+        latestBjPublishedRecord,
+        latestBjDraftRecord,
+        latestBjVersionRecord,
+        bjTemplateVersionNote,
+        setBjTemplateVersionNote,
+        bjTemplateLayout,
+        updateBjTemplateLayout,
+        bjTemplateData,
+        updateBjTemplateData,
+        bjVersionHistory,
+        latestScPublishedRecord,
+        latestScDraftRecord,
+        latestScVersionRecord,
+        scTemplateVersionNote,
+        setScTemplateVersionNote,
+        scTemplateLayout,
+        updateScTemplateLayout,
+        scTemplateData,
+        updateScTemplateData,
+        scVersionHistory,
+        scProductTableColumns: scTemplateData.templateSettings?.productTableColumns || DEFAULT_SALES_CONTRACT_PRODUCT_TABLE_COLUMNS,
+        moveScProductTableColumn,
+        updateScProductTableColumn,
+        latestCgPublishedRecord,
+        latestCgDraftRecord,
+        latestCgVersionRecord,
+        cgTemplateVersionNote,
+        setCgTemplateVersionNote,
+        cgTemplateLayout,
+        updateCgTemplateLayout,
+        cgTemplateData,
+        updateCgTemplateData,
+        cgVersionHistory,
+        cgProductTableColumns: cgTemplateData.templateSettings?.productTableColumns || DEFAULT_PURCHASE_ORDER_PRODUCT_TABLE_COLUMNS,
+        moveCgProductTableColumn,
+        updateCgProductTableColumn,
+        latestPiPublishedRecord,
+        latestPiDraftRecord,
+        latestPiVersionRecord,
+        piTemplateVersionNote,
+        setPiTemplateVersionNote,
+        piTemplateLayout,
+        updatePiTemplateLayout,
+        piTemplateData,
+        updatePiTemplateData,
+        piVersionHistory,
+        piGoodsTableColumns: piTemplateData.templateSettings?.goodsTableColumns || DEFAULT_PROFORMA_INVOICE_GOODS_TABLE_COLUMNS,
+        movePiGoodsTableColumn,
+        updatePiGoodsTableColumn,
+        latestCiPublishedRecord,
+        latestCiDraftRecord,
+        latestCiVersionRecord,
+        ciTemplateVersionNote,
+        setCiTemplateVersionNote,
+        ciTemplateLayout,
+        updateCiTemplateLayout,
+        ciTemplateData,
+        updateCiTemplateData,
+        ciVersionHistory,
+        ciGoodsTableColumns: ciTemplateData.templateSettings?.goodsTableColumns || DEFAULT_COMMERCIAL_INVOICE_GOODS_TABLE_COLUMNS,
+        moveCiGoodsTableColumn,
+        updateCiGoodsTableColumn,
+        latestPlPublishedRecord,
+        latestPlDraftRecord,
+        latestPlVersionRecord,
+        plTemplateVersionNote,
+        setPlTemplateVersionNote,
+        plTemplateLayout,
+        updatePlTemplateLayout,
+        plTemplateData,
+        updatePlTemplateData,
+        plVersionHistory,
+        latestSoaPublishedRecord,
+        latestSoaDraftRecord,
+        latestSoaVersionRecord,
+        soaTemplateVersionNote,
+        setSoaTemplateVersionNote,
+        soaTemplateLayout,
+        updateSoaTemplateLayout,
+        soaTemplateData,
+        updateSoaTemplateData,
+        soaVersionHistory,
+        latestInquiryPublishedRecord,
+        latestInquiryDraftRecord,
+        latestInquiryVersionRecord,
+        inquiryTemplateVersionNote,
+        setInquiryTemplateVersionNote,
+        inquiryTemplateLayout,
+        updateInquiryTemplateLayout,
+        inquiryTemplateData,
+        updateInquiryTemplateData,
+        inquiryVersionHistory,
+        inquiryProductTableColumns: inquiryTemplateData.templateSettings?.productTableColumns || DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS,
+        moveInquiryProductTableColumn,
+        updateInquiryProductTableColumn,
+        CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+        activeInquiryRequirementField,
+        setActiveInquiryRequirementField,
+        latestQuotationPublishedRecord,
+        latestQuotationDraftRecord,
+        latestQuotationVersionRecord,
+        quotationTemplateVersionNote,
+        setQuotationTemplateVersionNote,
+        quotationTemplateLayout,
+        updateQuotationTemplateLayout,
+        quotationTemplateData,
+        updateQuotationTemplateData,
+        quotationVersionHistory,
+        updateQuotationProductName,
+        updateQuotationProductQuantity,
+        updateQuotationProductUnitPrice,
+        quotationProductTableColumns: quotationTemplateData.templateSettings?.productTableColumns || DEFAULT_QUOTATION_PRODUCT_TABLE_COLUMNS,
+        moveQuotationProductTableColumn,
+        updateQuotationProductTableColumn,
+        restoreTemplateVersionAsDraft,
+      });
+      const editorPreviewContentProps = buildTemplatePreviewContentProps({
+        mode: 'editor',
+        activeTemplate,
+        qrTemplateData,
+        qrTemplateTextOverrides,
+        prTemplateData,
+        prTemplateTextOverrides,
+        xjTemplateData,
+        scTemplateData,
+        cgTemplateData,
+        bjTemplateData,
+        piTemplateData,
+        ciTemplateData,
+        plTemplateData,
+        soaTemplateData,
+        inquiryTemplateData,
+        quotationTemplateData,
+        quotationTemplateLayout,
+        resolvedActiveTemplateMeta,
+        publishStatusLabel: resolvedActiveTemplateMeta ? publishStatusMeta[resolvedActiveTemplateMeta.status].label : '未发布',
+      });
+
       return (
         <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          {/* Supabase 离线横幅 */}
+          {isTemplateCenterSupabaseUnreachable() && (
+            <div className="flex items-center gap-2 bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex-shrink-0 text-xs text-amber-800">
+              <span className="text-base">⚠️</span>
+              <span className="flex-1">数据库暂时无法连接（Supabase 可能正在休眠）。当前处于<strong>离线编辑模式</strong>，保存/发布操作将失败，请等待服务恢复后重试。</span>
+              <button
+                type="button"
+                onClick={() => { retryTemplateCenterSupabase(); window.location.reload(); }}
+                className="shrink-0 rounded border border-amber-400 bg-amber-100 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-200"
+              >
+                重试连接
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 flex-shrink-0">
             <button type="button" onClick={() => setTemplateHubView('detail')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
               <ChevronRight className="w-3.5 h-3.5 rotate-180" />返回预览
@@ -2310,7 +3719,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
             <span className="text-gray-300">|</span>
             <span className="text-sm font-semibold text-gray-900">{activeTemplate.name} 编辑工作台</span>
             <Badge className="h-5 px-2 text-[10px] bg-orange-50 text-orange-700 border-orange-200">{resolvedActiveTemplateMeta?.currentVersion}</Badge>
-            {hasActiveTemplateVersionSyncError && (
+            {hasActiveTemplateVersionSyncError && !isTemplateCenterSupabaseUnreachable() && (
               <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-1">
                 当前模板版本历史同步失败，可继续发布并重建版本链
               </span>
@@ -2349,1130 +3758,294 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
                 <p className="text-[10px] text-gray-400 mt-0.5">修改左侧参数，右侧实时预览</p>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
-                {activeTemplate.id === 'qr' ? (
-                  <>
-                <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                  <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                  <p className="mt-1 text-[11px] text-violet-700">发布版：{latestQrPublishedRecord?.version || '未发布'}{latestQrDraftRecord ? `  草稿：${latestQrDraftRecord.version}` : ''}</p>
-                  <div className="mt-2">
-                    <Label className="text-[11px] text-violet-700">版本备注</Label>
-                    <Textarea value={qrTemplateVersionNote} onChange={(e) => setQrTemplateVersionNote(e.target.value)} className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs" />
-                  </div>
-                  <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestQrVersionRecord}>恢复最近保存</Button>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="text-xs font-semibold text-gray-900 mb-3">模板标题</p>
-                  <div className="space-y-2">
-                    <div><Label className="text-[11px] text-gray-500">中文标题</Label><Input value={qrTemplateTextOverrides.documentTitle} onChange={(e) => updateQrTemplateText('documentTitle', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">英文标题</Label><Input value={qrTemplateTextOverrides.documentTitleEn} onChange={(e) => updateQrTemplateText('documentTitleEn', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">业务部说明标题</Label><Input value={qrTemplateTextOverrides.salesInstructionsTitle} onChange={(e) => updateQrTemplateText('salesInstructionsTitle', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="text-xs font-semibold text-gray-900 mb-3">单据信息</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div><Label className="text-[11px] text-gray-500">QR编号</Label><Input value={qrTemplateData.requirementNo} onChange={(e) => updateQrTemplateData('requirementNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">来源询价单</Label><Input value={qrTemplateData.sourceInquiryNo} onChange={(e) => updateQrTemplateData('sourceInquiryNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">要求回复日期</Label><Input value={qrTemplateData.requiredResponseDate} onChange={(e) => updateQrTemplateData('requiredResponseDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">要求交货日期</Label><Input value={qrTemplateData.requiredDeliveryDate} onChange={(e) => updateQrTemplateData('requiredDeliveryDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="text-xs font-semibold text-gray-900 mb-3">客户信息</p>
-                  <div className="space-y-2">
-                    <div><Label className="text-[11px] text-gray-500">客户名称</Label><Input value={qrTemplateData.customer.companyName} onChange={(e) => updateQrTemplateData('customer', { ...qrTemplateData.customer, companyName: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div><Label className="text-[11px] text-gray-500">联系人</Label><Input value={qrTemplateData.customer.contactPerson} onChange={(e) => updateQrTemplateData('customer', { ...qrTemplateData.customer, contactPerson: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                      <div><Label className="text-[11px] text-gray-500">区域</Label><Input value={qrTemplateData.customer.region} onChange={(e) => updateQrTemplateData('customer', { ...qrTemplateData.customer, region: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                    </div>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="text-xs font-semibold text-gray-900 mb-3">业务部说明 / X</p>
-                  <div>
-                    <Label className="text-[11px] text-gray-500">双语内容</Label>
-                    <Textarea
-                      value={qrTemplateData.salesDeptNotes || ''}
-                      onChange={(e) => updateQrTemplateData('salesDeptNotes', e.target.value)}
-                      className="mt-1 min-h-[180px] text-xs leading-6"
-                    />
-                  </div>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="text-xs font-semibold text-gray-900 mb-3">版式参数</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div><Label className="text-[11px] text-gray-500">画布宽度(mm)</Label><Input type="number" value={qrTemplateLayout.canvasWidthMm} onChange={(e) => updateQrTemplateLayout('canvasWidthMm', Number(e.target.value) || 210)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">最小高度(mm)</Label><Input type="number" value={qrTemplateLayout.canvasMinHeightMm} onChange={(e) => updateQrTemplateLayout('canvasMinHeightMm', Number(e.target.value) || 297)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">上边距(mm)</Label><Input type="number" value={qrTemplateLayout.contentPaddingTopMm} onChange={(e) => updateQrTemplateLayout('contentPaddingTopMm', Number(e.target.value) || 10)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">下边距(mm)</Label><Input type="number" value={qrTemplateLayout.contentPaddingBottomMm} onChange={(e) => updateQrTemplateLayout('contentPaddingBottomMm', Number(e.target.value) || 12)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">字体(pt)</Label><Input type="number" value={qrTemplateLayout.fontSizePt} onChange={(e) => updateQrTemplateLayout('fontSizePt', Number(e.target.value) || 10)} className="mt-1 h-7 text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">行高</Label><Input type="number" step="0.1" value={qrTemplateLayout.lineHeight} onChange={(e) => updateQrTemplateLayout('lineHeight', Number(e.target.value) || 1.5)} className="mt-1 h-7 text-xs" /></div>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="text-xs font-semibold text-gray-900 mb-3">底部说明</p>
-                  <div className="space-y-2">
-                    <div><Label className="text-[11px] text-gray-500">底部说明 1</Label><Textarea value={qrTemplateTextOverrides.footerNote1} onChange={(e) => updateQrTemplateText('footerNote1', e.target.value)} className="mt-1 min-h-[52px] text-xs" /></div>
-                    <div><Label className="text-[11px] text-gray-500">底部说明 2</Label><Textarea value={qrTemplateTextOverrides.footerNote2} onChange={(e) => updateQrTemplateText('footerNote2', e.target.value)} className="mt-1 min-h-[52px] text-xs" /></div>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <div className="flex items-center justify-between mb-3"><p className="text-xs font-semibold text-gray-900">版本记录</p><Badge variant="outline" className="text-[10px]">{qrVersionHistory.length} 条</Badge></div>
-                  <div className="space-y-2">
-                    {qrVersionHistory.map((record) => (
-                      <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                              <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                            </div>
-                            <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                            <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                          </div>
-                          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 flex-shrink-0" onClick={() => { applyQrVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                  </>
-                ) : activeTemplate.id === 'xj' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestXjPublishedRecord?.version || '未发布'}{latestXjDraftRecord ? `  草稿：${latestXjDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea
-                          value={xjTemplateVersionNote}
-                          onChange={(e) => setXjTemplateVersionNote(e.target.value)}
-                          className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs"
-                        />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestXjVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{xjVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {xjVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applyXjVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(xjTemplateLayout, updateXjTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">单据信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">XJ 编号</Label><Input value={xjTemplateData.xjNo} onChange={(e) => updateXjTemplateData('xjNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">询价日期</Label><Input value={xjTemplateData.xjDate} onChange={(e) => updateXjTemplateData('xjDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">回复截止</Label><Input value={xjTemplateData.requiredResponseDate} onChange={(e) => updateXjTemplateData('requiredResponseDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">要求交期</Label><Input value={xjTemplateData.requiredDeliveryDate} onChange={(e) => updateXjTemplateData('requiredDeliveryDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">采购方信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">公司名称</Label><Input value={xjTemplateData.buyer.name} onChange={(e) => updateXjTemplateData('buyer', { ...xjTemplateData.buyer, name: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">英文名称</Label><Input value={xjTemplateData.buyer.nameEn} onChange={(e) => updateXjTemplateData('buyer', { ...xjTemplateData.buyer, nameEn: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label className="text-[11px] text-gray-500">联系人</Label><Input value={xjTemplateData.buyer.contactPerson} onChange={(e) => updateXjTemplateData('buyer', { ...xjTemplateData.buyer, contactPerson: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                          <div><Label className="text-[11px] text-gray-500">邮箱</Label><Input value={xjTemplateData.buyer.email} onChange={(e) => updateXjTemplateData('buyer', { ...xjTemplateData.buyer, email: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">供应商信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">供应商名称</Label><Input value={xjTemplateData.supplier.companyName} onChange={(e) => updateXjTemplateData('supplier', { ...xjTemplateData.supplier, companyName: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label className="text-[11px] text-gray-500">联系人</Label><Input value={xjTemplateData.supplier.contactPerson} onChange={(e) => updateXjTemplateData('supplier', { ...xjTemplateData.supplier, contactPerson: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                          <div><Label className="text-[11px] text-gray-500">邮箱</Label><Input value={xjTemplateData.supplier.email} onChange={(e) => updateXjTemplateData('supplier', { ...xjTemplateData.supplier, email: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        </div>
-                        <div><Label className="text-[11px] text-gray-500">供应商地址</Label><Textarea value={xjTemplateData.supplier.address} onChange={(e) => updateXjTemplateData('supplier', { ...xjTemplateData.supplier, address: e.target.value })} className="mt-1 min-h-[56px] text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">产品清单</p>
-                      <div className="space-y-3">
-                        {xjTemplateData.products.map((product, index) => (
-                          <div key={`${product.no}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">产品 {product.no}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">产品名称</Label><Input value={product.description} onChange={(e) => updateXjTemplateData('products', xjTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} className="mt-1 h-7 text-xs" /></div>
-                              <div><Label className="text-[11px] text-gray-500">规格</Label><Textarea value={product.specification} onChange={(e) => updateXjTemplateData('products', xjTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, specification: e.target.value } : item))} className="mt-1 min-h-[52px] text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">数量</Label><Input type="number" value={product.quantity} onChange={(e) => updateXjTemplateData('products', xjTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(e.target.value) || 0 } : item))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">目标价格</Label><Input value={product.targetPrice || ''} onChange={(e) => updateXjTemplateData('products', xjTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, targetPrice: e.target.value } : item))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">询价条款</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">付款方式</Label><Textarea value={xjTemplateData.terms.paymentTerms || ''} onChange={(e) => updateXjTemplateData('terms', { ...xjTemplateData.terms, paymentTerms: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">交货条款</Label><Textarea value={xjTemplateData.terms.deliveryTerms || ''} onChange={(e) => updateXjTemplateData('terms', { ...xjTemplateData.terms, deliveryTerms: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">包装要求</Label><Textarea value={xjTemplateData.terms.packaging || ''} onChange={(e) => updateXjTemplateData('terms', { ...xjTemplateData.terms, packaging: e.target.value })} className="mt-1 min-h-[56px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">其他说明</Label><Textarea value={xjTemplateData.terms.remarks || ''} onChange={(e) => updateXjTemplateData('terms', { ...xjTemplateData.terms, remarks: e.target.value })} className="mt-1 min-h-[64px] text-xs" /></div>
-                      </div>
-                    </div>
-                  </>
-                ) : activeTemplate.id === 'sc' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestScPublishedRecord?.version || '未发布'}{latestScDraftRecord ? `  草稿：${latestScDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea
-                          value={scTemplateVersionNote}
-                          onChange={(e) => setScTemplateVersionNote(e.target.value)}
-                          className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs"
-                        />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestScVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{scVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {scVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applyScVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(scTemplateLayout, updateScTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">合同信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">合同编号</Label><Input value={scTemplateData.contractNo} onChange={(e) => updateScTemplateData('contractNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">合同日期</Label><Input value={scTemplateData.contractDate} onChange={(e) => updateScTemplateData('contractDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">报价单号</Label><Input value={scTemplateData.quotationNo || ''} onChange={(e) => updateScTemplateData('quotationNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">区域</Label><Input value={scTemplateData.region} onChange={(e) => updateScTemplateData('region', (e.target.value || 'NA') as SalesContractData['region'])} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">卖方信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">公司名称</Label><Input value={scTemplateData.seller.nameEn} onChange={(e) => updateScTemplateData('seller', { ...scTemplateData.seller, nameEn: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">地址</Label><Textarea value={scTemplateData.seller.addressEn} onChange={(e) => updateScTemplateData('seller', { ...scTemplateData.seller, addressEn: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label className="text-[11px] text-gray-500">电话</Label><Input value={scTemplateData.seller.tel} onChange={(e) => updateScTemplateData('seller', { ...scTemplateData.seller, tel: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                          <div><Label className="text-[11px] text-gray-500">邮箱</Label><Input value={scTemplateData.seller.email} onChange={(e) => updateScTemplateData('seller', { ...scTemplateData.seller, email: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">买方信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">客户名称</Label><Input value={scTemplateData.buyer.companyName} onChange={(e) => updateScTemplateData('buyer', { ...scTemplateData.buyer, companyName: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">客户地址</Label><Textarea value={scTemplateData.buyer.address} onChange={(e) => updateScTemplateData('buyer', { ...scTemplateData.buyer, address: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label className="text-[11px] text-gray-500">联系人</Label><Input value={scTemplateData.buyer.contactPerson} onChange={(e) => updateScTemplateData('buyer', { ...scTemplateData.buyer, contactPerson: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                          <div><Label className="text-[11px] text-gray-500">邮箱</Label><Input value={scTemplateData.buyer.email} onChange={(e) => updateScTemplateData('buyer', { ...scTemplateData.buyer, email: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">产品清单</p>
-                      <div className="space-y-3">
-                        {scTemplateData.products.map((product, index) => (
-                          <div key={`${product.no}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">产品 {product.no}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">产品描述</Label><Textarea value={product.description} onChange={(e) => updateScTemplateData('products', scTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} className="mt-1 min-h-[52px] text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">数量</Label><Input type="number" value={product.quantity} onChange={(e) => updateScTemplateData('products', scTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(e.target.value) || 0 } : item))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">单价</Label><Input type="number" value={product.unitPrice} onChange={(e) => updateScTemplateData('products', scTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: Number(e.target.value) || 0, amount: (Number(e.target.value) || 0) * item.quantity } : item))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">关键条款</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">贸易条款</Label><Input value={scTemplateData.terms.tradeTerms} onChange={(e) => updateScTemplateData('terms', { ...scTemplateData.terms, tradeTerms: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">付款条款</Label><Textarea value={scTemplateData.terms.paymentTerms} onChange={(e) => updateScTemplateData('terms', { ...scTemplateData.terms, paymentTerms: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">交期</Label><Input value={scTemplateData.terms.deliveryTime} onChange={(e) => updateScTemplateData('terms', { ...scTemplateData.terms, deliveryTime: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">包装</Label><Textarea value={scTemplateData.terms.packing} onChange={(e) => updateScTemplateData('terms', { ...scTemplateData.terms, packing: e.target.value })} className="mt-1 min-h-[56px] text-xs" /></div>
-                      </div>
-                    </div>
-                  </>
-                ) : activeTemplate.id === 'cg' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestCgPublishedRecord?.version || '未发布'}{latestCgDraftRecord ? `  草稿：${latestCgDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea
-                          value={cgTemplateVersionNote}
-                          onChange={(e) => setCgTemplateVersionNote(e.target.value)}
-                          className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs"
-                        />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestCgVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{cgVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {cgVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applyCgVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(cgTemplateLayout, updateCgTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">合同信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">CG 编号</Label><Input value={cgTemplateData.poNo} onChange={(e) => updateCgTemplateData('poNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">合同日期</Label><Input value={cgTemplateData.poDate} onChange={(e) => updateCgTemplateData('poDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div className="col-span-2"><Label className="text-[11px] text-gray-500">要求交期</Label><Input value={cgTemplateData.requiredDeliveryDate} onChange={(e) => updateCgTemplateData('requiredDeliveryDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">采购方信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">公司名称</Label><Input value={cgTemplateData.buyer.name} onChange={(e) => updateCgTemplateData('buyer', { ...cgTemplateData.buyer, name: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">英文名称</Label><Input value={cgTemplateData.buyer.nameEn} onChange={(e) => updateCgTemplateData('buyer', { ...cgTemplateData.buyer, nameEn: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label className="text-[11px] text-gray-500">联系人</Label><Input value={cgTemplateData.buyer.contactPerson} onChange={(e) => updateCgTemplateData('buyer', { ...cgTemplateData.buyer, contactPerson: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                          <div><Label className="text-[11px] text-gray-500">邮箱</Label><Input value={cgTemplateData.buyer.email} onChange={(e) => updateCgTemplateData('buyer', { ...cgTemplateData.buyer, email: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">供应商信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">供应商名称</Label><Input value={cgTemplateData.supplier.companyName} onChange={(e) => updateCgTemplateData('supplier', { ...cgTemplateData.supplier, companyName: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">供应商地址</Label><Textarea value={cgTemplateData.supplier.address} onChange={(e) => updateCgTemplateData('supplier', { ...cgTemplateData.supplier, address: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label className="text-[11px] text-gray-500">联系人</Label><Input value={cgTemplateData.supplier.contactPerson} onChange={(e) => updateCgTemplateData('supplier', { ...cgTemplateData.supplier, contactPerson: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                          <div><Label className="text-[11px] text-gray-500">邮箱</Label><Input value={cgTemplateData.supplier.email} onChange={(e) => updateCgTemplateData('supplier', { ...cgTemplateData.supplier, email: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">产品清单</p>
-                      <div className="space-y-3">
-                        {cgTemplateData.products.map((product, index) => (
-                          <div key={`${product.no}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">产品 {product.no}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">物料编码</Label><Input value={product.itemCode || ''} onChange={(e) => updateCgTemplateData('products', cgTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, itemCode: e.target.value } : item))} className="mt-1 h-7 text-xs" /></div>
-                              <div><Label className="text-[11px] text-gray-500">产品描述</Label><Textarea value={product.description} onChange={(e) => updateCgTemplateData('products', cgTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} className="mt-1 min-h-[52px] text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">数量</Label><Input type="number" value={product.quantity} onChange={(e) => updateCgTemplateData('products', cgTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(e.target.value) || 0, amount: (Number(e.target.value) || 0) * item.unitPrice } : item))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">单价</Label><Input type="number" value={product.unitPrice} onChange={(e) => updateCgTemplateData('products', cgTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: Number(e.target.value) || 0, amount: (Number(e.target.value) || 0) * item.quantity } : item))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">关键条款</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">付款条款</Label><Textarea value={cgTemplateData.terms.paymentTerms} onChange={(e) => updateCgTemplateData('terms', { ...cgTemplateData.terms, paymentTerms: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">交货条款</Label><Input value={cgTemplateData.terms.deliveryTerms} onChange={(e) => updateCgTemplateData('terms', { ...cgTemplateData.terms, deliveryTerms: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">交货地址</Label><Textarea value={cgTemplateData.terms.deliveryAddress} onChange={(e) => updateCgTemplateData('terms', { ...cgTemplateData.terms, deliveryAddress: e.target.value })} className="mt-1 min-h-[56px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">包装要求</Label><Textarea value={cgTemplateData.terms.packaging || ''} onChange={(e) => updateCgTemplateData('terms', { ...cgTemplateData.terms, packaging: e.target.value })} className="mt-1 min-h-[56px] text-xs" /></div>
-                      </div>
-                    </div>
-                  </>
-                ) : activeTemplate.id === 'pi' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestPiPublishedRecord?.version || '未发布'}{latestPiDraftRecord ? `  草稿：${latestPiDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea
-                          value={piTemplateVersionNote}
-                          onChange={(e) => setPiTemplateVersionNote(e.target.value)}
-                          className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs"
-                        />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestPiVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{piVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {piVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applyPiVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(piTemplateLayout, updatePiTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">发票信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">发票编号</Label><Input value={piTemplateData.invoiceNo} onChange={(e) => updatePiTemplateData('invoiceNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">日期</Label><Input value={piTemplateData.invoiceDate} onChange={(e) => updatePiTemplateData('invoiceDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">Cost No.</Label><Input value={piTemplateData.costNo || ''} onChange={(e) => updatePiTemplateData('costNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">S/C No.</Label><Input value={piTemplateData.scNo || ''} onChange={(e) => updatePiTemplateData('scNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">卖方信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">英文公司名</Label><Input value={piTemplateData.seller.nameEn} onChange={(e) => updatePiTemplateData('seller', { ...piTemplateData.seller, nameEn: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label className="text-[11px] text-gray-500">手机</Label><Input value={piTemplateData.seller.cell || ''} onChange={(e) => updatePiTemplateData('seller', { ...piTemplateData.seller, cell: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                          <div><Label className="text-[11px] text-gray-500">邮箱</Label><Input value={piTemplateData.seller.email || ''} onChange={(e) => updatePiTemplateData('seller', { ...piTemplateData.seller, email: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">买方信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">客户名称</Label><Input value={piTemplateData.buyer.companyName} onChange={(e) => updatePiTemplateData('buyer', { ...piTemplateData.buyer, companyName: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">P.O. Box</Label><Input value={piTemplateData.buyer.poBox || ''} onChange={(e) => updatePiTemplateData('buyer', { ...piTemplateData.buyer, poBox: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">联系人</Label><Input value={piTemplateData.buyer.contactPerson || ''} onChange={(e) => updatePiTemplateData('buyer', { ...piTemplateData.buyer, contactPerson: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">产品清单</p>
-                      <div className="space-y-3">
-                        {piTemplateData.products.map((product, index) => (
-                          <div key={`${product.seqNo}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">产品 {product.seqNo}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">描述</Label><Textarea value={product.description} onChange={(e) => updatePiTemplateData('products', piTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, description: e.target.value } : item))} className="mt-1 min-h-[52px] text-xs" /></div>
-                              <div><Label className="text-[11px] text-gray-500">规格</Label><Input value={product.specification || ''} onChange={(e) => updatePiTemplateData('products', piTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, specification: e.target.value } : item))} className="mt-1 h-7 text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">数量</Label><Input type="number" value={product.quantity} onChange={(e) => updatePiTemplateData('products', piTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(e.target.value) || 0, extendedValue: (Number(e.target.value) || 0) * item.unitPrice } : item))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">单价</Label><Input type="number" step="0.001" value={product.unitPrice} onChange={(e) => updatePiTemplateData('products', piTemplateData.products.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: Number(e.target.value) || 0, extendedValue: (Number(e.target.value) || 0) * item.quantity } : item))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="mb-3 text-xs font-semibold text-gray-900">付款与备注</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">价格条款</Label><Input value={piTemplateData.priceTerms || ''} onChange={(e) => updatePiTemplateData('priceTerms', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">付款条款</Label><Textarea value={piTemplateData.remarks.paymentTerms || ''} onChange={(e) => updatePiTemplateData('remarks', { ...piTemplateData.remarks, paymentTerms: e.target.value })} className="mt-1 min-h-[56px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">装运港</Label><Input value={piTemplateData.remarks.portOfLoading || ''} onChange={(e) => updatePiTemplateData('remarks', { ...piTemplateData.remarks, portOfLoading: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                  </>
-                ) : activeTemplate.id === 'ci' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestCiPublishedRecord?.version || '未发布'}{latestCiDraftRecord ? `  草稿：${latestCiDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea value={ciTemplateVersionNote} onChange={(e) => setCiTemplateVersionNote(e.target.value)} className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs" />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestCiVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{ciVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {ciVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applyCiVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(ciTemplateLayout, updateCiTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">发票信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">CI 编号</Label><Input value={ciTemplateData.invoiceNo} onChange={(e) => updateCiTemplateData('invoiceNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">日期</Label><Input value={ciTemplateData.invoiceDate} onChange={(e) => updateCiTemplateData('invoiceDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div className="col-span-2"><Label className="text-[11px] text-gray-500">合同号</Label><Input value={ciTemplateData.contractNo || ''} onChange={(e) => updateCiTemplateData('contractNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">出口方</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">英文名称</Label><Input value={ciTemplateData.exporter.nameEn} onChange={(e) => updateCiTemplateData('exporter', { ...ciTemplateData.exporter, nameEn: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">英文地址</Label><Textarea value={ciTemplateData.exporter.addressEn} onChange={(e) => updateCiTemplateData('exporter', { ...ciTemplateData.exporter, addressEn: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">电话</Label><Input value={ciTemplateData.exporter.tel} onChange={(e) => updateCiTemplateData('exporter', { ...ciTemplateData.exporter, tel: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">进口方</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">客户名称</Label><Input value={ciTemplateData.importer.name} onChange={(e) => updateCiTemplateData('importer', { ...ciTemplateData.importer, name: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">地址</Label><Textarea value={ciTemplateData.importer.address} onChange={(e) => updateCiTemplateData('importer', { ...ciTemplateData.importer, address: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">货物清单</p>
-                      <div className="space-y-3">
-                        {ciTemplateData.goods.map((item, index) => (
-                          <div key={`${item.no}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">货物 {item.no}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">描述</Label><Textarea value={item.description} onChange={(e) => updateCiTemplateData('goods', ciTemplateData.goods.map((row, rowIndex) => rowIndex === index ? { ...row, description: e.target.value } : row))} className="mt-1 min-h-[52px] text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">数量</Label><Input type="number" value={item.quantity} onChange={(e) => updateCiTemplateData('goods', ciTemplateData.goods.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: Number(e.target.value) || 0, amount: (Number(e.target.value) || 0) * row.unitPrice } : row))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">单价</Label><Input type="number" value={item.unitPrice} onChange={(e) => updateCiTemplateData('goods', ciTemplateData.goods.map((row, rowIndex) => rowIndex === index ? { ...row, unitPrice: Number(e.target.value) || 0, amount: (Number(e.target.value) || 0) * row.quantity } : row))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">运输与包装</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">贸易条款</Label><Input value={ciTemplateData.shipping.tradeTerms} onChange={(e) => updateCiTemplateData('shipping', { ...ciTemplateData.shipping, tradeTerms: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">装运港</Label><Input value={ciTemplateData.shipping.portOfLoading} onChange={(e) => updateCiTemplateData('shipping', { ...ciTemplateData.shipping, portOfLoading: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">总箱数</Label><Input type="number" value={ciTemplateData.packing.totalCartons} onChange={(e) => updateCiTemplateData('packing', { ...ciTemplateData.packing, totalCartons: Number(e.target.value) || 0 })} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                  </>
-                ) : activeTemplate.id === 'pl' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestPlPublishedRecord?.version || '未发布'}{latestPlDraftRecord ? `  草稿：${latestPlDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea value={plTemplateVersionNote} onChange={(e) => setPlTemplateVersionNote(e.target.value)} className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs" />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestPlVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{plVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {plVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applyPlVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(plTemplateLayout, updatePlTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">单据信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">PL 编号</Label><Input value={plTemplateData.plNo} onChange={(e) => updatePlTemplateData('plNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">CI 编号</Label><Input value={plTemplateData.invoiceNo} onChange={(e) => updatePlTemplateData('invoiceNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div className="col-span-2"><Label className="text-[11px] text-gray-500">日期</Label><Input value={plTemplateData.date} onChange={(e) => updatePlTemplateData('date', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">出口方 / 进口方</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">出口方名称</Label><Input value={plTemplateData.exporter.name} onChange={(e) => updatePlTemplateData('exporter', { ...plTemplateData.exporter, name: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">进口方名称</Label><Input value={plTemplateData.importer.name} onChange={(e) => updatePlTemplateData('importer', { ...plTemplateData.importer, name: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">唛头</Label><Textarea value={plTemplateData.shippingMarks} onChange={(e) => updatePlTemplateData('shippingMarks', e.target.value)} className="mt-1 min-h-[56px] text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">装箱明细</p>
-                      <div className="space-y-3">
-                        {plTemplateData.packages.map((pkg, index) => (
-                          <div key={`${pkg.cartonNo}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">包装 {index + 1}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">描述</Label><Textarea value={pkg.description} onChange={(e) => updatePlTemplateData('packages', plTemplateData.packages.map((row, rowIndex) => rowIndex === index ? { ...row, description: e.target.value } : row))} className="mt-1 min-h-[52px] text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">箱数</Label><Input type="number" value={pkg.totalCartons} onChange={(e) => updatePlTemplateData('packages', plTemplateData.packages.map((row, rowIndex) => rowIndex === index ? { ...row, totalCartons: Number(e.target.value) || 0 } : row))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">总数量</Label><Input type="number" value={pkg.totalQty} onChange={(e) => updatePlTemplateData('packages', plTemplateData.packages.map((row, rowIndex) => rowIndex === index ? { ...row, totalQty: Number(e.target.value) || 0 } : row))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">运输信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">装运港</Label><Input value={plTemplateData.shipping.portOfLoading} onChange={(e) => updatePlTemplateData('shipping', { ...plTemplateData.shipping, portOfLoading: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">卸货港</Label><Input value={plTemplateData.shipping.portOfDischarge} onChange={(e) => updatePlTemplateData('shipping', { ...plTemplateData.shipping, portOfDischarge: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">提单号</Label><Input value={plTemplateData.shipping.blNo || ''} onChange={(e) => updatePlTemplateData('shipping', { ...plTemplateData.shipping, blNo: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                  </>
-                ) : activeTemplate.id === 'soa' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestSoaPublishedRecord?.version || '未发布'}{latestSoaDraftRecord ? `  草稿：${latestSoaDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea value={soaTemplateVersionNote} onChange={(e) => setSoaTemplateVersionNote(e.target.value)} className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs" />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestSoaVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{soaVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {soaVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applySoaVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(soaTemplateLayout, updateSoaTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">对账信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">SOA 编号</Label><Input value={soaTemplateData.statementNo} onChange={(e) => updateSoaTemplateData('statementNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">对账日期</Label><Input value={soaTemplateData.statementDate} onChange={(e) => updateSoaTemplateData('statementDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">期间开始</Label><Input value={soaTemplateData.periodStart} onChange={(e) => updateSoaTemplateData('periodStart', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">期间结束</Label><Input value={soaTemplateData.periodEnd} onChange={(e) => updateSoaTemplateData('periodEnd', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">客户与余额</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">客户名称</Label><Input value={soaTemplateData.customer.companyName} onChange={(e) => updateSoaTemplateData('customer', { ...soaTemplateData.customer, companyName: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">期末余额</Label><Input type="number" value={soaTemplateData.closingBalance.amount} onChange={(e) => updateSoaTemplateData('closingBalance', { ...soaTemplateData.closingBalance, amount: Number(e.target.value) || 0 })} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">交易明细</p>
-                      <div className="space-y-3">
-                        {soaTemplateData.transactions.map((item, index) => (
-                          <div key={`${item.referenceNo}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">交易 {index + 1}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">摘要</Label><Input value={item.description} onChange={(e) => updateSoaTemplateData('transactions', soaTemplateData.transactions.map((row, rowIndex) => rowIndex === index ? { ...row, description: e.target.value } : row))} className="mt-1 h-7 text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">借方</Label><Input type="number" value={item.debit || 0} onChange={(e) => updateSoaTemplateData('transactions', soaTemplateData.transactions.map((row, rowIndex) => rowIndex === index ? { ...row, debit: Number(e.target.value) || 0 } : row))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">贷方</Label><Input type="number" value={item.credit || 0} onChange={(e) => updateSoaTemplateData('transactions', soaTemplateData.transactions.map((row, rowIndex) => rowIndex === index ? { ...row, credit: Number(e.target.value) || 0 } : row))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                ) : activeTemplate.id === 'ing' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestInquiryPublishedRecord?.version || '未发布'}{latestInquiryDraftRecord ? `  草稿：${latestInquiryDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea value={inquiryTemplateVersionNote} onChange={(e) => setInquiryTemplateVersionNote(e.target.value)} className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs" />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestInquiryVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{inquiryVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {inquiryVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applyInquiryVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(inquiryTemplateLayout, updateInquiryTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">询价信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">ING 编号</Label><Input value={inquiryTemplateData.inquiryNo} onChange={(e) => updateInquiryTemplateData('inquiryNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">日期</Label><Input value={inquiryTemplateData.inquiryDate} onChange={(e) => updateInquiryTemplateData('inquiryDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">客户信息</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">客户名称</Label><Input value={inquiryTemplateData.customer.companyName} onChange={(e) => updateInquiryTemplateData('customer', { ...inquiryTemplateData.customer, companyName: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label className="text-[11px] text-gray-500">联系人</Label><Input value={inquiryTemplateData.customer.contactPerson} onChange={(e) => updateInquiryTemplateData('customer', { ...inquiryTemplateData.customer, contactPerson: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                          <div><Label className="text-[11px] text-gray-500">邮箱</Label><Input value={inquiryTemplateData.customer.email} onChange={(e) => updateInquiryTemplateData('customer', { ...inquiryTemplateData.customer, email: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">产品需求</p>
-                      <div className="space-y-3">
-                        {inquiryTemplateData.products.map((product, index) => (
-                          <div key={`${product.no}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">产品 {product.no}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">产品名称</Label><Input value={product.productName} onChange={(e) => updateInquiryTemplateData('products', inquiryTemplateData.products.map((row, rowIndex) => rowIndex === index ? { ...row, productName: e.target.value } : row))} className="mt-1 h-7 text-xs" /></div>
-                              <div><Label className="text-[11px] text-gray-500">规格</Label><Textarea value={product.specification || ''} onChange={(e) => updateInquiryTemplateData('products', inquiryTemplateData.products.map((row, rowIndex) => rowIndex === index ? { ...row, specification: e.target.value } : row))} className="mt-1 min-h-[52px] text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">数量</Label><Input type="number" value={product.quantity} onChange={(e) => updateInquiryTemplateData('products', inquiryTemplateData.products.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: Number(e.target.value) || 0 } : row))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">目标价</Label><Input type="number" value={product.targetPrice || 0} onChange={(e) => updateInquiryTemplateData('products', inquiryTemplateData.products.map((row, rowIndex) => rowIndex === index ? { ...row, targetPrice: Number(e.target.value) || 0 } : row))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3">
-                        <p className="text-xs font-semibold text-gray-900">询价条款 / TRADING REQUIREMENTS</p>
-                        <p className="mt-1 text-[11px] leading-5 text-gray-500">
-                          这里定义模板中心 ING 预览中的条款绑定。模板中心只承接结构和字段路径，客户实际条款内容来自 `Create New Inquiry` 弹窗。
-                        </p>
-                      </div>
-                      <div className="overflow-hidden rounded-md border border-gray-200">
-                        {CUSTOMER_INQUIRY_REQUIREMENT_FIELDS.map((field) => {
-                          const value = field.key === 'certifications'
-                            ? (inquiryTemplateData.requirements?.certifications || []).join(', ')
-                            : inquiryTemplateData.requirements?.[field.key] || '';
-
-                          return (
-                            <button
-                              key={field.key}
-                              type="button"
-                              onMouseEnter={() => setActiveInquiryRequirementField(field.key)}
-                              onMouseLeave={() => setActiveInquiryRequirementField((current) => (current === field.key ? null : current))}
-                              onFocus={() => setActiveInquiryRequirementField(field.key)}
-                              onBlur={() => setActiveInquiryRequirementField((current) => (current === field.key ? null : current))}
-                              className={`grid w-full grid-cols-[160px_180px_1fr] border-t border-gray-200 text-left first:border-t-0 ${
-                                activeInquiryRequirementField === field.key ? 'bg-amber-50' : 'bg-white hover:bg-gray-50'
-                              }`}
-                            >
-                              <div className="border-r border-gray-200 bg-gray-50 px-3 py-3">
-                                <div className="text-[11px] font-semibold text-gray-900">{field.previewLabel}</div>
-                                <div className="mt-1 text-[10px] leading-4 text-gray-500">
-                                  客户侧字段名: {field.sourceLabel}
-                                </div>
-                              </div>
-                              <div className="border-r border-gray-200 px-3 py-3">
-                                <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
-                                  Binding Path
-                                </div>
-                                <div className="mt-1 font-mono text-[11px] text-gray-700">
-                                  requirements.{field.key}
-                                </div>
-                              </div>
-                              <div className="px-3 py-3">
-                                <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">
-                                  当前样例值
-                                </div>
-                                <div className="mt-1 text-[11px] leading-5 text-gray-700 whitespace-pre-wrap">
-                                  {value || '未提供'}
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </>
-                ) : activeTemplate.id === 'qt' ? (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布版：{latestQuotationPublishedRecord?.version || '未发布'}{latestQuotationDraftRecord ? `  草稿：${latestQuotationDraftRecord.version}` : ''}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea value={quotationTemplateVersionNote} onChange={(e) => setQuotationTemplateVersionNote(e.target.value)} className="mt-1 min-h-[56px] border-violet-200 bg-white text-xs" />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore} disabled={!latestQuotationVersionRecord}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <div className="mb-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-gray-900">版本记录</p>
-                        <Badge variant="outline" className="text-[10px]">{quotationVersionHistory.length} 条</Badge>
-                      </div>
-                      <div className="space-y-2">
-                        {quotationVersionHistory.map((record) => (
-                          <div key={record.id} className="rounded border border-gray-200 bg-gray-50 p-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-gray-900">{record.version}</span>
-                                  <Badge className={`h-4 px-1 text-[10px] border ${record.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{record.status === 'published' ? '已发布' : '草稿'}</Badge>
-                                </div>
-                                <p className="mt-0.5 text-[10px] text-gray-400">{record.savedAt}</p>
-                                <p className="mt-0.5 text-[11px] text-gray-600">{record.note}</p>
-                              </div>
-                              <Button size="sm" variant="outline" className="h-6 flex-shrink-0 px-2 text-[10px]" onClick={() => { applyQuotationVersionRecord(record); toast.success(`已加载版本 ${record.version}`); }}>恢复</Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {renderWorkspaceLayoutPanel(quotationTemplateLayout, updateQuotationTemplateLayout)}
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">报价信息</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-[11px] text-gray-500">QT 编号</Label><Input value={quotationTemplateData.quotationNo} onChange={(e) => updateQuotationTemplateData('quotationNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">报价日期</Label><Input value={quotationTemplateData.quotationDate} onChange={(e) => updateQuotationTemplateData('quotationDate', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">有效期</Label><Input value={quotationTemplateData.validUntil} onChange={(e) => updateQuotationTemplateData('validUntil', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">来源询价单</Label><Input value={quotationTemplateData.inquiryNo || ''} onChange={(e) => updateQuotationTemplateData('inquiryNo', e.target.value)} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">客户与销售员</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">客户名称</Label><Input value={quotationTemplateData.customer.companyName} onChange={(e) => updateQuotationTemplateData('customer', { ...quotationTemplateData.customer, companyName: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">销售员</Label><Input value={quotationTemplateData.salesPerson.name} onChange={(e) => updateQuotationTemplateData('salesPerson', { ...quotationTemplateData.salesPerson, name: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">报价产品</p>
-                      <div className="space-y-3">
-                        {quotationTemplateData.products.map((product, index) => (
-                          <div key={`${product.no}-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2.5">
-                            <div className="mb-2 text-[11px] font-semibold text-gray-700">产品 {product.no}</div>
-                            <div className="space-y-2">
-                              <div><Label className="text-[11px] text-gray-500">产品名称</Label><Input value={product.productName} onChange={(e) => updateQuotationTemplateData('products', quotationTemplateData.products.map((row, rowIndex) => rowIndex === index ? { ...row, productName: e.target.value } : row))} className="mt-1 h-7 text-xs" /></div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div><Label className="text-[11px] text-gray-500">数量</Label><Input type="number" value={product.quantity} onChange={(e) => updateQuotationTemplateData('products', quotationTemplateData.products.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: Number(e.target.value) || 0, amount: (Number(e.target.value) || 0) * row.unitPrice } : row))} className="mt-1 h-7 text-xs" /></div>
-                                <div><Label className="text-[11px] text-gray-500">单价</Label><Input type="number" value={product.unitPrice} onChange={(e) => updateQuotationTemplateData('products', quotationTemplateData.products.map((row, rowIndex) => rowIndex === index ? { ...row, unitPrice: Number(e.target.value) || 0, amount: (Number(e.target.value) || 0) * row.quantity } : row))} className="mt-1 h-7 text-xs" /></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">贸易条款</p>
-                      <div className="space-y-2">
-                        <div><Label className="text-[11px] text-gray-500">Incoterms</Label><Input value={quotationTemplateData.tradeTerms.incoterms} onChange={(e) => updateQuotationTemplateData('tradeTerms', { ...quotationTemplateData.tradeTerms, incoterms: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">付款条款</Label><Textarea value={quotationTemplateData.tradeTerms.paymentTerms} onChange={(e) => updateQuotationTemplateData('tradeTerms', { ...quotationTemplateData.tradeTerms, paymentTerms: e.target.value })} className="mt-1 min-h-[52px] text-xs" /></div>
-                        <div><Label className="text-[11px] text-gray-500">交期</Label><Input value={quotationTemplateData.tradeTerms.deliveryTime} onChange={(e) => updateQuotationTemplateData('tradeTerms', { ...quotationTemplateData.tradeTerms, deliveryTime: e.target.value })} className="mt-1 h-7 text-xs" /></div>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
-                      <p className="text-xs font-semibold text-violet-900">版本操作</p>
-                      <p className="mt-1 text-[11px] text-violet-700">当前版本：{resolvedActiveTemplateMeta?.currentVersion || 'v1.0.0'}</p>
-                      <p className="mt-1 text-[11px] text-violet-700">发布状态：{resolvedActiveTemplateMeta ? publishStatusMeta[resolvedActiveTemplateMeta.status].label : '未发布'}</p>
-                      <div className="mt-2">
-                        <Label className="text-[11px] text-violet-700">版本备注</Label>
-                        <Textarea
-                          value={`${activeTemplate.name} 模板统一工作台已接入，等待专属字段编辑器。`}
-                          readOnly
-                          className="mt-1 min-h-[72px] border-violet-200 bg-white text-xs"
-                        />
-                      </div>
-                      <Button size="sm" variant="outline" className="mt-2 h-7 text-xs w-full" onClick={handleTemplateRestore}>恢复最近保存</Button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">模板基础信息</p>
-                      <div className="space-y-2 text-[11px] text-gray-600">
-                        <div className="rounded bg-gray-50 px-3 py-2">
-                          <span className="text-gray-400">模板名称：</span>{activeTemplate.name}
-                        </div>
-                        <div className="rounded bg-gray-50 px-3 py-2">
-                          <span className="text-gray-400">英文名称：</span>{activeTemplate.nameEn}
-                        </div>
-                        <div className="rounded bg-gray-50 px-3 py-2">
-                          <span className="text-gray-400">模板分类：</span>{activeTemplate.categoryName}
-                        </div>
-                        <div className="rounded bg-gray-50 px-3 py-2">
-                          <span className="text-gray-400">组件来源：</span>{activeTemplate.component}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">业务说明</p>
-                      <Textarea value={activeTemplate.description} readOnly className="min-h-[96px] text-xs bg-gray-50" />
-                    </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs font-semibold text-gray-900 mb-3">调用节点</p>
-                      <div className="space-y-2">
-                        {activeTemplate.usedInModules.length > 0 ? activeTemplate.usedInModules.map((mod, idx) => {
-                          const label = typeof mod === 'string' ? mod : (mod as { description?: string }).description || (mod as { module?: string }).module || `节点 ${idx + 1}`;
-                          const key = typeof mod === 'string' ? mod : `${(mod as { module?: string }).module}-${(mod as { subModule?: string }).subModule}-${idx}`;
-                          return (
-                            <div key={key} className="rounded bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
-                              {label}
-                            </div>
-                          );
-                        }) : (
-                          <div className="rounded bg-gray-50 px-3 py-2 text-[11px] text-gray-400">暂无调用节点</div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                      <p className="text-xs font-semibold text-amber-900">下一步接入</p>
-                      <p className="mt-1 text-[11px] leading-5 text-amber-800">
-                        当前已统一接入左右双栏、顶部固定、独立滚动的工作台结构。
-                        下一步会逐个补齐 {activeTemplate.name} 的专属字段编辑器和真实模板预览组件。
-                      </p>
-                    </div>
-                  </>
-                )}
+                <TemplateEditorContent {...templateEditorContentProps} />
               </div>
             </div>
-            <TemplatePreviewShell
-              title="A4 模板预览"
-              subtitle="210mm × 297mm"
-              zoom={previewScale}
-              minZoom={30}
-              maxZoom={150}
-              onZoomIn={() => setPreviewScale(Math.min(previewScale + 10, 150))}
-              onZoomOut={() => setPreviewScale(Math.max(previewScale - 10, 30))}
-              shellClassName="rounded-none"
-            >
-              {activeTemplate.id === 'qr' ? (
-                <QuoteRequirementDocument data={qrTemplateData} layoutConfig={qrTemplateLayout} textOverrides={qrTemplateTextOverrides} />
-              ) : activeTemplate.id === 'xj' ? (
-                <XJDocument data={xjTemplateData} layoutConfig={xjTemplateLayout} />
-              ) : activeTemplate.id === 'sc' ? (
-                <SalesContractDocument data={scTemplateData} layoutConfig={scTemplateLayout} />
-              ) : activeTemplate.id === 'cg' ? (
-                <PurchaseOrderDocumentA4Pages data={cgTemplateData} />
-              ) : activeTemplate.id === 'pi' ? (
-                <ProformaInvoiceDocument data={piTemplateData} layoutConfig={piTemplateLayout} />
-              ) : activeTemplate.id === 'ci' ? (
-                <CommercialInvoiceDocument data={ciTemplateData} layoutConfig={ciTemplateLayout} />
-              ) : activeTemplate.id === 'pl' ? (
-                <PackingListDocument data={plTemplateData} layoutConfig={plTemplateLayout} />
-              ) : activeTemplate.id === 'soa' ? (
-                <StatementOfAccountDocument data={soaTemplateData} layoutConfig={soaTemplateLayout} />
-              ) : activeTemplate.id === 'ing' ? (
-                <CustomerInquiryDocument
-                  data={inquiryTemplateData}
-                  layoutConfig={inquiryTemplateLayout}
-                />
-              ) : activeTemplate.id === 'qt' ? (
-                <QuotationDocumentA4Pages data={quotationTemplateData} />
-              ) : (
-                <div className="rounded bg-white shadow-lg" style={{ width: '210mm', minHeight: '297mm' }}>
-                  <div className="flex min-h-[297mm] flex-col p-10 text-gray-800">
-                    <div className="flex items-start justify-between border-b-2 border-gray-900 pb-4">
-                      <div>
-                        <div className="text-3xl">{activeTemplate.icon}</div>
-                        <p className="mt-3 text-2xl font-bold">{activeTemplate.name}</p>
-                        <p className="mt-1 text-sm text-gray-500">{activeTemplate.nameEn}</p>
-                      </div>
-                      <div className="rounded border border-gray-300 px-3 py-2 text-right text-xs">
-                        <p>模板编号：{activeTemplate.id.toUpperCase()}</p>
-                        <p className="mt-1">当前版本：{resolvedActiveTemplateMeta?.currentVersion || 'v1.0.0'}</p>
-                        <p className="mt-1">状态：{resolvedActiveTemplateMeta ? publishStatusMeta[resolvedActiveTemplateMeta.status].label : '未发布'}</p>
-                      </div>
-                    </div>
-                    <div className="mt-8 space-y-5">
-                      <div>
-                        <p className="text-sm font-semibold">模板说明</p>
-                        <p className="mt-2 text-sm leading-6 text-gray-600">{activeTemplate.description}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold">调用节点</p>
-                        <div className="mt-3 space-y-2">
-                          {activeTemplate.usedInModules.length > 0 ? activeTemplate.usedInModules.map((mod, idx) => {
-                            const label = typeof mod === 'string' ? mod : (mod as { description?: string }).description || (mod as { module?: string }).module || `节点 ${idx + 1}`;
-                            const key = typeof mod === 'string' ? mod : `${(mod as { module?: string }).module}-${(mod as { subModule?: string }).subModule}-${idx}`;
-                            return (
-                              <div key={key} className="rounded border border-gray-200 px-3 py-2 text-sm text-gray-600">
-                                {idx + 1}. {label}
-                              </div>
-                            );
-                          }) : (
-                            <div className="rounded border border-dashed border-gray-200 px-3 py-3 text-sm text-gray-400">暂无调用节点</div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="rounded bg-gray-50 px-4 py-4 text-sm leading-6 text-gray-600">
-                        该模板已接入统一工作台外壳，可在这里保持与 QR 一致的左右双栏编辑体验。
-                        下一步将继续接入专属表单字段、组件渲染和版本持久化。
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </TemplatePreviewShell>
+            <div className="min-h-0 flex-1 overflow-hidden bg-slate-100 p-6">
+              <div
+                className="h-full min-h-0 overflow-hidden rounded-[24px] p-8 shadow-inner"
+                style={{ backgroundColor: '#525659' }}
+              >
+                <TemplateCenterPreviewViewport
+                  className="rounded-none border-0 bg-[#525659]"
+                  resetKey={`${activeTemplate.id}-${templateHubView}-editor`}
+                  zoom={previewScale}
+                  onZoomIn={() => setPreviewScale(Math.min(previewScale + 10, 150))}
+                  onZoomOut={() => setPreviewScale(Math.max(previewScale - 10, 30))}
+                  hideToolbar={false}
+                >
+                  <TemplatePreviewContent {...editorPreviewContentProps} />
+                </TemplateCenterPreviewViewport>
+              </div>
+            </div>
           </div>
         </div>
       );
     }
 
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        {/* 顶部模板标签页 — 一行横向排列，和图1完全一致 */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-3 flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
-          {filteredTemplateWorkspaceItems.map((template) => {
-            const isActive = activeTemplate?.id === template.id;
-            return (
-              <button
-                key={template.id}
-                type="button"
-                onClick={() => setSelectedTemplateId(template.id)}
-                className={`whitespace-nowrap px-4 py-2 rounded-md text-sm font-medium transition-colors flex-shrink-0 ${
-                  isActive
-                    ? 'bg-[#F96302] text-white shadow-sm'
-                    : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                {template.name}
-              </button>
-            );
-          })}
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] bg-white ring-1 ring-black/5">
+        {/* 顶部模板标签页：仅工作台支持排序与改名，预览区不受影响 */}
+        <div className="flex flex-shrink-0 items-center gap-4 border-b border-[#E5E7EB] bg-white px-10 py-5">
+          <div className="flex flex-1 items-center gap-2.5 overflow-x-auto pr-2" style={{ scrollbarWidth: 'none' }}>
+            {filteredTemplateWorkspaceItems.map((template) => {
+              const isActive = activeTemplate?.id === template.id;
+              const isEditing = editingTemplateTabId === template.id;
+              const isDraggedOver = dragOverTemplateTabId === template.id && draggedTemplateTabId !== template.id;
+              const isDragging = draggedTemplateTabId === template.id;
+              const runtimeMeta = templateRuntimeMetaMap[template.id] || template.meta;
+              return (
+                <div
+                  key={template.id}
+                  draggable={!isEditing}
+                  onDragStart={(event) => {
+                    setDraggedTemplateTabId(template.id);
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.dropEffect = 'move';
+                    event.dataTransfer.setData('text/plain', template.id);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    setDragOverTemplateTabId(template.id);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverTemplateTabId === template.id) {
+                      setDragOverTemplateTabId(null);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (draggedTemplateTabId) {
+                      reorderTemplateHubItems(draggedTemplateTabId, template.id);
+                    }
+                    setDraggedTemplateTabId(null);
+                    setDragOverTemplateTabId(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedTemplateTabId(null);
+                    setDragOverTemplateTabId(null);
+                  }}
+                  onClick={() => {
+                    if (!isEditing) {
+                      setSelectedTemplateId(template.id);
+                    }
+                  }}
+                  className={`group flex h-11 flex-shrink-0 select-none items-center gap-2 whitespace-nowrap rounded-[14px] border px-4 text-[14px] font-semibold tracking-tight transition-all ${
+                    isActive
+                      ? 'border-[#F96302] bg-[#F96302] text-white shadow-[0_10px_24px_rgba(249,99,2,0.2)]'
+                      : 'border-[#D8DEE7] bg-white text-[#2F3947] hover:border-[#F96302]/35 hover:bg-[#FFF7F2]'
+                  } ${isDraggedOver ? 'ring-2 ring-[#F96302] ring-offset-1' : ''} ${isDragging ? 'opacity-80' : ''}`}
+                  title={template.displayName}
+                >
+                  <button
+                    type="button"
+                    onMouseDown={(event) => {
+                      if (isEditing) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setDraggedTemplateTabId(template.id);
+                      setDragOverTemplateTabId(template.id);
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                    }}
+                    className={`cursor-grab rounded-md p-0.5 active:cursor-grabbing ${isActive ? 'hover:bg-white/10' : 'hover:bg-[#F4F6F8]'}`}
+                    title="拖动调整顺序"
+                  >
+                    <GripVertical className={`h-4 w-4 ${isActive ? 'text-white/80' : 'text-[#B7C0CD]'}`} />
+                  </button>
+
+                  {isEditing ? (
+                    <Input
+                      autoFocus
+                      value={editingTemplateTabName}
+                      onChange={(event) => setEditingTemplateTabName(event.target.value)}
+                      onBlur={commitTemplateTabRename}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          commitTemplateTabRename();
+                        }
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          cancelTemplateTabRename();
+                        }
+                      }}
+                      className="h-8 w-32 border-white/70 bg-white text-gray-900"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedTemplateId(template.id);
+                      }}
+                      className={`flex flex-1 items-center gap-2 overflow-hidden text-left ${isActive ? 'text-white' : 'text-[#2F3947]'}`}
+                    >
+                      <span className="truncate">{template.displayName}</span>
+                      <span
+                        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          isActive ? 'bg-white/20 text-white' : 'bg-[#FFF3EB] text-[#F96302]'
+                        }`}
+                        title={`当前模板版本：${runtimeMeta.currentVersion}`}
+                      >
+                        {runtimeMeta.currentVersion}
+                      </span>
+                    </button>
+                  )}
+
+                  {isEditing ? (
+                    <button
+                      type="button"
+                      onClick={commitTemplateTabRename}
+                      className={`rounded-md p-1 ${isActive ? 'hover:bg-white/15' : 'hover:bg-[#F4F6F8]'}`}
+                      title="保存名称"
+                    >
+                      <Check className={`h-4 w-4 ${isActive ? 'text-white' : 'text-[#F96302]'}`} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        beginTemplateTabRename(template.id, template.customName || template.displayName);
+                      }}
+                      className={`rounded-md p-1 opacity-0 transition-opacity group-hover:opacity-100 ${
+                        isActive ? 'hover:bg-white/15' : 'hover:bg-[#F4F6F8]'
+                      }`}
+                      title="编辑名称"
+                    >
+                      <Pencil className={`h-4 w-4 ${isActive ? 'text-white' : 'text-gray-500'}`} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-11 shrink-0 gap-2 rounded-[14px] border-[#D8DEE7] px-4 text-[14px] font-semibold text-[#2F3947] hover:bg-[#F8FAFC]"
+            onClick={() => setTemplateHubManagerOpen(true)}
+          >
+            <Settings2 className="h-4 w-4" />
+            管理模板条
+          </Button>
         </div>
+
+        <Dialog open={templateHubManagerOpen} onOpenChange={setTemplateHubManagerOpen}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>模板中心工作台导航管理</DialogTitle>
+              <DialogDescription>
+                这里只调整模板中心工作台顶部模板条的显示顺序与名称，不会改动其他模块。
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[70vh] overflow-y-auto pr-1">
+              <div className="space-y-3">
+                {templateHubManagerItems.map((template, index) => (
+                  <div
+                    key={`manager-${template.id}`}
+                    className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
+                  >
+                    <div className="flex w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-sm font-semibold text-gray-600">
+                      {index + 1}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <Label htmlFor={`template-tab-name-${template.id}`} className="text-xs text-gray-500">
+                        工作台名称
+                      </Label>
+                      <Input
+                        id={`template-tab-name-${template.id}`}
+                        value={template.customName || template.displayName}
+                        onChange={(e) => updateTemplateHubTabName(template.id, e.target.value)}
+                        onBlur={(e) => {
+                          void persistTemplateHubTabName(template.id, e.target.value);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            void persistTemplateHubTabName(template.id, event.currentTarget.value);
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        placeholder={template.name}
+                        className="mt-1 h-10"
+                      />
+                      <div className="mt-1 text-xs text-gray-400">
+                        原名称：{template.name} · 英文：{template.nameEn}
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-10 w-10"
+                        disabled={index === 0}
+                        onClick={() => moveTemplateHubItem(template.id, 'left')}
+                        title="左移"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-10 w-10"
+                        disabled={index === templateHubManagerItems.length - 1}
+                        onClick={() => moveTemplateHubItem(template.id, 'right')}
+                        title="右移"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t pt-4">
+              <p className="text-sm text-gray-500">
+                调整后会立即作用于模板中心工作台顶部模板条，并永久保存到 Supabase。
+              </p>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="ghost" onClick={resetTemplateHubTabs}>
+                  恢复默认
+                </Button>
+                <Button type="button" onClick={() => setTemplateHubManagerOpen(false)}>
+                  完成
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* 主体：深灰背景 + 居中A4文档 + 右侧工具条 */}
         {activeTemplate && (
-          <TemplateCenterPreviewViewport
-            resetKey={`${activeTemplate.id}-${templateHubView}`}
-            zoom={previewScale}
-            onZoomIn={() => setPreviewScale(Math.min(previewScale + 10, 150))}
-            onZoomOut={() => setPreviewScale(Math.max(previewScale - 10, 30))}
-            onOpenEditor={() => setTemplateHubView('editor')}
-          >
-            {activeTemplate.id === 'qr' ? (
-              <div style={{ width: `${qrTemplateLayout.canvasWidthMm}mm` }}>
-                <QuoteRequirementDocument
-                  data={qrTemplateData}
-                  layoutConfig={qrTemplateLayout}
-                  textOverrides={qrTemplateTextOverrides}
-                />
-              </div>
-            ) : activeTemplate.id === 'xj' ? (
-              <XJDocument data={xjTemplateData} layoutConfig={xjTemplateLayout} />
-            ) : activeTemplate.id === 'sc' ? (
-              <SalesContractDocument data={scTemplateData} layoutConfig={scTemplateLayout} />
-            ) : activeTemplate.id === 'cg' ? (
-              <PurchaseOrderDocumentA4Pages data={cgTemplateData} />
-            ) : activeTemplate.id === 'pi' ? (
-              <ProformaInvoiceDocument data={piTemplateData} layoutConfig={piTemplateLayout} />
-            ) : activeTemplate.id === 'ci' ? (
-              <CommercialInvoiceDocument data={ciTemplateData} layoutConfig={ciTemplateLayout} />
-            ) : activeTemplate.id === 'pl' ? (
-              <PackingListDocument data={plTemplateData} layoutConfig={plTemplateLayout} />
-            ) : activeTemplate.id === 'soa' ? (
-              <StatementOfAccountDocument data={soaTemplateData} layoutConfig={soaTemplateLayout} />
-            ) : activeTemplate.id === 'ing' ? (
-              <CustomerInquiryDocument
-                data={inquiryTemplateData}
-                layoutConfig={inquiryTemplateLayout}
-                highlightedRequirementKey={activeInquiryRequirementField}
-              />
-            ) : activeTemplate.id === 'qt' ? (
-              <QuotationDocumentA4Pages data={quotationTemplateData} />
-            ) : (
-              <div className="bg-white shadow-lg rounded" style={{ width: '210mm', minHeight: '297mm' }}>
-                <div className="flex flex-col items-center justify-center h-full min-h-[297mm] text-center p-12">
-                  <div className="text-6xl mb-6">{activeTemplate.icon}</div>
-                  <h2 className="text-2xl font-bold text-gray-800 mb-2">{activeTemplate.name}</h2>
-                  <p className="text-base text-gray-500 mb-1">{activeTemplate.nameEn}</p>
-                  <p className="text-sm text-gray-400 mt-4">{activeTemplate.description}</p>
-                  <p className="text-xs text-gray-300 mt-8">模板组件接入中，请先在编辑器中完成模板设计</p>
-                </div>
-              </div>
-            )}
-          </TemplateCenterPreviewViewport>
+          <div className="min-h-0 flex-1 overflow-hidden bg-slate-100 p-6">
+            <div
+              className="h-full min-h-0 overflow-hidden rounded-[24px] p-8 shadow-inner"
+              style={{ backgroundColor: '#525659' }}
+            >
+              <TemplateCenterPreviewViewport
+                className="rounded-none border-0 bg-[#525659]"
+                resetKey={`${activeTemplate.id}-${templateHubView}`}
+                zoom={previewScale}
+                onZoomIn={() => setPreviewScale(Math.min(previewScale + 10, 150))}
+                onZoomOut={() => setPreviewScale(Math.max(previewScale - 10, 30))}
+                onOpenEditor={() => setTemplateHubView('editor')}
+              >
+                {hubPreviewContentProps && <TemplatePreviewContent {...hubPreviewContentProps} />}
+              </TemplateCenterPreviewViewport>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -3810,14 +4383,16 @@ function SendDocumentDialog({ open, onOpenChange, document }: any) {
   const [emailTo, setEmailTo] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
+  const adminOrg = getStoredAdminOrgProfile();
+  const companyName = adminOrg.nameCN || adminOrg.nameEN || '贵司';
 
   React.useEffect(() => {
     if (open && document) {
       setEmailTo(document.customerEmail);
-      setEmailSubject(`【高盛达富】${document.documentNumber}`);
-      setEmailBody(`尊敬的 ${document.customerName}：\n\n您好！\n\n附件为您的订单 ${document.contractNumber} 的相关单证，请查收。\n\n此致\n敬礼\n\n福建高盛达富建材有限公司`);
+      setEmailSubject(`【${companyName}】${document.documentNumber}`);
+      setEmailBody(`尊敬的 ${document.customerName}：\n\n您好！\n\n附件为您的订单 ${document.contractNumber} 的相关单证，请查收。\n\n此致\n敬礼\n\n${companyName}`);
     }
-  }, [open, document]);
+  }, [open, document, companyName]);
 
   if (!document) return null;
 

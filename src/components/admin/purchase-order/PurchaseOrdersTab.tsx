@@ -104,16 +104,43 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
             </thead>
             <tbody>
               {filteredOrders.map((po, idx) => {
-                const reqStatus = String((po as any).procurementRequestStatus || '');
+                const reqStatus = String(po.procurementRequestStatus || '');
+                const executionStatus = String(po.executionStatus || '');
                 const projectBaseline = extractProjectExecutionBaseline(po);
-                const statusConfig =
-                  reqStatus === 'pending_boss_approval'
-                    ? { label: '提交审核状态', color: 'bg-amber-50 text-amber-700 border-amber-200' }
-                    : reqStatus === 'approved_boss'
-                      ? { label: '审核通过', color: 'bg-green-50 text-green-700 border-green-200' }
-                      : reqStatus === 'rejected_boss'
-                        ? { label: '审核驳回', color: 'bg-red-50 text-red-700 border-red-200' }
-                        : getPOStatusConfig(po.status as any);
+                // Phase 4: complete procurementRequestStatus → display mapping.
+                // All 8 values are handled explicitly; no value silently falls back to the base POStatus label.
+                const statusConfig: { label: string; color: string } = (() => {
+                  if (reqStatus === 'pushed_supplier' && executionStatus) {
+                    switch (executionStatus) {
+                      case 'supplier_pending_confirmation': return { label: '待供应商确认', color: 'bg-violet-50 text-violet-700 border-violet-200' };
+                      case 'supplier_confirmed': return { label: '供应商已确认', color: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200' };
+                      case 'sampling': return { label: '产前样处理中', color: 'bg-sky-50 text-sky-700 border-sky-200' };
+                      case 'in_production': return { label: '生产中', color: 'bg-blue-50 text-blue-700 border-blue-200' };
+                      case 'supplier_self_inspection_pending': return { label: '待供应商自检', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' };
+                      case 'supplier_self_inspection_submitted': return { label: '已提交自检', color: 'bg-teal-50 text-teal-700 border-teal-200' };
+                      case 'qc_pending': return { label: '待QC验货', color: 'bg-amber-50 text-amber-700 border-amber-200' };
+                      case 'qc_passed': return { label: 'QC通过', color: 'bg-green-50 text-green-700 border-green-200' };
+                      case 'qc_failed': return { label: 'QC不通过', color: 'bg-red-50 text-red-700 border-red-200' };
+                      case 'finished_goods_ready': return { label: '完货待出运', color: 'bg-lime-50 text-lime-700 border-lime-200' };
+                      case 'awaiting_loading': return { label: '待装柜', color: 'bg-orange-50 text-orange-700 border-orange-200' };
+                      case 'loaded': return { label: '已装柜', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
+                      case 'shipped': return { label: '已开船', color: 'bg-purple-50 text-purple-700 border-purple-200' };
+                      case 'completed': return { label: '已完成', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+                      default: break;
+                    }
+                  }
+                  switch (reqStatus) {
+                    case 'pending_procurement_assignment': return { label: '待分配供应商',   color: 'bg-amber-50 text-amber-700 border-amber-200' };
+                    case 'partial_allocated':             return { label: '部分已分配',      color: 'bg-orange-50 text-orange-700 border-orange-200' };
+                    case 'allocated_completed':           return { label: '已分配完成',      color: 'bg-teal-50 text-teal-700 border-teal-200' };
+                    case 'draft_allocated':               return { label: '草稿·待提交审核', color: 'bg-slate-50 text-slate-600 border-slate-200' };
+                    case 'pending_boss_approval':         return { label: '待老板审核',      color: 'bg-amber-50 text-amber-700 border-amber-200' };
+                    case 'approved_boss':                 return { label: '审核通过·可下推', color: 'bg-green-50 text-green-700 border-green-200' };
+                    case 'rejected_boss':                 return { label: '审核驳回',        color: 'bg-red-50 text-red-700 border-red-200' };
+                    case 'pushed_supplier':               return { label: '已推供应商',      color: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
+                    default: return getPOStatusConfig(po.status as any) ?? { label: '待确认', color: 'bg-slate-50 text-slate-700 border-slate-200' };
+                  }
+                })();
 
                 const regionConfig =
                   po.region === 'North America' || po.region === 'NA'
@@ -142,9 +169,21 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                     </td>
                     <td className="py-2 px-2 text-center text-gray-500">{idx + 1}</td>
                     <td className="py-3 px-3">
-                      <button onClick={() => handleViewPODocument(po)} className="text-purple-600 hover:text-purple-700 font-medium hover:underline text-xs">
-                        {normalizeCGNumberForDisplay(po.poNumber)}
-                      </button>
+                      {/* Phase 4: PR / CG / CQ record-type chip — lets operators distinguish rows without parsing the number prefix */}
+                      <div className="flex items-center gap-1.5">
+                        {String(po.poNumber || '').startsWith('PR-') && (
+                          <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-cyan-100 text-cyan-700 border border-cyan-300 leading-4" title="采购请求（PR）">PR</span>
+                        )}
+                        {String(po.poNumber || '').startsWith('CG-') && (
+                          <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-green-100 text-green-700 border border-green-300 leading-4" title="供应商订单（CG）">CG</span>
+                        )}
+                        {String(po.poNumber || '').startsWith('CQ-') && (
+                          <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-gray-100 text-gray-500 border border-gray-300 leading-4" title="旧单（历史记录）">CQ</span>
+                        )}
+                        <button onClick={() => handleViewPODocument(po)} className="text-purple-600 hover:text-purple-700 font-medium hover:underline text-xs">
+                          {normalizeCGNumberForDisplay(po.poNumber)}
+                        </button>
+                      </div>
                       <div className="text-[11px] text-gray-500 mt-0.5">
                         来源: {resolveInquirySourceRef(po)}
                         {getRequirementNoFromPO(po) ? ` · ${getRequirementNoFromPO(po)}` : ''}

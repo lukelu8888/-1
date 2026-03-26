@@ -29,6 +29,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [detailInitialAction, setDetailInitialAction] = useState<'accepted' | 'rejected' | 'negotiating' | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]); // 🆕 批量选择状态
   const [serverQuotations, setServerQuotations] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -315,6 +316,74 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
 
   const isQuotationDeletable = (quotation: any) => canDeleteQuotation(quotation);
 
+  const openQuotationDetail = (quotation: any, initialAction: 'accepted' | 'rejected' | 'negotiating' | null = null) => {
+    setDetailInitialAction(initialAction);
+    setSelectedQuotation(quotation as any);
+    setIsDetailOpen(true);
+  };
+
+  const handleAcceptQuotation = async (quotation: any) => {
+    const quotationKey = String(quotation.qtNumber || quotation.quotationNumber || quotation.id || '').trim();
+    if (!quotationKey) {
+      toast.error('Quotation key is missing');
+      return;
+    }
+
+    try {
+      const acceptedResponse = {
+        status: 'accepted',
+        comment: 'Customer accepted the quotation',
+        respondedAt: new Date().toISOString(),
+      };
+
+      await salesQuotationService.customerRespond(quotationKey, 'accepted', acceptedResponse.comment);
+
+      setServerQuotations((prev) =>
+        prev.map((item) => {
+          const itemKey = String(item?.qtNumber || item?.quotationNumber || item?.id || '').trim();
+          if (itemKey !== quotationKey) return item;
+          return {
+            ...item,
+            customerStatus: 'accepted',
+            customerResponse: acceptedResponse,
+          };
+        })
+      );
+
+      toast.success('✅ Quotation accepted');
+      setReloadKey((k) => k + 1);
+    } catch (e: any) {
+      console.error('❌ [QuotationReceived] 接受报价失败:', e);
+      toast.error(`❌ Accept failed: ${e?.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleQuotationUpdated = (updatedQuotation?: Partial<Quotation> & Record<string, any>) => {
+    if (updatedQuotation) {
+      const targetKey = String(
+        updatedQuotation.qtNumber ||
+        updatedQuotation.quotationNumber ||
+        updatedQuotation.id ||
+        ''
+      ).trim();
+
+      if (targetKey) {
+        setServerQuotations((prev) =>
+          prev.map((item) => {
+            const itemKey = String(item?.qtNumber || item?.quotationNumber || item?.id || '').trim();
+            if (itemKey !== targetKey) return item;
+            return {
+              ...item,
+              ...updatedQuotation,
+            };
+          })
+        );
+      }
+    }
+
+    setReloadKey((k) => k + 1);
+  };
+
   // 🆕 批量选择逻辑
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -546,8 +615,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                       <TableCell className="text-xs">
                         <button
                           onClick={() => {
-                            setSelectedQuotation(quotation as any);
-                            setIsDetailOpen(true);
+                            openQuotationDetail(quotation);
                           }}
                           className="font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                         >
@@ -586,13 +654,33 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                       <TableCell className="text-xs">{getStatusBadgeWithTooltip(quotation)}</TableCell>
                       <TableCell className="text-xs">
                         <div className="flex items-center justify-end gap-2">
+                          {(quotation.customerStatus === 'sent' || quotation.customerStatus === 'viewed') && (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 border-red-200 px-2 text-red-700 hover:bg-red-50"
+                                onClick={() => openQuotationDetail(quotation, 'rejected')}
+                              >
+                                <XCircle className="mr-1 h-3.5 w-3.5" />
+                                Decline
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-8 bg-green-600 px-2 text-white hover:bg-green-700"
+                                onClick={() => handleAcceptQuotation(quotation)}
+                              >
+                                <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                                Accept
+                              </Button>
+                            </>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0"
                             onClick={() => {
-                              setSelectedQuotation(quotation as any);
-                              setIsDetailOpen(true);
+                              openQuotationDetail(quotation);
                             }}
                           >
                             <Eye className="h-4 w-4" />
@@ -624,9 +712,11 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
         onClose={() => {
           setIsDetailOpen(false);
           setSelectedQuotation(null);
+          setDetailInitialAction(null);
         }}
         quotation={selectedQuotation}
-        onUpdated={() => setReloadKey((k) => k + 1)}
+        initialFeedbackType={detailInitialAction}
+        onUpdated={handleQuotationUpdated}
         onOpenProfitAnalyzer={(quotation: Quotation) => {
           // 🔥 导航到左侧栏的Profit Analyzer页面
           console.log('🔥 [QuotationReceived] Opening Profit Analyzer for quotation:', quotation.id);
@@ -655,6 +745,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
           // 🔥 关闭详情Dialog
           setIsDetailOpen(false);
           setSelectedQuotation(null);
+          setDetailInitialAction(null);
           
           // 🔥 导航到Profit Analyzer页面
           if (onNavigate) {

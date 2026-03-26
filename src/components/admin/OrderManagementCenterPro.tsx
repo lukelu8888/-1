@@ -31,13 +31,32 @@ import { ApprovalCenter } from './ApprovalCenter'; // 🔥 审批中心
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：获取待审批数量
 import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 新增：获取当前用户
+import { useAuth } from '../../hooks/useAuth';
+import { permissionCenterService } from '../../lib/services/permissionCenterService';
 import { QuotationPDFTemplate } from './QuotationPDFTemplate';
 import { SalesContractTemplate } from './SalesContractTemplate';
 import { SalesContractDocumentPaginated } from '../documents/SalesContractDocumentPaginated'; // 🔥 分页版销售合同
 import { SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 销售合同数据类型
 import { exportToPDF, generatePDFFilename } from '../../utils/pdfExport';
+import type { User } from '../../lib/rbac-config';
 const APPROVAL_CENTER_CACHE_PREFIX = 'approval_center_cache_v1';
 const getApprovalCenterCacheKey = (email: string) => `${APPROVAL_CENTER_CACHE_PREFIX}:${email || 'anonymous'}`;
+const getSwitchedRbacUser = () => {
+  try {
+    const stored = localStorage.getItem('cosun_switched_user') || localStorage.getItem('cosun_current_user');
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+};
+const APPROVAL_CENTER_ROLE_BY_EMAIL: Record<string, 'Regional_Manager' | 'Sales_Director' | 'CEO'> = {
+  'salesmanager-na@cosunchina.com': 'Regional_Manager',
+  'salesmanager-sa@cosunchina.com': 'Regional_Manager',
+  'salesmanager-ea@cosunchina.com': 'Regional_Manager',
+  'sales.director@cosunchina.com': 'Sales_Director',
+  'ceo@cosunchina.com': 'CEO',
+  'ceo@cosun.com': 'CEO',
+};
 
 // 🔥 增强的报价产品接口
 interface QuotationProduct {
@@ -81,7 +100,19 @@ interface Quotation {
   remarks?: string;
 }
 
-export default function OrderManagementCenterPro() {
+interface OrderManagementCenterProProps {
+  currentUser?: User | null;
+}
+
+export default function OrderManagementCenterPro({ currentUser: dashboardCurrentUser = null }: OrderManagementCenterProProps) {
+  const { currentUser: authCurrentUser } = useAuth();
+  const [runtimeUser, setRuntimeUser] = useState(() => dashboardCurrentUser || getSwitchedRbacUser() || getCurrentUser());
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(() => {
+    return dashboardCurrentUser?.role || getSwitchedRbacUser()?.role || null;
+  });
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>(() => {
+    return dashboardCurrentUser?.email || getSwitchedRbacUser()?.email || '';
+  });
   const [activeTab, setActiveTab] = useState<'overview' | 'inquiries' | 'cost-inquiry' | 'quotations' | 'orders' | 'collections' | 'approvals'>('overview');
   const [selectedInquiry, setSelectedInquiry] = useState<CustomerInquiry | null>(null);
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
@@ -94,9 +125,6 @@ export default function OrderManagementCenterPro() {
   // 🔥 高亮SC销售合同号（用于下推订单管理后高亮显示）
   const [highlightScNumber, setHighlightScNumber] = useState<string | undefined>(undefined);
   
-  // 🔒 获取当前用户角色
-  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
-
   useEffect(() => {
     const pendingTargetTab = localStorage.getItem('orderManagementCenterActiveTab');
     if (!pendingTargetTab) return;
@@ -107,16 +135,23 @@ export default function OrderManagementCenterPro() {
   }, []);
   
   useEffect(() => {
-    const currentUserStr = localStorage.getItem('cosun_current_user');
-    if (currentUserStr) {
-      try {
-        const currentUser = JSON.parse(currentUserStr);
-        setCurrentUserRole(currentUser.role || null);
-      } catch (e) {
-        console.error('❌ [OrderManagementCenter] Failed to parse current user:', e);
-      }
-    }
-  }, []);
+    const syncRuntimeUser = () => {
+      const switchedUser = getSwitchedRbacUser();
+      const nextUser = dashboardCurrentUser || switchedUser || getCurrentUser();
+      setRuntimeUser(nextUser);
+      setCurrentUserRole(
+        dashboardCurrentUser?.role || switchedUser?.role || nextUser?.role || nextUser?.userRole || null,
+      );
+      setCurrentUserEmail(dashboardCurrentUser?.email || switchedUser?.email || nextUser?.email || '');
+    };
+    syncRuntimeUser();
+    window.addEventListener('userChanged', syncRuntimeUser as EventListener);
+    window.addEventListener('storage', syncRuntimeUser);
+    return () => {
+      window.removeEventListener('userChanged', syncRuntimeUser as EventListener);
+      window.removeEventListener('storage', syncRuntimeUser);
+    };
+  }, [dashboardCurrentUser?.email, dashboardCurrentUser?.role]);
   
   // 报价管理状态
   const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -135,8 +170,36 @@ export default function OrderManagementCenterPro() {
   const { notifications, unreadCount, addNotification } = useNotifications();
   
   // 🔥 计算当前用户的待审批数量
-  const currentUser = getCurrentUser();
-  const currentUserEmail = currentUser?.email || '';
+  const currentUser = dashboardCurrentUser || runtimeUser || authCurrentUser;
+  const rawRuntimeRole = String(
+    dashboardCurrentUser?.role || currentUserRole || runtimeUser?.role || runtimeUser?.userRole || authCurrentUser?.role || '',
+  ).trim();
+  const normalizedRuntimeRole = ({
+    Regional_Manager: 'Regional_Manager',
+    Sales_Manager: 'Regional_Manager',
+    Sales_Director: 'Sales_Director',
+    CEO: 'CEO',
+    区域主管: 'Regional_Manager',
+    区域业务主管: 'Regional_Manager',
+    销售总监: 'Sales_Director',
+    老板: 'CEO',
+  } as Record<string, string>)[rawRuntimeRole] || '';
+  const emailDerivedRole = APPROVAL_CENTER_ROLE_BY_EMAIL[String(currentUserEmail || '').trim().toLowerCase()] || '';
+  const effectiveRuntimeRole = normalizedRuntimeRole || emailDerivedRole || rawRuntimeRole;
+  const shouldShowApprovalCenter = ['Regional_Manager', 'Sales_Manager', 'Sales_Director', 'CEO'].includes(rawRuntimeRole || '')
+    || ['Regional_Manager', 'Sales_Director', 'CEO'].includes(effectiveRuntimeRole || '');
+  const permissionRuntimeUser = currentUser
+    ? {
+        id: currentUser.id || currentUser.email,
+        email: currentUser.email,
+        name: currentUser.name || currentUser.email,
+        role: effectiveRuntimeRole,
+        region: dashboardCurrentUser?.region || runtimeUser?.region || authCurrentUser?.region || currentUser.region || 'all',
+      }
+    : authCurrentUser;
+  const canCreateOrderContent = permissionCenterService.hasModuleActionAccess(permissionRuntimeUser, 'order-management-center', 'create');
+  const canExportOrderContent = permissionCenterService.hasModuleActionAccess(permissionRuntimeUser, 'order-management-center', 'export');
+  const canApproveOrderContent = permissionCenterService.hasModuleActionAccess(permissionRuntimeUser, 'order-management-center', 'approve');
   const [myPendingCount, setMyPendingCount] = useState(() => {
     if (!currentUserEmail) return 0;
     try {
@@ -314,6 +377,10 @@ export default function OrderManagementCenterPro() {
 
   // 处理从询价创建报价
   const handleCreateQuotation = (inquiry: CustomerInquiry) => {
+    if (!canCreateOrderContent) {
+      toast.error('当前角色无权在订单管理中心新建报价');
+      return;
+    }
     console.log('🔄 创建报价流转被触发！');
     setSelectedInquiry(inquiry);
     setActiveTab('quotations');
@@ -351,6 +418,10 @@ export default function OrderManagementCenterPro() {
 
   // 导出报价PDF
   const handleExportQuotationPDF = async () => {
+    if (!canExportOrderContent) {
+      toast.error('当前角色无权导出报价文件');
+      return;
+    }
     if (!quotationPDFRef.current || !selectedQuotation) return;
     
     setExportingPDF(true);
@@ -362,6 +433,10 @@ export default function OrderManagementCenterPro() {
 
   // 生成销售合同
   const handleGenerateContract = async (quotation: Quotation) => {
+    if (!canCreateOrderContent) {
+      toast.error('当前角色无权在订单管理中心生成合同');
+      return;
+    }
     setGeneratingContract(true);
     
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -406,6 +481,10 @@ export default function OrderManagementCenterPro() {
 
   // 导出合同PDF
   const handleExportContractPDF = async () => {
+    if (!canExportOrderContent) {
+      toast.error('当前角色无权导出合同文件');
+      return;
+    }
     if (!contractPDFRef.current || !selectedQuotation) return;
     
     setExportingPDF(true);
@@ -536,7 +615,7 @@ export default function OrderManagementCenterPro() {
       
       {/* 🎨 方案A：台湾大厂原汁原味风格 - SAP/Oracle单行紧凑摘要栏 */}
       {/* 🔒 只对非业务员角色显示统计栏 - 移除CEO、销售总监、区域经理和业务员的统计 */}
-      {!['CEO', 'Sales_Director', 'Sales_Manager', 'Sales_Rep'].includes(currentUserRole || '') && (
+      {!['CEO', 'Sales_Director', 'Regional_Manager', 'Sales_Rep'].includes(effectiveRuntimeRole || '') && (
         <div className="bg-white border border-gray-300 rounded print-hide">
           <div className="px-5 py-3 border-b border-gray-200 bg-gray-50">
             <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">报价统计</h3>
@@ -658,7 +737,7 @@ export default function OrderManagementCenterPro() {
             </button>
             
             {/* 🔥 审批中心 - 仅主管、总监、CEO可见 */}
-            {['Regional_Manager', 'Sales_Manager', 'Sales_Director', 'CEO'].includes(currentUserRole || '') && (
+            {shouldShowApprovalCenter && (
               <button
                 onClick={() => setActiveTab('approvals')}
                 className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
@@ -705,6 +784,7 @@ export default function OrderManagementCenterPro() {
         <TabsContent value="quotations" className="mt-6">
           {/* 🔥 使用SalesQuotationManagement组件，管理QT销售报价单 */}
           <SalesQuotationManagement 
+            currentUser={currentUser}
             highlightQtNumber={highlightQtNumber} 
             onNavigateToOrders={() => setActiveTab('orders')} 
             onNavigateToOrdersWithHighlight={(scNumber) => {
@@ -730,7 +810,7 @@ export default function OrderManagementCenterPro() {
 
         {/* 审批中心标签页 */}
         <TabsContent value="approvals" className="mt-6">
-          <ApprovalCenter />
+          <ApprovalCenter currentUser={currentUser} />
         </TabsContent>
       </Tabs>
 
@@ -848,7 +928,7 @@ export default function OrderManagementCenterPro() {
             <Button variant="outline" onClick={() => setShowQuoteDetail(false)}>
               关闭
             </Button>
-            <Button onClick={handleExportQuotationPDF} disabled={exportingPDF}>
+            <Button onClick={handleExportQuotationPDF} disabled={exportingPDF || !canExportOrderContent}>
               {exportingPDF ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -864,7 +944,7 @@ export default function OrderManagementCenterPro() {
             {selectedQuotation?.status === 'Accepted' && !selectedQuotation?.contractGenerated && (
               <Button 
                 onClick={() => selectedQuotation && handleGenerateContract(selectedQuotation)}
-                disabled={generatingContract}
+                disabled={generatingContract || !canCreateOrderContent}
                 className="bg-purple-600 hover:bg-purple-700"
               >
                 {generatingContract ? (
@@ -992,7 +1072,7 @@ export default function OrderManagementCenterPro() {
             <Button variant="outline" onClick={() => setShowContractDialog(false)}>
               关闭
             </Button>
-            <Button onClick={handleExportContractPDF} disabled={exportingPDF}>
+            <Button onClick={handleExportContractPDF} disabled={exportingPDF || !canExportOrderContent}>
               {exportingPDF ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

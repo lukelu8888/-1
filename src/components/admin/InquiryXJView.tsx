@@ -85,7 +85,7 @@ export function InquiryXJView({ inquiry }: InquiryXJViewProps) {
           </div>
           <div className="text-right">
             <div className="bg-red-600 text-white px-4 py-2 rounded-lg mb-2">
-              <p className="text-xs">INQ No.</p>
+              <p className="text-xs">ING No.</p>
               <p className="text-lg">{inquiry.inquiryNumber || inquiry.id}</p>
             </div>
             <p className="text-xs text-gray-600">

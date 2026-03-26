@@ -7,23 +7,23 @@ import type { ProjectExecutionBaseline } from './purchaseOrderUtils';
 
 type XJPreviewDialogProps = {
   showXJPreview: boolean;
-  setShowRFQPreview: React.Dispatch<React.SetStateAction<boolean>>;
+  setShowXJPreview: React.Dispatch<React.SetStateAction<boolean>>;
   currentXJData: XJData | null;
   projectExecutionBaseline?: ProjectExecutionBaseline | null;
   xjDocRef: React.RefObject<HTMLDivElement>;
-  handleExportRFQPDF: (download: boolean) => void;
+  handleExportXJPDF: (download: boolean) => void;
 };
 
 export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
   showXJPreview,
-  setShowRFQPreview,
+  setShowXJPreview,
   currentXJData,
   projectExecutionBaseline,
   xjDocRef,
-  handleExportRFQPDF,
+  handleExportXJPDF,
 }) => {
   return (
-    <Dialog open={showXJPreview} onOpenChange={setShowRFQPreview}>
+    <Dialog open={showXJPreview} onOpenChange={setShowXJPreview}>
       <DialogContent className="max-w-[95vw] h-[95vh] p-0">
         <DialogHeader className="px-6 py-4 border-b">
           <DialogTitle className="text-base flex items-center gap-2">
@@ -58,14 +58,14 @@ export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
         <div className="border-t bg-white px-6 py-4 flex items-center justify-between">
           <div className="text-xs text-gray-500">💡 此询价单可发送给供应商进行报价</div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowRFQPreview(false)} className="text-xs">
+            <Button variant="outline" size="sm" onClick={() => setShowXJPreview(false)} className="text-xs">
               关闭
             </Button>
-            <Button variant="outline" size="sm" onClick={() => handleExportRFQPDF(false)} className="text-xs flex items-center gap-1">
+            <Button variant="outline" size="sm" onClick={() => handleExportXJPDF(false)} className="text-xs flex items-center gap-1">
               <Printer className="w-3 h-3" />
               打印
             </Button>
-            <Button size="sm" onClick={() => handleExportRFQPDF(true)} className="bg-[#F96302] hover:bg-[#E05502] text-xs flex items-center gap-1">
+            <Button size="sm" onClick={() => handleExportXJPDF(true)} className="bg-[#F96302] hover:bg-[#E05502] text-xs flex items-center gap-1">
               <Download className="w-3 h-3" />
               下载PDF
             </Button>

@@ -1,6 +1,6 @@
 /**
  * Document Number Generator for B2B Trade System
- * Supports: INQ, QUO, SC, CI, PL, YS, SK, QR, XJ, BJ, QT, SO, PO
+ * Supports: ING, SC, CI, PL, YS, SK, QR, XJ, BJ, QT, PR, CG
  * Format: {TYPE}-{REGION}-YYMMDD-XXXX
  *
  * Preferred: Use async RPC variants (nextQRNumber, nextXJNumber, nextBJNumber…)
@@ -157,7 +157,7 @@ function saveCounterData(data: DocumentCounterData): void {
 /**
  * Generate next document number
  * Format: {TYPE}-{REGION}-YYMMDD-XXXX
- * @param type Document type (e.g., "INQ", "QT", "PO")
+ * @param type Document type (e.g., "ING", "QT", "CG")
  * @param region Region type (e.g., "North America")
  * @returns {string} Generated document number
  */
@@ -248,15 +248,6 @@ export function resetDocumentCounter(): void {
 // ========== Convenience Functions ==========
 
 /**
- * Generate ING (Customer Inquiry) number
- * Format: ING-{REGION}-YYMMDD-XXXX
- * @deprecated Use generateINQNumber instead
- */
-export function generateRFQNumber(region: RegionType): string {
-  return generateDocumentNumber('XJ', region);
-}
-
-/**
  * Generate Quotation number
  * Format: QT-{REGION}-YYMMDD-XXXX
  */
@@ -315,48 +306,6 @@ export function generatePONumber(region: RegionType): string {
 
 // ========== Backward Compatibility ==========
 
-/**
- * Parse INQ number (backward compatible, handles legacy RFQ- prefix)
- * @deprecated Use parseDocumentNumber instead
- */
-export function parseRFQNumber(xjNumber: string): { region: string; date: string; sequence: number } | null {
-  const parsed = parseDocumentNumber(xjNumber);
-  if (parsed && parsed.type === 'XJ') {
-    return {
-      region: parsed.region,
-      date: parsed.date,
-      sequence: parsed.sequence
-    };
-  }
-  
-  // Fallback to old format: handles legacy RFQ-YYMMDD-XXXX (for backward compatibility)
-  const oldFormatMatch = xjNumber.match(/^RFQ-(\d{6})-(\d{4})$/);
-  if (oldFormatMatch) {
-    return {
-      region: 'N/A',
-      date: oldFormatMatch[1],
-      sequence: parseInt(oldFormatMatch[2], 10)
-    };
-  }
-  
-  return null;
-}
-
-/**
- * Format document date (backward compatible)
- * @deprecated Use formatDocumentDate instead
- */
-export function formatRFQDate(dateString: string): string {
-  return formatDocumentDate(dateString);
-}
-
-/**
- * Reset document counter (backward compatible)
- * @deprecated Use resetDocumentCounter instead
- */
-export function resetRFQCounter(): void {
-  resetDocumentCounter();
-}
 
 // ========== 7-Level Numbering System Functions ==========
 

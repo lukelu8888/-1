@@ -213,9 +213,8 @@ const documentTypeConfig: Record<string, {
   category: 'sales' | 'procurement' | 'logistics' | 'customs' | 'finance';
   description: string;
 }> = {
-  'INQ': { prefix: 'INQ', name: '客户询价单', nameEn: 'Customer Inquiry', color: '#8B5CF6', icon: '📝', category: 'sales', description: '客户通过Portal提交的产品询价' },
+  'ING': { prefix: 'ING', name: '客户询价单', nameEn: 'Customer Inquiry', color: '#8B5CF6', icon: '📝', category: 'sales', description: '客户通过Portal提交的产品询价' },
   'QT': { prefix: 'QT', name: '报价单', nameEn: 'Quotation', color: '#10B981', icon: '💰', category: 'sales', description: '业务员向客户提供的正式报价' },
-  'PI': { prefix: 'PI', name: '形式发票', nameEn: 'Proforma Invoice', color: '#06B6D4', icon: '📄', category: 'sales', description: '用于客户预付款的形式发票' },
   'SC': { prefix: 'SC', name: '销售合同', nameEn: 'Sales Contract', color: '#3B82F6', icon: '📋', category: 'sales', description: '与客户签订的外贸销售合同' },
   'CG': { prefix: 'CG', name: '采购合同', nameEn: 'Procurement Contract', color: '#F59E0B', icon: '📦', category: 'procurement', description: '与供应商签订的采购合同' },
   'PO': { prefix: 'PO', name: '采购订单', nameEn: 'Purchase Order', color: '#EAB308', icon: '🛒', category: 'procurement', description: '向供应商下达的采购订单' },
@@ -244,7 +243,7 @@ const regionCodeMap: Record<string, string> = {
  * 
  * 逻辑说明：
  * 1. 类型前缀（2-3位）：标识单据类型，符合国际惯例
- *    - INQ/QT/SC：销售类单据
+ *    - ING/QT/SC：销售类单据
  *    - CG：采购合同类单据
  *    - PO：采购订单
  *    - CI/PL/BL：物流类单据
@@ -263,7 +262,7 @@ const regionCodeMap: Record<string, string> = {
  *    - 0001-9999：支持每年每月每区域9999笔业务
  * 
  * 示例：
- * - INQ-NA-2512-0001：2025年12月北美区域第1笔客户询价
+ * - ING-NA-2512-0001：2025年12月北美区域第1笔客户询价
  * - SC-NA-2512-0016：2025年12月北美区域第16笔销售合同
  * - CG-DOM-2512-0026：2025年12月国内采购第26笔采购合同
  * - CD-XMN-2512-0083：2025年12月厦门港第83笔报关单
@@ -430,8 +429,8 @@ export const getAllSteps = (statusConfig: Record<string, StepStatus>): Step[] =>
     // 阶段1：询价报价（1-16）
     { 
       id: 1, role: '客户', stageId: 1, stageName: '询价报价', title: '发起询盘', action: '在后台发起询盘', time: '12-04 09:00', nextStepId: 2,
-      documentType: 'INQ',
-      documentNo: 'INQ-NA-2512-0001',
+      documentType: 'ING',
+      documentNo: 'ING-NA-2512-0001',
       status: statusConfig.completed,
       statusDetails: { 
         operator: 'ABC Building Supplies', 

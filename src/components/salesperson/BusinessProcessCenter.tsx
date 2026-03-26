@@ -19,7 +19,7 @@ import {
   TrendingUp,
   FileSignature
 } from 'lucide-react';
-import { AdminInquiryManagementNew } from '../admin/AdminInquiryManagementNew'; // 询价管理
+import AdminInquiryManagementNew from '../admin/AdminInquiryManagementNew'; // 询价管理
 import { CostInquiryQuotationManagement } from '../admin/CostInquiryQuotationManagement'; // 成本询报
 import { SalesQuotationManagement } from './SalesQuotationManagement'; // 报价管理
 import { SalesContractManagement } from './SalesContractManagement'; // 🔥 合同管理
@@ -29,6 +29,7 @@ import { useSalesContracts } from '../../contexts/SalesContractContext'; // 🔥
 import { useInquiry } from '../../contexts/InquiryContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { normalizePersonnelEmail } from '../../lib/notification-rules';
+import { matchesBusinessOwnerEmail, resolveQuoteRequirementOwner } from '../../utils/quotationOwnership';
 
 export function BusinessProcessCenter() {
   const [activeTab, setActiveTab] = useState('inquiry-management');
@@ -45,19 +46,43 @@ export function BusinessProcessCenter() {
   // 统计业务员相关的数据
   const currentSalesEmail = normalizePersonnelEmail(currentUser?.email, currentUser?.region);
   const myInquiries = inquiries.filter(inq => 
-    normalizePersonnelEmail(inq.salesRepEmail || inq.assignedTo, inq.region) === currentSalesEmail
+    matchesBusinessOwnerEmail(
+      inq.ownerEmail || inq.salesRepEmail || inq.assignedTo,
+      currentUser?.email,
+      inq.region,
+      inq.ownerUserId,
+      currentUser?.id,
+    )
   );
   
   const myRequirements = quoteRequirements.filter(qr => 
-    qr.createdBy === currentUser?.email
+    matchesBusinessOwnerEmail(
+      resolveQuoteRequirementOwner(qr, inquiries, currentUser).email,
+      currentUser?.email,
+      qr?.region,
+      qr?.ownerUserId,
+      currentUser?.id,
+    )
   );
   
   const myQuotations = quotations.filter(qt => 
-    qt.salesPerson === currentUser?.email
+    matchesBusinessOwnerEmail(
+      qt.ownerEmail || qt.salesPerson,
+      currentUser?.email,
+      qt?.region,
+      qt?.ownerUserId,
+      currentUser?.id,
+    )
   );
   
   const myContracts = contracts.filter(contract => 
-    contract.salesPerson === currentUser?.email
+    matchesBusinessOwnerEmail(
+      contract.ownerEmail || contract.salesPerson,
+      currentUser?.email,
+      contract?.region,
+      contract?.ownerUserId,
+      currentUser?.id,
+    )
   );
   
   return (
@@ -160,7 +185,7 @@ export function BusinessProcessCenter() {
                 该功能正在开发中，敬请期待...
               </p>
               <p className="text-xs text-gray-400 mt-2">
-                将展示：INQ → QR → XJ → BJ → QT → SO → PO 完整流转链路
+                将展示：ING → QR → XJ → BJ → QT → SC → PR → CG 完整流转链路
               </p>
             </div>
           </TabsContent>
@@ -173,6 +198,8 @@ export function BusinessProcessCenter() {
           
           <TabsContent value="cost-inquiry" className="mt-0">
             <CostInquiryQuotationManagement 
+              forceDesensitizePreview={true}
+              viewerRole={currentUser?.userRole || currentUser?.role || 'Sales_Rep'}
               onSwitchToQuotationManagement={(qtNumber) => {
                 // 🔥 下推报价管理：切换到报价管理页面并高亮指定QT
                 setHighlightQtNumber(qtNumber);

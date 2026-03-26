@@ -298,7 +298,7 @@ export function ProductSupplierDistributionDialog({
         const xjNumber = generateXJNumber(quotationRequest.region);
         
         const xjPayload = {
-          id: `rfq_${Date.now()}_${supplierId}_${Math.random()}`,
+          id: `xj_${Date.now()}_${supplierId}_${Math.random()}`,
           xjNumber,
           
           // 🔥 关联原始QR编号
@@ -351,7 +351,7 @@ export function ProductSupplierDistributionDialog({
         await addXJ(xjPayload);
       }));
 
-      // 🔥 更新QuotationRequest的rfqCount
+      // 🔥 更新QuotationRequest的xjCount
       await updateQuotationRequest(quotationRequest.id, {
         xjCount: statistics.totalXJs,
         status: 'processing'

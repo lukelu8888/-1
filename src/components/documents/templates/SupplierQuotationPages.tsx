@@ -362,7 +362,38 @@ function EmptyProductsState() {
 
 // ─── Main export: build pages ─────────────────────────────────────────────────
 export function buildQuotationPages(data: QuotationDocData): React.ReactNode[] {
-  const { items, currency, totalAmount, terms, supplierRemarks } = data;
+  const normalizedItems = Array.isArray((data as any)?.items)
+    ? (data as any).items
+    : Array.isArray((data as any)?.products)
+      ? (data as any).products.map((product: any, index: number) => ({
+          no: product?.no ?? index + 1,
+          modelNo: product?.modelNo || '',
+          imageUrl: product?.imageUrl,
+          description: product?.description || '',
+          specification: product?.specification || '',
+          quantity: Number(product?.quantity || 0),
+          unit: product?.unit || 'PCS',
+          unitPrice: typeof product?.unitPrice === 'number' ? product.unitPrice : Number(product?.unitPrice || 0),
+          lineAmount:
+            typeof product?.lineAmount === 'number'
+              ? product.lineAmount
+              : Number(product?.quantity || 0) * Number(product?.unitPrice || 0),
+          currency: product?.currency || '',
+          remarks: product?.remarks,
+        }))
+      : [];
+
+  const fallbackCurrency =
+    (data as any)?.currency ||
+    normalizedItems[0]?.currency ||
+    'CNY';
+  const totalAmount = typeof (data as any)?.totalAmount === 'number'
+    ? (data as any).totalAmount
+    : normalizedItems.reduce((sum: number, item: any) => sum + Number(item?.lineAmount || 0), 0);
+  const terms = ((data as any)?.terms || {}) as QuotationDocData['terms'];
+  const supplierRemarks = (data as any)?.supplierRemarks;
+  const items = normalizedItems as QuotationDocItem[];
+  const currency = fallbackCurrency;
 
   // Build term rows (only non-empty values)
   const termRows: TermRow[] = [

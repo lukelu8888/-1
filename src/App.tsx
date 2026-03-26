@@ -130,9 +130,11 @@ function CustomerBusinessProviders({ children }: { children: React.ReactNode }) 
       <OrderProvider>
         <NotificationProvider>
           <FinanceProvider>
-            <SalesQuotationProvider>
-              <SalesContractProvider>{children}</SalesContractProvider>
-            </SalesQuotationProvider>
+            <PurchaseOrderProvider>
+              <SalesQuotationProvider>
+                <SalesContractProvider>{children}</SalesContractProvider>
+              </SalesQuotationProvider>
+            </PurchaseOrderProvider>
           </FinanceProvider>
         </NotificationProvider>
       </OrderProvider>
@@ -155,7 +157,7 @@ function AppProviders({
     <RegionProvider>
       {isCustomerBusinessPage ? (
         <CustomerBusinessProviders>{children}</CustomerBusinessProviders>
-      ) : user?.type === 'admin' || user?.type === 'supplier' || currentPage === 'dashboard' ? (
+      ) : user?.type === 'admin' || user?.type === 'supplier' ? (
         <FullBusinessProviders>{children}</FullBusinessProviders>
       ) : (
         children
@@ -169,7 +171,14 @@ function AppShell() {
   const user = userContext?.user ?? null;
   const authLoading = userContext?.authLoading ?? false;
   const logout = userContext?.logout ?? (async () => {});
-  const { currentPage } = useRouter();
+  const { currentPage, navigateTo } = useRouter();
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (user?.type === 'supplier' && currentPage === 'dashboard') {
+      navigateTo('supplier');
+    }
+  }, [authLoading, currentPage, navigateTo, user?.type]);
 
   return (
     <AppProviders user={user} currentPage={currentPage}>

@@ -7,7 +7,7 @@ import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { toast } from 'sonner@2.0.3';
 import { productDetailsData } from '../../data/productDetailsData';
 
-interface ResizableProformaTableProps {
+interface ResizableQuotationTableProps {
   orderItems: any[];
   selectedProduct: any;
   setSelectedProduct: (product: any) => void;
@@ -21,7 +21,7 @@ interface ResizableProformaTableProps {
   };
 }
 
-export function ResizableProformaTable({
+export function ResizableQuotationTable({
   orderItems,
   selectedProduct,
   setSelectedProduct,
@@ -29,7 +29,7 @@ export function ResizableProformaTable({
   removeProduct,
   saveDraftOrder,
   totals
-}: ResizableProformaTableProps) {
+}: ResizableQuotationTableProps) {
   // Column widths state
   const [columnWidths, setColumnWidths] = useState<{ [key: string]: number }>({
     no: 64,
@@ -74,7 +74,7 @@ export function ResizableProformaTable({
     const handleMouseUp = () => {
       if (resizing) {
         // Save to localStorage
-        localStorage.setItem('proformaTableColumnWidths', JSON.stringify(columnWidths));
+        localStorage.setItem('quotationTableColumnWidths', JSON.stringify(columnWidths));
       }
       setResizing(null);
     };
@@ -92,7 +92,7 @@ export function ResizableProformaTable({
 
   // Load column widths from localStorage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('proformaTableColumnWidths');
+    const saved = localStorage.getItem('quotationTableColumnWidths');
     if (saved) {
       try {
         setColumnWidths(JSON.parse(saved));

@@ -244,7 +244,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
         },
         body: JSON.stringify({
           access_key: accessKey,
-          subject: `New INQ ${inquiryNumber} from ${formData.companyName}`,
+          subject: `New ING ${inquiryNumber} from ${formData.companyName}`,
           from_name: formData.companyName,
           email: formData.email,
           to_email: 'gousllc0604@gmail.com',
@@ -285,7 +285,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
   };
 
   // 🔥 Preview inquiry number (without incrementing counter)
-  // 🌍 Use current user's region for INQ number
+  // 🌍 Use current user's region for ING number
   const [inquiryNumber, setInquiryNumber] = React.useState(() => {
     const regionCode = currentUserRegion === 'North America' ? 'NA' : 
                       currentUserRegion === 'South America' ? 'SA' : 'EA';
@@ -299,7 +299,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
                         currentUserRegion === 'South America' ? 'SA' : 'EA';
       const previewNumber = peekInquiryNumber(regionCode);
       setInquiryNumber(previewNumber);
-      console.log('🔢 预览 INQ 编号:', previewNumber, '用户区域:', currentUserRegion);
+      console.log('🔢 预览 ING 编号:', previewNumber, '用户区域:', currentUserRegion);
     }
   }, [isOpen, peekInquiryNumber, currentUserRegion]);
 
@@ -611,7 +611,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
           </div>
           <div className="text-right">
             <div className="bg-red-600 text-white px-4 py-2 rounded-lg mb-2">
-              <p className="text-xs">INQ No.</p>
+              <p className="text-xs">ING No.</p>
               <p className="text-lg">{inquiryNumber}</p>
             </div>
             <p className="text-xs text-gray-600">
@@ -969,7 +969,7 @@ This inquiry was submitted via COSUN Building Materials B2B Platform
                   setIsSubmitting(false);
                   return;
                 }
-                console.log('✅ [Submit] DB-generated INQ number:', finalInquiryNumber, 'region:', regionCode);
+                console.log('✅ [Submit] DB-generated ING number:', finalInquiryNumber, 'region:', regionCode);
 
                 // Send email (non-blocking — don't gate inquiry creation on email)
                 sendInquiryEmail().catch(e => console.warn('[Submit] Email send failed (non-critical):', e));

@@ -32,8 +32,8 @@ BEGIN
     UPDATE public.document_templates
        SET template_code = 'tpl_ing',
            document_code = 'ING',
-           template_name_cn = '客户询价单',
-           template_name_en = 'Customer Inquiry',
+           template_name_cn = 'ING',
+           template_name_en = 'ING',
            business_stage = 'source',
            description = '客户原始询价源头',
            updated_at = NOW()
@@ -54,8 +54,8 @@ BEGIN
     ) VALUES (
       'tpl_ing',
       'ING',
-      '客户询价单',
-      'Customer Inquiry',
+      'ING',
+      'ING',
       'source',
       'legacy-react',
       v_current_version_id,

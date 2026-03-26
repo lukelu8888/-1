@@ -33,7 +33,6 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Badge } from '../ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../ui/tooltip';
 import {
@@ -122,6 +121,30 @@ const QUOTE_MODE_LABELS: Record<QuoteMode, string> = {
   FOB_USD: 'FOB（离岸价，美元）',
   CIF_USD: 'CIF（到岸价，美元）',
 };
+
+const PAYMENT_TERM_OPTIONS = [
+  'T/T 30% 预付，70% 发货前',
+  'T/T 100% 预付',
+  'T/T 30天',
+  'T/T 60天',
+  'L/C at sight',
+  'L/C 30天',
+  'D/P 付款交单',
+  '月结30天',
+  '月结60天',
+];
+
+const DELIVERY_TERM_OPTIONS = [
+  'EXW 工厂',
+  'FOB 厦门',
+  'FOB 上海',
+  'FOB 广州',
+  'FOB 宁波',
+  'CIF 目的港',
+  'DDP 目的地',
+  'DAP 目的地',
+  'FCA 货交承运人',
+];
 
 const EMPTY_COST = (): CostBreakdown => ({
   material: 0, labor: 0, manufacturing: 0, packaging: 0,
@@ -1266,25 +1289,33 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
             </div>
             <div>
               <FieldLabel tip="买卖双方约定的货款支付方式。T/T（电汇）最常见；L/C（信用证）风险低但手续复杂；D/P（付款交单）适合中等信任度客户。预付比例越高，对卖方越有利。">付款方式</FieldLabel>
-              <Select value={paymentTerms} onValueChange={setPaymentTerms}>
-                <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {['T/T 30% 预付，70% 发货前', 'T/T 100% 预付', 'T/T 30天', 'T/T 60天', 'L/C at sight', 'L/C 30天', 'D/P 付款交单', '月结30天', '月结60天'].map(v => (
-                    <SelectItem key={v} value={v}>{v}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                list="supplier-payment-terms"
+                value={paymentTerms}
+                onChange={e => setPaymentTerms(e.target.value)}
+                placeholder="请选择或输入付款方式"
+                className="mt-1 h-8 text-sm"
+              />
+              <datalist id="supplier-payment-terms">
+                {PAYMENT_TERM_OPTIONS.map(v => (
+                  <option key={v} value={v} />
+                ))}
+              </datalist>
             </div>
             <div>
               <FieldLabel tip="国际贸易术语（Incoterms），规定买卖双方在货物运输中各自承担的费用、风险和责任边界。应与上方「报价模式」保持一致。" formula={"EXW：工厂交货，买方承担一切\nFOB：货上船后风险转移给买方\nCIF：卖方负责运费+保险到目的港\nDDP：卖方负责到买方门口（含关税）"}>交货条款</FieldLabel>
-              <Select value={deliveryTerms} onValueChange={setDeliveryTerms}>
-                <SelectTrigger className="mt-1 h-8 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {['EXW 工厂', 'FOB 厦门', 'FOB 上海', 'FOB 广州', 'FOB 宁波', 'CIF 目的港', 'DDP 目的地', 'DAP 目的地', 'FCA 货交承运人'].map(v => (
-                    <SelectItem key={v} value={v}>{v}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input
+                list="supplier-delivery-terms"
+                value={deliveryTerms}
+                onChange={e => setDeliveryTerms(e.target.value)}
+                placeholder="请选择或输入交货条款"
+                className="mt-1 h-8 text-sm"
+              />
+              <datalist id="supplier-delivery-terms">
+                {DELIVERY_TERM_OPTIONS.map(v => (
+                  <option key={v} value={v} />
+                ))}
+              </datalist>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

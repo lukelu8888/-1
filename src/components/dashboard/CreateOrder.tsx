@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '../ui/alert';
 import { Badge } from '../ui/badge';
 import { toast } from 'sonner';
 import { AddProductDialog } from './AddProductDialog';
-import { ResizableProformaTable } from './ResizableProformaTable';
+import { ResizableQuotationTable } from './ResizableQuotationTable';
 import { productDetailsData } from '../../data/productDetailsData';
 import { copyToClipboard } from '../../utils/clipboard';
 import { useUser } from '../../contexts/UserContext';
@@ -802,7 +802,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
       }}>
         <DialogContent className="max-w-7xl max-h-[95vh] overflow-hidden flex flex-col">
           <DialogHeader className="sr-only">
-            <DialogTitle>Proforma Invoice - {selectedProduct?.itemNumber}</DialogTitle>
+            <DialogTitle>Quotation Draft - {selectedProduct?.itemNumber}</DialogTitle>
             <DialogDescription>
               Professional trade order format with complete product specifications and shipping details
             </DialogDescription>
@@ -866,7 +866,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
                 {/* Products Table - Professional Format */}
                 <div>
                   <div className="border rounded-lg overflow-hidden">
-                    <ResizableProformaTable
+                    <ResizableQuotationTable
                       orderItems={selectedProduct.orderItems}
                       selectedProduct={selectedProduct}
                       setSelectedProduct={setSelectedProduct}
@@ -993,7 +993,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
                 <div className="border rounded-lg p-4">
                   <h3 className="font-semibold text-gray-900 mb-2">NOTES</h3>
                   <p className="text-sm text-gray-600 italic">
-                    This is a draft proforma invoice. Final PI will be issued upon order confirmation. 
+                    This is a quotation draft used for order confirmation preparation.
                     All specifications and prices are subject to confirmation.
                   </p>
                 </div>

@@ -10,6 +10,7 @@ import { supabase } from './supabase'
 const BUCKET_PAYMENT = 'payment-proofs'
 const BUCKET_CONTRACTS = 'contract-attachments'
 const BUCKET_OEM = 'oem-attachments'
+const BUCKET_FINANCE_COMPLIANCE = 'finance-compliance-docs'
 
 export type UploadResult = {
   url: string
@@ -147,6 +148,33 @@ export const oemAttachmentStorage = {
 }
 
 // ============================================================
+// 财务合规文件包附件上传
+// ============================================================
+export const financeComplianceStorage = {
+  async upload(
+    file: File,
+    packetNo: string,
+    docCode: string,
+    uploaderEmail: string,
+  ): Promise<UploadResult> {
+    const safePacket = packetNo.replace(/[^a-zA-Z0-9_\-]/g, '_')
+    const safeDocCode = docCode.replace(/[^a-zA-Z0-9_\-]/g, '_')
+    const safeEmail = uploaderEmail.split('@')[0].replace(/[^a-zA-Z0-9]/g, '_')
+    const pathPrefix = `${safePacket}/${safeDocCode}/${safeEmail}`
+    return uploadFile(BUCKET_FINANCE_COMPLIANCE, file, pathPrefix)
+  },
+
+  async delete(path: string) {
+    return deleteFile(BUCKET_FINANCE_COMPLIANCE, path)
+  },
+
+  getPublicUrl(path: string) {
+    const { data } = supabase.storage.from(BUCKET_FINANCE_COMPLIANCE).getPublicUrl(path)
+    return data.publicUrl
+  },
+}
+
+// ============================================================
 // 工具函数：把旧的 base64 dataURL 转成 File 对象
 // ============================================================
 export function dataUrlToFile(dataUrl: string, fileName: string): File {
@@ -172,7 +200,7 @@ export async function ensureBucketsExist() {
   const { data: buckets } = await supabase.storage.listBuckets()
   const existing = new Set((buckets || []).map((b) => b.name))
 
-  for (const bucketName of [BUCKET_PAYMENT, BUCKET_CONTRACTS, BUCKET_OEM]) {
+  for (const bucketName of [BUCKET_PAYMENT, BUCKET_CONTRACTS, BUCKET_OEM, BUCKET_FINANCE_COMPLIANCE]) {
     if (!existing.has(bucketName)) {
       const { error } = await supabase.storage.createBucket(bucketName, {
         public: true,

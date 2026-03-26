@@ -141,13 +141,13 @@ INSERT INTO public.document_templates (
   status,
   description
 ) VALUES
-  ('tpl_inq', 'INQ', '客户询价单', 'Customer Inquiry', 'source', 'legacy-react', 'published', '客户原始询价源头'),
-  ('tpl_qr',  'QR',  '报价请求单', 'Quote Requirement', 'internal-cost-request', 'legacy-react', 'published', '业务员向采购员发起的报价请求'),
-  ('tpl_xj',  'XJ',  '采购询价单', 'Supplier Inquiry', 'supplier-inquiry', 'legacy-react', 'published', '采购员向供应商询价'),
-  ('tpl_bj',  'BJ',  '供应商报价单', 'Supplier Quotation', 'supplier-quotation', 'legacy-react', 'published', '供应商报价反馈'),
-  ('tpl_qt',  'QT',  '销售报价单', 'Sales Quotation', 'sales-quotation', 'legacy-react', 'published', '业务员对客户报价'),
-  ('tpl_sc',  'SC',  '销售合同', 'Sales Contract', 'sales-contract', 'legacy-react', 'published', '客户成交合同'),
-  ('tpl_cg',  'CG',  '采购合同', 'Purchase Contract', 'purchase-contract', 'legacy-react', 'published', '公司与供应商采购合同')
+  ('tpl_inq', 'INQ', 'ING', 'ING', 'source', 'legacy-react', 'published', '客户原始询价源头'),
+  ('tpl_qr',  'QR',  'QR',  'QR',  'internal-cost-request', 'legacy-react', 'published', '业务员向采购员发起的报价请求'),
+  ('tpl_xj',  'XJ',  'XJ',  'XJ',  'supplier-inquiry', 'legacy-react', 'published', '采购员向供应商询价'),
+  ('tpl_bj',  'BJ',  'BJ',  'BJ',  'supplier-quotation', 'legacy-react', 'published', '供应商报价反馈'),
+  ('tpl_qt',  'QT',  'QT',  'QT',  'sales-quotation', 'legacy-react', 'published', '业务员对客户报价'),
+  ('tpl_sc',  'SC',  'SC',  'SC',  'sales-contract', 'legacy-react', 'published', '客户成交合同'),
+  ('tpl_cg',  'CG',  'CG',  'CG',  'purchase-contract', 'legacy-react', 'published', '公司与供应商采购合同')
 ON CONFLICT (template_code) DO UPDATE SET
   document_code = EXCLUDED.document_code,
   template_name_cn = EXCLUDED.template_name_cn,

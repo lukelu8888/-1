@@ -12,6 +12,7 @@ import type { SalesContractData } from '@/components/documents/templates/SalesCo
 import type { QuotationData } from '@/components/documents/templates/QuotationDocument';
 import type { SupplierQuotationData } from '@/components/documents/templates/SupplierQuotationDocument';
 import type { CustomerInquiryData } from '@/components/documents/templates/CustomerInquiryDocument';
+import { getStoredAdminOrgProfile } from '@/contexts/AdminOrganizationContext';
 import { aggregateInquiryOemFromProducts, type InquiryOemData } from '@/types/oem';
 import {
   getCustomerFacingModelNo,
@@ -26,6 +27,122 @@ const toSafeNumber = (value: unknown): number => {
     if (Number.isFinite(parsed)) return parsed;
   }
   return 0;
+};
+
+const normalizePlaceholderText = (value?: string | null) => {
+  const text = String(value || '').trim();
+  if (!text || text === '-' || text === '--' || /^n\/a$/i.test(text)) {
+    return '';
+  }
+  return text;
+};
+
+const parseQuotedProductSummary = (rawName?: string | null, rawSpecification?: string | null) => {
+  const nameText = normalizePlaceholderText(rawName);
+  const specText = normalizePlaceholderText(rawSpecification);
+
+  if (!nameText) {
+    return {
+      productName: '',
+      modelNo: '',
+      specification: specText,
+    };
+  }
+
+  const normalizedText = nameText
+    .replace(/\s*[\r\n]+\s*/g, '; ')
+    .replace(/([,，])\s*(?=(型号|规格|Material|Warranty|Certification)\b|(?=型号|规格))/gi, '; ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  const segments = normalizedText
+    .split(/[;；]\s*/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  let productName = '';
+  let modelNo = '';
+  const specificationParts: string[] = [];
+
+  segments.forEach((segment, index) => {
+    const cleanedSegment = segment.replace(/^[-:：,\s]+/, '').trim();
+    if (!cleanedSegment) return;
+
+    if (/^型号[:：]?/i.test(cleanedSegment)) {
+      modelNo = cleanedSegment.replace(/^型号[:：]?\s*/i, '').trim();
+      return;
+    }
+
+    if (/^规格[:：]?/i.test(cleanedSegment)) {
+      specificationParts.push(cleanedSegment.replace(/^规格[:：]?\s*/i, '').trim());
+      return;
+    }
+
+    if (/^certification[:：]?/i.test(cleanedSegment) || /^warranty[:：]?/i.test(cleanedSegment) || /^material[:：]?/i.test(cleanedSegment)) {
+      specificationParts.push(cleanedSegment);
+      return;
+    }
+
+    if (index === 0 && !productName) {
+      productName = cleanedSegment;
+      return;
+    }
+
+    specificationParts.push(cleanedSegment);
+  });
+
+  return {
+    productName: productName || normalizedText,
+    modelNo,
+    specification: [specText, ...specificationParts]
+      .map((part) => normalizePlaceholderText(part))
+      .filter(Boolean)
+      .join('; '),
+  };
+};
+
+const UUID_LIKE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const buildAdminCompanyProfile = () => {
+  const adminOrg = getStoredAdminOrgProfile();
+
+  return {
+    name: String(adminOrg.nameCN || '').trim(),
+    nameEn: String(adminOrg.nameEN || adminOrg.nameCN || '').trim(),
+    address: String(adminOrg.addressCN || '').trim(),
+    addressEn: String(adminOrg.addressEN || adminOrg.addressCN || '').trim(),
+    tel: String(adminOrg.phone || '').trim(),
+    email: String(adminOrg.email || '').trim(),
+    website: String(adminOrg.website || '').trim(),
+    contactPerson: String(adminOrg.contactPerson || '').trim(),
+    bankUSD: {
+      bankName: String(adminOrg.bankUSD.bankNameEN || adminOrg.bankUSD.bankNameCN || '').trim(),
+      accountName: String(adminOrg.bankUSD.accountNameEN || adminOrg.bankUSD.accountNameCN || adminOrg.nameEN || adminOrg.nameCN || '').trim(),
+      accountNumber: String(adminOrg.bankUSD.accountNumber || '').trim(),
+      swiftCode: String(adminOrg.bankUSD.swiftCode || '').trim(),
+      bankAddress: String(adminOrg.bankUSD.bankAddress || '').trim(),
+      currency: String(adminOrg.bankUSD.currency || 'USD').trim(),
+    },
+  };
+};
+
+const resolveDisplayInquiryNumber = (inquiry: Record<string, any>): string => {
+  const candidates = [
+    inquiry.inquiryNumber,
+    inquiry.inquiry_number,
+    inquiry.inquiryNo,
+    inquiry.documentDataSnapshot?.inquiryNo,
+    inquiry.document_data_snapshot?.inquiryNo,
+    inquiry.id,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (!value || value === 'ING-DRAFT' || UUID_LIKE_PATTERN.test(value)) continue;
+    return value;
+  }
+
+  return 'ING-DRAFT';
 };
 
 const parseInquiryRequirementsFromMessage = (message?: string | null) => {
@@ -173,7 +290,7 @@ export function adaptInquiryToFactoryFacingOemDocument(inquiry: {
   const oem = resolveProductLevelInquiryOem(inquiry);
   if (!oem?.enabled) return null;
 
-  const inquiryNumber = inquiry.inquiryNumber || 'ING-DRAFT';
+  const inquiryNumber = resolveDisplayInquiryNumber(inquiry as Record<string, any>);
   const issueDate = inquiry.date || new Date().toISOString().split('T')[0];
   const projectName = `COSUN OEM PROJECT ${inquiryNumber}`;
   const fileMappings = new Map(
@@ -333,7 +450,7 @@ export function adaptInquiryToDocumentData(inquiry: {
   const resolvedOem = resolveProductLevelInquiryOem(inquiry);
 
   return {
-    inquiryNo: inquiry.inquiryNumber || 'ING-DRAFT',
+    inquiryNo: resolveDisplayInquiryNumber(inquiry as Record<string, any>),
     inquiryDate: date,
     region,
     customer: {
@@ -411,6 +528,7 @@ export function adaptOrderToSalesContract(orderData: {
   portOfLoading?: string;
   portOfDestination?: string;
 }): SalesContractData {
+  const adminCompany = buildAdminCompanyProfile();
   const normalizedOrderDate = new Date(orderData.date);
   const safeOrderDate = Number.isFinite(normalizedOrderDate.getTime())
     ? normalizedOrderDate
@@ -431,24 +549,26 @@ export function adaptOrderToSalesContract(orderData: {
     quotationNo: orderData.quotationNumber,
     region,
     
-    // 卖方信息（高盛达富）
+    // 卖方信息（企业主数据中心）
     seller: {
-      name: '福建高盛达富建材有限公司',
-      nameEn: 'Fujian Cosun Dafu Building Materials Co., Ltd.',
-      address: '福建省福州市仓山区建新镇金山工业区',
-      addressEn: 'Jinshan Industrial Zone, Jianxin Town, Cangshan District, Fuzhou City, Fujian Province, China',
-      tel: '+86-591-8888-8888',
-      fax: '+86-591-8888-8889',
-      email: 'export@cosun.com',
-      legalRepresentative: '张三',
-      businessLicense: '91350000MA2XYZ1234',
+      name: adminCompany.name,
+      nameEn: adminCompany.nameEn,
+      address: adminCompany.address,
+      addressEn: adminCompany.addressEn,
+      tel: adminCompany.tel,
+      fax: '',
+      email: adminCompany.email,
+      legalRepresentative: adminCompany.contactPerson,
+      businessLicense: '',
       bankInfo: {
-        bankName: 'Bank of China Fuzhou Branch',
-        accountName: 'Fujian Cosun Dafu Building Materials Co., Ltd.',
-        accountNumber: '1234567890123456',
-        swiftCode: 'BKCHCNBJ950',
-        bankAddress: 'No. 136 Wusi Road, Fuzhou, Fujian, China',
-        currency: orderData.currency
+        bankName: adminCompany.bankUSD.bankName,
+        accountName: adminCompany.bankUSD.accountName,
+        accountNumber: adminCompany.bankUSD.accountNumber,
+        swiftCode: adminCompany.bankUSD.swiftCode,
+        bankAddress: adminCompany.bankUSD.bankAddress,
+        currency: orderData.currency || adminCompany.bankUSD.currency
+        ,
+        paymentNote: adminCompany.bankUSD.paymentNote,
       }
     },
     
@@ -564,7 +684,9 @@ export function adaptSalesQuotationToDocumentData(quotation: {
   salesPerson?: string;
   salesPersonPhone?: string;
   salesPersonWhatsapp?: string;
+  paymentMode?: string | null;
 }): QuotationData {
+  const adminCompany = buildAdminCompanyProfile();
   const quotationDate = quotation.quotationDate
     || (quotation.createdAt ? new Date(quotation.createdAt).toISOString().split('T')[0] : null)
     || new Date().toISOString().split('T')[0];
@@ -579,14 +701,14 @@ export function adaptSalesQuotationToDocumentData(quotation: {
     inquiryNo: quotation.inqNumber,
     region: quotation.region || 'NA',
     company: {
-      name: '福建高盛达富建材有限公司',
-      nameEn: 'Fujian Gaoshengdafu Building Materials Co., Ltd.',
-      address: '中国福建省厦门市思明区',
-      addressEn: 'Siming District, Xiamen, Fujian Province, China',
-      tel: '+86-592-1234567',
-      fax: '+86-592-1234568',
-      email: 'info@cosun.com',
-      website: 'www.cosun.com',
+      name: adminCompany.name,
+      nameEn: adminCompany.nameEn,
+      address: adminCompany.address,
+      addressEn: adminCompany.addressEn,
+      tel: adminCompany.tel,
+      fax: '',
+      email: adminCompany.email,
+      website: adminCompany.website,
     },
     customer: {
       companyName: quotation.customerCompany || '',
@@ -598,12 +720,17 @@ export function adaptSalesQuotationToDocumentData(quotation: {
     products: (quotation.items || []).map((item, index) => {
       const quantity = toSafeNumber(item.quantity);
       const unitPrice = toSafeNumber(item.salesPrice ?? item.unitPrice);
+      const normalized = parseQuotedProductSummary(item.productName, item.specification);
+      const normalizedModelNo = normalizePlaceholderText(item.modelNo) || normalized.modelNo;
       return {
         no: index + 1,
-        modelNo: getFormalBusinessModelNo(item),
+        modelNo: getFormalBusinessModelNo({
+          ...item,
+          modelNo: normalizedModelNo || '',
+        }),
         imageUrl: item.imageUrl || '',
-        productName: item.productName || '',
-        specification: item.specification || '',
+        productName: normalized.productName,
+        specification: normalized.specification,
         hsCode: item.hsCode || '',
         quantity,
         unit: item.unit || 'PCS',
@@ -663,6 +790,7 @@ export function adaptLegacyQuotationToDocumentData(quotation: {
   deliveryTerms?: string;
   notes?: string;
 }): QuotationData {
+  const adminCompany = buildAdminCompanyProfile();
   const quotationDate = quotation.quotationDate || new Date().toISOString().split('T')[0];
   const validUntil =
     quotation.validUntil
@@ -678,14 +806,14 @@ export function adaptLegacyQuotationToDocumentData(quotation: {
     inquiryNo: quotation.inquiryNumber,
     region,
     company: {
-      name: '福建高盛达富建材有限公司',
-      nameEn: 'Fujian Gaoshengdafu Building Materials Co., Ltd.',
-      address: '中国福建省厦门市思明区',
-      addressEn: 'Siming District, Xiamen, Fujian Province, China',
-      tel: '+86-592-1234567',
-      fax: '+86-592-1234568',
-      email: 'info@cosun.com',
-      website: 'www.cosun.com',
+      name: adminCompany.name,
+      nameEn: adminCompany.nameEn,
+      address: adminCompany.address,
+      addressEn: adminCompany.addressEn,
+      tel: adminCompany.tel,
+      fax: '',
+      email: adminCompany.email,
+      website: adminCompany.website,
     },
     customer: {
       companyName: quotation.customerName || quotation.customer || '',
@@ -763,11 +891,13 @@ export function adaptSupplierQuotationToDocumentData(quotation: {
     remarks?: string;
   }>;
   paymentTerms?: string;
+  paymentMode?: string | null;
   deliveryTerms?: string;
   packingTerms?: string;
   generalRemarks?: string;
   supplierRemarks?: string;
 }): SupplierQuotationData {
+  const adminCompany = buildAdminCompanyProfile();
   const quotationDate = quotation.quotationDate || new Date().toISOString().split('T')[0];
   const validUntil =
     quotation.validUntil ||
@@ -790,13 +920,13 @@ export function adaptSupplierQuotationToDocumentData(quotation: {
       supplierCode: quotation.supplierCode || '',
     },
     buyer: {
-      name: '福建高盛达富建材有限公司',
-      nameEn: 'Fujian Gaoshengdafu Building Materials Co., Ltd.',
-      address: '福建省厦门市思明区',
-      addressEn: 'Siming District, Xiamen, Fujian, China',
-      tel: '+86-592-1234567',
-      email: 'purchase@cosun.com',
-      contactPerson: 'COSUN采购',
+      name: adminCompany.name,
+      nameEn: adminCompany.nameEn,
+      address: adminCompany.address,
+      addressEn: adminCompany.addressEn,
+      tel: adminCompany.tel,
+      email: adminCompany.email,
+      contactPerson: adminCompany.contactPerson,
     },
     products: (quotation.items || []).map((item, index) => ({
       no: index + 1,
@@ -863,6 +993,7 @@ export function adaptSalesContractToDocumentData(contract: {
   currency?: string;
   tradeTerms?: string;
   paymentTerms?: string;
+  paymentMode?: string | null;
   depositAmount?: number;
   balanceAmount?: number;
   deliveryTime?: string;
@@ -871,6 +1002,7 @@ export function adaptSalesContractToDocumentData(contract: {
   packing?: string;
   remarks?: string;
 }): SalesContractData {
+  const adminCompany = buildAdminCompanyProfile();
   const region = contract.region === 'EA' ? 'EU' : (contract.region || 'NA');
   const totalAmount = toSafeNumber(contract.totalAmount);
   return {
@@ -879,21 +1011,22 @@ export function adaptSalesContractToDocumentData(contract: {
     quotationNo: contract.quotationNumber,
     region,
     seller: {
-      name: '福建高盛达富建材有限公司',
-      nameEn: 'FUJIAN COSUN BUILDING MATERIALS CO., LTD.',
-      address: '中国福建省厦门市工业园区123号',
-      addressEn: 'No. 123, Industrial Park, Xiamen, Fujian, China',
-      tel: '+86-592-1234-5678',
-      fax: '+86-592-1234-5679',
-      email: 'sales@cosun.com',
-      legalRepresentative: '张总',
+      name: adminCompany.name,
+      nameEn: adminCompany.nameEn,
+      address: adminCompany.address,
+      addressEn: adminCompany.addressEn,
+      tel: adminCompany.tel,
+      fax: '',
+      email: adminCompany.email,
+      legalRepresentative: adminCompany.contactPerson,
       bankInfo: {
-        bankName: 'Bank of China, Xiamen Branch',
-        accountName: 'FUJIAN COSUN BUILDING MATERIALS CO., LTD.',
-        accountNumber: '1234567890123456',
-        swiftCode: 'BKCHCNBJ950',
-        bankAddress: 'Xiamen, Fujian, China',
-        currency: contract.currency || 'USD',
+        bankName: adminCompany.bankUSD.bankName,
+        accountName: adminCompany.bankUSD.accountName,
+        accountNumber: adminCompany.bankUSD.accountNumber,
+        swiftCode: adminCompany.bankUSD.swiftCode,
+        bankAddress: adminCompany.bankUSD.bankAddress,
+        currency: contract.currency || adminCompany.bankUSD.currency,
+        paymentNote: adminCompany.bankUSD.paymentNote,
       },
     },
     buyer: {

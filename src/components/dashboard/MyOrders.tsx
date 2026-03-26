@@ -50,6 +50,7 @@ const DraggableTab = ({
   isDragging
 }: DraggableTabProps) => {
   const Icon = tab.icon;
+  const isActive = activeTab === tab.id;
 
   return (
     <div 
@@ -66,10 +67,24 @@ const DraggableTab = ({
     >
       <TabsTrigger 
         value={tab.id}
-        className="flex items-center gap-1.5 px-4 py-4 rounded-none border-b-2 border-transparent data-[state=active]:border-[#F96302] data-[state=active]:bg-[#FFF4ED] transition-all"
-        style={{ fontSize: '13px', fontWeight: 600 }}
+        className="flex items-center gap-1.5 px-4 py-4 rounded-none border-b-2 border-transparent transition-all"
+        style={
+          isActive
+            ? {
+                fontSize: '13px',
+                fontWeight: 600,
+                borderBottomColor: 'var(--customer-primary)',
+                backgroundColor: 'var(--customer-primary-soft)',
+                color: 'var(--customer-primary-text)',
+              }
+            : { fontSize: '13px', fontWeight: 600 }
+        }
       >
-        <GripVertical className="w-3 h-3 text-gray-300 -ml-0.5" strokeWidth={2} />
+        <GripVertical
+          className="w-3 h-3 -ml-0.5"
+          style={{ color: isActive ? 'var(--customer-primary-border)' : '#d1d5db' }}
+          strokeWidth={2}
+        />
         <Icon className="w-4 h-4" strokeWidth={2.5} />
         <span className="uppercase tracking-wide whitespace-nowrap">{tab.label}</span>
       </TabsTrigger>
@@ -180,7 +195,10 @@ export function MyOrders({
       <div className="bg-white border-2 border-gray-200 rounded-sm shadow-sm p-6">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-[#F96302] rounded-sm flex items-center justify-center flex-shrink-0">
+            <div
+              className="w-12 h-12 rounded-sm flex items-center justify-center flex-shrink-0"
+              style={{ backgroundColor: 'var(--customer-primary)' }}
+            >
               <Package className="w-6 h-6 text-white" strokeWidth={2.5} />
             </div>
             <div>

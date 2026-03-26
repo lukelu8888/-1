@@ -15,12 +15,38 @@
  */
 
 import { Personnel, Region, personnelList } from './notification-rules';
+import { staffDirectoryService } from './supabaseService';
+
+const getInternalSalesPersonnel = (): Personnel[] => {
+  const cachedStaff = staffDirectoryService.getCachedSalesStaff();
+  if (cachedStaff.length === 0) return [];
+
+  const regionMap: Record<string, Region | undefined> = {
+    NA: 'north_america',
+    SA: 'south_america',
+    EA: 'europe_africa',
+  };
+
+  return cachedStaff
+    .filter((row) => row.rbacRole === 'Sales_Rep')
+    .map<Personnel>((row) => ({
+      name: row.name,
+      nameEn: row.name,
+      role: '业务员',
+      roleEn: 'Sales Rep',
+      region: regionMap[String(row.region || '').toUpperCase()],
+      displayName: row.name,
+      workload: 0,
+      email: row.email,
+    }));
+};
 
 const normalizeSalesRepEmail = (email?: string | null, region?: Region): string | undefined => {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return undefined;
 
-  const exactMatch = personnelList.find((person) => String(person.email || '').trim().toLowerCase() === normalized);
+  const internalSalesPersonnel = getInternalSalesPersonnel();
+  const exactMatch = internalSalesPersonnel.find((person) => String(person.email || '').trim().toLowerCase() === normalized);
   if (exactMatch?.email) return exactMatch.email;
 
   const legacyRegionFallback: Partial<Record<Region, string>> = {
@@ -41,7 +67,7 @@ const resolveMappedSalesRep = (mapping: CustomerSalesRepMapping): Personnel | nu
   const mappedName = String(mapping.salesRepName || '').trim();
 
   return (
-    personnelList.find((person) => {
+    getInternalSalesPersonnel().find((person) => {
       const personEmail = String(person.email || '').trim().toLowerCase();
       const personDisplayName = String(person.displayName || '').trim();
       const personName = String(person.name || '').trim();
@@ -168,7 +194,7 @@ export function getSalesRepByCustomer(customerName: string): Personnel | null {
  */
 export function assignSalesRepAuto(customerName: string, customerRegion: Region): Personnel | null {
   // 查找同区域的所有业务员，按负载排序
-  const regionalSalesReps = personnelList
+  const regionalSalesReps = getInternalSalesPersonnel()
     .filter(p => p.role === '业务员' && p.region === customerRegion)
     .sort((a, b) => (a.workload || 0) - (b.workload || 0));
   
@@ -233,7 +259,7 @@ export function assignSalesRepManual(
   const mappings = getAllMappings();
   
   // 验证业务员是否存在
-  const salesRep = personnelList.find(p => 
+  const salesRep = getInternalSalesPersonnel().find(p => 
     p.displayName === salesRepName || 
     p.name === salesRepName
   );

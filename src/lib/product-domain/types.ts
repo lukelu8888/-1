@@ -20,7 +20,7 @@ export type ProductDisplaySourceType =
 
 export type ProductSnapshotType = 'inquiry' | 'quotation' | 'order' | 'procurement';
 
-export type ProductSnapshotTypeCode = 'INQ' | 'QT' | 'ORD' | 'PRC';
+export type ProductSnapshotTypeCode = 'ING' | 'QT' | 'ORD' | 'PRC';
 
 export type ProductItemType = 'standard_sourcing' | 'oem_custom';
 

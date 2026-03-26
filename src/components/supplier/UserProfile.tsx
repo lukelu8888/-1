@@ -185,7 +185,7 @@ export default function UserProfile({ onBack }: UserProfileProps) {
         // Converts file → data-URI → context → localStorage → Header re-renders
         await uploadUserAvatar(avatarFile);
       }
-      updateUserProfile({
+      await updateUserProfile({
         name: draft.name,
         // Only update avatarUrl if no new file (file upload already handled above)
         ...(!avatarFile ? { avatarUrl: avatarPreview } : {}),

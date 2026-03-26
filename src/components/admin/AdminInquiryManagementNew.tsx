@@ -23,8 +23,9 @@ import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { generateQRNumber } from '../../utils/xjNumberGenerator';
 import { useUser } from '../../contexts/UserContext';
 import { extractModelNo, extractSpecification } from '../../utils/productDataExtractor';
-import { quoteRequirementService } from '../../lib/supabaseService';
+import { quoteRequirementService, staffDirectoryService, type StaffDirectoryProfile } from '../../lib/supabaseService';
 import { buildQuoteRequirementDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
+import { matchesBusinessOwnerEmail, resolveInquirySalesOwner } from '../../utils/quotationOwnership';
 import { normalizePersonnelEmail } from '../../lib/notification-rules';
 
 interface AdminInquiryManagementProps {
@@ -55,6 +56,8 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const [filterDateRange, setFilterDateRange] = useState('all'); // 🔥 新增：时间段筛选
   const [filterOem, setFilterOem] = useState('all');
   const [filterOemProcessing, setFilterOemProcessing] = useState('all');
+  const [salesRepAssignments, setSalesRepAssignments] = useState<Record<string, string>>({});
+  const [regionalSalesRepOptions, setRegionalSalesRepOptions] = useState<StaffDirectoryProfile[]>([]);
   
   // 🚀 Use unified InquiryContext - only show submitted inquiries
   const { addInquiry, getSubmittedInquiries, deleteInquiry, refreshInquiries, updateInquiry } = useInquiry();
@@ -119,17 +122,15 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   // 🔥 下推成本询报：从INQ创建QR（调用后端API）
   const handlePushToCostInquiry = async (inquiry: any) => {
     try {
-      const sourceTemplateSnapshot = inquiry.templateSnapshot || inquiry.template_snapshot || null;
-      const sourceDocumentData = inquiry.documentDataSnapshot || inquiry.document_data_snapshot || null;
-      if (!sourceDocumentData) {
-        throw new Error('该 ING 缺少文档数据快照，无法下推 QR');
-      }
-
+      // QR 的 documentDataSnapshot 由 buildQuoteRequirementDocumentSnapshot 重新生成，
+      // 不依赖 ING 的快照，因此无需检查 ING 是否有快照。
       const regionCode = inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA';
       const qrNumber = await nextQRNumber(regionCode);
+      const quotationOwner = resolveInquirySalesOwner(inquiry, currentUser);
       const newQR = {
         id: crypto.randomUUID(),
         requirementNo: qrNumber,
+        sourceInquiryId: inquiry.id,
         sourceInquiryNumber: inquiry.inquiryNumber || inquiry.id,
         createdDate: String(
           inquiry.createdDate ||
@@ -142,6 +143,8 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
         urgency: 'medium',
         status: 'pending',
         createdBy: currentUser?.email || '',
+        requestedBy: quotationOwner.email || null,
+        requestedByName: quotationOwner.name || null,
         notes: inquiry.message || '',
         customer: {
           companyName: inquiry.buyerInfo?.companyName || inquiry.customer?.name || 'N/A',
@@ -246,9 +249,13 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
 
   const assignmentFilteredInquiries = currentUserRole === 'Sales_Rep' && currentUser?.email
     ? inquiries.filter((inq) => {
-        const assignedEmail = normalizePersonnelEmail(inq.salesRepEmail || inq.assignedTo, inq.region);
-        const currentEmail = normalizePersonnelEmail(currentUser.email, currentUser.region);
-        return assignedEmail === currentEmail;
+        return matchesBusinessOwnerEmail(
+          inq.ownerEmail || inq.salesRepEmail || inq.assignedTo,
+          currentUser.email,
+          inq.region,
+          inq.ownerUserId,
+          currentUser.id,
+        );
       })
     : inquiries;
 
@@ -294,9 +301,37 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const uniqueRegions = [...new Set(displayInquiries.map(inq => inq.region).filter(Boolean))];
   const uniqueCustomers = [...new Set(displayInquiries.map(inq => inq.customer.name).filter(Boolean))];
   // 🔥 新增：提取业务员和国家列表
-  const uniqueSalesReps = [...new Set(displayInquiries.map(inq => inq.salesRepEmail || inq.assignedTo).filter(Boolean))];
+  const uniqueSalesReps = [...new Set(displayInquiries.map(inq => inq.ownerEmail || inq.salesRepEmail || inq.assignedTo).filter(Boolean))];
   const uniqueCountries = [...new Set(displayInquiries.map(inq => inq.country).filter(Boolean))];
   const uniqueOemProcessingStatuses = [...new Set(displayInquiries.filter(inq => inq.oemEnabled).map(inq => inq.oemProcessingStatus).filter(Boolean))];
+  const normalizedManagerRegionCode = (() => {
+    const region = regionCodeToFullName(currentUser?.region || '') || currentUser?.region || '';
+    if (region === 'North America') return 'NA';
+    if (region === 'South America') return 'SA';
+    if (region === 'Europe & Africa') return 'EA';
+    if (region === 'NA' || region === 'SA' || region === 'EA') return region;
+    return '';
+  })();
+  useEffect(() => {
+    const loadRegionalSalesReps = async () => {
+      if (!(currentUserRole === 'Regional_Manager' &&
+        normalizedManagerRegionCode &&
+        normalizedManagerRegionCode !== 'all')) {
+        setRegionalSalesRepOptions([]);
+        return;
+      }
+
+      try {
+        const reps = await staffDirectoryService.listSalesRepsByRegion(normalizedManagerRegionCode);
+        setRegionalSalesRepOptions(reps);
+      } catch (error) {
+        console.warn('⚠️ [AdminInquiryManagementNew] load regional sales reps failed:', error);
+        setRegionalSalesRepOptions([]);
+      }
+    };
+
+    void loadRegionalSalesReps();
+  }, [currentUserRole, normalizedManagerRegionCode]);
 
   // Filter logic
   const filteredInquiries = displayInquiries.filter((inquiry) => {
@@ -309,7 +344,10 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     const matchesRegion = filterRegion === 'all' || inquiry.region === filterRegion;
     const matchesCustomer = filterCustomer === 'all' || inquiry.customer.name === filterCustomer;
     // 🔥 新增：业务员和国家筛选
-    const matchesSalesRep = filterSalesRep === 'all' || inquiry.salesRepEmail === filterSalesRep || inquiry.assignedTo === filterSalesRep;
+    const matchesSalesRep =
+      filterSalesRep === 'all' ||
+      normalizePersonnelEmail(inquiry.ownerEmail || inquiry.salesRepEmail || inquiry.assignedTo, inquiry.region) ===
+        normalizePersonnelEmail(filterSalesRep, inquiry.region);
     const matchesCountry = filterCountry === 'all' || inquiry.country === filterCountry;
     const matchesOem = filterOem === 'all' || (filterOem === 'oem_only' ? inquiry.oemEnabled : !inquiry.oemEnabled);
     const matchesOemProcessing = filterOemProcessing === 'all' || inquiry.oemProcessingStatus === filterOemProcessing;
@@ -364,6 +402,25 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     }
     toast.success('回复已发送');
     setReplyMessage('');
+  };
+
+  const handleAssignSalesRep = async (inquiry: any) => {
+    const selectedSalesRepEmail = salesRepAssignments[inquiry.id] || regionalSalesRepOptions[0]?.email;
+    if (!selectedSalesRepEmail) {
+      toast.error('当前区域没有可分配的业务员');
+      return;
+    }
+
+    const selectedSalesRep = regionalSalesRepOptions.find((user) => user.email === selectedSalesRepEmail);
+    try {
+      await updateInquiry(inquiry.id, {
+        assignedTo: selectedSalesRepEmail,
+        salesRepEmail: selectedSalesRepEmail,
+      });
+      toast.success(`✅ 已分配给业务员：${selectedSalesRep?.name || selectedSalesRepEmail}`);
+    } catch (error: any) {
+      toast.error(error?.message || '分配业务员失败');
+    }
   };
 
   const openInquiryDetail = (inquiry: any) => {
@@ -744,6 +801,34 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                           </Button>
                         )}
                       </div>
+                      {currentUserRole === 'Regional_Manager' && regionalSalesRepOptions.length > 0 && (
+                        <div className="mt-2 flex items-center justify-center gap-2">
+                          <Select
+                            value={salesRepAssignments[inquiry.id] || inquiry.salesRepEmail || ''}
+                            onValueChange={(value) =>
+                              setSalesRepAssignments((prev) => ({ ...prev, [inquiry.id]: value }))
+                            }
+                          >
+                            <SelectTrigger className="w-[160px] h-8 text-xs bg-white">
+                              <SelectValue placeholder="选择业务员" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {regionalSalesRepOptions.map((salesRep) => (
+                                <SelectItem key={salesRep.email} value={salesRep.email} style={{ fontSize: '12px' }}>
+                                  {salesRep.name} ({salesRep.email})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            size="sm"
+                            className="h-8 px-2 text-xs bg-orange-600 hover:bg-orange-700"
+                            onClick={() => handleAssignSalesRep(inquiry)}
+                          >
+                            {inquiry.salesRepEmail ? '改派' : '分配'}
+                          </Button>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

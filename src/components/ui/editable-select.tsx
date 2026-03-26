@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Input } from './input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
 import { Label } from './label';
+import { Popover, PopoverContent, PopoverTrigger } from './popover';
 import { X, Search, ChevronDown } from 'lucide-react@0.487.0';
 
 interface EditableSelectProps {
@@ -42,20 +43,14 @@ const SearchableCombobox: React.FC<{
 }> = ({ value, onChange, options, placeholder }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Close on outside click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setQuery('');
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+    if (open) {
+      const timer = window.setTimeout(() => inputRef.current?.focus(), 50);
+      return () => window.clearTimeout(timer);
+    }
+  }, [open]);
 
   const filtered = query.trim()
     ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
@@ -75,36 +70,46 @@ const SearchableCombobox: React.FC<{
     setOpen(false);
   };
 
+  const handleUseCustomValue = () => {
+    if (query.trim()) {
+      onChange(query.trim());
+    } else {
+      onChange('');
+    }
+    setOpen(false);
+    setQuery('');
+  };
+
   return (
-    <div ref={containerRef} className="flex items-center gap-1 flex-1 relative">
+    <div className="flex items-center gap-1 flex-1">
       <ClearBtn hasValue={Boolean(value)} onClear={handleClear} />
 
-      {/* Trigger button */}
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((o) => !o);
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }}
-        className="flex-1 flex items-center justify-between gap-1 h-9 px-3 text-sm border border-input rounded-md bg-background hover:bg-accent hover:text-accent-foreground transition-colors text-left"
-      >
-        <span className={value ? 'text-foreground truncate' : 'text-muted-foreground'}>
-          {value || placeholder}
-        </span>
-        <ChevronDown className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
+      <Popover open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setQuery(''); }}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="flex-1 flex items-center justify-between gap-1 h-9 px-3 text-sm border border-input rounded-md bg-background hover:bg-accent hover:text-accent-foreground transition-colors text-left"
+          >
+            <span className={value ? 'text-foreground truncate' : 'text-muted-foreground'}>
+              {value || placeholder}
+            </span>
+            <ChevronDown className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+          </button>
+        </PopoverTrigger>
 
-      {/* Dropdown */}
-      {open && (
-        <div className="absolute top-full left-6 right-0 z-50 mt-1 bg-popover border border-border rounded-md shadow-md overflow-hidden">
-          {/* Search input */}
+        <PopoverContent
+          align="start"
+          sideOffset={6}
+          className="z-[1200] w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0 overflow-hidden"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border">
             <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索..."
+              placeholder="搜索或输入自定义内容..."
               className="flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground"
             />
             {query && (
@@ -114,8 +119,7 @@ const SearchableCombobox: React.FC<{
             )}
           </div>
 
-          {/* Options list */}
-          <div className="max-h-48 overflow-y-auto">
+          <div className="max-h-56 overflow-y-auto">
             {filtered.length > 0 ? (
               filtered.map((opt) => (
                 <button
@@ -132,17 +136,19 @@ const SearchableCombobox: React.FC<{
             ) : (
               <p className="px-3 py-2 text-sm text-muted-foreground">无匹配结果</p>
             )}
-            {/* Custom entry at the bottom */}
+          </div>
+
+          <div className="border-t border-border p-1.5 bg-white">
             <button
               type="button"
-              onClick={() => { onChange(''); setOpen(false); setQuery(''); }}
-              className="w-full text-left px-3 py-1.5 text-sm text-blue-600 font-semibold border-t border-border hover:bg-blue-50 transition-colors"
+              onClick={handleUseCustomValue}
+              className="w-full text-left px-3 py-2 text-sm text-blue-600 font-semibold rounded hover:bg-blue-50 transition-colors"
             >
-              ✏️ 自定义输入...
+              {query.trim() ? `使用“${query.trim()}”` : '切换到自定义输入'}
             </button>
           </div>
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 };

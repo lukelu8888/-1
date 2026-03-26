@@ -38,6 +38,19 @@ export function removeTombstones(predicate: (t: Tombstone) => boolean): number {
   return removed;
 }
 
+export function removeTombstonesByMarkers(
+  domain: BusinessDomain,
+  markers: string[],
+): number {
+  const normalized = new Set(
+    markers
+      .filter(Boolean)
+      .map((marker) => String(marker)),
+  );
+  if (normalized.size === 0) return 0;
+  return removeTombstones((t) => t.domain === domain && normalized.has(String(t.marker || '')));
+}
+
 export function addTombstones(
   domain: BusinessDomain,
   markers: string[],

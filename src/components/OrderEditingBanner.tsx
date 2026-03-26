@@ -87,7 +87,7 @@ export function OrderEditingBanner({ onReturnToOrder }: OrderEditingBannerProps)
                   {productCount} {productCount === 1 ? 'item' : 'items'}
                 </Badge>
               </div>
-              <p className="text-xs text-blue-100">Add products to your Proforma Invoice</p>
+              <p className="text-xs text-blue-100">Add products to your quotation draft</p>
             </div>
           </div>
 
@@ -97,7 +97,7 @@ export function OrderEditingBanner({ onReturnToOrder }: OrderEditingBannerProps)
               className="bg-white text-blue-600 hover:bg-blue-50 font-semibold shadow-md"
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Return to Proforma Invoice
+              Return to quotation draft
             </Button>
             <button
               onClick={handleClose}

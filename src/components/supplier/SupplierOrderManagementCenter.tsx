@@ -1,7 +1,7 @@
 // 🔥 供应商订单管理中心 - 台湾大厂专业版
 // 整合：询价 → 报价 → 在制订单 → 历史订单
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
@@ -10,8 +10,7 @@ import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogPortal, DialogOverlay } from '../ui/dialog';
-import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { 
   LayoutGrid, FileText, Calculator, Package, Clock, CheckCircle2, 
   XCircle, AlertCircle, Search, Filter, Eye, Download, Printer,
@@ -33,7 +32,7 @@ import {
   type SupplierQuotationItem,
 } from '../../utils/createQuotationFromXJ';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
-import { supplierQuotationService } from '../../lib/supabaseService';
+import { supplierQuotationService, templateCenterService } from '../../lib/supabaseService';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
 
 // 🔥 统计数据接口
@@ -127,6 +126,7 @@ export default function SupplierOrderManagementCenter() {
   
   // 核算报价弹窗状态（editingQuotationId 驱动，quotationEditorOpen 已在上方声明）
   const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
+  const [latestXjPublishedVersion, setLatestXjPublishedVersion] = useState<string | null>(null);
 
   const openQuotationEditor = (id: string) => {
     // Set the quotation to edit, then reuse the existing quotationEditorOpen dialog
@@ -139,7 +139,45 @@ export default function SupplierOrderManagementCenter() {
     setQuotationEditorOpen(false);
     setEditingQuotationId(null);
   };
-  
+
+  useEffect(() => {
+    let active = true;
+    templateCenterService
+      .getVersionHistory('xj')
+      .then((history: any[]) => {
+        if (!active) return;
+        const latest = history.find((record) => record.status === 'published') || history[0] || null;
+        setLatestXjPublishedVersion(latest?.version || null);
+      })
+      .catch(() => {
+        if (active) setLatestXjPublishedVersion(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const getXJBoundVersion = (xj: any) =>
+    String(
+      xj?.templateSnapshot?.version?.version ||
+      xj?.templateSnapshot?.version?.version_label ||
+      xj?.templateSnapshot?.version?.versionLabel ||
+      xj?.template_snapshot?.version?.version ||
+      xj?.template_snapshot?.version?.version_label ||
+      xj?.template_snapshot?.version?.versionLabel ||
+      xj?.templateVersion ||
+      xj?.template_version ||
+      '',
+    ).trim() || null;
+
+  // Esc 关闭核算报价弹窗
+  useEffect(() => {
+    if (!quotationEditorOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeQuotationEditor(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [quotationEditorOpen]);
+
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [hiddenXJIds, setHiddenXJIds] = useState<Set<string>>(new Set());
@@ -905,6 +943,39 @@ export default function SupplierOrderManagementCenter() {
                       <div>
                         <p className="text-sm font-medium text-blue-600">{xj.supplierXjNo || xj.xjNumber}</p>
                         <p className="text-xs text-slate-500">{formatCompactUtcMinute(xj.createdDate)}</p>
+                        {(() => {
+                          const boundVersion = getXJBoundVersion(xj);
+                          const isLatest = Boolean(
+                            boundVersion &&
+                            latestXjPublishedVersion &&
+                            boundVersion === latestXjPublishedVersion,
+                          );
+                          if (!boundVersion) {
+                            return (
+                              <Badge className="mt-1 bg-rose-100 text-rose-700 border-rose-300">
+                                未绑定模板版本
+                              </Badge>
+                            );
+                          }
+                          return (
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              <Badge className="bg-orange-100 text-orange-700 border-orange-300">
+                                {boundVersion}
+                              </Badge>
+                              {latestXjPublishedVersion ? (
+                                <Badge
+                                  className={
+                                    isLatest
+                                      ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                                      : 'bg-amber-100 text-amber-700 border-amber-300'
+                                  }
+                                >
+                                  {isLatest ? '已映射最新' : `最新 ${latestXjPublishedVersion}`}
+                                </Badge>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                         {formatExecutionBaseline(xj) && (
                           <p className="text-xs text-purple-600 font-mono mt-1">{formatExecutionBaseline(xj)}</p>
                         )}
@@ -1064,21 +1135,29 @@ export default function SupplierOrderManagementCenter() {
                               });
 
                               // Supabase-first: 保存到 supplier_quotations 表
-                              await saveSupplierQuotation(quotation);
+                              const savedQuotation = await saveSupplierQuotation(quotation);
                               
                               // 更新本地状态
-                              const updatedQuotations = [...supplierQuotations, quotation];
+                              const updatedQuotations = [...supplierQuotations, savedQuotation];
                               setSupplierQuotations(updatedQuotations);
 
                               // Supabase-first: BJ 草稿仅建立关联，不把 XJ 提前标记为 quoted
-                              await syncXJQuoteFromBJ(quotation, 'draft');
+                              try {
+                                await syncXJQuoteFromBJ(savedQuotation, 'draft');
+                              } catch (syncError: any) {
+                                console.warn('⚠️ BJ 已创建，但 XJ 同步失败:', syncError);
+                                toast.warning('报价单已创建，但询价单状态同步失败', {
+                                  description: syncError?.message || '请刷新后确认状态',
+                                  duration: 4000,
+                                });
+                              }
 
                               // 显示成功提示
                               toast.success(
                                 <div className="space-y-1">
                                   <p className="font-semibold">✅ 报价单创建成功</p>
                                   <p className="text-sm">询价单: {xj.supplierXjNo || xj.xjNumber}</p>
-                                  <p className="text-sm">报价单: {quotation.quotationNo}</p>
+                                  <p className="text-sm">报价单: {savedQuotation.quotationNo}</p>
                                   <p className="text-xs text-slate-500 mt-1">状态已更新为"已下推"，正在跳转到我的报价...</p>
                                 </div>,
                                 { duration: 3000 }
@@ -1088,9 +1167,11 @@ export default function SupplierOrderManagementCenter() {
                               setTimeout(() => {
                                 setActiveTab('qt');
                               }, 800);
-                            } catch (error) {
+                            } catch (error: any) {
                               console.error('创建报价单失败:', error);
-                              toast.error('创建报价单失败，请重试');
+                              toast.error('创建报价单失败，请重试', {
+                                description: error?.message || '请查看控制台日志',
+                              });
                             }
                           }}
                         >
@@ -2022,78 +2103,84 @@ export default function SupplierOrderManagementCenter() {
         />
       )}
 
-      {/* 核算报价 / 编辑报价单 弹窗
-          架构：Portal > Overlay(居中容器) > Content(尺寸+flex) > Header(固定) + Body(滚动)
-          - Overlay: fixed inset-0 flex items-center justify-center p-6  → 负责居中
-          - Content: w-full max-w-5xl max-h-full flex flex-col overflow-hidden → 负责尺寸
-          - Body:    flex-1 min-h-0 overflow-y-auto                         → 负责滚动
+      {/* 核算报价 弹窗 ── 自定义模态，完全参照 DocumentModal 的 inline-style 架构：
+            遮罩(fixed inset-0) + Shell(fixed, display:flex, flexDirection:column, overflow:hidden)
+            + Header(flexShrink:0 固定) + Body(flex:1, minHeight:0, overflowY:auto 独立滚动)
+            使用 inline style 而非 Tailwind class，避免 Radix DialogContent 基类的 grid/overflow 冲突。
       */}
-      <Dialog open={quotationEditorOpen} onOpenChange={open => { if (!open) closeQuotationEditor(); }}>
-        <DialogPortal>
-          {/* 背景遮罩 */}
-          <DialogOverlay />
+      {quotationEditorOpen && selectedQuotation && (
+        <>
+          {/* 遮罩 */}
+          <div
+            className="fixed inset-0 bg-black/50"
+            style={{ zIndex: 1000 }}
+          />
 
-          {/* Overlay 兼居中容器：fixed inset-0 + flex 居中，p-6 作为安全边距 */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
-            {/* Modal 容器：负责尺寸与三段式 flex 布局，pointer-events-auto 恢复交互 */}
-            <DialogPrimitive.Content
-              className="pointer-events-auto w-full max-w-5xl max-h-full flex flex-col overflow-hidden rounded-lg border bg-white shadow-lg"
-              onInteractOutside={e => e.preventDefault()}
-              onOpenAutoFocus={e => e.preventDefault()}
+          {/* 弹窗 shell */}
+          <div
+            style={{
+              position: 'fixed',
+              top: '1rem',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 'min(calc(100vw - 2rem), 64rem)',   /* max-w-5xl = 64rem */
+              height: 'calc(100dvh - 2rem)',
+              zIndex: 1001,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              borderRadius: '0.5rem',
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)',
+              background: '#fff',
+            }}
+          >
+            {/* ── 固定标题栏（flexShrink:0，不参与滚动） ── */}
+            <div
+              style={{ flexShrink: 0 }}
+              className="border-b border-slate-200 bg-white px-6 py-4"
             >
-              {/* ModalHeader — shrink-0，不参与滚动 */}
-              <div className="shrink-0 flex items-center gap-3 px-6 py-4 pr-14 bg-white border-b border-slate-200">
+              <div className="flex items-center gap-3">
                 <Calculator className="w-4 h-4 text-orange-500 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <DialogPrimitive.Title className="text-[15px] font-semibold text-slate-800 leading-tight">
-                    核算报价
-                  </DialogPrimitive.Title>
-                  {selectedQuotation && (
-                    <DialogPrimitive.Description className="text-[12px] text-slate-400 mt-0.5">
-                      {selectedQuotation.quotationNo} · {selectedQuotation.customerName || 'COSUN采购'}
-                    </DialogPrimitive.Description>
-                  )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[15px] font-semibold leading-tight text-slate-800">核算报价</div>
+                  <div className="mt-0.5 text-[12px] text-slate-400">
+                    {selectedQuotation.quotationNo} · {selectedQuotation.customerName || 'COSUN采购'}
+                  </div>
                 </div>
+                <button
+                  onClick={closeQuotationEditor}
+                  className="h-8 w-8 rounded flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors flex-shrink-0"
+                  title="关闭 (Esc)"
+                >
+                  <XIcon className="w-4 h-4" />
+                </button>
               </div>
+            </div>
 
-              {/* ModalBody — flex-1 min-h-0 overflow-y-auto，内容在此滚动 */}
-              <div className="flex-1 min-h-0 overflow-y-auto">
-                {selectedQuotation && (
-                  <SupplierQuotationEditor
-                    quotation={selectedQuotation}
-                    onSave={async (updatedQuotation) => {
-                      // 1. Supabase-first: 持久化到 supplier_quotations 表
-                      await saveSupplierQuotation(updatedQuotation);
-
-                      // 2. Sync unitPrice + totalAmount back into the table row
-                      const updatedQuotations = supplierQuotations.map(q =>
-                        q.quotationNo === updatedQuotation.quotationNo ? updatedQuotation : q
-                      );
-                      setSupplierQuotations(updatedQuotations);
-
-                      // 3. Keep selectedQuotation fresh (for document viewer)
-                      setSelectedQuotation(updatedQuotation);
-
-                      // 4. Sync back to the parent 采购询价
-                      await syncXJQuoteFromBJ(updatedQuotation, updatedQuotation.status || 'draft');
-
-                      // 5. Close dialog
-                      closeQuotationEditor();
-                    }}
-                    onCancel={closeQuotationEditor}
-                  />
-                )}
-              </div>
-
-              {/* 关闭按钮 */}
-              <DialogPrimitive.Close className="absolute top-4 right-4 z-50 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:outline-none disabled:pointer-events-none">
-                <XIcon className="w-5 h-5" />
-                <span className="sr-only">Close</span>
-              </DialogPrimitive.Close>
-            </DialogPrimitive.Content>
+            {/* ── 可滚动内容区（flex:1, minHeight:0, overflowY:auto） ── */}
+            <div
+              style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}
+              className="px-4 py-4"
+            >
+              <SupplierQuotationEditor
+                quotation={selectedQuotation}
+                onSave={async (updatedQuotation) => {
+                  await saveSupplierQuotation(updatedQuotation);
+                  const updatedQuotations = supplierQuotations.map(q =>
+                    q.quotationNo === updatedQuotation.quotationNo ? updatedQuotation : q
+                  );
+                  setSupplierQuotations(updatedQuotations);
+                  setSelectedQuotation(updatedQuotation);
+                  await syncXJQuoteFromBJ(updatedQuotation, updatedQuotation.status || 'draft');
+                  closeQuotationEditor();
+                }}
+                onCancel={closeQuotationEditor}
+              />
+            </div>
           </div>
-        </DialogPortal>
-      </Dialog>
+        </>
+      )}
 
 
     </div>

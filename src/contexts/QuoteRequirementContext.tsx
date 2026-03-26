@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { quoteRequirementService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
+import { buildIdentityAuditMetadata, buildIdentityPersistenceFields } from '../utils/dataIsolation';
 import type { PricingTaxSettings, SourcePricingBasis } from '../types/pricingBasis';
 import type { QuoteRequirementDocumentData } from '../components/documents/templates/QuoteRequirementDocument';
 import type {
@@ -8,6 +9,7 @@ import type {
   CustomerRequirementsSnapshot,
   DownstreamVisibilityRules,
 } from '../utils/procurementRequestContext';
+import { assertBusinessOwnerEmail } from '../utils/quotationOwnership';
 
 export interface QuoteRequirementItem {
   id: string;
@@ -68,6 +70,7 @@ export interface QuoteRequirement {
   requirementNo: string;
   source: string;
   sourceRef?: string;
+  sourceInquiryId?: string;
   sourceInquiryNumber?: string;
   projectId?: string | null;
   projectCode?: string | null;
@@ -82,6 +85,22 @@ export interface QuoteRequirement {
   urgency: 'high' | 'medium' | 'low';
   status: 'pending' | 'partial' | 'processing' | 'completed';
   createdBy: string;
+  requestedBy?: string | null;
+  requestedByName?: string | null;
+  assignedTo?: string | null;
+  ownerUserId?: string | null;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+  operatorUserId?: string | null;
+  operatorEmail?: string | null;
+  operatorRole?: string | null;
+  actingUserId?: string | null;
+  actingUserEmail?: string | null;
+  actingUserRole?: string | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserEmail?: string | null;
+  authenticatedUserRole?: string | null;
   createdDate: string;
   specialRequirements?: string;
   expectedQuoteDate?: string;
@@ -142,6 +161,36 @@ const assertQuoteRequirementPersistedBinding = (requirement: Partial<QuoteRequir
   }
 };
 
+const normalizeQuoteRequirementWritePayload = (requirement: QuoteRequirement): QuoteRequirement => {
+  const ownerEmail = assertBusinessOwnerEmail(
+    requirement.requestedBy || requirement.createdBy,
+    requirement.region,
+    '采购需求单',
+  );
+
+  return {
+    ...requirement,
+    requestedBy: ownerEmail,
+    ownerEmail,
+    ownerName: requirement.requestedByName || null,
+    ownerRole: 'Sales_Rep',
+    ...buildIdentityPersistenceFields({
+      ownerEmail,
+      ownerName: requirement.requestedByName || null,
+      ownerRole: 'Sales_Rep',
+    }),
+    documentRenderMeta: {
+      ...(requirement.documentRenderMeta || {}),
+      ...buildIdentityAuditMetadata({
+        ownerEmail,
+        ownerName: requirement.requestedByName || null,
+        ownerRole: 'Sales_Rep',
+        region: requirement.region || null,
+      }),
+    },
+  };
+};
+
 export const QuoteRequirementProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [requirements, setRequirements] = useState<QuoteRequirement[]>([]);
 
@@ -163,10 +212,11 @@ export const QuoteRequirementProvider: React.FC<{ children: ReactNode }> = ({ ch
   }, []);
 
   const addRequirement = async (requirement: QuoteRequirement) => {
-    assertQuoteRequirementWritePayload(requirement);
-    const saved = await quoteRequirementService.upsert(requirement);
+    const normalizedRequirement = normalizeQuoteRequirementWritePayload(requirement);
+    assertQuoteRequirementWritePayload(normalizedRequirement);
+    const saved = await quoteRequirementService.upsert(normalizedRequirement);
     if (!saved) {
-      throw new Error(`QR ${requirement.requirementNo || requirement.id} 写入 Supabase 失败`);
+      throw new Error(`QR ${normalizedRequirement.requirementNo || normalizedRequirement.id} 写入 Supabase 失败`);
     }
     assertQuoteRequirementPersistedBinding(saved as QuoteRequirement);
     setRequirements(prev => prev.some(r => r.id === saved.id) ? prev : [...prev, saved as QuoteRequirement]);
@@ -175,7 +225,7 @@ export const QuoteRequirementProvider: React.FC<{ children: ReactNode }> = ({ ch
   const updateRequirement = async (id: string, updates: Partial<QuoteRequirement>) => {
     const current = requirements.find((req) => req.id === id);
     if (!current) return;
-    const merged = { ...current, ...updates } as QuoteRequirement;
+    const merged = normalizeQuoteRequirementWritePayload({ ...current, ...updates } as QuoteRequirement);
     assertQuoteRequirementWritePayload(merged);
     const saved = await quoteRequirementService.upsert(merged);
     if (!saved) {

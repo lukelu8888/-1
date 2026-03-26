@@ -23,7 +23,7 @@ import type { InquiryOemData } from '../../../types/oem';
 
 export interface CustomerInquiryData {
   // 询价单基本信息
-  inquiryNo: string;           // INQ-NA-20251210-001
+  inquiryNo: string;           // ING-NA-20251210-001
   inquiryDate: string;         // 2025-12-10
   region: 'NA' | 'SA' | 'EU';  // 区域
   
@@ -65,6 +65,10 @@ export interface CustomerInquiryData {
 
   // OEM 分支（内部流程字段，不直接由客户决定下游是否转发）
   oem?: InquiryOemData;
+
+  templateSettings?: {
+    productTableColumns?: CustomerInquiryProductTableColumn[];
+  };
   
   // 备注
   remarks?: string;
@@ -79,6 +83,22 @@ export interface CustomerInquiryRequirementRow {
   key: keyof NonNullable<CustomerInquiryData['requirements']>;
   label: string;
   value: string;
+}
+
+export type CustomerInquiryProductTableColumnKey =
+  | 'no'
+  | 'modelNo'
+  | 'image'
+  | 'itemNameSpecification'
+  | 'quantity'
+  | 'unit'
+  | 'targetPrice'
+  | 'estimatedValue';
+
+export interface CustomerInquiryProductTableColumn {
+  key: CustomerInquiryProductTableColumnKey;
+  label: string;
+  widthPercent: number;
 }
 
 export interface CustomerInquiryRequirementField {
@@ -104,6 +124,17 @@ export const DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS: CustomerInquiryRequire
   certifications: '',
   otherRequirements: '',
 };
+
+export const DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS: CustomerInquiryProductTableColumn[] = [
+  { key: 'no', label: 'No.', widthPercent: 5 },
+  { key: 'modelNo', label: 'Model No.', widthPercent: 12 },
+  { key: 'image', label: 'Image', widthPercent: 10 },
+  { key: 'itemNameSpecification', label: 'Item Name / Specification', widthPercent: 33 },
+  { key: 'quantity', label: 'Quantity', widthPercent: 10 },
+  { key: 'unit', label: 'Unit', widthPercent: 8 },
+  { key: 'targetPrice', label: 'Target Price', widthPercent: 11 },
+  { key: 'estimatedValue', label: 'Subtotal Value', widthPercent: 11 },
+];
 
 export const CUSTOMER_INQUIRY_REQUIREMENT_FIELDS: CustomerInquiryRequirementField[] = [
   {
@@ -166,6 +197,62 @@ export const CUSTOMER_INQUIRY_REQUIREMENT_FIELDS: CustomerInquiryRequirementFiel
     rows: 4,
   },
 ];
+
+export const normalizeCustomerInquiryProductTableColumns = (
+  value?: CustomerInquiryProductTableColumn[] | null,
+): CustomerInquiryProductTableColumn[] => {
+  const fallbackMap = new Map(
+    DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS.map((column) => [column.key, column]),
+  );
+  const canonicalLabels: Partial<Record<CustomerInquiryProductTableColumnKey, string>> = {
+    estimatedValue: 'Subtotal Value',
+  };
+  const canonicalWidths: Partial<Record<CustomerInquiryProductTableColumnKey, number>> = {
+    no: 5,
+    modelNo: 12,
+    image: 10,
+    itemNameSpecification: 33,
+    quantity: 10,
+    unit: 8,
+    targetPrice: 11,
+    estimatedValue: 11,
+  };
+  const incoming = Array.isArray(value) ? value : [];
+  const normalized = DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS.map((fallbackColumn) => {
+    const matched = incoming.find((column) => column?.key === fallbackColumn.key);
+    const widthPercent = Number(matched?.widthPercent);
+    const preferredLabel = canonicalLabels[fallbackColumn.key] || fallbackColumn.label;
+    const preferredWidth = canonicalWidths[fallbackColumn.key] || fallbackColumn.widthPercent;
+
+    return {
+      key: fallbackColumn.key,
+      label: String(canonicalLabels[fallbackColumn.key] || matched?.label || preferredLabel).trim() || preferredLabel,
+      widthPercent: Number.isFinite(widthPercent) ? Math.max(4, widthPercent) : preferredWidth,
+    };
+  });
+
+  const total = normalized.reduce((sum, column) => sum + column.widthPercent, 0) || 100;
+
+  return normalized.map((column, index) => {
+    if (index === normalized.length - 1) {
+      const allocated = normalized
+        .slice(0, -1)
+        .reduce((sum, item) => sum + Number(((item.widthPercent / total) * 100).toFixed(2)), 0);
+      return {
+        ...column,
+        widthPercent: Number((100 - allocated).toFixed(2)),
+      };
+    }
+
+    return {
+      ...column,
+      widthPercent: Number(((column.widthPercent / total) * 100).toFixed(2)),
+    };
+  }).map((column) => ({
+    ...column,
+    label: fallbackMap.get(column.key)?.label && !column.label ? fallbackMap.get(column.key)!.label : column.label,
+  }));
+};
 
 export const normalizeCustomerInquiryRequirementFields = (
   value?: Partial<CustomerInquiryRequirementFormFields> | null,
@@ -316,6 +403,9 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
       country: data.customer?.country || 'N/A',
     };
     const requirementRows = getCustomerInquiryRequirementRows(data);
+    const productTableColumns = normalizeCustomerInquiryProductTableColumns(
+      data.templateSettings?.productTableColumns,
+    );
     
     // 计算总金额（如果有目标价格）
     const calculateTotal = () => {
@@ -336,6 +426,7 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
     const contentPaddingTop = `${resolvedLayout.contentPaddingTopMm}mm`;
     const contentPaddingBottom = `${resolvedLayout.contentPaddingBottomMm}mm`;
     const contentPaddingHorizontal = '20mm';
+    const fullWidthTableClass = 'w-full table-fixed border-collapse border border-gray-400 text-xs';
 
     return (
       <div 
@@ -404,7 +495,7 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
 
           {/* Customer Information - Taiwan Enterprise Table Style */}
           <div className="mb-3">
-            <table className="w-full border-collapse border border-gray-400 text-xs">
+            <table className={fullWidthTableClass}>
               <tbody>
                 <tr>
                   <td className="border border-gray-400 p-0 align-top">
@@ -418,7 +509,6 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
                       {customer.phone && (
                         <div><span className="text-gray-600">Tel:</span> {customer.phone}</div>
                       )}
-                      <div><span className="text-gray-600">Country:</span> {customer.country}</div>
                       {customer.address && (
                         <div><span className="text-gray-600">Address:</span> {customer.address}</div>
                       )}
@@ -432,74 +522,113 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
           {/* Product Requirements Table - Taiwan Enterprise Style */}
           <div className="mb-4">
             <h3 className="text-sm font-bold mb-2 text-gray-900">PRODUCT REQUIREMENTS:</h3>
-            <table className="w-full border-collapse border-2 border-gray-300 text-xs">
+            <table className={fullWidthTableClass}>
+              <colgroup>
+                {productTableColumns.map((column) => (
+                  <col key={column.key} style={{ width: `${column.widthPercent}%` }} />
+                ))}
+              </colgroup>
               <thead>
                 <tr className="bg-gray-100">
-                  <th className="border border-gray-300 px-2 py-2 text-left w-8 whitespace-nowrap">No.</th>
-                  <th className="border border-gray-300 px-2 py-2 text-left w-20 whitespace-nowrap">Model No.</th>
-                  <th className="border border-gray-300 px-2 py-2 text-center w-16 whitespace-nowrap">Image</th>
-                  <th className="border border-gray-300 px-2 py-2 text-left whitespace-nowrap">Item Name / Specification</th>
-                  <th className="border border-gray-300 px-2 py-2 text-right w-12 whitespace-nowrap">Quantity</th>
-                  <th className="border border-gray-300 px-2 py-2 text-center w-10 whitespace-nowrap">Unit</th>
-                  <th className="border border-gray-300 px-2 py-2 text-right w-20 whitespace-nowrap">Target Price</th>
-                  <th className="border border-gray-300 px-2 py-2 text-right w-28 whitespace-nowrap">Estimated Value</th>
+                  {productTableColumns.map((column) => {
+                    const alignmentClass =
+                      column.key === 'image'
+                        ? 'text-center'
+                        : column.key === 'quantity' || column.key === 'targetPrice' || column.key === 'estimatedValue'
+                          ? 'text-right'
+                          : column.key === 'unit'
+                            ? 'text-center'
+                            : 'text-left';
+
+                    return (
+                      <th
+                        key={column.key}
+                        className={`border border-gray-300 px-2 py-2 ${column.key === 'quantity' || column.key === 'unit' || column.key === 'targetPrice' || column.key === 'estimatedValue' ? 'whitespace-nowrap break-normal' : 'break-words'} ${alignmentClass}`}
+                      >
+                        {column.label}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {products.map((product, index) => (
                   <tr key={`${product.no || index + 1}-${index}`}>
-                    <td className="border border-gray-300 px-2 py-2 text-center">{product.no || index + 1}</td>
-                    <td className="border border-gray-300 px-2 py-2 text-gray-700">
-                      {product.modelNo || '-'}
-                    </td>
-                    <td className="border border-gray-300 px-1 py-1 text-center">
-                      {product.imageUrl ? (
-                        <img 
-                          src={product.imageUrl} 
-                          alt={product.productName}
-                          className="w-10 h-10 object-cover mx-auto rounded"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 bg-gray-100 mx-auto rounded flex items-center justify-center text-xs text-gray-400">
-                          N/A
-                        </div>
-                      )}
-                    </td>
-                    <td className="border border-gray-300 px-2 py-2">
-                      <div className="font-semibold">{product.productName}</div>
-                      {product.specification && (
-                        <div className="text-xs text-gray-600 mt-0.5">{product.specification}</div>
-                      )}
-                    </td>
-                    <td className="border border-gray-300 px-2 py-2 text-right">
-                      {Number(product.quantity || 0).toLocaleString()}
-                    </td>
-                    <td className="border border-gray-300 px-2 py-2 text-center">
-                      {product.unit}
-                    </td>
-                    <td className="border border-gray-300 px-2 py-2 text-right">
-                      {product.targetPrice 
-                        ? `${product.currency || currency} ${product.targetPrice.toFixed(2)}`
-                        : '-'
+                    {productTableColumns.map((column) => {
+                      if (column.key === 'no') {
+                        return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{product.no || index + 1}</td>;
                       }
-                    </td>
-                    <td className="border border-gray-300 px-2 py-2 text-right font-semibold">
-                      {product.targetPrice 
-                        ? `${product.currency || currency} ${(Number(product.quantity || 0) * Number(product.targetPrice || 0)).toFixed(2)}`
-                        : '-'
+
+                      if (column.key === 'modelNo') {
+                        return <td key={column.key} className="border border-gray-300 px-2 py-2 text-gray-700">{product.modelNo || '-'}</td>;
                       }
-                    </td>
+
+                      if (column.key === 'image') {
+                        return (
+                          <td key={column.key} className="border border-gray-300 px-1 py-1 text-center">
+                            {product.imageUrl ? (
+                              <img
+                                src={product.imageUrl}
+                                alt={product.productName}
+                                className="w-10 h-10 object-cover mx-auto rounded"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 bg-gray-100 mx-auto rounded flex items-center justify-center text-xs text-gray-400">
+                                N/A
+                              </div>
+                            )}
+                          </td>
+                        );
+                      }
+
+                      if (column.key === 'itemNameSpecification') {
+                        return (
+                          <td key={column.key} className="border border-gray-300 px-2 py-2">
+                            <div className="font-semibold">{product.productName}</div>
+                            {product.specification && (
+                              <div className="text-xs text-gray-600 mt-0.5">{product.specification}</div>
+                            )}
+                          </td>
+                        );
+                      }
+
+                      if (column.key === 'quantity') {
+                        return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{Number(product.quantity || 0).toLocaleString()}</td>;
+                      }
+
+                      if (column.key === 'unit') {
+                        return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{product.unit}</td>;
+                      }
+
+                      if (column.key === 'targetPrice') {
+                        return (
+                          <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">
+                            {product.targetPrice
+                              ? product.targetPrice.toFixed(2)
+                              : '-'}
+                          </td>
+                        );
+                      }
+
+                      return (
+                        <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">
+                          {product.targetPrice
+                            ? (Number(product.quantity || 0) * Number(product.targetPrice || 0)).toFixed(2)
+                            : '-'}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
               {total > 0 && (
                 <tfoot>
                   <tr className="bg-gray-100 font-bold">
-                    <td colSpan={7} className="border border-gray-300 px-2 py-2 text-right">
-                      ESTIMATED TOTAL:
+                    <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 py-2 text-right">
+                      Total Value ({currency}):
                     </td>
                     <td className="border border-gray-300 px-2 py-2 text-right font-semibold">
-                      {currency} {total.toFixed(2)}
+                      {total.toFixed(2)}
                     </td>
                   </tr>
                 </tfoot>
@@ -510,7 +639,7 @@ export const CustomerInquiryDocument = forwardRef<HTMLDivElement, CustomerInquir
           {/* Trading Requirements - Taiwan Enterprise Style (单列表格布局) */}
           <div className="mb-6">
             <h3 className="text-sm font-bold mb-2 text-gray-900">TRADING REQUIREMENTS:</h3>
-            <table className="w-full border-collapse border border-gray-400 text-xs">
+            <table className={fullWidthTableClass}>
               <tbody>
                 {getCustomerInquiryRequirementRows(data, { includeEmpty: true }).map((row, index) => (
                   <tr

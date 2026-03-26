@@ -151,6 +151,15 @@ export function InquiryManagement() {
 
   const currentUser = resolvedCurrentUser;
   const inquiries = Array.isArray(contextInquiries) ? contextInquiries : [];
+
+  React.useEffect(() => {
+    if (!selectedInquiry?.id) return;
+    const latestInquiry = inquiries.find((item) => item.id === selectedInquiry.id);
+    if (!latestInquiry) return;
+    if (latestInquiry !== selectedInquiry) {
+      setSelectedInquiry(latestInquiry);
+    }
+  }, [inquiries, selectedInquiry]);
   
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -172,6 +181,9 @@ export function InquiryManagement() {
   const visibleInquiries = filterNotDeleted('ing', inquiries, (inquiry) => [
     String(inquiry?.id || ''),
   ]);
+
+  const pendingSyncInquiries = visibleInquiries.filter((inquiry) => inquiry.syncStatus === 'pending');
+  const latestPendingInquiry = pendingSyncInquiries[0] || null;
 
   const filteredInquiries = visibleInquiries.filter(inquiry => {
     // Get first product name for search
@@ -331,7 +343,15 @@ export function InquiryManagement() {
       newInquiry.oem = aggregateInquiryOemFromProducts(newInquiry.products);
       (newInquiry as any).documentDataSnapshot = adaptInquiryToDocumentData(newInquiry as any);
       const savedInquiry = await addInquiry(newInquiry as any);
-      toast.success(`Inquiry ${savedInquiry.inquiryNumber || savedInquiry.id} created successfully!`);
+      const createdInquiryNo = String(
+        (savedInquiry as any)?.inquiryNumber ||
+        ''
+      ).trim();
+      toast.success(
+        createdInquiryNo
+          ? `Inquiry ${createdInquiryNo} created successfully!`
+          : 'Inquiry created successfully and is syncing to server…'
+      );
       setIsNewInquiryOpen(false);
     } catch (err) {
       console.error('❌ handleCreateInquiry failed:', err);
@@ -395,16 +415,30 @@ export function InquiryManagement() {
         <div className="border-b-2 border-gray-200">
           <div className="px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <FileText className="w-5 h-5 text-[#F96302]" strokeWidth={2.5} />
+              <FileText className="w-5 h-5" style={{ color: 'var(--customer-primary)' }} strokeWidth={2.5} />
               <h3 className="text-gray-900 uppercase tracking-wide" style={{ fontSize: '14px', fontWeight: 600 }}>Inquiry List</h3>
             </div>
-            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={() => setIsNewInquiryOpen(true)}>
+            <Button
+              className="text-white"
+              style={{ backgroundColor: 'var(--customer-primary)' }}
+              onClick={() => setIsNewInquiryOpen(true)}
+            >
               <Plus className="h-4 w-4 mr-2" />
               New Inquiry
             </Button>
           </div>
         </div>
         <div className="p-5">
+          {pendingSyncInquiries.length > 0 && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <div className="font-semibold">
+                Pending sync diagnostics: {pendingSyncInquiries.length} inquiry(s) waiting to sync
+              </div>
+              <div className="mt-1 text-xs text-amber-800">
+                Latest pending id: {latestPendingInquiry?.id || '-'} | inquiryNo: {String((latestPendingInquiry as any)?.inquiryNumber || '') || '-'} | email: {latestPendingInquiry?.userEmail || '-'}
+              </div>
+            </div>
+          )}
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -429,28 +463,48 @@ export function InquiryManagement() {
               <Button
                 variant={filterStatus === 'all' ? 'default' : 'outline'}
                 onClick={() => handleFilterStatusChange('all')}
-                className={filterStatus === 'all' ? 'bg-red-600 hover:bg-red-700' : ''}
+                className={filterStatus === 'all' ? 'text-white border-transparent' : ''}
+                style={
+                  filterStatus === 'all'
+                    ? { backgroundColor: 'var(--customer-primary)' }
+                    : undefined
+                }
               >
                 All
               </Button>
               <Button
                 variant={filterStatus === 'pending' ? 'default' : 'outline'}
                 onClick={() => handleFilterStatusChange('pending')}
-                className={filterStatus === 'pending' ? 'bg-red-600 hover:bg-red-700' : ''}
+                className={filterStatus === 'pending' ? 'text-white border-transparent' : ''}
+                style={
+                  filterStatus === 'pending'
+                    ? { backgroundColor: 'var(--customer-primary)' }
+                    : undefined
+                }
               >
                 Pending
               </Button>
               <Button
                 variant={filterStatus === 'quoted' ? 'default' : 'outline'}
                 onClick={() => handleFilterStatusChange('quoted')}
-                className={filterStatus === 'quoted' ? 'bg-red-600 hover:bg-red-700' : ''}
+                className={filterStatus === 'quoted' ? 'text-white border-transparent' : ''}
+                style={
+                  filterStatus === 'quoted'
+                    ? { backgroundColor: 'var(--customer-primary)' }
+                    : undefined
+                }
               >
                 Quoted
               </Button>
               <Button
                 variant={filterStatus === 'approved' ? 'default' : 'outline'}
                 onClick={() => handleFilterStatusChange('approved')}
-                className={filterStatus === 'approved' ? 'bg-red-600 hover:bg-red-700' : ''}
+                className={filterStatus === 'approved' ? 'text-white border-transparent' : ''}
+                style={
+                  filterStatus === 'approved'
+                    ? { backgroundColor: 'var(--customer-primary)' }
+                    : undefined
+                }
               >
                 Approved
               </Button>
@@ -490,10 +544,11 @@ export function InquiryManagement() {
                     ? `${firstProduct?.productName} +${inquiry.products.length - 1} more`
                     : firstProduct?.productName || 'N/A';
                   
-                  const inquiryNo = String((inquiry as any)?.inquiryNumber || inquiry.id);
+                  const inquiryNo = String((inquiry as any)?.inquiryNumber || '').trim();
+                  const inquiryDisplayNo = inquiryNo || `ING syncing…`;
                   const numberDisplay = resolveDisplayNumber({
                     domain: 'ing',
-                    internalNo: inquiryNo,
+                    internalNo: inquiryNo || inquiry.id,
                     companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
                   });
                   
@@ -508,8 +563,13 @@ export function InquiryManagement() {
                       </TableCell>
                       <TableCell className="text-xs">
                         <span className="font-bold text-gray-900">
-                          {inquiryNo}
+                          {inquiryDisplayNo}
                         </span>
+                        {!inquiryNo && inquiry.syncStatus === 'pending' && (
+                          <div className="text-[11px] text-amber-600 mt-0.5">
+                            Waiting for server number
+                          </div>
+                        )}
                         {numberDisplay.externalNo && (
                           <div className="text-[11px] text-gray-500 mt-0.5">
                             Customer ERP: {numberDisplay.externalNo}

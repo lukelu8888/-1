@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { toast } from 'sonner@2.0.3';
 import PurchaseOrderDocument from './PurchaseOrderDocument';
 import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext';
+import { shipmentWorkflowSummaryService } from '../../lib/supabaseService';
 
 /**
  * 🔥 供应商视角：客户订单管理
@@ -27,6 +28,7 @@ export default function CustomerOrders() {
   const [documentDialogOpen, setDocumentDialogOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState('');
   const [rejectReason, setRejectReason] = useState('');
+  const [workflowSummaryMap, setWorkflowSummaryMap] = React.useState<Record<string, any>>({});
   
   // 🔥 从Context获取客户订单数据（Admin端的采购订单）
   const { purchaseOrders: allPurchaseOrders, updatePurchaseOrder } = usePurchaseOrders();
@@ -80,6 +82,18 @@ export default function CustomerOrders() {
     return supplierCustomerOrders.map(po => {
       // 计算第一个产品项信息用于列表显示
       const firstItem = po.items[0];
+      const executionStatus = String(po.executionStatus || '');
+      const supplierFacingStatus =
+        executionStatus === 'supplier_pending_confirmation' ? 'pending_confirmation'
+          : executionStatus === 'supplier_confirmed' ? 'confirmed'
+          : executionStatus === 'sampling' ? 'sampling'
+          : executionStatus === 'in_production' ? 'in_production'
+          : executionStatus === 'supplier_self_inspection_pending' ? 'self_inspection_pending'
+          : executionStatus === 'supplier_self_inspection_submitted' ? 'self_inspection_submitted'
+          : po.status === 'pending' ? 'pending_confirmation'
+          : po.status === 'confirmed' ? 'confirmed'
+          : po.status === 'producing' ? 'in_production'
+          : po.status;
       
       return {
         id: po.poNumber,
@@ -93,10 +107,7 @@ export default function CustomerOrders() {
         totalAmount: po.totalAmount,
         currency: po.currency,
         deliveryDate: po.expectedDate,
-        status: po.status === 'pending' ? 'pending_confirmation' : 
-               po.status === 'confirmed' ? 'confirmed' :
-               po.status === 'producing' ? 'in_production' :
-               po.status,
+        status: supplierFacingStatus,
         confirmedDate: po.updatedDate,
         priority: 'medium',
         notes: po.remarks,
@@ -106,14 +117,106 @@ export default function CustomerOrders() {
     });
   }, [supplierCustomerOrders]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function loadWorkflowSummaries() {
+      const purchaseOrderIds = supplierCustomerOrders
+        .map((po) => po.id)
+        .filter(Boolean);
+
+      if (purchaseOrderIds.length === 0) {
+        setWorkflowSummaryMap({});
+        return;
+      }
+
+      try {
+        const rows = await Promise.all(
+          purchaseOrderIds.map(async (purchaseOrderId) => ({
+            purchaseOrderId,
+            summary: await shipmentWorkflowSummaryService.getByPurchaseOrderId(purchaseOrderId),
+          }))
+        );
+
+        if (cancelled) return;
+        setWorkflowSummaryMap(
+          rows.reduce((acc, item) => {
+            acc[item.purchaseOrderId] = item.summary || null;
+            return acc;
+          }, {} as Record<string, any>)
+        );
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('⚠️ [SupplierCustomerOrders] 加载协同摘要失败:', error);
+        }
+      }
+    }
+
+    loadWorkflowSummaries();
+    return () => {
+      cancelled = true;
+    };
+  }, [supplierCustomerOrders]);
+
   const getStatusConfig = (status: string) => {
     const config: any = {
       pending_confirmation: { label: '待确认', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
       confirmed: { label: '已确认', color: 'bg-green-100 text-green-800 border-green-300' },
       rejected: { label: '已拒绝', color: 'bg-red-100 text-red-800 border-red-300' },
       in_production: { label: '生产中', color: 'bg-blue-100 text-blue-800 border-blue-300' },
+      sampling: { label: '产前样处理中', color: 'bg-sky-100 text-sky-800 border-sky-300' },
+      self_inspection_pending: { label: '待提交自检', color: 'bg-cyan-100 text-cyan-800 border-cyan-300' },
+      self_inspection_submitted: { label: '已提交自检', color: 'bg-teal-100 text-teal-800 border-teal-300' },
     };
     return config[status] || { label: status, color: 'bg-gray-100 text-gray-800 border-gray-300' };
+  };
+
+  const renderWorkflowSummary = (order: any) => {
+    const summary = workflowSummaryMap[order.rawPO?.id || ''];
+    const replySummary = summary?.replySummary || {};
+    const pendingReplies = summary?.pendingReplies || [];
+    const formatSummaryValue = (value: any) => {
+      if (!value) return '-';
+      if (typeof value === 'string') return value;
+      const parts = [
+        value.status || null,
+        value.mode || null,
+        typeof value.pendingCount === 'number' ? `${value.pendingCount} pending` : null,
+      ].filter(Boolean);
+      return parts.join(' · ') || JSON.stringify(value);
+    };
+    const entries = [
+      ['验货', replySummary.customerThirdPartyInspection],
+      ['监装', replySummary.loadingSupervision],
+      ['付款', replySummary.customerPaymentControl],
+      ['交单', replySummary.bankSubmission],
+      ['放单', replySummary.documentRelease],
+      ['到港', replySummary.arrivalNotice],
+      ['清关', replySummary.clearanceDocs],
+      ['收货', replySummary.deliveryReceipt],
+      ['反馈', replySummary.feedback],
+    ].filter(([, value]) => value);
+
+    if (entries.length === 0 && pendingReplies.length === 0) {
+      return <span className="text-xs text-gray-400">暂无</span>;
+    }
+
+    return (
+      <div className="space-y-1">
+        <div className="flex flex-wrap gap-1">
+          {entries.slice(0, 3).map(([label, value]) => (
+            <span key={label} className="rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-700">
+              {label}:{formatSummaryValue(value)}
+            </span>
+          ))}
+        </div>
+        {pendingReplies.length > 0 && (
+          <div className="text-[10px] text-amber-700">
+            待回执：{pendingReplies.map((item: any) => item.title).join(' / ')}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handleConfirmOrder = async () => {
@@ -127,6 +230,10 @@ export default function CustomerOrders() {
       try {
         await updatePurchaseOrder(selectedOrder.rawPO.id, {
           status: 'confirmed',
+          executionStatus: 'supplier_confirmed',
+          supplierConfirmedAt: new Date().toISOString(),
+          supplierRejectedAt: undefined,
+          supplierReplyNotes: `供应商确认接单，承诺交期 ${deliveryDate}`,
           actualDate: deliveryDate,
           updatedDate: new Date().toISOString()
         });
@@ -153,6 +260,9 @@ export default function CustomerOrders() {
       try {
         await updatePurchaseOrder(selectedOrder.rawPO.id, {
           status: 'cancelled',
+          executionStatus: 'supplier_pending_confirmation',
+          supplierRejectedAt: new Date().toISOString(),
+          supplierReplyNotes: rejectReason,
           remarks: `拒绝原因: ${rejectReason}`,
           updatedDate: new Date().toISOString()
         });
@@ -256,6 +366,7 @@ export default function CustomerOrders() {
                 <TableHead className="h-9 w-28 text-right" style={{ fontSize: '12px' }}>总金额</TableHead>
                 <TableHead className="h-9 w-24" style={{ fontSize: '12px' }}>交货日期</TableHead>
                 <TableHead className="h-9 w-20" style={{ fontSize: '12px' }}>状态</TableHead>
+                <TableHead className="h-9 w-56" style={{ fontSize: '12px' }}>协同摘要</TableHead>
                 <TableHead className="h-9 w-48 text-center" style={{ fontSize: '12px' }}>操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -307,6 +418,9 @@ export default function CustomerOrders() {
                           {statusConfig.label}
                         </Badge>
                       </TableCell>
+                      <TableCell className="py-2.5" style={{ fontSize: '12px' }}>
+                        {renderWorkflowSummary(order)}
+                      </TableCell>
                       <TableCell className="py-2.5">
                         <div className="flex items-center justify-center gap-1">
                           <Button
@@ -355,7 +469,7 @@ export default function CustomerOrders() {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-32 text-center">
+                  <TableCell colSpan={11} className="h-32 text-center">
                     <div className="flex flex-col items-center justify-center text-gray-400">
                       <Package2 className="w-12 h-12 mb-2" />
                       <p style={{ fontSize: '13px' }}>暂无客户订单数据</p>

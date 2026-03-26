@@ -2,14 +2,14 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { CartItem } from './CartContext';
 import type { RegionType } from '../utils/xjNumberGenerator';
 import { getCurrentUser, getStoredPortalRole, isStoredStaffPortalRole } from '../utils/dataIsolation';
-import { inquiryOemFactoryDispatchService, inquiryOemService, inquiryService, productMasterService, productModelMappingService } from '../lib/supabaseService';
+import { inquiryOemFactoryDispatchService, inquiryOemService, inquiryService, productMasterService, productModelMappingService, staffDirectoryService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
 import { emitErpEvent } from '../lib/erp-core/event-bus';
 import { adaptInquiryToDocumentData } from '../utils/documentDataAdapters';
 import type { CustomerInquiryData } from '../components/documents/templates/CustomerInquiryDocument';
-import { routeToSalesRep } from '../lib/customer-salesrep-mapping';
 import type { Region as SalesRepRegion } from '../lib/notification-rules';
+import { normalizePersonnelEmail } from '../lib/notification-rules';
 import { aggregateInquiryOemFromProducts, type InquiryOemData } from '../types/oem';
 import { customerProductLibraryService } from '../lib/customerProductLibrary';
 import type {
@@ -103,6 +103,10 @@ export interface Inquiry {
   submittedAt?: number;
   assignedTo?: string | null;
   salesRepEmail?: string | null;
+  ownerUserId?: string | null;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
   syncStatus?: 'synced' | 'pending';
   syncMessage?: string | null;
 }
@@ -129,7 +133,7 @@ const SYNCED_INQUIRY_CACHE_KEY = 'synced_inquiry_cache_v1';
 
 const resolveInquiryStorageIdentity = () => {
   if (typeof window === 'undefined') {
-    return { email: 'anonymous', role: 'unknown' };
+    return { email: 'anonymous', role: 'customer' };
   }
 
   try {
@@ -154,28 +158,83 @@ const resolveInquiryStorageIdentity = () => {
       role: role || 'customer',
     };
   } catch {
-    return { email: 'anonymous', role: 'unknown' };
+    return { email: 'anonymous', role: 'customer' };
+  }
+};
+
+const getStableInquiryStorageKey = (baseKey: string) => {
+  const { email } = resolveInquiryStorageIdentity();
+  return `${baseKey}:${email}`;
+};
+
+const getLegacyInquiryStorageKeys = (baseKey: string) => {
+  if (typeof window === 'undefined') return [] as string[];
+  const { email, role } = resolveInquiryStorageIdentity();
+  const keys = new Set<string>([
+    `${baseKey}:${email}:${role}`,
+    `${baseKey}:${email}:customer`,
+    `${baseKey}:${email}:unknown`,
+    `${baseKey}:${email}:admin`,
+    `${baseKey}:${email}:staff`,
+    `${baseKey}:${email}:supplier`,
+  ]);
+
+  try {
+    const prefix = `${baseKey}:${email}:`;
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) {
+        keys.add(key);
+      }
+    }
+  } catch {
+    // ignore storage scan failures
+  }
+
+  return Array.from(keys);
+};
+
+const readInquiryStoragePayload = (baseKey: string) => {
+  if (typeof window === 'undefined') return null;
+  const candidateKeys = [getStableInquiryStorageKey(baseKey), ...getLegacyInquiryStorageKeys(baseKey)];
+  for (const key of candidateKeys) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) return raw;
+    } catch {
+      // ignore malformed entries and keep scanning
+    }
+  }
+  return null;
+};
+
+const clearLegacyInquiryStorageKeys = (baseKey: string) => {
+  if (typeof window === 'undefined') return;
+  const stableKey = getStableInquiryStorageKey(baseKey);
+  for (const key of getLegacyInquiryStorageKeys(baseKey)) {
+    if (key === stableKey) continue;
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore cleanup failures
+    }
   }
 };
 
 const getHiddenInquiryStorageKey = () => {
-  const { email, role } = resolveInquiryStorageIdentity();
-  return `${HIDDEN_INQUIRY_IDS_KEY}:${email}:${role}`;
+  return getStableInquiryStorageKey(HIDDEN_INQUIRY_IDS_KEY);
 };
 
 const getPendingInquiryStorageKey = () => {
-  const { email, role } = resolveInquiryStorageIdentity();
-  return `${PENDING_INQUIRY_SYNC_KEY}:${email}:${role}`;
+  return getStableInquiryStorageKey(PENDING_INQUIRY_SYNC_KEY);
 };
 
 const getLegacyPendingInquiryStorageKey = () => {
-  const { email, role } = resolveInquiryStorageIdentity();
-  return `${LEGACY_PENDING_INQUIRY_SYNC_KEY}:${email}:${role}`;
+  return `${getStableInquiryStorageKey(LEGACY_PENDING_INQUIRY_SYNC_KEY)}:legacy`;
 };
 
 const getSyncedInquiryCacheStorageKey = () => {
-  const { email, role } = resolveInquiryStorageIdentity();
-  return `${SYNCED_INQUIRY_CACHE_KEY}:${email}:${role}`;
+  return getStableInquiryStorageKey(SYNCED_INQUIRY_CACHE_KEY);
 };
 
 const isUuidLikeMarker = (value: unknown) =>
@@ -186,7 +245,7 @@ const isUuidLikeMarker = (value: unknown) =>
 const loadHiddenInquiryMarkers = (): Set<string> => {
   if (typeof window === 'undefined') return new Set();
   try {
-    const raw = localStorage.getItem(getHiddenInquiryStorageKey());
+    const raw = readInquiryStoragePayload(HIDDEN_INQUIRY_IDS_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     const normalized = Array.isArray(parsed)
       ? parsed.map((v) => String(v)).filter((v) => isUuidLikeMarker(v))
@@ -200,14 +259,15 @@ const loadHiddenInquiryMarkers = (): Set<string> => {
 const persistHiddenInquiryMarkers = (markers: Set<string>) => {
   if (typeof window === 'undefined') return;
   localStorage.setItem(getHiddenInquiryStorageKey(), JSON.stringify(Array.from(markers)));
+  clearLegacyInquiryStorageKeys(HIDDEN_INQUIRY_IDS_KEY);
 };
 
 const loadPendingInquirySyncItems = (): Inquiry[] => {
   if (typeof window === 'undefined') return [];
   try {
-    const storageKey = getPendingInquiryStorageKey();
-    const legacyKey = getLegacyPendingInquiryStorageKey();
-    const raw = localStorage.getItem(storageKey) || localStorage.getItem(legacyKey);
+    const raw =
+      readInquiryStoragePayload(PENDING_INQUIRY_SYNC_KEY) ||
+      readInquiryStoragePayload(LEGACY_PENDING_INQUIRY_SYNC_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed.map((item) => hydrateInquiryRecord(item as Inquiry)) : [];
   } catch {
@@ -218,8 +278,7 @@ const loadPendingInquirySyncItems = (): Inquiry[] => {
 const loadSyncedInquiryCache = (): Inquiry[] => {
   if (typeof window === 'undefined') return [];
   try {
-    const storageKey = getSyncedInquiryCacheStorageKey();
-    const raw = localStorage.getItem(storageKey);
+    const raw = readInquiryStoragePayload(SYNCED_INQUIRY_CACHE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     const normalized = Array.isArray(parsed)
       ? parsed
@@ -374,12 +433,15 @@ const persistPendingInquirySyncItems = (items: Inquiry[]) => {
     return;
   }
   localStorage.setItem(storageKey, JSON.stringify(sanitizedItems));
+  clearLegacyInquiryStorageKeys(PENDING_INQUIRY_SYNC_KEY);
+  clearLegacyInquiryStorageKeys(LEGACY_PENDING_INQUIRY_SYNC_KEY);
 };
 
 const clearLegacyPendingInquirySyncItems = () => {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem(getPendingInquiryStorageKey());
+    clearLegacyInquiryStorageKeys(PENDING_INQUIRY_SYNC_KEY);
+    clearLegacyInquiryStorageKeys(LEGACY_PENDING_INQUIRY_SYNC_KEY);
     localStorage.removeItem(getLegacyPendingInquiryStorageKey());
   } catch {
     // ignore cleanup failures
@@ -392,6 +454,7 @@ const persistSyncedInquiryCache = (items: Inquiry[]) => {
   const sanitizedItems = items.map(sanitizeInquiryForSyncedCache);
   try {
     localStorage.setItem(storageKey, JSON.stringify(sanitizedItems));
+    clearLegacyInquiryStorageKeys(SYNCED_INQUIRY_CACHE_KEY);
   } catch (error) {
     console.warn('⚠️ [persistSyncedInquiryCache] localStorage quota exceeded, trimming payload.', error);
     try {
@@ -429,10 +492,77 @@ const persistSyncedInquiryCache = (items: Inquiry[]) => {
 const getInquiryMarkers = (inquiry: Partial<Inquiry>): string[] =>
   [inquiry.id].filter(Boolean).map((v) => String(v));
 
+const normalizeRegionForVisibility = (region?: string | null): 'NA' | 'SA' | 'EA' | 'all' | '' => {
+  const value = String(region || '').trim().toLowerCase();
+  if (!value) return '';
+  if (value === 'na' || value === 'north america' || value === 'north_america' || value === 'north-america' || value === '北美') {
+    return 'NA';
+  }
+  if (value === 'sa' || value === 'south america' || value === 'south_america' || value === 'south-america' || value === '南美') {
+    return 'SA';
+  }
+  if (
+    value === 'ea' ||
+    value === 'emea' ||
+    value === 'europe & africa' ||
+    value === 'europe_africa' ||
+    value === 'europe-africa' ||
+    value === '欧非'
+  ) {
+    return 'EA';
+  }
+  if (value === 'all') return 'all';
+  return '';
+};
+
 const filterVisibleInquiriesForCurrentUser = (list: Inquiry[]): Inquiry[] => {
   const hidden = loadHiddenInquiryMarkers();
-  if (hidden.size === 0) return list;
-  return list.filter((inquiry) => !getInquiryMarkers(inquiry).some((marker) => hidden.has(marker)));
+  const visibleByHidden = hidden.size === 0
+    ? list
+    : list.filter((inquiry) => !getInquiryMarkers(inquiry).some((marker) => hidden.has(marker)));
+
+  const currentUser = getCurrentUser() as any;
+  const portalRole = getStoredPortalRole();
+  const isStaff = isStoredStaffPortalRole();
+
+  if (!isStaff || portalRole !== 'admin' || !currentUser?.email) {
+    return visibleByHidden;
+  }
+
+  const role = String(currentUser.role || currentUser.userRole || '').trim();
+  const currentEmail = normalizePersonnelEmail(currentUser.email, currentUser.region);
+  const currentRegion = normalizeRegionForVisibility(currentUser.region);
+
+  if (!role) return visibleByHidden;
+
+  return visibleByHidden.filter((inquiry) => {
+    const inquiryRegion = normalizeRegionForVisibility(inquiry.region);
+    const assignedManager = normalizePersonnelEmail(inquiry.assignedTo, inquiry.region);
+    const assignedSales = normalizePersonnelEmail(inquiry.salesRepEmail, inquiry.region);
+
+    if (['Admin', 'CEO', 'CFO', 'Procurement', 'Finance', 'Documentation_Officer', 'Marketing_Ops'].includes(role)) {
+      return true;
+    }
+
+    if (role === 'Sales_Director') {
+      return true;
+    }
+
+    if (role === 'Regional_Manager') {
+      if (!currentRegion || currentRegion === 'all') return assignedManager === currentEmail;
+      return inquiryRegion === currentRegion && assignedManager === currentEmail;
+    }
+
+    if (role === 'Sales_Manager') {
+      return false;
+    }
+
+    if (role === 'Sales_Rep') {
+      return assignedSales === currentEmail;
+    }
+
+    return true;
+  });
 };
 
 const mergeInquiryLists = (remoteList: Inquiry[], localPendingList: Inquiry[]) => {
@@ -445,7 +575,11 @@ const mergeInquiryLists = (remoteList: Inquiry[], localPendingList: Inquiry[]) =
     if (!inquiry?.id) continue;
     merged.set(inquiry.id, inquiry);
   }
-  return Array.from(merged.values());
+  return Array.from(merged.values()).sort((a, b) => {
+    const aTime = Number((a as any)?.createdAt || new Date(String(a?.date || 0)).getTime() || 0);
+    const bTime = Number((b as any)?.createdAt || new Date(String(b?.date || 0)).getTime() || 0);
+    return bTime - aTime;
+  });
 };
 
 const mergeSyncedAndPendingInquiryLists = (syncedList: Inquiry[], localPendingList: Inquiry[]) => {
@@ -458,7 +592,11 @@ const mergeSyncedAndPendingInquiryLists = (syncedList: Inquiry[], localPendingLi
     if (!inquiry?.id) continue;
     merged.set(inquiry.id, inquiry);
   }
-  return Array.from(merged.values());
+  return Array.from(merged.values()).sort((a, b) => {
+    const aTime = Number((a as any)?.createdAt || new Date(String(a?.date || 0)).getTime() || 0);
+    const bTime = Number((b as any)?.createdAt || new Date(String(b?.date || 0)).getTime() || 0);
+    return bTime - aTime;
+  });
 };
 
 const mergeRemoteWithRecoveredInquiryLists = (remoteList: Inquiry[], recoveredLocalList: Inquiry[]) => {
@@ -473,7 +611,11 @@ const mergeRemoteWithRecoveredInquiryLists = (remoteList: Inquiry[], recoveredLo
       merged.set(inquiry.id, inquiry);
     }
   }
-  return Array.from(merged.values());
+  return Array.from(merged.values()).sort((a, b) => {
+    const aTime = Number((a as any)?.createdAt || new Date(String(a?.date || 0)).getTime() || 0);
+    const bTime = Number((b as any)?.createdAt || new Date(String(b?.date || 0)).getTime() || 0);
+    return bTime - aTime;
+  });
 };
 
 const matchesCustomerInquiryVisibility = (
@@ -567,6 +709,17 @@ const isDeterministicInquirySaveError = (error: unknown) => {
   );
 };
 
+const isTransientInquirySaveError = (error: unknown) => {
+  const message = String((error as any)?.message || error || '').toLowerCase();
+  return (
+    (error as any)?.name === 'AbortError' ||
+    message.includes('aborterror') ||
+    message.includes('signal is aborted') ||
+    message.includes('request aborted') ||
+    message.includes('timed out')
+  );
+};
+
 const emitInquiryEvent = (
   key: string,
   inquiry: Partial<Inquiry> & { id: string },
@@ -601,6 +754,14 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     setInquiries(visible);
     persistSyncedInquiryCache(visible.filter((item) => item.syncStatus !== 'pending'));
   };
+
+  const getLatestVisibleInquiryList = () =>
+    filterVisibleInquiriesForCurrentUser(
+      mergeSyncedAndPendingInquiryLists(
+        loadSyncedInquiryCache(),
+        loadPendingInquirySyncItems(),
+      ),
+    );
 
   const upsertPendingInquiry = (inquiry: Inquiry) => {
     const nextPending = [
@@ -659,12 +820,12 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       }
       removePendingInquiry(inquiry.id);
       const hydratedSaved = hydrateInquiryRecord(enrichedSaved as Inquiry);
+      const latestList = getLatestVisibleInquiryList();
       setVisibleInquiries(
-        inquiries.map((item) =>
-          item.id === inquiry.id
-            ? ({ ...hydratedSaved, syncStatus: 'synced', syncMessage: null } as Inquiry)
-            : item
-        )
+        [
+          { ...hydratedSaved, syncStatus: 'synced', syncMessage: null } as Inquiry,
+          ...latestList.filter((item) => item.id !== inquiry.id),
+        ]
       );
       enqueueInquiryProductMappings(hydratedSaved as Inquiry);
     } catch (error) {
@@ -683,7 +844,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       syncMessage: message,
     };
     upsertPendingInquiry(pendingInquiry);
-    setVisibleInquiries(mergeInquiryLists(inquiries, [pendingInquiry]));
+    setVisibleInquiries(mergeInquiryLists(getLatestVisibleInquiryList(), [pendingInquiry]));
     console.warn('⚠️ [queueInquiryForSync] retained local pending inquiry:', {
       inquiryId: inquiry.id,
       message,
@@ -711,35 +872,47 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     return 'north_america';
   };
 
-  const ensureInquiryAssignment = (inquiry: Inquiry): Inquiry => {
-    if (inquiry.assignedTo || inquiry.salesRepEmail) {
+  const resolveRegionalManagerEmail = async (region?: string | null): Promise<string | null> => {
+    const normalizedRegion = normalizeInquiryRegionForRouting(region);
+    const regionCodeMap: Record<SalesRepRegion, 'NA' | 'SA' | 'EA'> = {
+      north_america: 'NA',
+      south_america: 'SA',
+      europe_africa: 'EA',
+    };
+    const regionalManagerEmailFallbackMap: Record<'NA' | 'SA' | 'EA', string> = {
+      NA: 'salesmanager-na@cosunchina.com',
+      SA: 'salesmanager-sa@cosunchina.com',
+      EA: 'salesmanager-ea@cosunchina.com',
+    };
+
+    const regionCode = regionCodeMap[normalizedRegion];
+    try {
+      const manager = await staffDirectoryService.findRegionalManagerByRegion(regionCode);
+      return manager?.email || regionalManagerEmailFallbackMap[regionCode] || null;
+    } catch (error) {
+      console.warn('⚠️ [resolveRegionalManagerEmail] fallback to official manager mapping:', error);
+      return regionalManagerEmailFallbackMap[regionCode] || null;
+    }
+  };
+
+  const ensureInquiryAssignment = async (inquiry: Inquiry): Promise<Inquiry> => {
+    if (inquiry.assignedTo) {
       return {
         ...inquiry,
-        assignedTo: inquiry.assignedTo || inquiry.salesRepEmail || null,
-        salesRepEmail: inquiry.salesRepEmail || inquiry.assignedTo || null,
+        assignedTo: inquiry.assignedTo || null,
+        salesRepEmail: inquiry.salesRepEmail || null,
       };
     }
 
-    const normalizedCompanyName = String(inquiry.buyerInfo?.companyName || '').trim();
-    const customerName =
-      (normalizedCompanyName && normalizedCompanyName !== 'N/A' ? normalizedCompanyName : '') ||
-      String(inquiry.companyId || '').trim() ||
-      String(inquiry.buyerInfo?.email || '').trim() ||
-      String(inquiry.userEmail || '').trim() ||
-      'unknown-customer';
-    const assignedSalesRep = routeToSalesRep(
-      String(customerName || inquiry.userEmail || 'unknown-customer'),
-      normalizeInquiryRegionForRouting(inquiry.region),
-    );
-
-    if (!assignedSalesRep?.email) {
+    const regionalManagerEmail = await resolveRegionalManagerEmail(inquiry.region);
+    if (!regionalManagerEmail) {
       return inquiry;
     }
 
     return {
       ...inquiry,
-      assignedTo: assignedSalesRep.email,
-      salesRepEmail: assignedSalesRep.email,
+      assignedTo: regionalManagerEmail,
+      salesRepEmail: null,
     };
   };
 
@@ -832,9 +1005,13 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
 
   const loadFromSupabase = async () => {
     try {
-      const localPending = loadPendingInquirySyncItems();
-      const cachedSynced = loadSyncedInquiryCache();
-      const locallyRecovered = mergeSyncedAndPendingInquiryLists(cachedSynced, localPending);
+      const readLatestRecovered = () =>
+        mergeSyncedAndPendingInquiryLists(
+          loadSyncedInquiryCache(),
+          loadPendingInquirySyncItems(),
+        );
+
+      const locallyRecovered = readLatestRecovered();
       if (locallyRecovered.length > 0) {
         setVisibleInquiries(locallyRecovered);
       }
@@ -885,7 +1062,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
 
       const hasLookupIdentity = Boolean(isStaff || email || companyId || companyName);
       if (!hasLookupIdentity) {
-        setVisibleInquiries(locallyRecovered);
+        setVisibleInquiries(readLatestRecovered());
         return;
       }
 
@@ -924,9 +1101,8 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       if (Array.isArray(data)) {
         const enrichedData = await enrichInquiryListWithOem(data as Inquiry[])
         const enrichedWithDispatch = await enrichInquiryListWithOemFactoryDispatch(enrichedData)
-        // `cachedSynced` is already partitioned per user/role in localStorage.
-        // Re-filtering it by volatile identity fields causes false negatives on refresh.
-        const recoveredLocal = locallyRecovered;
+        // 请求完成时重新读取一次本地恢复列表，避免把这段时间内新建的 pending ING 覆盖掉。
+        const recoveredLocal = readLatestRecovered();
         const mergedResults = mergeRemoteWithRecoveredInquiryLists(
           enrichedWithDispatch.map((item) => ({ ...item, syncStatus: 'synced', syncMessage: null })),
           recoveredLocal,
@@ -995,7 +1171,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addInquiry = async (inquiry: Inquiry) => {
-    const inquiryWithAssignment = ensureInquiryAssignment(prepareInquiryRecordForSave(inquiry));
+    const inquiryWithAssignment = await ensureInquiryAssignment(prepareInquiryRecordForSave(inquiry));
     const optimisticInquiry = {
       ...inquiryWithAssignment,
       syncStatus: 'pending' as const,
@@ -1003,7 +1179,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     } as Inquiry;
 
     upsertPendingInquiry(optimisticInquiry);
-    setVisibleInquiries(mergeInquiryLists(inquiries, [optimisticInquiry]));
+    setVisibleInquiries(mergeInquiryLists(getLatestVisibleInquiryList(), [optimisticInquiry]));
 
     emitInquiryEvent(ERP_EVENT_KEYS.INQUIRY_CREATED, inquiryWithAssignment, {
       status: inquiryWithAssignment.status,
@@ -1053,11 +1229,12 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
       }
       removePendingInquiry(inquiryWithAssignment.id);
       const hydratedResult = hydrateInquiryRecord(enrichedResult as Inquiry);
+      const latestList = getLatestVisibleInquiryList();
       setVisibleInquiries([{
         ...hydratedResult,
         syncStatus: 'synced',
         syncMessage: null,
-      }, ...inquiries.filter(i => i.id !== result.id)]);
+      }, ...latestList.filter(i => i.id !== result.id && i.id !== inquiryWithAssignment.id)]);
       enqueueInquiryProductMappings(hydratedResult as Inquiry);
       return {
         ...hydratedResult,
@@ -1070,6 +1247,16 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
         optimisticInquiry,
         error instanceof Error ? error.message : 'Supabase sync failed',
       );
+      if (isTransientInquirySaveError(error)) {
+        window.setTimeout(() => {
+          void syncInquiryInBackground(optimisticInquiry);
+        }, 1500);
+        return {
+          ...optimisticInquiry,
+          syncStatus: 'pending',
+          syncMessage: 'Saved locally, syncing to server…',
+        } as Inquiry;
+      }
       throw error;
     }
   };
@@ -1098,7 +1285,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     if (!current) {
       throw new Error('未找到要更新的 ING');
     }
-    const mergedInquiry = ensureInquiryAssignment(prepareInquiryRecordForSave({
+    const mergedInquiry = await ensureInquiryAssignment(prepareInquiryRecordForSave({
       ...current,
       ...updatedInquiry,
     } as Inquiry & Record<string, any>));
@@ -1182,7 +1369,7 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     }
     if (inquiry.isSubmitted) return true;
 
-    const submittedInquiry = ensureInquiryAssignment(hydrateInquiryRecord({
+    const submittedInquiry = await ensureInquiryAssignment(hydrateInquiryRecord({
       ...inquiry,
       isSubmitted: true,
       status: 'pending' as const,

@@ -51,7 +51,7 @@ export async function downloadRFQAsPDF(inquiryId: string): Promise<void> {
     <html>
       <head>
         <meta charset="UTF-8">
-        <title>INQ-${inquiryId}</title>
+        <title>ING-${inquiryId}</title>
         <style>
           ${stylesheets}
           
@@ -149,7 +149,7 @@ export async function downloadRFQAsPDFAdvanced(inquiryId: string): Promise<void>
     // PDF options
     const opt = {
       margin: [15, 15, 15, 15], // 15mm margins
-      filename: `INQ-${inquiryId}.pdf`,
+      filename: `ING-${inquiryId}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { 
         scale: 2,

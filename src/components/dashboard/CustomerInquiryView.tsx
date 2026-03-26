@@ -6,11 +6,13 @@ import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
-import { A4DocumentContainer, type DocumentLayoutConfig } from '../documents/A4PageContainer';
-import { CustomerInquiryDocument, type CustomerInquiryData } from '../documents/templates/CustomerInquiryDocument';
+import { A4DocumentContainer } from '../documents/A4PageContainer';
+import type { CustomerInquiryData } from '../documents/templates/CustomerInquiryDocument';
+import { CustomerInquiryDocumentA4Pages } from '../documents/templates/paginated/CustomerInquiryDocumentA4';
 import { OemInquirySummary } from './OemInquirySummary';
 import { adaptInquiryToDocumentData } from '../../utils/documentDataAdapters';
 import { exportToPDF } from '../../utils/pdfExport';
+import { templateCenterService } from '../../lib/supabaseService';
 import {
   aggregateInquiryOemFromProducts,
   normalizeOemData,
@@ -1111,14 +1113,66 @@ function InternalProductPackagePanel({ inquiry }: { inquiry: any }) {
 
 export const CustomerInquiryView = forwardRef<HTMLDivElement, CustomerInquiryViewProps>(
   ({ inquiry, audience = 'customer', onUpdateInquiry }, ref) => {
+    // Load the currently published ING template settings (e.g. column config) from Supabase.
+    // This ensures that admin template publishes (column labels, widths, order) propagate
+    // to all customer inquiry previews — both existing and newly created ones.
+    // The result is cached at module level (5-min TTL) so repeated opens don't hit Supabase.
+    const [publishedTemplateSettings, setPublishedTemplateSettings] = useState<CustomerInquiryData['templateSettings'] | null>(null);
+    useEffect(() => {
+      let cancelled = false;
+      templateCenterService.getPublishedTemplateSettings('ing')
+        .then((settings) => {
+          if (!cancelled && settings) {
+            setPublishedTemplateSettings(settings as CustomerInquiryData['templateSettings']);
+          }
+        })
+        .catch(() => { /* Supabase unreachable — silently fall back to defaults */ });
+      return () => { cancelled = true; };
+    }, []);
+
     const templateSnapshot = inquiry?.templateSnapshot || inquiry?.template_snapshot || null;
-    const templateVersion = templateSnapshot?.version || null;
-    const documentData = (
+
+    // Always use live inquiry data as the primary source so that:
+    // 1. New template publishes (layout, columns, settings) propagate to existing inquiries
+    // 2. Trading Requirements and other fields reflect the current inquiry state
+    // The frozen documentDataSnapshot (saved at inquiry-creation time) is used only
+    // as a supplementary override for fields that may have been manually edited later.
+    const liveData = adaptInquiryToDocumentData(inquiry);
+    const snapshotData = (
       inquiry?.documentDataSnapshot ||
       inquiry?.document_data_snapshot ||
-      adaptInquiryToDocumentData(inquiry)
+      null
     ) as CustomerInquiryData | null;
-    const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
+
+    const mergedData: CustomerInquiryData | null = liveData
+      ? (snapshotData
+        ? {
+            ...liveData,
+            // Prefer snapshot customer info only if it has richer manually-edited content
+            customer: { ...liveData.customer, ...snapshotData.customer },
+            // Prefer snapshot products only if snapshot has product rows; otherwise use live
+            products: (snapshotData.products?.length ? snapshotData.products : liveData.products),
+            // Prefer snapshot requirements only if they contain at least one non-empty value
+            requirements: (
+              snapshotData.requirements &&
+              Object.values(snapshotData.requirements).some(v => Boolean(v))
+            )
+              ? snapshotData.requirements
+              : liveData.requirements,
+          }
+        : liveData)
+      : null;
+
+    // Apply published template settings on top of merged business data.
+    // publishedTemplateSettings comes from the latest published version in Supabase;
+    // it reflects whatever column/layout config the admin saved in DocumentCenter.
+    const documentData: CustomerInquiryData | null = mergedData
+      ? {
+          ...mergedData,
+          templateSettings: publishedTemplateSettings ?? mergedData.templateSettings,
+        }
+      : null;
+
     if (!documentData) {
       return (
         <div className="flex min-h-[240px] items-center justify-center bg-white text-sm text-gray-500">
@@ -1129,7 +1183,7 @@ export const CustomerInquiryView = forwardRef<HTMLDivElement, CustomerInquiryVie
 
     return (
       <div ref={ref} data-rfq-preview className="bg-white">
-        <CustomerInquiryDocument data={documentData} layoutConfig={layoutConfig || undefined} />
+        <CustomerInquiryDocumentA4Pages data={documentData} />
         {audience === 'internal' ? <InternalProductPackagePanel inquiry={inquiry} /> : null}
         {audience === 'internal' ? <InternalAttachmentBundlePanel inquiry={inquiry} onUpdateInquiry={onUpdateInquiry} /> : null}
         <OemInquirySummary inquiry={inquiry} audience={audience} />

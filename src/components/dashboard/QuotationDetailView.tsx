@@ -18,7 +18,8 @@ interface QuotationDetailViewProps {
   onClose: () => void;
   quotation: Quotation | null;
   onOpenProfitAnalyzer?: (quotation: Quotation) => void; // 🔥 新增：打开Profit Analyzer的回调
-  onUpdated?: () => void; // 🔥 客户操作后刷新列表（落库后重新拉取）
+  onUpdated?: (updatedQuotation?: Partial<Quotation> & Record<string, any>) => void; // 🔥 客户操作后刷新列表（落库后重新拉取）
+  initialFeedbackType?: 'accepted' | 'rejected' | 'negotiating' | null;
 }
 
 export default function QuotationDetailView({
@@ -26,13 +27,29 @@ export default function QuotationDetailView({
   onClose,
   quotation,
   onOpenProfitAnalyzer,
-  onUpdated
+  onUpdated,
+  initialFeedbackType = null,
 }: QuotationDetailViewProps) {
   const printRef = useRef<HTMLDivElement>(null);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackType, setFeedbackType] = useState<'accepted' | 'rejected' | 'negotiating'>('negotiating');
   const { user } = useUser();
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (initialFeedbackType === 'rejected') {
+      setFeedbackType('rejected');
+      setShowFeedback(true);
+      return;
+    }
+    if (initialFeedbackType === 'negotiating') {
+      setFeedbackType('negotiating');
+      setShowFeedback(true);
+      return;
+    }
+    setShowFeedback(false);
+  }, [initialFeedbackType, open]);
 
   const handlePrint = () => {
     window.print();
@@ -56,6 +73,7 @@ export default function QuotationDetailView({
   // 🆕 接受报价
   const handleAcceptQuotation = async () => {
     if (!quotation || !user) return;
+    const quotationKey = String((quotation as any).qtNumber || quotation.quotationNumber || quotation.id || '').trim();
 
     console.log('📝 [QuotationDetailView] 接受报价开始');
     console.log('  - 报价ID:', quotation.id);
@@ -65,12 +83,20 @@ export default function QuotationDetailView({
 
     // ✅ 落库：客户接受报价
     try {
-      await salesQuotationService.updateStatus(String(quotation.id), 'accepted', {
-        customer_status: 'accepted',
-        customer_response: { status: 'accepted', comment: 'Customer accepted the quotation', respondedAt: new Date().toISOString() },
-      });
+      const acceptedResponse = {
+        status: 'accepted',
+        comment: 'Customer accepted the quotation',
+        respondedAt: new Date().toISOString(),
+      };
 
-      onUpdated?.();
+      await salesQuotationService.customerRespond(quotationKey, 'accepted', acceptedResponse.comment);
+
+      onUpdated?.({
+        id: quotation.id,
+        qtNumber: (quotation as any).qtNumber || quotation.quotationNumber,
+        customerStatus: 'accepted',
+        customerResponse: acceptedResponse,
+      });
     } catch (e: any) {
       console.error('❌ [QuotationDetailView] Accept 落库失败:', e);
       toast.error(`❌ Accept failed: ${e?.message || 'Unknown error'}`);
@@ -136,12 +162,16 @@ export default function QuotationDetailView({
 
     // ✅ 落库：客户协商/拒绝
     try {
-      await salesQuotationService.updateStatus(String(quotation.id), newCustomerStatus, {
-        customer_status: newCustomerStatus,
-        customer_response: { status: feedbackType, comment: feedbackMessage, respondedAt: new Date().toISOString() },
-      });
+      const quotationKey = String((quotation as any).qtNumber || quotation.quotationNumber || quotation.id || '').trim();
+      const customerResponse = { status: feedbackType, comment: feedbackMessage, respondedAt: new Date().toISOString() };
+      await salesQuotationService.customerRespond(quotationKey, feedbackType, feedbackMessage);
 
-      onUpdated?.();
+      onUpdated?.({
+        id: quotation.id,
+        qtNumber: (quotation as any).qtNumber || quotation.quotationNumber,
+        customerStatus: newCustomerStatus,
+        customerResponse,
+      });
     } catch (e: any) {
       console.error('❌ [QuotationDetailView] Feedback 落库失败:', e);
       toast.error(`❌ Submit failed: ${e?.message || 'Unknown error'}`);
@@ -192,10 +222,15 @@ export default function QuotationDetailView({
   if (!quotation) return null;
 
   // 是否已有反馈
-  const hasFeedback = quotation.customerFeedback !== undefined;
-  const isConfirmed = quotation.status === 'confirmed';
-  const isRejected = quotation.status === 'rejected';
-  const isNegotiating = quotation.status === 'negotiating';
+  const customerStatus = String((quotation as any).customerStatus || quotation.status || '').toLowerCase();
+  const customerResponse = (quotation as any).customerResponse || quotation.customerFeedback;
+  const hasFeedback = Boolean(
+    customerResponse?.status ||
+    ['accepted', 'rejected', 'negotiating'].includes(customerStatus)
+  );
+  const isConfirmed = customerStatus === 'accepted' || quotation.status === 'confirmed';
+  const isRejected = customerStatus === 'rejected' || quotation.status === 'rejected';
+  const isNegotiating = customerStatus === 'negotiating' || quotation.status === 'negotiating';
   
   // 🆕 检查是否是修订版本
   const isRevised = (quotation.revisionNumber || 1) > 1;
@@ -210,7 +245,7 @@ export default function QuotationDetailView({
   console.log('  - hasFeedback:', hasFeedback);
   console.log('  - customerFeedback:', quotation.customerFeedback);
   console.log('  - 修订版本号:', quotation.revisionNumber);
-  console.log('  - 是否显示操作按钮:', !hasFeedback && quotation.status !== 'converted');
+  console.log('  - 是否显示操作按钮:', !hasFeedback && customerStatus !== 'converted');
   console.log('  - isConfirmed:', isConfirmed);
   console.log('  - isRevised:', isRevised);
 
@@ -475,7 +510,7 @@ export default function QuotationDetailView({
           </div>
 
           {/* 🔥 粘性操作栏 - 固定在底部，始终可见 */}
-          {!hasFeedback && quotation.status !== 'converted' && (
+          {!hasFeedback && customerStatus !== 'converted' && (
             <div className="border-t bg-white flex-shrink-0 print:hidden">
               {/* 🔥 利润计算提示区域 - 放在最顶部 */}
               {!showFeedback && (
@@ -628,7 +663,7 @@ export default function QuotationDetailView({
           )}
 
           {/* 已有反馈或已转订单的关闭按钮 */}
-          {(hasFeedback || quotation.status === 'converted') && (
+          {(hasFeedback || customerStatus === 'converted') && (
             <div className="border-t bg-white px-6 py-4 flex-shrink-0 print:hidden">
               <div className="flex justify-end">
                 <Button variant="outline" size="sm" className="h-9 text-sm px-6" onClick={onClose}>

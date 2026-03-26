@@ -116,7 +116,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
     toast.success(`Added ${quantity} pieces (${totalCartons} carton${totalCartons > 1 ? 's' : ''}) to cart`);
   };
 
-  const handleAddToProformaInvoice = () => {
+  const handleAddToQuotationDraft = () => {
     if (!orderSession) return;
 
     // Load draft orders
@@ -147,7 +147,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
         draft.products[existingProductIndex].qty += quantity;
         draft.products[existingProductIndex].image = product.image; // Sync image
         draft.products[existingProductIndex].itemNumber = productKey; // Sync SKU
-        toast.success(`Updated ${product.name} quantity in Proforma Invoice`, {
+        toast.success(`Updated ${product.name} quantity in quotation draft`, {
           action: {
             label: 'View Invoice',
             onClick: () => {
@@ -174,7 +174,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
         };
 
         draft.products.push(newProduct);
-        toast.success(`Added ${product.name} to Proforma Invoice`, {
+        toast.success(`Added ${product.name} to quotation draft`, {
           action: {
             label: 'View Invoice',
             onClick: () => {
@@ -195,7 +195,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
       // Trigger custom event to update banner
       window.dispatchEvent(new Event('draftOrderUpdated'));
     } catch (error) {
-      console.error('Failed to add product to Proforma Invoice:', error);
+      console.error('Failed to add product to quotation draft:', error);
       toast.error('Failed to add product');
     }
   };
@@ -499,7 +499,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
                     </span>
                   </div>
                   <p className="text-sm text-blue-700">
-                    Click below to add this product to your Proforma Invoice
+                    Click below to add this product to your quotation draft
                   </p>
                 </div>
               )}
@@ -507,11 +507,11 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
               {orderSession ? (
                 <>
                   <Button
-                    onClick={handleAddToProformaInvoice}
+                    onClick={handleAddToQuotationDraft}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white py-6 text-lg mb-3"
                   >
                     <FileText className="h-5 w-5 mr-2" />
-                    Add to Proforma Invoice
+                    Add to quotation draft
                   </Button>
                   <Button
                     onClick={handleAddToCart}

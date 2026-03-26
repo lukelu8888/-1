@@ -37,17 +37,22 @@ import { useSalesContracts } from '../../contexts/SalesContractContext'; // 🔥
 import { useInquiry } from '../../contexts/InquiryContext'; // 🔥 导入询价Context
 import { useOrders } from '../../contexts/OrderContext'; // 🔥 导入订单Context
 import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext'; // 🔥 导入 QR Context（用于溯源回写）
-import { salesQuotationService, approvalRecordService } from '../../lib/supabaseService';
+import { salesQuotationService, approvalRecordService, notificationSupabaseService, staffDirectoryService } from '../../lib/supabaseService';
 import { supabase } from '../../lib/supabase';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
 import { ERP_EVENT_KEYS } from '../../lib/erp-core/events';
 import { subscribeErpEvent, emitErpEvent } from '../../lib/erp-core/event-bus';
-import { addTombstones, filterNotDeleted, removeTombstones } from '../../lib/erp-core/deletion-tombstone';
+import { addTombstones, filterNotDeleted, removeTombstones, removeTombstonesByMarkers } from '../../lib/erp-core/deletion-tombstone';
 import { adaptSalesQuotationToDocumentData } from '../../utils/documentDataAdapters';
 import { adaptSalesContractToDocumentData } from '../../utils/documentDataAdapters';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { normalizePersonnelEmail } from '../../lib/notification-rules';
+import { getPersonnelEmailAliases } from '../../lib/personnelEmail';
+import { isSystemOwnerEmail, pickBusinessOwnerEmail } from '../../utils/quotationOwnership';
+import { normalizeApprovalNotes } from '../../utils/approvalWorkflow';
 import QuoteCreationIntelligent from '../admin/QuoteCreationIntelligent'; // 🔥 智能报价创建
+import type { User as RbacUser } from '../../lib/rbac-config';
 // ❌ 已禁用：文件不存在
 // import { CustomerInquiryView } from '../admin/CustomerInquiryView'; // 🔥 客户询价单查看
 import { QuotationView } from './QuotationView'; // 🔥 报价单查看（使用文档中心模版）
@@ -63,13 +68,49 @@ interface SalesQuotationManagementProps {
   highlightQtNumber?: string; // 🔥 高亮显示的报价单号
   onNavigateToOrders?: () => void; // 🔥 导航到订单管理的回调
   onNavigateToOrdersWithHighlight?: (scNumber: string) => void; // 🔥 导航到订单管理并高亮SC单号
+  currentUser?: RbacUser | null;
 }
 
 export function SalesQuotationManagement({ 
   highlightQtNumber, 
   onNavigateToOrders, 
-  onNavigateToOrdersWithHighlight 
+  onNavigateToOrdersWithHighlight,
+  currentUser: dashboardCurrentUser = null,
 }: SalesQuotationManagementProps = {}) {
+  const stickyQtNumberRef = React.useRef<string | undefined>(undefined);
+  const ownerRepairAttemptedRef = React.useRef<Set<string>>(new Set());
+  const REGIONAL_MANAGER_EMAILS: Record<string, string> = {
+    NA: 'salesmanager-na@cosunchina.com',
+    'North America': 'salesmanager-na@cosunchina.com',
+    SA: 'salesmanager-sa@cosunchina.com',
+    'South America': 'salesmanager-sa@cosunchina.com',
+    EA: 'salesmanager-ea@cosunchina.com',
+    EMEA: 'salesmanager-ea@cosunchina.com',
+    'Europe & Africa': 'salesmanager-ea@cosunchina.com',
+    Other: 'salesmanager-na@cosunchina.com',
+  };
+
+  const SALES_DIRECTOR_EMAIL = 'sales.director@cosunchina.com';
+
+  const resolveStructuredApprovalNotes = React.useCallback((qt: any, mode: 'submit' | 'review') => {
+    const amount = Number(qt?.totalAmount || qt?.totalPrice || 0);
+    const baseNote = String(qt?.approvalNotes || qt?.notes || '').trim();
+    const customerName = qt?.customerCompany || qt?.customerName || '当前客户';
+    const reviewReason = String(qt?.customerResponse?.comment || '').trim();
+    return normalizeApprovalNotes(baseNote, {
+      pricingStrategy: mode === 'review'
+        ? '客户对当前报价未接受，申请复核定价逻辑与对客方案。'
+        : '按当前成本核算、利润率与条款配置提交审批。',
+      customerBackground: `${customerName}${amount >= 20000 ? '，当前金额达到总监复审阈值。' : '，当前金额在主管审批权限内。'}`,
+      specialConsiderations: mode === 'review'
+        ? `本单已进入客户反馈阶段，需结合反馈调整报价策略。${reviewReason ? `客户反馈：${reviewReason}` : ''}`
+        : '请重点结合客户价值、付款条件与交期承诺综合判断。',
+      riskFocus: reviewReason
+        ? `客户已提出异议：${reviewReason}`
+        : '请关注利润率、付款条件、交期承诺及特殊条款风险。',
+    });
+  }, []);
+
   const pushApprovalBridgeItem = async (item: any) => {
     const request = item?.request || {};
     const currentApprover = item?.currentApprover || request?.currentApprover || '';
@@ -84,6 +125,25 @@ export function SalesQuotationManagement({
     if (!saved) {
       throw new Error('approval_records upsert failed');
     }
+  };
+
+  const sendQuotationApprovalNotification = async (recipientEmail: string, qt: any, amount: number, stageLabel: string) => {
+    if (!recipientEmail) return;
+
+    await notificationSupabaseService.send({
+      recipient_email: recipientEmail,
+      type: 'quotation_pending_approval',
+      title: `📋 报价待审批 - ${stageLabel}`,
+      message: `${qt.qtNumber || 'QT'} 待审批，客户：${qt.customerCompany || qt.customerName || 'Customer'}，金额：${qt.currency || 'USD'} ${amount}`,
+      data: {
+        quotationNumber: qt.qtNumber || qt.id,
+        quotationId: qt.id,
+        stage: stageLabel,
+        amount,
+        currency: qt.currency || 'USD',
+        region: qt.region || currentUser?.region || 'NA',
+      },
+    });
   };
 
   const mapQuoteDataToServerLike = (quoteData: any, currentQt: any) => ({
@@ -128,9 +188,9 @@ export function SalesQuotationManagement({
     };
   };
 
-  const { quotations, updateQuotation } = useSalesQuotations();
-  const quotationsRef = React.useRef(quotations);
-  quotationsRef.current = quotations;
+  const { quotations: contextQuotations, updateQuotation } = useSalesQuotations();
+  const quotationsRef = React.useRef(contextQuotations);
+  quotationsRef.current = contextQuotations;
   const { contracts: salesContracts, createContract, getContractByQuotationNumber } = useSalesContracts(); // 🔥 获取销售合同
   const { inquiries } = useInquiry();
   const { orders, addOrder } = useOrders(); // 🔥 获取订单和添加订单函数
@@ -139,7 +199,32 @@ export function SalesQuotationManagement({
     updateRequirement: updateQuoteRequirement,
     refreshQuoteRequirementsFromApi,
   } = useQuoteRequirements(); // 🔥 获取 QR 和更新函数
-  const [currentUser, setCurrentUser] = useState<any>(() => getCurrentUser());
+  const [currentUser, setCurrentUser] = useState<any>(() => dashboardCurrentUser || getCurrentUser());
+
+  const resolveQuotationOwnerEmail = React.useCallback((qt: any) => {
+    const relatedQr = quoteRequirements.find(
+      (req) => String(req?.requirementNo || '').trim() === String(qt?.qrNumber || '').trim()
+    );
+    const relatedInquiry = inquiries.find((inq) =>
+      String(inq?.inquiryNumber || inq?.id || '').trim() === String(qt?.inqNumber || '').trim()
+    );
+
+    const ownerCandidates = [
+      relatedQr?.requestedBy,
+      relatedInquiry?.salesRepEmail,
+      relatedInquiry?.assignedTo,
+      relatedQr?.salesPerson,
+      relatedQr?.salesPersonEmail,
+      relatedQr?.createdBy,
+      qt?.salesPerson,
+      (relatedQr as any)?.salesPerson,
+      (relatedQr as any)?.salesPersonEmail,
+      (relatedQr as any)?.sourceInquiry?.salesRepEmail,
+      (relatedQr as any)?.sourceInquiry?.assignedTo,
+    ];
+
+    return pickBusinessOwnerEmail(ownerCandidates, qt?.region || relatedQr?.region, qt?.salesPerson || '');
+  }, [inquiries, quoteRequirements]);
 
   const ensureBoundQuotationSnapshot = (qt: any) => {
     const templateSnapshot = qt?.templateSnapshot || qt?.template_snapshot || null;
@@ -153,7 +238,7 @@ export function SalesQuotationManagement({
   };
 
   useEffect(() => {
-    const syncCurrentUser = () => setCurrentUser(getCurrentUser());
+    const syncCurrentUser = () => setCurrentUser(dashboardCurrentUser || getCurrentUser());
     syncCurrentUser();
     window.addEventListener('userChanged', syncCurrentUser as EventListener);
     window.addEventListener('storage', syncCurrentUser);
@@ -161,7 +246,13 @@ export function SalesQuotationManagement({
       window.removeEventListener('userChanged', syncCurrentUser as EventListener);
       window.removeEventListener('storage', syncCurrentUser);
     };
-  }, []);
+  }, [dashboardCurrentUser]);
+
+  useEffect(() => {
+    if (highlightQtNumber) {
+      stickyQtNumberRef.current = highlightQtNumber;
+    }
+  }, [highlightQtNumber]);
 
   // 🔥 从后端加载报价单列表（只读服务器数据，不读本地）
   const [serverQuotations, setServerQuotations] = useState<any[]>([]);
@@ -189,10 +280,40 @@ export function SalesQuotationManagement({
         }
 
         hasAuthWarningRef.current = false;
-        const rows = effectiveEmail && !canReadAll
+        const stickyQtNumber = String(highlightQtNumber || stickyQtNumberRef.current || '').trim();
+        let rows = effectiveEmail && !canReadAll
           ? await salesQuotationService.getBySalesPerson(effectiveEmail)
           : await salesQuotationService.getAll();
-        const quotations: any[] = Array.isArray(rows) ? rows : [];
+        let quotations: any[] = Array.isArray(rows) ? rows : [];
+
+        if (effectiveEmail && !canReadAll) {
+          const normalizedCurrentEmail = normalizePersonnelEmail(effectiveEmail, currentUser?.region);
+          const ownerAliases = getPersonnelEmailAliases(normalizedCurrentEmail, currentUser?.region);
+          const fallbackRows = await salesQuotationService.getAll();
+          const allQuotations: any[] = Array.isArray(fallbackRows) ? fallbackRows : [];
+          const inferredOwnedQuotations = allQuotations.filter((qt) => {
+            const resolvedOwnerEmail = resolveQuotationOwnerEmail(qt);
+            const normalizedSalesPerson = normalizePersonnelEmail(qt?.salesPerson, qt?.region);
+            const isHighlighted = stickyQtNumber && String(qt?.qtNumber || '').trim() === stickyQtNumber;
+            return isHighlighted || [resolvedOwnerEmail, normalizedSalesPerson, String(qt?.salesPerson || '').trim().toLowerCase()]
+              .filter(Boolean)
+              .some((email) => ownerAliases.includes(email));
+          });
+
+          const mergedById = new Map<string, any>();
+          [...quotations, ...inferredOwnedQuotations].forEach((qt) => {
+            const key = String(qt?.id || qt?.qtNumber || '');
+            if (key) mergedById.set(key, qt);
+          });
+          quotations = Array.from(mergedById.values())
+            .sort((a, b) => String(b?.createdAt || '').localeCompare(String(a?.createdAt || '')));
+        }
+
+        removeTombstonesByMarkers(
+          'qt',
+          quotations.flatMap((qt: any) => [qt?.id, qt?.qtNumber, qt?.quotationNumber]),
+        );
+
         setServerQuotations(filterNotDeleted(
           'qt',
           quotations,
@@ -207,7 +328,7 @@ export function SalesQuotationManagement({
       }
     };
     void run();
-  }, [currentUser?.email, currentUser?.role, currentUser?.userRole]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentUser?.email, currentUser?.region, currentUser?.role, currentUser?.userRole, highlightQtNumber, resolveQuotationOwnerEmail]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 🔥 初始加载
   useEffect(() => {
@@ -351,10 +472,74 @@ export function SalesQuotationManagement({
     }
   };
   
-  // 🔥 只使用服务器数据，不读本地数据
-  const effectiveQuotations = serverQuotations;
+  const effectiveQuotations = useMemo(() => {
+    const merged = new Map<string, any>();
 
-  // 🔥 调试日志
+    [...serverQuotations, ...contextQuotations].forEach((qt) => {
+      const key = String(qt?.id || qt?.qtNumber || '');
+      if (!key) return;
+      const existing = merged.get(key);
+      merged.set(key, existing ? { ...qt, ...existing } : qt);
+    });
+
+    return Array.from(merged.values()).sort((a, b) =>
+      String(b?.createdAt || b?.created_at || '').localeCompare(String(a?.createdAt || a?.created_at || ''))
+    );
+  }, [contextQuotations, serverQuotations]);
+
+  useEffect(() => {
+    const repairTarget = effectiveQuotations.find((qt) => {
+      const repairKey = String(qt?.id || qt?.qtNumber || '').trim();
+      if (!repairKey || ownerRepairAttemptedRef.current.has(repairKey)) return false;
+
+      const currentOwner = normalizePersonnelEmail(qt?.salesPerson, qt?.region);
+      const resolvedOwner = resolveQuotationOwnerEmail(qt);
+      return (
+        isSystemOwnerEmail(currentOwner, qt?.region) &&
+        Boolean(resolvedOwner) &&
+        !isSystemOwnerEmail(resolvedOwner, qt?.region) &&
+        resolvedOwner !== currentOwner
+      );
+    });
+
+    if (!repairTarget) return;
+
+    const repairKey = String(repairTarget?.id || repairTarget?.qtNumber || '').trim();
+    ownerRepairAttemptedRef.current.add(repairKey);
+    void (async () => {
+      try {
+        const resolvedOwnerEmail = resolveQuotationOwnerEmail(repairTarget);
+        const matchedStaff = staffDirectoryService.getCachedSalesStaff().find(
+          (staff) =>
+            String(staff.email || '').trim().toLowerCase() ===
+            String(resolvedOwnerEmail || '').trim().toLowerCase(),
+        );
+        const repairedOwnerName =
+          [
+            repairTarget?.salesPersonName && !isSystemOwnerEmail(repairTarget?.salesPerson, repairTarget?.region)
+              ? repairTarget.salesPersonName
+              : '',
+            matchedStaff?.name,
+          ]
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)[0] || '';
+
+        await salesQuotationService.upsert({
+          ...repairTarget,
+          salesPerson: resolvedOwnerEmail,
+          salesPersonName: repairedOwnerName,
+          updatedAt: new Date().toISOString(),
+        });
+
+        toast.success(`已修复 ${repairTarget.qtNumber || 'QT'} 的业务员归属`);
+        loadSalesQuotations();
+      } catch (error) {
+        ownerRepairAttemptedRef.current.delete(repairKey);
+        console.error('❌ [QT owner repair] failed to reassign quotation owner:', error);
+        toast.error(`修复 ${repairTarget.qtNumber || 'QT'} 归属失败`);
+      }
+    })();
+  }, [effectiveQuotations, loadSalesQuotations, resolveQuotationOwnerEmail]);
   console.log('═══════════════════════════════════════════════════════');
   console.log('🎯 [SalesQuotationManagement] 组件渲染');
   console.log('  - 服务器返回QT数量:', serverQuotations.length);
@@ -382,6 +567,40 @@ export function SalesQuotationManagement({
   const [showPriceCalculation, setShowPriceCalculation] = useState(false); // 核算价格
   const [selectedQuotation, setSelectedQuotation] = useState<any>(null); // 当前选中的报价单
   const [selectedInquiry, setSelectedInquiry] = useState<any>(null); // 当前选中的询价单
+
+  const resolveQuotationOwnerFromQr = React.useCallback((qt: any) => {
+    const relatedQr = quoteRequirements.find(
+      (req) => String(req?.requirementNo || '').trim() === String(qt?.qrNumber || '').trim()
+    );
+    const relatedInquiry = inquiries.find((inq) =>
+      String(inq?.inquiryNumber || inq?.id || '').trim() === String(qt?.inqNumber || '').trim()
+    );
+
+    const resolvedEmail = resolveQuotationOwnerEmail(qt);
+    const matchedStaff = staffDirectoryService.getCachedSalesStaff().find(
+      (staff) => String(staff.email || '').trim().toLowerCase() === String(resolvedEmail || '').trim().toLowerCase()
+    );
+
+    const resolvedName = [
+      relatedQr?.requestedByName,
+      relatedInquiry && String(relatedInquiry?.salesRepEmail || relatedInquiry?.assignedTo || '').trim()
+        ? matchedStaff?.name
+        : '',
+      qt?.salesPersonName && !isSystemOwnerEmail(qt?.salesPerson, qt?.region) ? qt.salesPersonName : '',
+      matchedStaff?.name,
+      currentUser?.email && String(currentUser.email).trim().toLowerCase() === String(resolvedEmail).trim().toLowerCase()
+        ? currentUser?.name
+        : '',
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)[0] || '';
+
+    return {
+      ...qt,
+      salesPerson: resolvedEmail || qt?.salesPerson || '',
+      salesPersonName: resolvedName || qt?.salesPersonName || '',
+    };
+  }, [currentUser?.email, currentUser?.name, inquiries, quoteRequirements, resolveQuotationOwnerEmail]);
   
   // 🔥 新增：查看客户询价单
   const handleViewInquiry = (qt: any) => {
@@ -397,7 +616,7 @@ export function SalesQuotationManagement({
   
   // 🔥 新增：查看报价单（使用文档模版）
   const handleViewQuotation = (qt: any) => {
-    setSelectedQuotation(qt);
+    setSelectedQuotation(resolveQuotationOwnerFromQr(qt));
     setShowQuotationView(true);
   };
   
@@ -417,7 +636,7 @@ export function SalesQuotationManagement({
 
     const requiresDirectorReview = amount >= 20000;
     const managerEmail = getRegionalManager(currentUser?.region);
-    const directorEmail = 'sales.director@cosun.com';
+    const directorEmail = SALES_DIRECTOR_EMAIL;
     const declineReason = qt.customerResponse?.comment || '';
 
     const approvalChain = [
@@ -445,6 +664,7 @@ export function SalesQuotationManagement({
     // ─── 3. 推送到审批中心（主管可立即看到复核请求）───
     const now = new Date();
     const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const submissionOwner = resolveQuotationOwnerFromQr(qt);
     const productCount = qt.items?.length ?? 0;
     const productSummary = productCount === 1
       ? `${qt.items[0].productName} × ${qt.items[0].quantity} ${qt.items[0].unit}`
@@ -452,6 +672,7 @@ export function SalesQuotationManagement({
         ? `${qt.items[0].productName} × ${qt.items[0].quantity} ${qt.items[0].unit} 等 ${productCount} 项产品`
         : '暂无产品';
 
+    const structuredApprovalNotes = resolveStructuredApprovalNotes(qt, 'review');
     const reviewNote = declineReason
       ? `客户拒绝报价，申请主管复核定价。客户拒绝理由：${declineReason}`
       : '客户拒绝报价，申请主管复核定价。';
@@ -461,9 +682,14 @@ export function SalesQuotationManagement({
       type: 'qt' as const,
       relatedDocumentId: qt.qtNumber || qt.id,
       relatedDocumentType: '销售报价单（复核申请）',
-      relatedDocument: { ...qt },
-      submittedBy: currentUser?.email || '',
-      submittedByName: currentUser?.name || currentUser?.email || '',
+      relatedDocument: {
+        ...qt,
+        salesPerson: submissionOwner.salesPerson || qt.salesPerson || '',
+        salesPersonName: submissionOwner.salesPersonName || qt.salesPersonName || '',
+        approvalNotes: structuredApprovalNotes,
+      },
+      submittedBy: submissionOwner.salesPerson || currentUser?.email || '',
+      submittedByName: submissionOwner.salesPersonName || currentUser?.name || currentUser?.email || '',
       submittedByRole: currentUser?.userRole || currentUser?.role || 'Sales',
       submittedAt: now.toISOString(),
       region: qt.region || currentUser?.region || 'NA',
@@ -488,6 +714,7 @@ export function SalesQuotationManagement({
       currentApprover: managerEmail,
       request: { ...baseReviewRequest, currentApprover: managerEmail, currentApproverRole: '区域业务主管' },
     });
+    await sendQuotationApprovalNotification(managerEmail, qt, amount, '主管复核');
 
     toast.success('✅ 复核申请已提交给主管！', {
       description: `主管将收到复核请求。${declineReason ? `\n客户拒绝理由：${declineReason}` : ''}`,
@@ -530,7 +757,7 @@ export function SalesQuotationManagement({
     
     // 🔥 获取主管信息（根据用户区域获取对应主管）
     const managerEmail = getRegionalManager(currentUser?.region);
-    const directorEmail = 'sales.director@cosun.com'; // 销售总监：王强
+    const directorEmail = SALES_DIRECTOR_EMAIL; // 销售总监：王强
     
     // 🔥 产品摘要
     const productCount = qt.items.length;
@@ -538,6 +765,8 @@ export function SalesQuotationManagement({
       ? `${qt.items[0].productName} × ${qt.items[0].quantity} ${qt.items[0].unit}`
       : `${qt.items[0].productName} × ${qt.items[0].quantity} ${qt.items[0].unit} 等 ${productCount} 项产品`;
     
+    const structuredApprovalNotes = resolveStructuredApprovalNotes(qt, 'submit');
+
     // 🔥 组装审批链（落库到 sales_quotations.approval_chain）
     const approvalChain = [
       {
@@ -580,14 +809,21 @@ export function SalesQuotationManagement({
     try {
       const now = new Date();
       const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const submissionOwner = resolveQuotationOwnerFromQr(qt);
       const baseRequest = {
         id: qt.id,
         type: 'qt',
         relatedDocumentId: qt.qtNumber || qt.id,
         relatedDocumentType: '销售报价单',
-        relatedDocument: { ...qt, id: qt.id },
-        submittedBy: currentUser?.email || '',
-        submittedByName: currentUser?.name || currentUser?.email || '',
+        relatedDocument: {
+          ...qt,
+          id: qt.id,
+          salesPerson: submissionOwner.salesPerson || qt.salesPerson || '',
+          salesPersonName: submissionOwner.salesPersonName || qt.salesPersonName || '',
+          approvalNotes: structuredApprovalNotes,
+        },
+        submittedBy: submissionOwner.salesPerson || currentUser?.email || '',
+        submittedByName: submissionOwner.salesPersonName || currentUser?.name || currentUser?.email || '',
         submittedByRole: currentUser?.userRole || currentUser?.role || 'Sales',
         submittedAt: now.toISOString(),
         region: qt.region || currentUser?.region || 'NA',
@@ -615,6 +851,7 @@ export function SalesQuotationManagement({
           currentApproverRole: '区域业务主管',
         },
       });
+      await sendQuotationApprovalNotification(managerEmail, qt, amount, '主管审批');
 
       // 提交后刷新列表，确保以 Supabase 实际状态回流
     } catch (e: any) {
@@ -622,15 +859,7 @@ export function SalesQuotationManagement({
       return;
     }
 
-    // 显示审批流程提示
-    const approvalMessage = requiresDirectorReview
-      ? `💰 报价金额：$${amount.toLocaleString()} (≥ $20,000)\n\n📋 审批流程：\n1️⃣ 区域业务主管审批\n2️⃣ 销售总监审批\n\n✅ 双重审批通过后，即可发送给客户。`
-      : `💰 报价金额：$${amount.toLocaleString()} (< $20,000)\n\n📋 审批流程：\n1️⃣ 区域业务主管审批\n\n✅ 主管审批通过后，即可发送给客户。`;
-    
-    toast.success('✅ 报价单已提交审批！', {
-      description: approvalMessage,
-      duration: 6000
-    });
+    toast.success('✅ 已提交主管审核，请等待审批结果。', { duration: 3000 });
     
     console.log('✅ 提交审批成功:', {
       qtNumber: qt.qtNumber,
@@ -683,7 +912,12 @@ export function SalesQuotationManagement({
 
     try {
       const sendKey = qt.qtNumber || qt.id;
-      await salesQuotationService.updateStatus(sendKey, 'sent', { customer_status: 'sent', sent_to_customer_at: nowIso });
+      await salesQuotationService.updateStatus(sendKey, 'approved', {
+        customer_status: 'sent',
+        sent_at: nowIso,
+        sent_to_customer: true,
+        sent_to_customer_at: nowIso,
+      });
       const apiQuotation: any = qt;
 
       // 合并时：用 API 返回的元数据（customerEmail、id 等），但保留本地 items（业务员改过的价格）
@@ -821,6 +1055,7 @@ export function SalesQuotationManagement({
       }));
 
       const totalAmount = items.reduce((sum: number, p: any) => sum + p.amount, 0) || Number(qt.totalPrice || qt.totalAmount || 0);
+      const quotationOwner = resolveQuotationOwnerFromQr(qt);
 
       console.log('🔥 [handlePushToContract] 本地创建合同，items:', items.length, 'totalAmount:', totalAmount);
 
@@ -844,14 +1079,15 @@ export function SalesQuotationManagement({
         customerCountry: qt.customerCountry || '',
         contactPerson: qt.customerName || '',
         contactPhone: qt.customerPhone || '',
-        salesPerson: currentUser?.email || '',
-        salesPersonName: currentUser?.name || '',
+        salesPerson: quotationOwner.salesPerson || qt.salesPerson || currentUser?.email || '',
+        salesPersonName: quotationOwner.salesPersonName || qt.salesPersonName || currentUser?.name || '',
         region: qt.region || 'NA',
         products: items,
         totalAmount,
         currency: qt.currency || 'USD',
         tradeTerms: qt.tradeTerms?.incoterms || qt.deliveryTerms || 'FOB Xiamen',
         paymentTerms: qt.tradeTerms?.paymentTerms || qt.paymentTerms || '30% T/T deposit, 70% before shipment',
+        paymentMode: qt.paymentMode || null,
         deliveryTime: qt.tradeTerms?.deliveryTime || '25-30 days after deposit',
         portOfLoading: qt.tradeTerms?.portOfLoading || 'Xiamen, China',
         remarks: qt.projectRevisionId
@@ -951,15 +1187,7 @@ export function SalesQuotationManagement({
   
   // 🔥 获取区域主管邮箱的辅助函数
   const getRegionalManager = (region: string) => {
-    const managers: Record<string, string> = {
-      'NA': 'john.smith@cosun.com',          // 北美区主管：刘建国
-      'North America': 'john.smith@cosun.com',
-      'SA': 'carlos.silva@cosun.com',        // 南美区主管：陈明华
-      'South America': 'carlos.silva@cosun.com',
-      'EA': 'hans.mueller@cosun.com',      // 欧非区主管：赵国强
-      'Europe & Africa': 'hans.mueller@cosun.com',
-      'Other': 'john.smith@cosun.com',       // 默认使用北美主管
-    };
+    const managers = REGIONAL_MANAGER_EMAILS;
     
     console.log('🔍 [getRegionalManager] 根据区域获取主管:', {
       inputRegion: region,
@@ -971,8 +1199,29 @@ export function SalesQuotationManagement({
   
   // 🔥 筛选：只做状态、搜索筛选；数据来自接口，后端已按权限过滤
   const myQuotations = useMemo(() => {
+    const role = String(currentUser?.userRole || currentUser?.role || '').trim();
+    const canReadAll = ['Admin', 'CEO', 'Boss', 'CFO', 'Sales_Director'].includes(role);
+    const effectiveEmail = String(currentUser?.email || '').trim();
+    const normalizedCurrentEmail = normalizePersonnelEmail(effectiveEmail, currentUser?.region);
+    const ownerAliases = normalizedCurrentEmail
+      ? getPersonnelEmailAliases(normalizedCurrentEmail, currentUser?.region)
+      : [];
+    const stickyQtNumber = String(highlightQtNumber || stickyQtNumberRef.current || '').trim();
+
     const filtered = effectiveQuotations.filter(qt => {
-      // 🔥 数据来自接口：后端已按登录用户过滤，前端不再按 salesPerson 过滤，避免「admin 登录、前端角色为业务员」时全被筛掉
+      if (!canReadAll && ownerAliases.length > 0) {
+        const resolvedOwnerEmail = resolveQuotationOwnerEmail(qt);
+        const normalizedSalesPerson = normalizePersonnelEmail(qt?.salesPerson, qt?.region);
+        const isHighlighted = stickyQtNumber && String(qt?.qtNumber || '').trim() === stickyQtNumber;
+        const matchesOwner = isHighlighted || [resolvedOwnerEmail, normalizedSalesPerson, String(qt?.salesPerson || '').trim().toLowerCase()]
+          .filter(Boolean)
+          .some((email) => ownerAliases.includes(email));
+
+        if (!matchesOwner) {
+          return false;
+        }
+      }
+
       // 状态筛选
       if (filterStatus !== 'all' && qt.approvalStatus !== filterStatus) {
         console.log(`    ❌ 状态不匹配: filterStatus=${filterStatus}, approvalStatus=${qt.approvalStatus}`);
@@ -996,9 +1245,9 @@ export function SalesQuotationManagement({
       
       return true;
     });
-    
+
     return filtered;
-  }, [effectiveQuotations, filterStatus, searchTerm]);
+  }, [currentUser?.email, currentUser?.region, currentUser?.role, currentUser?.userRole, effectiveQuotations, filterStatus, highlightQtNumber, resolveQuotationOwnerEmail, searchTerm]);
   
   // 🔥 统计信息
   const stats = useMemo(() => {
@@ -1504,6 +1753,11 @@ export function SalesQuotationManagement({
       {showQuotationView && selectedQuotation && (
         <QuotationView
           quotation={selectedQuotation}
+          viewerUser={{
+            name: dashboardCurrentUser?.name || currentUser?.name || '',
+            email: dashboardCurrentUser?.email || currentUser?.email || '',
+            phone: '',
+          }}
           onClose={() => {
             setShowQuotationView(false);
             setSelectedQuotation(null);

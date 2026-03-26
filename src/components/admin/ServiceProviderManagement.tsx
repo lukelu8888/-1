@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from '../ui/textarea';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
+import ThirdPartyWarehouseModule from './service-provider/ThirdPartyWarehouseModule';
 
 // 服务商类型枚举
 export enum ServiceProviderType {
@@ -472,12 +473,13 @@ export default function ServiceProviderManagement() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="bg-gray-100">
-          <TabsTrigger value="list">服务商列表</TabsTrigger>
-          <TabsTrigger value="orders">服务订单</TabsTrigger>
-          <TabsTrigger value="payments">应付账款</TabsTrigger>
-          <TabsTrigger value="performance">绩效评估</TabsTrigger>
-        </TabsList>
+          <TabsList className="bg-gray-100">
+            <TabsTrigger value="list">服务商列表</TabsTrigger>
+            <TabsTrigger value="third-party-warehouse">第三方仓/集货计划</TabsTrigger>
+            <TabsTrigger value="orders">服务订单</TabsTrigger>
+            <TabsTrigger value="payments">应付账款</TabsTrigger>
+            <TabsTrigger value="performance">绩效评估</TabsTrigger>
+          </TabsList>
 
         {/* 服务商列表 */}
         <TabsContent value="list" className="space-y-4">
@@ -693,6 +695,10 @@ export default function ServiceProviderManagement() {
               </TableBody>
             </Table>
           </div>
+        </TabsContent>
+
+        <TabsContent value="third-party-warehouse" className="space-y-4">
+          <ThirdPartyWarehouseModule />
         </TabsContent>
 
         {/* 服务订单 */}

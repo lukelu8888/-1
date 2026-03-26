@@ -14,6 +14,10 @@ import {
   type SourcePricingBasis,
 } from '../../types/pricingBasis';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import {
+  buildStructuredApprovalNotes,
+  type StructuredApprovalDraft,
+} from '../../utils/approvalWorkflow';
 
 /**
  * 🎯 智能报价创建页面 - 外贸价格核算专家系统
@@ -104,6 +108,12 @@ export default function QuoteCreationIntelligent({
   
   // 审批备注
   const [approvalNotes, setApprovalNotes] = useState('');
+  const [approvalDraft, setApprovalDraft] = useState<StructuredApprovalDraft>({
+    pricingStrategy: '',
+    customerBackground: '',
+    specialConsiderations: '',
+    riskFocus: '',
+  });
   
   // 全局默认设置
   const [globalDefaults, setGlobalDefaults] = useState({
@@ -126,6 +136,14 @@ export default function QuoteCreationIntelligent({
   // 🔥 尺寸调整状态
   const [size, setSize] = useState({ width: 1400, height: 850 });
   const [isResizing, setIsResizing] = useState(false);
+
+  const updateApprovalDraftField = (field: keyof StructuredApprovalDraft, value: string) => {
+    setApprovalDraft((prev) => {
+      const next = { ...prev, [field]: value };
+      setApprovalNotes(buildStructuredApprovalNotes(next));
+      return next;
+    });
+  };
 
   // 🔥 ESC键关闭弹窗
   useEffect(() => {
@@ -757,8 +775,9 @@ export default function QuoteCreationIntelligent({
 
   // 提交审核
   const handleSubmitForApproval = () => {
-    if (!approvalNotes.trim()) {
-      alert('请填写提交给上级的审批说明');
+    const approvalSections = Object.values(approvalDraft).map((value) => String(value || '').trim());
+    if (approvalSections.some((value) => !value)) {
+      alert('请完整填写报价策略、客户背景、特殊考虑和风险点后再提交审核');
       return;
     }
 
@@ -1730,13 +1749,52 @@ export default function QuoteCreationIntelligent({
                   提交给上级的审批说明
                   <Badge variant="destructive" className="text-xs h-5">必填</Badge>
                 </h3>
-                <textarea
-                  value={approvalNotes}
-                  onChange={(e) => setApprovalNotes(e.target.value)}
-                  placeholder="请说明：&#10;1. 报价策略（定价逻辑、竞争对手情况）&#10;2. 客户背景（订单潜力、合作意向）&#10;3. 特殊考虑（交期紧急、数量大、首单等）&#10;4. 需要上级关注的风险点"
-                  rows={4}
-                  className="w-full px-3 py-2 border rounded-lg resize-none text-sm"
-                />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">1. 报价策略</label>
+                    <textarea
+                      value={approvalDraft.pricingStrategy}
+                      onChange={(e) => updateApprovalDraftField('pricingStrategy', e.target.value)}
+                      placeholder="定价逻辑、竞争对手情况、让利原因"
+                      rows={3}
+                      className="w-full rounded-lg border px-3 py-2 text-sm resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">2. 客户背景</label>
+                    <textarea
+                      value={approvalDraft.customerBackground}
+                      onChange={(e) => updateApprovalDraftField('customerBackground', e.target.value)}
+                      placeholder="订单潜力、合作意向、客户战略价值"
+                      rows={3}
+                      className="w-full rounded-lg border px-3 py-2 text-sm resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">3. 特殊考虑</label>
+                    <textarea
+                      value={approvalDraft.specialConsiderations}
+                      onChange={(e) => updateApprovalDraftField('specialConsiderations', e.target.value)}
+                      placeholder="交期紧急、数量大、首单、样板项目等"
+                      rows={3}
+                      className="w-full rounded-lg border px-3 py-2 text-sm resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600">4. 风险点</label>
+                    <textarea
+                      value={approvalDraft.riskFocus}
+                      onChange={(e) => updateApprovalDraftField('riskFocus', e.target.value)}
+                      placeholder="付款、交期、条款承诺及补救措施"
+                      rows={3}
+                      className="w-full rounded-lg border px-3 py-2 text-sm resize-none"
+                    />
+                  </div>
+                </div>
+                <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2">
+                  <p className="text-xs font-medium text-slate-600">将随审批流转的结构化摘要</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700">{approvalNotes}</pre>
+                </div>
                 <div className="mt-2 flex items-start gap-1.5 text-xs text-gray-600">
                   <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                   <span>此备注将随报价单一起流转至：<strong>区域业务主管</strong> → <strong>销售总监</strong>审核</span>

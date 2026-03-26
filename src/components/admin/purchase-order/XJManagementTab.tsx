@@ -9,11 +9,11 @@ import { formatCompactUtcMinute } from './purchaseOrderUtils';
 type XJManagementTabProps = {
   xjs: XJ[];
   xjSearchTerm: string;
-  setRFQSearchTerm: React.Dispatch<React.SetStateAction<string>>;
+  setXJSearchTerm: React.Dispatch<React.SetStateAction<string>>;
   selectedXJIds: string[];
-  setSelectedRFQIds: React.Dispatch<React.SetStateAction<string[]>>;
+  setSelectedXJIds: React.Dispatch<React.SetStateAction<string[]>>;
   filteredXJs: XJ[];
-  handleBatchDeleteRFQs: () => void;
+  handleBatchDeleteXJs: () => void;
   hasDownstreamQuotationForXJ: (xj: any) => boolean;
   openXJPreview: (xj: XJ) => void;
   handleEditXJ: (xj: XJ) => void;
@@ -23,11 +23,11 @@ type XJManagementTabProps = {
 export const XJManagementTab: React.FC<XJManagementTabProps> = ({
   xjs,
   xjSearchTerm,
-  setRFQSearchTerm,
+  setXJSearchTerm,
   selectedXJIds,
-  setSelectedRFQIds,
+  setSelectedXJIds,
   filteredXJs,
-  handleBatchDeleteRFQs,
+  handleBatchDeleteXJs,
   hasDownstreamQuotationForXJ,
   openXJPreview,
   handleEditXJ,
@@ -71,7 +71,7 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
               <Input
                 placeholder="搜索询价单号、供应商、QR编号..."
                 value={xjSearchTerm}
-                onChange={(e) => setRFQSearchTerm(e.target.value)}
+                onChange={(e) => setXJSearchTerm(e.target.value)}
                 className="pl-8 h-8 text-xs w-80"
               />
             </div>
@@ -79,7 +79,7 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleBatchDeleteRFQs}
+                onClick={handleBatchDeleteXJs}
                 className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
               >
                 <Trash2 className="w-3.5 h-3.5 mr-1" />
@@ -108,9 +108,9 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                       checked={selectedXJIds.length === filteredXJs.length && filteredXJs.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedRFQIds(filteredXJs.map(r => r.id));
+                          setSelectedXJIds(filteredXJs.map(r => r.id));
                         } else {
-                          setSelectedRFQIds([]);
+                          setSelectedXJIds([]);
                         }
                       }}
                     />
@@ -142,9 +142,9 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                           checked={selectedXJIds.includes(xj.id)}
                           onChange={(e) => {
                             if (e.target.checked) {
-                              setSelectedRFQIds([...selectedXJIds, xj.id]);
+                              setSelectedXJIds([...selectedXJIds, xj.id]);
                             } else {
-                              setSelectedRFQIds(selectedXJIds.filter(id => id !== xj.id));
+                              setSelectedXJIds(selectedXJIds.filter(id => id !== xj.id));
                             }
                           }}
                         />

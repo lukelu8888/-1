@@ -3,6 +3,8 @@ import { purchaseOrderService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 import { addTombstones, filterNotDeleted, removeTombstones } from '../lib/erp-core/deletion-tombstone';
 import type { PurchaseOrderData } from '../components/documents/templates/PurchaseOrderDocument';
+import { buildIdentityAuditMetadata, buildIdentityPersistenceFields } from '../utils/dataIsolation';
+import { assertBusinessOwnerEmail } from '../utils/quotationOwnership';
 
 // 🔥 采购订单状态
 export type POStatus = 'pending' | 'confirmed' | 'producing' | 'shipped' | 'completed' | 'cancelled';
@@ -35,6 +37,44 @@ export interface PurchaseOrder {
   requirementNo?: string; // 关联的采购需求编号
   sourceRef?: string; // 来源单号（销售订单号等）
   sourceSONumber?: string; // 🔥 新增：关联销售订单编号 SO-xxx
+  // Phase 3a: typed SC linkage — replaces the previous `as any` cast in requestProcurementFromContract
+  salesContractNumber?: string; // 关联的销售合同编号 SC-xxx
+  quotationNumber?: string;     // 关联的报价单编号 QT-xxx (set at PR creation from SC.quotationNumber)
+
+  // ── Phase 3b: PR → CG relationship fields ──────────────────────────────────────────────────────
+  // PR records (poNumber: PR-xxx) are procurement requests created from SC by the salesperson.
+  // CG records (poNumber: CG-xxx) are supplier orders generated from PR by admin allocation.
+  // One PR can produce multiple CG records (one per allocated supplier).
+
+  // On CG records: the PR number (PR-xxx) of the parent procurement request that produced this CG
+  // via submitSupplierAllocation. Absent on legacy direct-CG records (handleSubmitCreateOrder path).
+  parentRequestPoNumber?: string;
+
+  // On PR records: CG numbers generated from this PR during supplier allocation
+  pendingSupplierPONumbers?: string[];
+
+  // On PR records: number of suppliers allocated in the last allocation operation
+  allocatedSupplierCount?: number;
+
+  // On PR records: true once at least one supplier allocation has been submitted
+  supplierAllocationReady?: boolean;
+
+  // On both PR and CG records: position in the procurement request lifecycle.
+  // PR lifecycle:  pending_procurement_assignment → partial_allocated | allocated_completed
+  // CG lifecycle:  draft_allocated → pending_boss_approval → approved_boss → pushed_supplier
+  //               (rejected_boss is a terminal failure state requiring re-initiation)
+  // Phase 3c precondition: union completed to include all active CG lifecycle values.
+  procurementRequestStatus?:
+    | 'pending_procurement_assignment'  // PR: created, awaiting admin supplier allocation
+    | 'partial_allocated'               // PR: some items allocated; remainder still in pool
+    | 'allocated_completed'             // PR: all items distributed to suppliers
+    | 'draft_allocated'                 // CG: created from PR allocation, not yet submitted for review
+    | 'pending_boss_approval'           // CG: submitted for boss review
+    | 'approved_boss'                   // CG: boss approved, ready to push to supplier
+    | 'rejected_boss'                   // CG: boss rejected; requires re-initiation
+    | 'pushed_supplier';                // CG: pushed to supplier — execution has started
+  // ────────────────────────────────────────────────────────────────────────────────────────────────
+
   projectId?: string | null;
   projectCode?: string | null;
   projectName?: string | null;
@@ -52,7 +92,7 @@ export interface PurchaseOrder {
   groupNote?: string; // 订单组备注（例如："同一客户订单拆分"）
   
   // 🔥 XJ关联信息（如果PO是基于供应商报价创建的）
-  rfqId?: string; // 关联的XJ ID
+  xjId?: string; // 关联的XJ ID
   xjNumber?: string; // 关联的XJ编号
   selectedQuote?: { // 选中的供应商报价信息
     supplierCode: string;
@@ -97,6 +137,62 @@ export interface PurchaseOrder {
   // 状态信息
   status: POStatus;
   paymentStatus: PaymentStatus;
+  executionStatus?: string;
+  supplierConfirmedAt?: string;
+  supplierRejectedAt?: string;
+  supplierReplyNotes?: string;
+  sampleRequired?: boolean;
+  preProductionSampleStatus?: string;
+  preProductionSampleNo?: string;
+  sampleRound?: number;
+  preProductionSampleSentAt?: string;
+  sampleConfirmedAt?: string;
+  sealConfirmedAt?: string;
+  productionStartedAt?: string;
+  estimatedCompletionDate?: string;
+  productionCompletedAt?: string;
+  supplierSelfInspectionStatus?: string;
+  qcInspectionStatus?: string;
+  inspectionExecutionMode?: string;
+  customerDesignatedInspectionAgency?: string;
+  customerDesignatedInspectionStatus?: string;
+  finishedGoodsConfirmedAt?: string;
+  customerInspectionMode?: string;
+  goodsReadyNotifiedToCustomerAt?: string;
+  inspectionMethodNotifiedAt?: string;
+  qcReportSharedToCustomerAt?: string;
+  customerBalanceStatus?: string;
+  supplierBalanceStatus?: string;
+  collectionControlMode?: string;
+  documentReleaseMode?: string;
+  customerBalanceGateStatus?: string;
+  customerBalanceConfirmedAt?: string;
+  supplierBalanceConfirmedAt?: string;
+  supplierBalanceConfirmedBy?: string;
+  bankSubmittedAt?: string;
+  bankSubmittedBy?: string;
+  bookingResponsibility?: string;
+  freightConfirmationRequired?: boolean;
+  freightConfirmedByCustomerAt?: string;
+  bookingStatus?: string;
+  freightInquiryStatus?: string;
+  selectedBookingQuoteId?: string;
+  shippingOrderStatus?: string;
+  customerPaymentReceivedAt?: string;
+  customerPaymentConfirmedAt?: string;
+  financeConfirmedReceivedBy?: string;
+  bankSubmissionStatus?: string;
+  documentReleaseStatus?: string;
+  documentReleasedAt?: string;
+  documentReleasedBy?: string;
+  fulfillmentMode?: string;
+  consolidationRequired?: boolean;
+  loadingSupervisionMode?: string;
+  loadingSupervisionAgencyName?: string;
+  loadingSupervisionRequired?: boolean;
+  loadingSupervisionFeedbackStatus?: string;
+  shipmentReadinessStatus?: string;
+  executionRemarks?: string;
   
   // 其他信息
   remarks?: string;
@@ -108,6 +204,19 @@ export interface PurchaseOrder {
   templateSnapshot?: any;
   documentDataSnapshot?: PurchaseOrderData;
   documentRenderMeta?: any;
+  ownerUserId?: string | null;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+  operatorUserId?: string | null;
+  operatorEmail?: string | null;
+  operatorRole?: string | null;
+  actingUserId?: string | null;
+  actingUserEmail?: string | null;
+  actingUserRole?: string | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserEmail?: string | null;
+  authenticatedUserRole?: string | null;
 }
 
 interface PurchaseOrderContextType {
@@ -141,6 +250,35 @@ const assertPurchaseOrderPersistedBinding = (order: Partial<PurchaseOrder>) => {
   if (!order.templateId || !order.templateVersionId || !order.templateSnapshot || !order.documentDataSnapshot) {
     throw new Error(`CG/PO ${order.poNumber || order.id || ''} 缺少模板绑定字段，Supabase 返回结果不完整`);
   }
+};
+
+const normalizePurchaseOrderWritePayload = (order: PurchaseOrder): PurchaseOrder => {
+  const ownerEmail = assertBusinessOwnerEmail(
+    order.ownerEmail,
+    order.region,
+    '采购单',
+  );
+  const ownerName = String(order.ownerName || '').trim() || null;
+
+  return {
+    ...order,
+    ownerEmail,
+    ownerName,
+    documentRenderMeta: {
+      ...(order.documentRenderMeta || {}),
+      ...buildIdentityAuditMetadata({
+        ownerEmail,
+        ownerName,
+        ownerRole: order.ownerRole || null,
+        region: order.region || null,
+      }),
+    },
+    ...buildIdentityPersistenceFields({
+      ownerEmail,
+      ownerName,
+      ownerRole: order.ownerRole || null,
+    }),
+  };
 };
 
 const getPurchaseOrderMarkers = (order: Partial<PurchaseOrder>): string[] =>
@@ -180,7 +318,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
       const marker = String(t.marker || '').trim().toUpperCase();
       const reason = String(t.reason || '').trim();
       if (reason !== 'manual-delete-purchase-order') return false;
-      return /^(SC-|QT-|RFQ-|ING-|XJ-|SO-|QR-)/.test(marker);
+      return /^(SC-|QT-|ING-|XJ-|QR-|PR-|CG-)/.test(marker);
     });
     if (removedLegacy > 0) {
       console.warn(`⚠️ [PurchaseOrderContext] removed ${removedLegacy} invalid order tombstones`);
@@ -200,7 +338,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
       const next = [...prev];
       const parentMap = new Map<string, PurchaseOrder[]>();
       prev.forEach((o) => {
-        const parent = String((o as any).parentRequestPoNumber || '').trim().toUpperCase();
+        const parent = String(o.parentRequestPoNumber || '').trim().toUpperCase();
         if (!/^CQ-\d{6}-\d{4}$/.test(parent)) return;
         const list = parentMap.get(parent) || [];
         list.push(o);
@@ -219,7 +357,7 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
           requirementNo: seed.requirementNo,
           sourceRef: seed.sourceRef,
           sourceSONumber: seed.sourceSONumber,
-          rfqId: seed.rfqId,
+          xjId: seed.xjId ?? seed.rfqId,
           xjNumber: seed.xjNumber,
           supplierName: '待分配供应商',
           supplierCode: 'TBD',
@@ -237,6 +375,9 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
           createdBy: seed.createdBy || 'system',
           createdDate: new Date().toISOString(),
           updatedDate: new Date().toISOString(),
+          ownerEmail: seed.ownerEmail || null,
+          ownerName: seed.ownerName || null,
+          ownerRole: seed.ownerRole || null,
           ...( {
             procurementRequestStatus: 'partial_allocated',
             supplierAllocationReady: true,
@@ -274,10 +415,27 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
     return () => { alive = false; subscription.unsubscribe(); };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    const reload = async () => {
+      const rows = await purchaseOrderService.getAll();
+      if (!alive || !Array.isArray(rows)) return;
+      setPurchaseOrders(rows.filter(Boolean) as PurchaseOrder[]);
+    };
+    const channel = purchaseOrderService.subscribeToChanges(() => {
+      void reload();
+    });
+    return () => {
+      alive = false;
+      void supabase.removeChannel(channel);
+    };
+  }, []);
+
 
   const addPurchaseOrder = async (order: PurchaseOrder) => {
-    assertPurchaseOrderWritePayload(order);
-    const saved = await purchaseOrderService.upsert(order);
+    const normalizedOrder = normalizePurchaseOrderWritePayload(order);
+    assertPurchaseOrderWritePayload(normalizedOrder);
+    const saved = await purchaseOrderService.upsert(normalizedOrder);
     if (!saved) {
       throw new Error(`CG/PO ${order.poNumber || order.id} 写入 Supabase 失败`);
     }
@@ -294,7 +452,11 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
   const updatePurchaseOrder = async (id: string, updates: Partial<PurchaseOrder>) => {
     const target = purchaseOrders.find(o => o.id === id || o.poNumber === id);
     if (!target) return;
-    const merged = { ...target, ...updates, updatedDate: new Date().toISOString() };
+    const merged = normalizePurchaseOrderWritePayload({
+      ...target,
+      ...updates,
+      updatedDate: new Date().toISOString(),
+    } as PurchaseOrder);
     assertPurchaseOrderWritePayload(merged);
     const saved = await purchaseOrderService.upsert(merged);
     if (!saved) {
@@ -334,8 +496,9 @@ export const PurchaseOrderProvider: React.FC<{ children: ReactNode }> = ({ child
   const addPurchaseOrderBatch = async (orders: PurchaseOrder[]) => {
     const savedOrders: PurchaseOrder[] = [];
     for (const order of orders) {
-      assertPurchaseOrderWritePayload(order);
-      const saved = await purchaseOrderService.upsert(order);
+      const normalizedOrder = normalizePurchaseOrderWritePayload(order);
+      assertPurchaseOrderWritePayload(normalizedOrder);
+      const saved = await purchaseOrderService.upsert(normalizedOrder);
       if (!saved) {
         throw new Error(`批量写入采购单 ${order.poNumber || order.id} 到 Supabase 失败`);
       }
@@ -389,3 +552,5 @@ export const usePurchaseOrders = () => {
   }
   return context;
 };
+
+export const useOptionalPurchaseOrders = () => useContext(PurchaseOrderContext);

@@ -132,7 +132,7 @@ export function InquiryPreviewDialog({
     if (isOpen) {
       const previewNumber = peekInquiryNumber(selectedRegion?.code || 'NA');
       setInquiryNumber(previewNumber);
-      console.log('🔢 预览 INQ 编号:', previewNumber);
+      console.log('🔢 预览 ING 编号:', previewNumber);
     }
   }, [isOpen, peekInquiryNumber, selectedRegion?.code]);
 
@@ -238,7 +238,7 @@ export function InquiryPreviewDialog({
         setIsSubmitting(false);
         return;
       }
-      console.log('✅ [Submit] DB-generated INQ number:', finalInquiryNumber);
+      console.log('✅ [Submit] DB-generated ING number:', finalInquiryNumber);
 
       const date = new Date();
       const customerInquiry = {
@@ -504,10 +504,10 @@ export function InquiryPreviewDialog({
                   </div>
                 </div>
                 
-                {/* INQ Number Badge */}
+                {/* ING Number Badge */}
                 <div className="text-right">
                   <div className="bg-orange-600 text-white px-6 py-3 rounded-lg shadow-lg mb-2">
-                    <p className="text-xs uppercase tracking-wide opacity-90">INQ Number</p>
+                    <p className="text-xs uppercase tracking-wide opacity-90">ING Number</p>
                     <p className="text-xl tracking-wider font-bold">{inquiryNumber}</p>
                   </div>
                   <p className="text-xs text-gray-500">

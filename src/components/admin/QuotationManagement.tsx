@@ -29,6 +29,7 @@ import { sendNotificationToUser } from '../../utils/notificationUtils'; // 🆕 
 import { getCurrentUser } from '../../data/authorizedUsers'; // 🆕 获取当前用户信息
 import { adaptLegacyQuotationToDocumentData } from '../../utils/documentDataAdapters';
 import { customerProductLibraryService } from '../../lib/customerProductLibrary';
+import { normalizeApprovalNotes } from '../../utils/approvalWorkflow';
 import EditQuotationDialog from './EditQuotationDialog';
 import ViewQuotationDialog from './ViewQuotationDialog';
 import NegotiationDialog from './NegotiationDialog';
@@ -162,6 +163,22 @@ export default function QuotationManagement({
   // 🌍 Get current user region from localStorage
   const [currentUserRegion, setCurrentUserRegion] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+
+  const resolveStructuredApprovalNotes = (quotation: Quotation, mode: 'submit' | 'review') => {
+    const baseNote = String(quotation.approvalNotes || quotation.notes || '').trim();
+    return normalizeApprovalNotes(baseNote, {
+      pricingStrategy: mode === 'review'
+        ? '该报价已对客发送，现申请内部复核当前定价与条款。'
+        : '按当前报价明细、利润率与付款交期配置提交审批。',
+      customerBackground: `${quotation.customerName || quotation.customer || '当前客户'}，报价金额 ${quotation.currency || 'USD'} ${Number(quotation.totalAmount || 0).toLocaleString()}`,
+      specialConsiderations: quotation.totalAmount >= 20000
+        ? '当前金额达到销售总监复审阈值，需形成完整主管结论。'
+        : '当前金额在主管审批权限内，可按常规流程判断。',
+      riskFocus: mode === 'review'
+        ? '请重点复核客户反馈、利润空间以及对客承诺是否仍然成立。'
+        : '请重点关注利润率、付款条件、交期承诺及异常条款风险。',
+    });
+  };
 
   const getQuotationRoleLabel = (role?: Quotation['quotationRole'] | null) => {
     const labels: Record<string, string> = {
@@ -332,7 +349,7 @@ export default function QuotationManagement({
     }
 
     // 从询价编号提取区域代码
-    const region = inquiry.id.split('-')[1] || 'NA'; // e.g., "INQ-NA-251130-0001" -> "NA"
+    const region = inquiry.id.split('-')[1] || 'NA'; // e.g., "ING-NA-251130-0001" -> "NA"
     console.log('🌍 从询价单号提取的区域代码:', region);
     
     // 检查是否已经为这个询价创建过报价（草稿或已发送状态）
@@ -833,6 +850,7 @@ export default function QuotationManagement({
     
     // 判断审批流程
     const requiresDirectorApproval = quotation.totalAmount >= 20000;
+    const structuredApprovalNotes = resolveStructuredApprovalNotes(quotation, 'submit');
     
     // 创建审批流程信息
     const approvalFlow = {
@@ -848,7 +866,7 @@ export default function QuotationManagement({
         actor: getCurrentUser()?.name || '业务员',
         actorRole: 'salesperson',
         timestamp: new Date().toISOString(),
-        notes: quotation.approvalNotes || quotation.notes || '提交审核',
+        notes: structuredApprovalNotes,
         amount: quotation.totalAmount
       }
     ];
@@ -858,7 +876,8 @@ export default function QuotationManagement({
       await updateQuotation(quotation.id, {
         status: 'pending_supervisor' as any,
         approvalFlow,
-        approvalHistory
+        approvalHistory,
+        approvalNotes: structuredApprovalNotes,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '提交审核失败');
@@ -890,6 +909,7 @@ export default function QuotationManagement({
     
     // 判断复核流程
     const requiresDirectorReview = quotation.totalAmount >= 20000;
+    const structuredApprovalNotes = resolveStructuredApprovalNotes(quotation, 'review');
     
     // 创建复核流程信息
     const approvalFlow = {
@@ -905,7 +925,7 @@ export default function QuotationManagement({
         actor: getCurrentUser()?.name || '业务员',
         actorRole: 'salesperson',
         timestamp: new Date().toISOString(),
-        notes: '申请复核已发送的报价',
+        notes: structuredApprovalNotes,
         amount: quotation.totalAmount
       }
     ];
@@ -915,7 +935,8 @@ export default function QuotationManagement({
       await updateQuotation(quotation.id, {
         status: 'pending_supervisor' as any,
         approvalFlow,
-        approvalHistory
+        approvalHistory,
+        approvalNotes: structuredApprovalNotes,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '提交复核失败');

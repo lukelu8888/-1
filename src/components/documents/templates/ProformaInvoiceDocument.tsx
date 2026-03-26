@@ -92,7 +92,69 @@ export interface ProformaInvoiceData {
     currentPage?: number;
     totalPages?: number;
   };
+
+  templateSettings?: {
+    goodsTableColumns?: ProformaInvoiceGoodsTableColumn[];
+  };
 }
+
+export type ProformaInvoiceGoodsTableColumnKey =
+  | 'seqItemNo'
+  | 'photos'
+  | 'description'
+  | 'quantity'
+  | 'unitPrice'
+  | 'extendedValue';
+
+export interface ProformaInvoiceGoodsTableColumn {
+  key: ProformaInvoiceGoodsTableColumnKey;
+  label: string;
+  widthPercent: number;
+}
+
+export const DEFAULT_PROFORMA_INVOICE_GOODS_TABLE_COLUMNS: ProformaInvoiceGoodsTableColumn[] = [
+  { key: 'seqItemNo', label: 'Seq Item No.', widthPercent: 10 },
+  { key: 'photos', label: 'Photos', widthPercent: 12 },
+  { key: 'description', label: 'Description of Goods', widthPercent: 38 },
+  { key: 'quantity', label: "Q'ty", widthPercent: 12 },
+  { key: 'unitPrice', label: 'Unit Price', widthPercent: 13 },
+  { key: 'extendedValue', label: 'Extended Value', widthPercent: 15 },
+];
+
+export const normalizeProformaInvoiceGoodsTableColumns = (
+  value?: ProformaInvoiceGoodsTableColumn[] | null,
+): ProformaInvoiceGoodsTableColumn[] => {
+  const incoming = Array.isArray(value) ? value : [];
+  const normalized = DEFAULT_PROFORMA_INVOICE_GOODS_TABLE_COLUMNS.map((fallbackColumn) => {
+    const matched = incoming.find((column) => column?.key === fallbackColumn.key);
+    const widthPercent = Number(matched?.widthPercent);
+
+    return {
+      key: fallbackColumn.key,
+      label: String(matched?.label || fallbackColumn.label).trim() || fallbackColumn.label,
+      widthPercent: Number.isFinite(widthPercent) ? Math.max(4, widthPercent) : fallbackColumn.widthPercent,
+    };
+  });
+
+  const total = normalized.reduce((sum, column) => sum + column.widthPercent, 0) || 100;
+
+  return normalized.map((column, index) => {
+    if (index === normalized.length - 1) {
+      const allocated = normalized
+        .slice(0, -1)
+        .reduce((sum, item) => sum + Number(((item.widthPercent / total) * 100).toFixed(2)), 0);
+      return {
+        ...column,
+        widthPercent: Number((100 - allocated).toFixed(2)),
+      };
+    }
+
+    return {
+      ...column,
+      widthPercent: Number(((column.widthPercent / total) * 100).toFixed(2)),
+    };
+  });
+};
 
 /**
  * 📄 Proforma Invoice 文档模板组件
@@ -103,6 +165,9 @@ export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: Profor
     const formatAmount = (amount: number, currency: string = 'US$') => {
       return `${currency}${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
+    const goodsTableColumns = normalizeProformaInvoiceGoodsTableColumns(
+      data.templateSettings?.goodsTableColumns,
+    );
     const pageWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '210mm';
     const pageMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '297mm';
     const pagePaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '15mm';
@@ -113,6 +178,21 @@ export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: Profor
     const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '3rem';
     const contentFontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '0.875rem';
     const contentLineHeight = layoutConfig?.lineHeight ?? 1.25;
+    const sellerAddress =
+      data.seller.addressEn ||
+      data.seller.address ||
+      [
+        data.seller.unit,
+        data.seller.building,
+        data.seller.zone,
+        data.seller.plaza,
+        data.seller.district,
+        data.seller.city,
+        data.seller.province,
+        data.seller.country,
+      ]
+        .filter(Boolean)
+        .join(', ');
 
     return (
       <div ref={ref}>
@@ -153,21 +233,11 @@ export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: Profor
                     <h1 className="text-sm font-bold tracking-normal mb-1" style={{ letterSpacing: '0.02em' }}>
                       {data.seller.nameEn || data.seller.name}
                     </h1>
-                    <div className="text-xs leading-relaxed" style={{ lineHeight: '1.4' }}>
-                      <p>
-                        {data.seller.unit && `${data.seller.unit}, `}
-                        {data.seller.building && `${data.seller.building}, `}
-                        {data.seller.zone && `${data.seller.zone},`}
-                      </p>
-                      <p>
-                        {data.seller.plaza && `${data.seller.plaza}, `}
-                        {data.seller.district && `${data.seller.district}., `}
-                        {data.seller.city},
-                      </p>
-                      <p>
-                        {data.seller.province}, {data.seller.country}
-                      </p>
-                    </div>
+                    {sellerAddress ? (
+                      <div className="text-xs leading-relaxed" style={{ lineHeight: '1.4' }}>
+                        <p>{sellerAddress}</p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 
@@ -238,65 +308,61 @@ export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: Profor
             <table className="w-full border-collapse border-2 border-black text-xs mb-4">
               <thead>
                 <tr className="bg-white">
-                  <th className="border border-black px-1 py-1 font-bold italic text-center" style={{ width: '50px' }}>
-                    Seq Item No.
-                  </th>
-                  <th className="border border-black px-1 py-1 font-bold italic text-center" style={{ width: '80px' }}>
-                    Photos
-                  </th>
-                  <th className="border border-black px-2 py-1 font-bold italic text-center">
-                    Description of Goods
-                  </th>
-                  <th className="border border-black px-1 py-1 font-bold italic text-center" style={{ width: '70px' }}>
-                    Q'ty
-                  </th>
-                  <th className="border border-black px-1 py-1 font-bold italic text-center" style={{ width: '80px' }}>
-                    Unit Price
-                  </th>
-                  <th className="border border-black px-1 py-1 font-bold italic text-center" style={{ width: '90px' }}>
-                    Extended Value
-                  </th>
+                  {goodsTableColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      className="border border-black px-1 py-1 font-bold italic text-center"
+                      style={{ width: `${column.widthPercent}%` }}
+                    >
+                      {column.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {data.products.map((product) => (
                   <tr key={product.seqNo}>
-                    <td className="border border-black px-1 py-2 text-center italic align-top">
-                      {product.seqNo}
-                    </td>
-                    <td className="border border-black px-1 py-2 text-center align-top">
-                      {product.itemNo && (
-                        <div className="italic text-xs mb-1">{product.itemNo}</div>
-                      )}
-                      {product.photoUrl ? (
-                        <img src={product.photoUrl} alt={product.description} className="w-full h-auto" />
-                      ) : (
-                        <div className="w-full h-12 bg-gray-100 flex items-center justify-center text-xs text-gray-400">
-                          Photo
-                        </div>
-                      )}
-                    </td>
-                    <td className="border border-black px-2 py-2 italic align-top">
-                      <div className="font-bold">{product.description}</div>
-                      {product.specification && (
-                        <div className="mt-1">{product.specification}</div>
-                      )}
-                    </td>
-                    <td className="border border-black px-1 py-2 text-center italic align-top">
-                      {product.quantity.toLocaleString()} {product.unit}
-                    </td>
-                    <td className="border border-black px-1 py-2 text-center italic align-top">
-                      {formatAmount(product.unitPrice, product.currency)}
-                    </td>
-                    <td className="border border-black px-1 py-2 text-center italic align-top">
-                      {formatAmount(product.extendedValue, product.currency)}
-                    </td>
+                    {goodsTableColumns.map((column) => {
+                      switch (column.key) {
+                        case 'seqItemNo':
+                          return <td key={column.key} className="border border-black px-1 py-2 text-center italic align-top">{product.seqNo}</td>;
+                        case 'photos':
+                          return (
+                            <td key={column.key} className="border border-black px-1 py-2 text-center align-top">
+                              {product.itemNo ? (
+                                <div className="italic text-xs mb-1">{product.itemNo}</div>
+                              ) : null}
+                              {product.photoUrl ? (
+                                <img src={product.photoUrl} alt={product.description} className="w-full h-auto" />
+                              ) : (
+                                <div className="w-full h-12 bg-gray-100 flex items-center justify-center text-xs text-gray-400">
+                                  Photo
+                                </div>
+                              )}
+                            </td>
+                          );
+                        case 'description':
+                          return (
+                            <td key={column.key} className="border border-black px-2 py-2 italic align-top">
+                              <div className="font-bold">{product.description}</div>
+                              {product.specification ? <div className="mt-1">{product.specification}</div> : null}
+                            </td>
+                          );
+                        case 'quantity':
+                          return <td key={column.key} className="border border-black px-1 py-2 text-center italic align-top">{product.quantity.toLocaleString()} {product.unit}</td>;
+                        case 'unitPrice':
+                          return <td key={column.key} className="border border-black px-1 py-2 text-center italic align-top">{formatAmount(product.unitPrice, product.currency)}</td>;
+                        case 'extendedValue':
+                        default:
+                          return <td key={column.key} className="border border-black px-1 py-2 text-center italic align-top">{formatAmount(product.extendedValue, product.currency)}</td>;
+                      }
+                    })}
                   </tr>
                 ))}
                 
                 {/* Null行 */}
                 <tr>
-                  <td className="border border-black px-1 py-2" colSpan={6}>
+                  <td className="border border-black px-1 py-2" colSpan={goodsTableColumns.length}>
                     <div className="text-center italic font-bold">Null</div>
                   </td>
                 </tr>
@@ -304,7 +370,7 @@ export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: Profor
                 {/* 运费行 */}
                 {data.freight && (
                   <tr>
-                    <td className="border border-black px-2 py-2 text-center italic" colSpan={6}>
+                    <td className="border border-black px-2 py-2 text-center italic" colSpan={goodsTableColumns.length}>
                       {data.freight.type}: {data.freight.terms}
                     </td>
                   </tr>
@@ -312,7 +378,7 @@ export const ProformaInvoiceDocument = forwardRef<HTMLDivElement, { data: Profor
                 
                 {/* 总额行 */}
                 <tr>
-                  <td className="border border-black px-2 py-2 text-right italic font-bold" colSpan={5}>
+                  <td className="border border-black px-2 py-2 text-right italic font-bold" colSpan={Math.max(goodsTableColumns.length - 1, 1)}>
                     Total {data.priceTerms} Value
                   </td>
                   <td className="border border-black px-1 py-2 text-center font-bold italic">

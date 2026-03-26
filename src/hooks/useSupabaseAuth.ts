@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, supabaseAnonKey } from '../lib/supabase'
 import type { Session, User } from '@supabase/supabase-js'
+import { normalizeManagedAdminIdentity } from '../lib/internalAdminIdentity'
 
 export interface SupabaseProfile {
   id: string
@@ -287,7 +288,7 @@ export function useSupabaseAuth() {
 // ── 向后兼容：同步到旧 localStorage keys ──────────────────────
 function syncToLegacyStorage(profile: SupabaseProfile) {
   // cosun_auth_user（UserContext 读取）
-  const authUser = {
+  const authUser = normalizeManagedAdminIdentity({
     email: profile.email,
     type: profile.portal_role === 'admin' ? 'admin'
         : profile.portal_role === 'supplier' ? 'supplier'
@@ -297,24 +298,42 @@ function syncToLegacyStorage(profile: SupabaseProfile) {
     role: profile.rbac_role ?? undefined,
     userRole: profile.rbac_role ?? undefined,
     region: profile.region ?? undefined,
-  }
+  })
   localStorage.setItem('cosun_auth_user', JSON.stringify(authUser))
 
   // cosun_current_user（RBAC 系统读取）
   if (profile.portal_role === 'admin') {
-    const rbacUser = {
+    const baseRbacUser = normalizeManagedAdminIdentity({
       id: profile.id,
       email: profile.email,
       name: profile.name,
       role: profile.rbac_role ?? 'Admin',
       region: profile.region ?? 'all',
       type: 'admin',
+    })
+    let effectiveRbacUser = baseRbacUser
+    try {
+      const switchedRaw = localStorage.getItem('cosun_switched_user')
+      if (switchedRaw) {
+        const switchedUser = JSON.parse(switchedRaw)
+        if (String(switchedUser?.email || '').trim().toLowerCase() === String(profile.email || '').trim().toLowerCase()) {
+          effectiveRbacUser = {
+            ...baseRbacUser,
+            ...switchedUser,
+            email: baseRbacUser.email,
+            id: switchedUser?.id ?? baseRbacUser.id,
+          }
+        }
+      }
+    } catch {
+      // ignore switched snapshot parse failure
     }
-    localStorage.setItem('cosun_current_user', JSON.stringify(rbacUser))
-    window.dispatchEvent(new CustomEvent('userChanged', { detail: rbacUser }))
+    localStorage.setItem('cosun_current_user', JSON.stringify(effectiveRbacUser))
+    window.dispatchEvent(new CustomEvent('userChanged', { detail: effectiveRbacUser }))
   } else {
     // 非 admin 登录时，必须清除旧的 admin cosun_current_user，防止数据隔离系统误判
     localStorage.removeItem('cosun_current_user')
+    localStorage.removeItem('cosun_switched_user')
     window.dispatchEvent(new CustomEvent('userChanged', { detail: {
       email: profile.email,
       type: profile.portal_role,

@@ -262,16 +262,16 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
   };
 
   // 计算总采购询价数量
-  const totalRFQCount = Object.values(selectedSuppliersByProduct).reduce(
+  const totalXJCount = Object.values(selectedSuppliersByProduct).reduce(
     (sum, suppliers) => sum + suppliers.length,
     0
   );
 
-  // 提交创建RFQ
+  // 提交创建XJ
   const handleSubmit = async () => {
     if (!inquiry) return;
     
-    if (totalRFQCount === 0) {
+    if (totalXJCount === 0) {
       toast.error('请至少为一个产品选择一个供应商');
       return;
     }
@@ -294,10 +294,10 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
           const supplier = mockSuppliers.find(s => s.id === supplierId);
           if (!supplier) return;
 
-          const xjNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+          const xjNumber = `XJ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
           
           const xjPayload = {
-            id: `rfq_${Date.now()}_${supplierId}_${item.id}`,
+            id: `xj_${Date.now()}_${supplierId}_${item.id}`,
             xjNumber,
             
             // 🔥 关联客户询价单
@@ -588,7 +588,7 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
           </div>
 
           {/* 创建预览 */}
-          {totalRFQCount > 0 && (
+          {totalXJCount > 0 && (
             <Card className="border-green-200 bg-green-50">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center gap-2">
@@ -598,7 +598,7 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
               </CardHeader>
               <CardContent>
                 <div className="space-y-2 text-sm">
-                  <p>将创建 <strong className="text-green-700">{totalRFQCount}</strong> 个采购询价单（XJ）：</p>
+                  <p>将创建 <strong className="text-green-700">{totalXJCount}</strong> 个采购询价单（XJ）：</p>
                   <ul className="space-y-1 ml-4">
                     {inquiry.items.map((item, index) => {
                       const count = selectedSuppliersByProduct[item.id]?.length || 0;
@@ -620,8 +620,8 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
         <DialogFooter className="border-t pt-4">
           <div className="flex items-center justify-between w-full">
             <div className="text-sm text-slate-600">
-              {totalRFQCount > 0 && (
-                <span>共 <strong className="text-orange-600">{totalRFQCount}</strong> 个XJ</span>
+              {totalXJCount > 0 && (
+                <span>共 <strong className="text-orange-600">{totalXJCount}</strong> 个XJ</span>
               )}
             </div>
             <div className="flex gap-2">
@@ -630,11 +630,11 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
               </Button>
               <Button 
                 onClick={handleSubmit} 
-                disabled={totalRFQCount === 0 || !quotationDeadline || loading}
+                disabled={totalXJCount === 0 || !quotationDeadline || loading}
                 className="bg-orange-600 hover:bg-orange-700"
               >
                 <Send className="w-4 h-4 mr-2" />
-                {loading ? '创建中...' : `创建 ${totalRFQCount} 个XJ`}
+                {loading ? '创建中...' : `创建 ${totalXJCount} 个XJ`}
               </Button>
             </div>
           </div>

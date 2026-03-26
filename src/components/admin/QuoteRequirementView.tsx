@@ -56,6 +56,12 @@ export const QuoteRequirementView = forwardRef<HTMLDivElement, QuoteRequirementV
 
     return (
       <div ref={ref}>
+        <div className="mb-4 flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm">
+          <span className="font-medium text-slate-700">报价请求单预览</span>
+          <span className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-xs font-semibold text-blue-700">
+            模板版本：{templateVersion?.version || '未绑定'}
+          </span>
+        </div>
         <QuoteRequirementDocument
           data={documentData}
           layoutConfig={layoutConfig}

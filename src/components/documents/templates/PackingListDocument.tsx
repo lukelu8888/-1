@@ -227,7 +227,7 @@ export const PackingListDocument = forwardRef<HTMLDivElement, PackingListDocumen
                       {pkg.totalGW.toFixed(2)}
                     </td>
                     <td className="border border-black px-1 py-1 text-right font-semibold">
-                      {pkg.totalCBM.toFixed(3)}
+                      {pkg.totalCBM.toFixed(2)}
                     </td>
                   </tr>
                 ))}
@@ -249,7 +249,7 @@ export const PackingListDocument = forwardRef<HTMLDivElement, PackingListDocumen
                     {totals.gw.toFixed(2)}
                   </td>
                   <td className="border border-black px-1 py-1 text-right">
-                    {totals.cbm.toFixed(3)}
+                    {totals.cbm.toFixed(2)}
                   </td>
                 </tr>
               </tfoot>
@@ -258,6 +258,9 @@ export const PackingListDocument = forwardRef<HTMLDivElement, PackingListDocumen
 
           {/* 运输信息 */}
           <div className="text-xs">
+            <div className="mb-1">
+              <span className="font-semibold">Remark:</span> Weight unit: KGS; Measurement unit: CBM.
+            </div>
             <div className="mb-1">
               <span className="font-semibold">Port of Loading:</span> {data.shipping.portOfLoading}
             </div>

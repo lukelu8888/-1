@@ -28,7 +28,7 @@ export function clearAllTestData(customerEmail: string = 'customer@example.com')
   // 1️⃣ 清空客户端数据
   console.log('\n👤 [1/4] 清空Customer数据...');
   localStorage.removeItem(`orders_${customerEmail}`);
-  localStorage.removeItem(`rfqs_${customerEmail}`);
+  localStorage.removeItem(`xjs_${customerEmail}`);
   localStorage.removeItem(`quotations_${customerEmail}`);
   localStorage.removeItem(`notifications_${customerEmail}`);
   console.log('  ✅ 已清空Customer数据（订单、询价、报价、通知）');
@@ -37,7 +37,7 @@ export function clearAllTestData(customerEmail: string = 'customer@example.com')
   console.log('\n🔧 [2/4] 清空Admin数据...');
   const adminEmail = 'admin@cosun.com';
   localStorage.removeItem(`orders_${adminEmail}`);
-  localStorage.removeItem(`rfqs_${adminEmail}`);
+  localStorage.removeItem(`xjs_${adminEmail}`);
   localStorage.removeItem(`quotations_${adminEmail}`);
   localStorage.removeItem(`notifications_${adminEmail}`);
   console.log('  ✅ 已清空Admin数据（订单、询价、报价、通知）');
@@ -72,13 +72,13 @@ export function checkDataStatus(customerEmail: string = 'customer@example.com') 
   
   // Customer数据
   const customerOrders = JSON.parse(localStorage.getItem(`orders_${customerEmail}`) || '[]');
-  const customerRFQs = JSON.parse(localStorage.getItem(`rfqs_${customerEmail}`) || '[]');
+  const customerXJs = JSON.parse(localStorage.getItem(`xjs_${customerEmail}`) || '[]');
   const customerQuotations = JSON.parse(localStorage.getItem(`quotations_${customerEmail}`) || '[]');
   const customerNotifications = JSON.parse(localStorage.getItem(`notifications_${customerEmail}`) || '[]');
   
   // Admin数据
   const adminOrders = JSON.parse(localStorage.getItem(`orders_${adminEmail}`) || '[]');
-  const adminRFQs = JSON.parse(localStorage.getItem(`rfqs_${adminEmail}`) || '[]');
+  const adminXJs = JSON.parse(localStorage.getItem(`xjs_${adminEmail}`) || '[]');
   const adminQuotations = JSON.parse(localStorage.getItem(`quotations_${adminEmail}`) || '[]');
   const adminNotifications = JSON.parse(localStorage.getItem(`notifications_${adminEmail}`) || '[]');
   
@@ -87,13 +87,13 @@ export function checkDataStatus(customerEmail: string = 'customer@example.com') 
   
   console.log('\n👤 Customer Portal Data:');
   console.log(`  - Orders: ${customerOrders.length} 条`);
-  console.log(`  - Inquiries (INQ): ${customerRFQs.length} 条`);
+  console.log(`  - Inquiries (ING): ${customerXJs.length} 条`);
   console.log(`  - Quotations: ${customerQuotations.length} 条`);
   console.log(`  - Notifications: ${customerNotifications.length} 条`);
   
   console.log('\n🔧 Admin Portal Data:');
   console.log(`  - Orders: ${adminOrders.length} 条`);
-  console.log(`  - Inquiries (INQ): ${adminRFQs.length} 条`);
+  console.log(`  - Inquiries (ING): ${adminXJs.length} 条`);
   console.log(`  - Quotations: ${adminQuotations.length} 条`);
   console.log(`  - Notifications: ${adminNotifications.length} 条`);
   
@@ -106,13 +106,13 @@ export function checkDataStatus(customerEmail: string = 'customer@example.com') 
   return {
     customer: {
       orders: customerOrders.length,
-      rfqs: customerRFQs.length,
+      xjs: customerXJs.length,
       quotations: customerQuotations.length,
       notifications: customerNotifications.length
     },
     admin: {
       orders: adminOrders.length,
-      rfqs: adminRFQs.length,
+      xjs: adminXJs.length,
       quotations: adminQuotations.length,
       notifications: adminNotifications.length
     },

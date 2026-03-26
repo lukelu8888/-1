@@ -1,7 +1,7 @@
 import type { ProductSnapshotType, ProductSnapshotTypeCode, SnapshotEnvelope } from './types';
 
 const SNAPSHOT_TYPE_CODES: Record<ProductSnapshotType, ProductSnapshotTypeCode> = {
-  inquiry: 'INQ',
+  inquiry: 'ING',
   quotation: 'QT',
   order: 'ORD',
   procurement: 'PRC',

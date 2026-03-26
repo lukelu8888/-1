@@ -1,12 +1,13 @@
 import React, { forwardRef } from 'react';
-import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
+import cosunLogo from '../../../assets/410810351d2b1fef484ded221d682af920f7ac14.png';
 import type { DocumentConditionGroup } from '../../../types/documentConditions';
+import { forceDesensitizePurchaserFeedbackText } from '../../../utils/purchaserFeedbackSanitizer';
 
 /**
  * 📋 报价请求单（Quote Requirement - QR）
  *
  * 用途：业务员向采购员发起内部报价请求，请采购去找供应商拿价格
- * 场景：客户询价（INQ）→ 报价请求（QR）→ 采购询价（XJ）→ 供应商报价（BJ）
+ * 场景：客户询价（ING）→ 报价请求（QR）→ 采购询价（XJ）→ 供应商报价（BJ）
  * 包含：客户信息、产品信息、客户需求要素、报价请求说明
  */
 
@@ -14,7 +15,7 @@ export interface QuoteRequirementDocumentData {
   // 报价请求单基本信息
   requirementNo: string;                // QR-NA-251220-0001
   requirementDate: string;              // 2025-12-20
-  sourceInquiryNo: string;              // 来源询价单号 INQ-NA-251220-0001
+  sourceInquiryNo: string;              // 来源询价单号 ING-NA-251220-0001
   requiredResponseDate: string;         // 要求回复日期
   requiredDeliveryDate: string;         // 要求交货日期
   
@@ -189,7 +190,7 @@ export const buildDefaultQuoteRequirementTextOverrides = (
   dateLabel: '日期：',
   footerNote1: '• 本报价请求单为内部文件，请妥善保管，不得外泄',
   footerNote2: '• 采购部门应遵循公司采购流程和保密规定',
-  footerNote3: '• 单据编号规则：QR-[区域代码]-[日期YYMMDD]-[流水号]',
+  footerNote3: '',
 });
 
 interface QuoteRequirementDocumentProps {
@@ -200,6 +201,7 @@ interface QuoteRequirementDocumentProps {
 
 export const QuoteRequirementDocument = forwardRef<HTMLDivElement, QuoteRequirementDocumentProps>(
   ({ data, layoutConfig, textOverrides }, ref) => {
+    const safePurchaseDeptFeedback = forceDesensitizePurchaserFeedbackText(data.purchaseDeptFeedback || '');
     const layout = {
       ...DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT,
       ...(layoutConfig || {}),
@@ -560,7 +562,7 @@ export const QuoteRequirementDocument = forwardRef<HTMLDivElement, QuoteRequirem
               <h3 className="font-bold text-base mb-2">{texts.purchaseFeedbackTitle}</h3>
               <div className="border border-gray-300 rounded p-3 bg-blue-50 text-xs min-h-[100px]">
                 {data.purchaseDeptFeedback ? (
-                  <div className="whitespace-pre-wrap">{data.purchaseDeptFeedback}</div>
+                  <div className="whitespace-pre-wrap">{safePurchaseDeptFeedback}</div>
                 ) : (
                   <div className="text-gray-400 italic">
                     {texts.purchaseFeedbackPlaceholder}

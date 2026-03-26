@@ -164,7 +164,7 @@ export default function OrganizationProfile({ onBack }: OrganizationProfileProps
       if (logoFile) {
         await uploadOrgLogo(logoFile);   // converts file → data-URI → context + localStorage
       }
-      updateOrg({
+      await updateOrg({
         name:          draft.name,
         nameEn:        draft.nameEn,
         description:   draft.description,

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -72,6 +72,14 @@ import { useUser } from '../../contexts/UserContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext';
 import { filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
+import {
+  arrivalNoticeService,
+  customerShipmentTrackingService,
+  deliveryConfirmationService,
+  importClearanceCoordinationService,
+  postOrderFeedbackService,
+  purchaseOrderExecutionStatusService,
+} from '../../lib/supabaseService';
 
 // Mock data with complete order lifecycle
 const mockOrders = [
@@ -1196,8 +1204,96 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
   const [showFreightInquiryForm, setShowFreightInquiryForm] = useState(false);
   const [showFreightConfirmationForm, setShowFreightConfirmationForm] = useState(false);
   const [showBookingConfirmationForm, setShowBookingConfirmationForm] = useState(false);
+  const [shipmentTrackingMap, setShipmentTrackingMap] = useState<Record<string, any>>({});
+  const [loadingShipmentTracking, setLoadingShipmentTracking] = useState(false);
+  const [feedbackDraft, setFeedbackDraft] = useState({
+    overallRating: '5',
+    productRating: '5',
+    packagingRating: '5',
+    deliveryRating: '5',
+    serviceRating: '5',
+    reorderIntent: 'yes',
+    recommendIntent: 'yes',
+    feedbackText: '',
+    qualityIssueFlag: false,
+    packagingIssueFlag: false,
+    deliveryIssueFlag: false,
+  });
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
+  const [submittingShipmentAck, setSubmittingShipmentAck] = useState(false);
 
   const normalizeStatus = (status?: string) => String(status || '').trim().toLowerCase();
+
+  const getShipmentStatusLabel = (status?: string) => {
+    switch (String(status || '').trim().toLowerCase()) {
+      case 'departed':
+        return '已开船';
+      case 'in_transit':
+        return '在途';
+      case 'transshipment':
+        return '中转中';
+      case 'arrived_at_port':
+        return '已到港';
+      case 'delayed':
+        return '延误';
+      case 'exception':
+        return '异常';
+      default:
+        return '待更新';
+    }
+  };
+
+  const getTrackingProgress = (status?: string, arrivalNoticeStatus?: string) => {
+    if (['sent', 'acknowledged'].includes(String(arrivalNoticeStatus || '').toLowerCase())) return 90;
+    switch (String(status || '').trim().toLowerCase()) {
+      case 'departed':
+        return 55;
+      case 'in_transit':
+        return 70;
+      case 'transshipment':
+        return 78;
+      case 'arrived_at_port':
+        return 88;
+      case 'delayed':
+        return 65;
+      case 'exception':
+        return 60;
+      default:
+        return 0;
+    }
+  };
+
+  useEffect(() => {
+    let alive = true;
+    const loadShipmentTracking = async () => {
+      if (!user?.email) {
+        setShipmentTrackingMap({});
+        return;
+      }
+      setLoadingShipmentTracking(true);
+      try {
+        const rows = await customerShipmentTrackingService.getByCustomerEmail(user.email);
+        if (!alive) return;
+        const map: Record<string, any> = {};
+        (rows || []).forEach((row: any) => {
+          if (row?.orderNumber) {
+            map[String(row.orderNumber)] = row;
+          }
+        });
+        setShipmentTrackingMap(map);
+      } catch (error: any) {
+        if (!alive) return;
+        toast.error(error?.message || '加载在途跟踪失败');
+        setShipmentTrackingMap({});
+      } finally {
+        if (alive) setLoadingShipmentTracking(false);
+      }
+    };
+    void loadShipmentTracking();
+    return () => {
+      alive = false;
+    };
+  }, [user?.email]);
 
   const inquiries = user?.email ? getUserInquiries(user.email) : [];
   const customerQuotations = useMemo(() => {
@@ -1314,6 +1410,15 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
   const trackedOrders = useMemo(() => {
     return visibleCustomerOrders.map((order: any) => {
       const displayNo = order.orderNumber || order.id || 'N/A';
+      const shipmentTracking = shipmentTrackingMap[String(displayNo)] || null;
+      const voyage = shipmentTracking?.voyage || null;
+      const arrivalNotice = shipmentTracking?.arrivalNotice || null;
+      const importClearance = shipmentTracking?.importClearance || null;
+      const deliveryConfirmation = shipmentTracking?.deliveryConfirmation || null;
+      const deliveryExceptions = shipmentTracking?.deliveryExceptions || [];
+      const latestFeedback = shipmentTracking?.latestFeedback || null;
+      const trackingStatus = voyage?.currentStatus || null;
+      const derivedProgress = getTrackingProgress(trackingStatus, arrivalNotice?.status);
       const externalNo = resolveDisplayNumber({
         domain: 'order',
         internalNo: displayNo,
@@ -1328,13 +1433,245 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
         productName: order.products?.[0]?.name || '-',
         totalItems: Number(order.products?.reduce((sum: number, p: any) => sum + Number(p.quantity || 0), 0) || 0),
         totalValue: Number(order.totalAmount || 0),
-        overallProgress: Number(order.progress || 0),
-        estimatedArrival: String(order.expectedDelivery || '-'),
+        overallProgress: Math.max(Number(order.progress || 0), derivedProgress),
+        estimatedArrival: String(voyage?.eta || arrivalNotice?.arrivalAt || order.expectedDelivery || '-'),
+        shipmentTracking,
+        trackingStatusLabel: getShipmentStatusLabel(trackingStatus),
+        currentLocation: voyage?.currentLocation || arrivalNotice?.arrivalPort || null,
+        blNo: voyage?.blNo || null,
+        vesselName: voyage?.vesselName || null,
+        voyageNo: voyage?.voyageNo || null,
+        etd: voyage?.etd || null,
+        eta: voyage?.eta || null,
+        arrivalNoticeStatus: arrivalNotice?.status || null,
+        arrivalNoticeNo: arrivalNotice?.arrivalNoticeNo || null,
+        sentToCustomerAt: arrivalNotice?.sentToCustomerAt || null,
+        clearanceStatus: importClearance?.clearanceStatus || null,
+        importBrokerName: importClearance?.importBrokerName || null,
+        customsReleaseAt: importClearance?.customsReleaseAt || null,
+        deliveryOrderReceived: importClearance?.deliveryOrderReceived ?? false,
+        deliveryStatus: deliveryConfirmation?.status || null,
+        deliveredAt: deliveryConfirmation?.deliveredAt || null,
+        receivedBy: deliveryConfirmation?.receivedBy || null,
+        receivedQuantity: deliveryConfirmation?.receivedQuantity || null,
+        damageFlag: deliveryConfirmation?.damageFlag ?? false,
+        shortageFlag: deliveryConfirmation?.shortageFlag ?? false,
+        deliveryExceptions,
+        latestFeedback,
+        workflowSummary: shipmentTracking?.workflowSummary || { timeline: [], pendingReplies: [], replySummary: {} },
         phases: Array.isArray(order.phases) ? order.phases : [],
         currentPhaseIndex: Number(order.currentPhaseIndex || 0),
       };
     });
-  }, [visibleCustomerOrders]);
+  }, [shipmentTrackingMap, user, visibleCustomerOrders]);
+
+  useEffect(() => {
+    setFeedbackDraft({
+      overallRating: '5',
+      productRating: '5',
+      packagingRating: '5',
+      deliveryRating: '5',
+      serviceRating: '5',
+      reorderIntent: 'yes',
+      recommendIntent: 'yes',
+      feedbackText: selectedOrder?.latestFeedback?.feedbackText || '',
+      qualityIssueFlag: Boolean(selectedOrder?.latestFeedback?.qualityIssueFlag),
+      packagingIssueFlag: Boolean(selectedOrder?.latestFeedback?.packagingIssueFlag),
+      deliveryIssueFlag: Boolean(selectedOrder?.latestFeedback?.deliveryIssueFlag),
+    });
+  }, [selectedOrder?.id, selectedOrder?.latestFeedback]);
+
+  const refreshShipmentTracking = async () => {
+    if (!user?.email) return;
+    const rows = await customerShipmentTrackingService.getByCustomerEmail(user.email);
+    const map: Record<string, any> = {};
+    (rows || []).forEach((row: any) => {
+      if (row?.orderNumber) map[String(row.orderNumber)] = row;
+    });
+    setShipmentTrackingMap(map);
+    setSelectedOrder((prev: any) => {
+      if (!prev?.id) return prev;
+      const latest = map[String(prev.id)];
+      if (!latest) return prev;
+      return {
+        ...prev,
+        shipmentTracking: latest,
+        trackingStatusLabel: getShipmentStatusLabel(latest.voyage?.currentStatus || null),
+        currentLocation: latest.voyage?.currentLocation || latest.arrivalNotice?.arrivalPort || null,
+        blNo: latest.voyage?.blNo || null,
+        vesselName: latest.voyage?.vesselName || null,
+        voyageNo: latest.voyage?.voyageNo || null,
+        etd: latest.voyage?.etd || null,
+        eta: latest.voyage?.eta || null,
+        arrivalNoticeStatus: latest.arrivalNotice?.status || null,
+        arrivalNoticeNo: latest.arrivalNotice?.arrivalNoticeNo || null,
+        sentToCustomerAt: latest.arrivalNotice?.sentToCustomerAt || null,
+        clearanceStatus: latest.importClearance?.clearanceStatus || null,
+        importBrokerName: latest.importClearance?.importBrokerName || null,
+        customsReleaseAt: latest.importClearance?.customsReleaseAt || null,
+        deliveryOrderReceived: latest.importClearance?.deliveryOrderReceived ?? false,
+        deliveryStatus: latest.deliveryConfirmation?.status || null,
+        deliveredAt: latest.deliveryConfirmation?.deliveredAt || null,
+        receivedBy: latest.deliveryConfirmation?.receivedBy || null,
+        receivedQuantity: latest.deliveryConfirmation?.receivedQuantity || null,
+        damageFlag: latest.deliveryConfirmation?.damageFlag ?? false,
+        shortageFlag: latest.deliveryConfirmation?.shortageFlag ?? false,
+        inspectionExecutionMode: latest.execution?.inspection_execution_mode || null,
+        customerDesignatedInspectionAgency: latest.execution?.customer_designated_inspection_agency || null,
+        customerDesignatedInspectionStatus: latest.execution?.customer_designated_inspection_status || null,
+        loadingSupervisionMode: latest.execution?.loading_supervision_mode || null,
+        loadingSupervisionAgencyName: latest.execution?.loading_supervision_agency_name || null,
+        loadingSupervisionRequired: latest.execution?.loading_supervision_required ?? false,
+        loadingSupervisionFeedbackStatus: latest.execution?.loading_supervision_feedback_status || null,
+        deliveryExceptions: latest.deliveryExceptions || [],
+        latestFeedback: latest.latestFeedback || null,
+        workflowSummary: latest.workflowSummary || { timeline: [], pendingReplies: [], replySummary: {} },
+      };
+    });
+  };
+
+  const handleAcknowledgeArrivalNotice = async () => {
+    if (!selectedOrder?.shipmentTracking?.purchaseOrderId) {
+      toast.error('当前订单尚未关联到可确认的到港通知');
+      return;
+    }
+    setSubmittingShipmentAck(true);
+    try {
+      await arrivalNoticeService.acknowledgeByPurchaseOrderId(selectedOrder.shipmentTracking.purchaseOrderId, {
+        remarks: `Customer acknowledged in portal by ${user?.email || user?.name || 'customer'}`,
+      });
+      await refreshShipmentTracking();
+      toast.success('已确认收到到港通知');
+    } catch (error: any) {
+      toast.error(error?.message || '确认到港通知失败');
+    } finally {
+      setSubmittingShipmentAck(false);
+    }
+  };
+
+  const handleConfirmClearanceDocs = async () => {
+    if (!selectedOrder?.shipmentTracking?.purchaseOrderId) {
+      toast.error('当前订单尚未关联到可确认的清关资料');
+      return;
+    }
+    setSubmittingShipmentAck(true);
+    try {
+      await importClearanceCoordinationService.confirmDocumentsReceivedByPurchaseOrderId(
+        selectedOrder.shipmentTracking.purchaseOrderId,
+        {
+          remarks: `Customer confirmed clearance docs received in portal by ${user?.email || user?.name || 'customer'}`,
+        },
+      );
+      await refreshShipmentTracking();
+      toast.success('已确认收到清关资料 / Delivery Order');
+    } catch (error: any) {
+      toast.error(error?.message || '确认清关资料失败');
+    } finally {
+      setSubmittingShipmentAck(false);
+    }
+  };
+
+  const handleConfirmDeliveryReceipt = async () => {
+    if (!selectedOrder?.shipmentTracking?.purchaseOrderId) {
+      toast.error('当前订单尚未关联到可确认的收货记录');
+      return;
+    }
+    setSubmittingShipmentAck(true);
+    try {
+      await deliveryConfirmationService.confirmReceivedByPurchaseOrderId(
+        selectedOrder.shipmentTracking.purchaseOrderId,
+        {
+          receivedBy: user?.name || user?.email || 'customer-portal',
+          remarks: `Customer confirmed receipt in portal by ${user?.email || user?.name || 'customer'}`,
+          receivedQuantity: selectedOrder.receivedQuantity ?? selectedOrder.totalItems ?? 0,
+        },
+      );
+      await refreshShipmentTracking();
+      toast.success('已确认收货');
+    } catch (error: any) {
+      toast.error(error?.message || '确认收货失败');
+    } finally {
+      setSubmittingShipmentAck(false);
+    }
+  };
+
+  const handleConfirmThirdPartyInspectionArrangement = async () => {
+    if (!selectedOrder?.shipmentTracking?.purchaseOrderId) {
+      toast.error('当前订单尚未关联到可回执的验货任务');
+      return;
+    }
+    setSubmittingShipmentAck(true);
+    try {
+      await purchaseOrderExecutionStatusService.confirmCustomerInspectionArrangedByPurchaseOrderId(
+        selectedOrder.shipmentTracking.purchaseOrderId,
+        {
+          remarks: `Customer confirmed third-party inspection arranged in portal by ${user?.email || user?.name || 'customer'}`,
+        },
+      );
+      await refreshShipmentTracking();
+      toast.success('已回执：客户第三方验货已安排');
+    } catch (error: any) {
+      toast.error(error?.message || '回执第三方验货失败');
+    } finally {
+      setSubmittingShipmentAck(false);
+    }
+  };
+
+  const handleConfirmLoadingSupervisionArrangement = async () => {
+    if (!selectedOrder?.shipmentTracking?.purchaseOrderId) {
+      toast.error('当前订单尚未关联到可回执的监装任务');
+      return;
+    }
+    setSubmittingShipmentAck(true);
+    try {
+      await purchaseOrderExecutionStatusService.confirmLoadingSupervisionArrangedByPurchaseOrderId(
+        selectedOrder.shipmentTracking.purchaseOrderId,
+        {
+          remarks: `Customer confirmed loading supervision arranged in portal by ${user?.email || user?.name || 'customer'}`,
+        },
+      );
+      await refreshShipmentTracking();
+      toast.success('已回执：第三方监装已安排');
+    } catch (error: any) {
+      toast.error(error?.message || '回执第三方监装失败');
+    } finally {
+      setSubmittingShipmentAck(false);
+    }
+  };
+
+  const handleSubmitPostOrderFeedback = async () => {
+    if (!selectedOrder?.shipmentTracking?.purchaseOrderId) {
+      toast.error('当前订单尚未关联到可反馈的采购执行单');
+      return;
+    }
+    setSubmittingFeedback(true);
+    try {
+      await postOrderFeedbackService.createByPurchaseOrderId(selectedOrder.shipmentTracking.purchaseOrderId, {
+        feedbackNo: `POF-${Date.now()}-${String(selectedOrder.shipmentTracking.purchaseOrderId).slice(0, 8)}`,
+        customerId: user?.email || selectedOrder.customerEmail || selectedOrder.customer,
+        customerName: selectedOrder.customer || user?.name || 'Customer',
+        feedbackChannel: 'customer_portal',
+        overallRating: Number(feedbackDraft.overallRating),
+        productRating: Number(feedbackDraft.productRating),
+        packagingRating: Number(feedbackDraft.packagingRating),
+        deliveryRating: Number(feedbackDraft.deliveryRating),
+        serviceRating: Number(feedbackDraft.serviceRating),
+        qualityIssueFlag: feedbackDraft.qualityIssueFlag,
+        packagingIssueFlag: feedbackDraft.packagingIssueFlag,
+        deliveryIssueFlag: feedbackDraft.deliveryIssueFlag,
+        reorderIntent: feedbackDraft.reorderIntent,
+        recommendIntent: feedbackDraft.recommendIntent,
+        feedbackText: feedbackDraft.feedbackText.trim(),
+        submittedBy: user?.email || user?.name || 'customer-portal',
+      });
+      await refreshShipmentTracking();
+      toast.success('客户线上反馈已提交');
+    } catch (error: any) {
+      toast.error(error?.message || '提交客户反馈失败');
+    } finally {
+      setSubmittingFeedback(false);
+    }
+  };
 
   const filteredOrders = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -1353,6 +1690,18 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
     setCurrentImageIndex(startIndex);
     setIsImageViewerOpen(true);
   };
+
+  const shipmentTimeline = useMemo(() => {
+    return selectedOrder?.workflowSummary?.timeline || [];
+  }, [selectedOrder]);
+
+  const shipmentReplySummary = useMemo(() => {
+    return selectedOrder?.workflowSummary?.replySummary || {};
+  }, [selectedOrder]);
+
+  const pendingShipmentReplies = useMemo(() => {
+    return selectedOrder?.workflowSummary?.pendingReplies || [];
+  }, [selectedOrder]);
 
   return (
     <div className="space-y-6">
@@ -1491,6 +1840,7 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Product</TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Quantity</TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Value</TableHead>
+                  <TableHead className="font-bold" style={{ fontSize: '14px' }}>Tracking</TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>Progress</TableHead>
                   <TableHead className="font-bold" style={{ fontSize: '14px' }}>ETA</TableHead>
                   <TableHead className="font-bold text-right" style={{ fontSize: '14px' }}>Actions</TableHead>
@@ -1523,6 +1873,16 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
                     </TableCell>
                     <TableCell className="text-xs text-gray-700">{order.totalItems.toLocaleString()} pcs</TableCell>
                     <TableCell className="text-xs font-medium text-gray-900">${order.totalValue.toLocaleString()}</TableCell>
+                    <TableCell className="text-xs">
+                      <div className="space-y-1">
+                        <Badge variant="outline" className="text-[11px]">
+                          {order.trackingStatusLabel || '待更新'}
+                        </Badge>
+                        <div className="text-[11px] text-gray-500">
+                          {order.currentLocation || (loadingShipmentTracking ? '同步中...' : '-')}
+                        </div>
+                      </div>
+                    </TableCell>
                     <TableCell className="text-xs">
                       <div className="flex items-center gap-2">
                         <Progress value={order.overallProgress} className="w-20 h-2" />
@@ -1599,6 +1959,346 @@ export function OrderTracking({ onTabChange }: OrderTrackingProps) {
                   </div>
                   <Progress value={selectedOrder.overallProgress} className="h-2" />
                 </div>
+              </div>
+
+              <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <ShipWheel className="h-5 w-5 text-cyan-700" />
+                  <h3 className="font-semibold text-cyan-900">Shipment Tracking</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Current Status</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.trackingStatusLabel || (loadingShipmentTracking ? '同步中...' : '-')}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Current Location</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.currentLocation || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">BL No.</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.blNo || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Arrival Notice</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.arrivalNoticeStatus || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Clearance</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.clearanceStatus || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Delivery</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.deliveryStatus || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Vessel</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.vesselName || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Voyage</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.voyageNo || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">ETD</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.etd || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">ETA</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.eta || selectedOrder.estimatedArrival || '-'}</p>
+                  </div>
+                </div>
+                {(selectedOrder.arrivalNoticeNo || selectedOrder.sentToCustomerAt) && (
+                  <div className="mt-3 text-xs text-cyan-800 space-y-1">
+                    {selectedOrder.arrivalNoticeNo && <div>Arrival Notice No.: {selectedOrder.arrivalNoticeNo}</div>}
+                    {selectedOrder.sentToCustomerAt && <div>Sent To Customer: {selectedOrder.sentToCustomerAt}</div>}
+                    {selectedOrder.importBrokerName && <div>Import Broker: {selectedOrder.importBrokerName}</div>}
+                    {selectedOrder.customsReleaseAt && <div>Customs Released At: {selectedOrder.customsReleaseAt}</div>}
+                    {selectedOrder.deliveryOrderReceived && <div>Delivery Order: received</div>}
+                    {selectedOrder.deliveredAt && <div>Delivered At: {selectedOrder.deliveredAt}</div>}
+                    {selectedOrder.receivedBy && <div>Received By: {selectedOrder.receivedBy}</div>}
+                    {selectedOrder.receivedQuantity != null && <div>Received Quantity: {selectedOrder.receivedQuantity}</div>}
+                    {(selectedOrder.damageFlag || selectedOrder.shortageFlag) && (
+                      <div>
+                        Delivery Issue:
+                        {selectedOrder.damageFlag ? ' damage' : ''}
+                        {selectedOrder.shortageFlag ? ' shortage' : ''}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedOrder.arrivalNoticeStatus && selectedOrder.arrivalNoticeStatus !== 'acknowledged' && (
+                    <Button size="sm" variant="outline" onClick={handleAcknowledgeArrivalNotice} disabled={submittingShipmentAck}>
+                      {submittingShipmentAck ? 'Saving...' : '确认收到到港通知'}
+                    </Button>
+                  )}
+                  {!selectedOrder.deliveryOrderReceived && selectedOrder.clearanceStatus && (
+                    <Button size="sm" variant="outline" onClick={handleConfirmClearanceDocs} disabled={submittingShipmentAck}>
+                      {submittingShipmentAck ? 'Saving...' : '确认收到清关资料 / DO'}
+                    </Button>
+                  )}
+                  {selectedOrder.deliveryStatus && selectedOrder.deliveryStatus === 'pending' && (
+                    <Button size="sm" variant="outline" onClick={handleConfirmDeliveryReceipt} disabled={submittingShipmentAck}>
+                      {submittingShipmentAck ? 'Saving...' : '确认已收货'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <ClipboardCheck className="h-5 w-5 text-amber-700" />
+                  <h3 className="font-semibold text-amber-900">Inspection & Loading Coordination</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Inspection Mode</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.inspectionExecutionMode || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Inspection Agency</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.customerDesignatedInspectionAgency || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Inspection Reply</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.customerDesignatedInspectionStatus || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Loading Supervision</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.loadingSupervisionMode || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Supervision Agency</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.loadingSupervisionAgencyName || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Supervision Reply</p>
+                    <p className="font-bold text-gray-900">{selectedOrder.loadingSupervisionFeedbackStatus || '-'}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedOrder.inspectionExecutionMode === 'customer_third_party' && selectedOrder.customerDesignatedInspectionStatus !== 'scheduled' && selectedOrder.customerDesignatedInspectionStatus !== 'reported' && (
+                    <Button size="sm" variant="outline" onClick={handleConfirmThirdPartyInspectionArrangement} disabled={submittingShipmentAck}>
+                      {submittingShipmentAck ? 'Saving...' : '确认已安排第三方验货'}
+                    </Button>
+                  )}
+                  {selectedOrder.loadingSupervisionMode === 'third_party_witness' && selectedOrder.loadingSupervisionFeedbackStatus !== 'confirmed' && selectedOrder.loadingSupervisionFeedbackStatus !== 'reported' && (
+                    <Button size="sm" variant="outline" onClick={handleConfirmLoadingSupervisionArrangement} disabled={submittingShipmentAck}>
+                      {submittingShipmentAck ? 'Saving...' : '确认已安排第三方监装'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Bell className="h-5 w-5 text-slate-700" />
+                  <h3 className="font-semibold text-slate-900">Workflow Reply Summary</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Customer Payment Control</div>
+                    <div className="font-semibold text-gray-900">
+                      {shipmentReplySummary.customerPaymentControl?.status
+                        ? `${shipmentReplySummary.customerPaymentControl.status}${shipmentReplySummary.customerPaymentControl?.mode ? ` · ${shipmentReplySummary.customerPaymentControl.mode}` : ''}`
+                        : '-'}
+                    </div>
+                    {shipmentReplySummary.customerPaymentControl?.blockedReason && (
+                      <div className="mt-1 text-xs text-amber-700">{shipmentReplySummary.customerPaymentControl.blockedReason}</div>
+                    )}
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Bank Submission</div>
+                    <div className="font-semibold text-gray-900">
+                      {shipmentReplySummary.bankSubmission?.status
+                        ? `${shipmentReplySummary.bankSubmission.status}${shipmentReplySummary.bankSubmission?.mode ? ` · ${shipmentReplySummary.bankSubmission.mode}` : ''}`
+                        : '-'}
+                    </div>
+                    {shipmentReplySummary.bankSubmission?.blockedReason && (
+                      <div className="mt-1 text-xs text-amber-700">{shipmentReplySummary.bankSubmission.blockedReason}</div>
+                    )}
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Document Release</div>
+                    <div className="font-semibold text-gray-900">
+                      {shipmentReplySummary.documentRelease?.status
+                        ? `${shipmentReplySummary.documentRelease.status}${shipmentReplySummary.documentRelease?.mode ? ` · ${shipmentReplySummary.documentRelease.mode}` : ''}`
+                        : '-'}
+                    </div>
+                    {shipmentReplySummary.documentRelease?.blockedReason && (
+                      <div className="mt-1 text-xs text-amber-700">{shipmentReplySummary.documentRelease.blockedReason}</div>
+                    )}
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Arrival Notice</div>
+                    <div className="font-semibold text-gray-900">{shipmentReplySummary.arrivalNotice?.status || '-'}</div>
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Clearance Docs / DO</div>
+                    <div className="font-semibold text-gray-900">{shipmentReplySummary.clearanceDocs?.received ? 'received' : (shipmentReplySummary.clearanceDocs?.status || '-')}</div>
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Customer 3rd-party Inspection</div>
+                    <div className="font-semibold text-gray-900">{shipmentReplySummary.customerThirdPartyInspection?.status || '-'}</div>
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Loading Supervision</div>
+                    <div className="font-semibold text-gray-900">{shipmentReplySummary.loadingThirdPartySupervision?.status || '-'}</div>
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Delivery Receipt</div>
+                    <div className="font-semibold text-gray-900">{shipmentReplySummary.deliveryReceipt?.status || '-'}</div>
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white p-3">
+                    <div className="text-xs text-gray-600 mb-1">Post-order Feedback</div>
+                    <div className="font-semibold text-gray-900">{shipmentReplySummary.feedback?.submitted ? `submitted${shipmentReplySummary.feedback?.overallRating ? ` · ${shipmentReplySummary.feedback.overallRating}/5` : ''}` : 'pending'}</div>
+                  </div>
+                </div>
+                {pendingShipmentReplies.length > 0 && (
+                  <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3">
+                    <div className="text-xs font-semibold text-amber-900 mb-2">Pending Customer Replies</div>
+                    <div className="space-y-1 text-sm text-amber-900">
+                      {pendingShipmentReplies.map((item: any) => (
+                        <div key={item.key}>{item.title} · {item.status}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <AlertCircle className="h-5 w-5 text-amber-700" />
+                    <h3 className="font-semibold text-amber-900">Delivery Exceptions</h3>
+                  </div>
+                  {selectedOrder.deliveryExceptions?.length ? (
+                    <div className="space-y-2 text-sm">
+                      {selectedOrder.deliveryExceptions.map((exception: any) => (
+                        <div key={exception.id} className="rounded border border-amber-200 bg-white p-3">
+                          <div className="flex items-center justify-between">
+                            <div className="font-semibold text-gray-900">{exception.exceptionType}</div>
+                            <Badge variant="outline">{exception.status}</Badge>
+                          </div>
+                          <div className="mt-1 text-xs text-gray-600">
+                            {exception.reportedAt ? `Reported: ${String(exception.reportedAt).slice(0, 16)}` : 'Reported: -'}
+                          </div>
+                          {exception.responsibleParty && <div className="mt-1 text-xs text-gray-700">Responsible: {exception.responsibleParty}</div>}
+                          {exception.resolutionNotes && <div className="mt-2 text-xs text-gray-700">Resolution: {exception.resolutionNotes}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-600">当前没有登记的交付异常。</div>
+                  )}
+                </div>
+
+                <div className="bg-pink-50 border border-pink-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Star className="h-5 w-5 text-pink-700" />
+                    <h3 className="font-semibold text-pink-900">Post-order Feedback</h3>
+                  </div>
+                  {selectedOrder.latestFeedback && (
+                    <div className="mb-3 rounded border border-pink-200 bg-white p-3 text-xs text-gray-700 space-y-1">
+                      <div>Latest Status: {selectedOrder.latestFeedback.feedbackStatus}</div>
+                      <div>Overall Rating: {selectedOrder.latestFeedback.overallRating || '-'}</div>
+                      <div>Submitted At: {selectedOrder.latestFeedback.submittedAt ? String(selectedOrder.latestFeedback.submittedAt).slice(0, 16) : '-'}</div>
+                      {selectedOrder.latestFeedback.feedbackText && <div>Comment: {selectedOrder.latestFeedback.feedbackText}</div>}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <Select value={feedbackDraft.overallRating} onValueChange={(value) => setFeedbackDraft((draft) => ({ ...draft, overallRating: value }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Overall" /></SelectTrigger>
+                      <SelectContent>{['5','4','3','2','1'].map((value) => <SelectItem key={value} value={value}>Overall {value}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={feedbackDraft.productRating} onValueChange={(value) => setFeedbackDraft((draft) => ({ ...draft, productRating: value }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Product" /></SelectTrigger>
+                      <SelectContent>{['5','4','3','2','1'].map((value) => <SelectItem key={value} value={value}>Product {value}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={feedbackDraft.packagingRating} onValueChange={(value) => setFeedbackDraft((draft) => ({ ...draft, packagingRating: value }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Packaging" /></SelectTrigger>
+                      <SelectContent>{['5','4','3','2','1'].map((value) => <SelectItem key={value} value={value}>Packaging {value}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={feedbackDraft.deliveryRating} onValueChange={(value) => setFeedbackDraft((draft) => ({ ...draft, deliveryRating: value }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Delivery" /></SelectTrigger>
+                      <SelectContent>{['5','4','3','2','1'].map((value) => <SelectItem key={value} value={value}>Delivery {value}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <Select value={feedbackDraft.serviceRating} onValueChange={(value) => setFeedbackDraft((draft) => ({ ...draft, serviceRating: value }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Service" /></SelectTrigger>
+                      <SelectContent>{['5','4','3','2','1'].map((value) => <SelectItem key={value} value={value}>Service {value}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={feedbackDraft.reorderIntent} onValueChange={(value) => setFeedbackDraft((draft) => ({ ...draft, reorderIntent: value }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Reorder" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="yes">Reorder Yes</SelectItem>
+                        <SelectItem value="considering">Considering</SelectItem>
+                        <SelectItem value="no">Reorder No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={feedbackDraft.recommendIntent} onValueChange={(value) => setFeedbackDraft((draft) => ({ ...draft, recommendIntent: value }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Recommend" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="yes">Recommend Yes</SelectItem>
+                        <SelectItem value="neutral">Neutral</SelectItem>
+                        <SelectItem value="no">Recommend No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-wrap gap-3 mb-3 text-sm">
+                    <label className="flex items-center gap-2">
+                      <Checkbox checked={feedbackDraft.qualityIssueFlag} onCheckedChange={(checked) => setFeedbackDraft((draft) => ({ ...draft, qualityIssueFlag: Boolean(checked) }))} />
+                      <span>Quality issue</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <Checkbox checked={feedbackDraft.packagingIssueFlag} onCheckedChange={(checked) => setFeedbackDraft((draft) => ({ ...draft, packagingIssueFlag: Boolean(checked) }))} />
+                      <span>Packaging issue</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <Checkbox checked={feedbackDraft.deliveryIssueFlag} onCheckedChange={(checked) => setFeedbackDraft((draft) => ({ ...draft, deliveryIssueFlag: Boolean(checked) }))} />
+                      <span>Delivery issue</span>
+                    </label>
+                  </div>
+                  <Textarea
+                    value={feedbackDraft.feedbackText}
+                    onChange={(e) => setFeedbackDraft((draft) => ({ ...draft, feedbackText: e.target.value }))}
+                    placeholder="Please share product / packaging / delivery feedback..."
+                    rows={4}
+                  />
+                  <div className="mt-3 flex justify-end">
+                    <Button onClick={handleSubmitPostOrderFeedback} disabled={submittingFeedback}>
+                      {submittingFeedback ? 'Submitting...' : 'Submit Feedback'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Clock className="h-5 w-5 text-slate-700" />
+                  <h3 className="font-semibold text-slate-900">Shipment Timeline</h3>
+                </div>
+                {shipmentTimeline.length === 0 ? (
+                  <div className="text-sm text-gray-500">当前暂无真实出运时间线。</div>
+                ) : (
+                  <div className="space-y-3">
+                    {shipmentTimeline.map((item, index) => (
+                      <div key={item.key} className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className="w-3 h-3 rounded-full bg-slate-500 mt-1" />
+                          {index < shipmentTimeline.length - 1 && <div className="w-px flex-1 bg-slate-200 mt-1" />}
+                        </div>
+                        <div className="pb-2">
+                          <div className="text-sm font-semibold text-gray-900">{item.title}</div>
+                          <div className="text-xs text-gray-500">{item.time}</div>
+                          <div className="text-sm text-gray-700 mt-1">{item.note}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Horizontal Phase Stepper */}

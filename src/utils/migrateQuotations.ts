@@ -5,19 +5,19 @@
  * 使用场景：供应商已经提交过报价，但系统还没有创建BJ对象
  */
 
-export function migrateRFQQuotesToBJQuotations() {
+export function migrateXJQuotesToBJQuotations() {
   try {
     console.log('🚀 开始迁移XJ报价数据到BJ报价单...');
     
     // 1. 读取所有XJ
-    const rfqsData = localStorage.getItem('rfqs');
-    if (!rfqsData) {
+    const xjsData = localStorage.getItem('xjs');
+    if (!xjsData) {
       console.log('⚠️ 没有找到XJ数据');
       return { success: false, message: '没有找到XJ数据' };
     }
     
-    const rfqs = JSON.parse(rfqsData);
-    console.log(`📊 找到 ${rfqs.length} 个XJ`);
+    const xjs = JSON.parse(xjsData);
+    console.log(`📊 找到 ${xjs.length} 个XJ`);
     
     // 2. 读取现有的BJ报价单
     const existingBJs = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
@@ -27,7 +27,7 @@ export function migrateRFQQuotesToBJQuotations() {
     let migratedCount = 0;
     const newBJs: any[] = [];
     
-    rfqs.forEach((xj: any) => {
+    xjs.forEach((xj: any) => {
       // 检查是否有supplierQuotationNo（说明供应商已经提交报价）
       if (xj.supplierQuotationNo && xj.quotes && xj.quotes.length > 0) {
         const quote = xj.quotes[0]; // 取第一个报价
@@ -44,7 +44,7 @@ export function migrateRFQQuotesToBJQuotations() {
             quotationNo: xj.supplierQuotationNo,
             sourceXJ: xj.supplierXjNo, // 关联XJ询价单号
             sourceQR: xj.requirementNo, // 关联QR采购需求号
-            sourceRFQId: xj.id,
+            sourceXJId: xj.id,
             customerName: xj.customerName || 'COSUN',
             customerCompany: 'COSUN贸易',
             supplierCode: quote.supplierCode,
@@ -133,32 +133,32 @@ export function migrateRFQQuotesToBJQuotations() {
  * 🔥 查看迁移状态
  */
 export function checkMigrationStatus() {
-  const rfqs = JSON.parse(localStorage.getItem('rfqs') || '[]');
+  const xjs = JSON.parse(localStorage.getItem('xjs') || '[]');
   const bjs = JSON.parse(localStorage.getItem('supplierQuotations') || '[]');
   
-  const rfqsWithQuotes = rfqs.filter((xj: any) => xj.supplierQuotationNo && xj.quotes);
-  const unmatchedRFQs = rfqsWithQuotes.filter((xj: any) => 
+  const xjsWithQuotes = xjs.filter((xj: any) => xj.supplierQuotationNo && xj.quotes);
+  const unmatchedXJs = xjsWithQuotes.filter((xj: any) => 
     !bjs.some((bj: any) => bj.quotationNo === xj.supplierQuotationNo)
   );
   
   console.log('📊 迁移状态:');
-  console.log(`  - 总XJ数: ${rfqs.length}`);
-  console.log(`  - 有报价的XJ: ${rfqsWithQuotes.length}`);
+  console.log(`  - 总XJ数: ${xjs.length}`);
+  console.log(`  - 有报价的XJ: ${xjsWithQuotes.length}`);
   console.log(`  - 总BJ报价单: ${bjs.length}`);
-  console.log(`  - 需要迁移的XJ: ${unmatchedRFQs.length}`);
+  console.log(`  - 需要迁移的XJ: ${unmatchedXJs.length}`);
   
-  if (unmatchedRFQs.length > 0) {
+  if (unmatchedXJs.length > 0) {
     console.log('⚠️ 需要迁移的XJ:');
-    unmatchedRFQs.forEach((xj: any) => {
+    unmatchedXJs.forEach((xj: any) => {
       console.log(`  - ${xj.supplierQuotationNo} (XJ: ${xj.supplierXjNo}, QR: ${xj.requirementNo})`);
     });
   }
   
   return {
-    totalRFQs: rfqs.length,
-    rfqsWithQuotes: rfqsWithQuotes.length,
+    totalXJs: xjs.length,
+    xjsWithQuotes: xjsWithQuotes.length,
     totalBJs: bjs.length,
-    unmatchedRFQs: unmatchedRFQs.length,
-    needsMigration: unmatchedRFQs.length > 0
+    unmatchedXJs: unmatchedXJs.length,
+    needsMigration: unmatchedXJs.length > 0
   };
 }

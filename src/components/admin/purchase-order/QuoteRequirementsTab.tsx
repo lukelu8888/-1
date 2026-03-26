@@ -27,7 +27,7 @@ type QuoteRequirementsTabProps = {
   hasDownstreamXJForRequirement: (req: QuoteRequirement) => boolean;
   setViewRequirement: (req: QuoteRequirement) => void;
   setShowRequirementDialog: (show: boolean) => void;
-  handleCreateRFQFromRequirement: (req: QuoteRequirement) => void;
+  handleCreateXJFromRequirement: (req: QuoteRequirement) => void;
   handleCreateOrderFromRequirement: (req: QuoteRequirement) => void;
   handleSmartFeedback: (req: QuoteRequirement) => void;
   handlePushToSalesInquiry: (req: QuoteRequirement) => void;
@@ -45,7 +45,7 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
   hasDownstreamXJForRequirement,
   setViewRequirement,
   setShowRequirementDialog,
-  handleCreateRFQFromRequirement,
+  handleCreateXJFromRequirement,
   handleCreateOrderFromRequirement,
   handleSmartFeedback,
   handlePushToSalesInquiry,
@@ -267,15 +267,20 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                           <>
                             <Button
                               size="sm"
-                              onClick={() => handleCreateRFQFromRequirement(req)}
+                              onClick={() => handleCreateXJFromRequirement(req)}
                               className="h-6 text-[12px] bg-blue-600 hover:bg-blue-700 px-2"
                             >
                               创建询价单
                             </Button>
+                            {/* Phase 3d: legacy path — visually downgraded to signal non-standard use.
+                                Standard path is PR → admin allocation → CG (via 创建询价单 → 供应商分配).
+                                This button bypasses PR and creates a CG directly (no parentRequestPoNumber). */}
                             <Button
                               size="sm"
+                              variant="outline"
                               onClick={() => handleCreateOrderFromRequirement(req)}
-                              className="h-6 text-[12px] bg-[#F96302] hover:bg-[#E05502] px-2"
+                              className="h-6 text-[12px] border-gray-300 text-gray-500 hover:text-gray-700 hover:bg-gray-50 px-2"
+                              title="旧流程：直接创建采购单（不经过PR审批流）"
                             >
                               直接下单
                             </Button>

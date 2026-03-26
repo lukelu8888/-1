@@ -8,14 +8,16 @@ import { QuoteRequirementDocumentData } from '../../documents/templates/QuoteReq
 import { XJData } from '../../documents/templates/XJDocument';
 import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOrderContext';
 import { QuoteRequirement } from '../../../contexts/QuoteRequirementContext';
-import { Supplier } from '../../../data/suppliersData';
+import { Supplier, findSupplier, toSupplierProfile } from '../../../data/suppliersData';
 import { XJ } from '../../../contexts/XJContext';
+import { getStoredAdminOrgProfile, getStoredAdminUserProfile } from '../../../contexts/AdminOrganizationContext';
 import {
   buildBilingualTradingRequirementsText,
   buildProcurementConditionGroups,
   extractProcurementRequestContext,
   joinNonEmptyText,
 } from '../../../utils/procurementRequestContext';
+import { desensitizePurchaserFeedbackText } from '../../../utils/purchaserFeedbackSanitizer';
 import { generateXJNumber } from '../../../utils/xjNumberGenerator';
 import { getFormalBusinessModelNo } from '../../../utils/productModelDisplay';
 
@@ -109,11 +111,27 @@ export const getUrgencyConfig = (urgency: 'high' | 'medium' | 'low') => {
   return configs[urgency];
 };
 
+const buildAdminCompanyContact = () => {
+  const adminOrg = getStoredAdminOrgProfile();
+  const adminUser = getStoredAdminUserProfile();
+
+  return {
+    nameCN: String(adminOrg.nameCN || '').trim(),
+    nameEN: String(adminOrg.nameEN || adminOrg.nameCN || '').trim(),
+    addressCN: String(adminOrg.addressCN || '').trim(),
+    addressEN: String(adminOrg.addressEN || adminOrg.addressCN || '').trim(),
+    phone: String(adminOrg.phone || '').trim(),
+    email: String(adminOrg.email || adminUser.email || '').trim(),
+    contactPerson: String(adminOrg.contactPerson || adminUser.name || '').trim(),
+  };
+};
+
 /**
  * 🔥 将采购订单数据转换为文档模板数据
  */
 export const convertToPOData = (po: PurchaseOrderType): PurchaseOrderData => {
   const poAny = po as any;
+  const adminCompany = buildAdminCompanyContact();
   const pick = (...values: unknown[]) => {
     for (const v of values) {
       const s = String(v ?? '').trim();
@@ -144,13 +162,13 @@ export const convertToPOData = (po: PurchaseOrderType): PurchaseOrderData => {
     
     // 买方（公司）信息
     buyer: {
-      name: '福建高盛达富建材有限公司',
-      nameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-      address: '福建省福州市仓山区金山街道浦上大道216号',
-      addressEn: 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China',
-      tel: '+86-591-8888-8888',
-      email: 'purchase@gaoshengdafu.com',
-      contactPerson: '采购部-刘明'
+      name: adminCompany.nameCN,
+      nameEn: adminCompany.nameEN,
+      address: adminCompany.addressCN,
+      addressEn: adminCompany.addressEN,
+      tel: adminCompany.phone,
+      email: adminCompany.email,
+      contactPerson: adminCompany.contactPerson
     },
     
     // 卖方（供应商）信息
@@ -212,34 +230,7 @@ export const buildPurchaseOrderDocumentSnapshot = (po: PurchaseOrderType): Purch
  * 🔥 脱敏函数 - 隐藏供应商公司名称（仅业务员查看时）
  */
 export const desensitizeFeedback = (feedback: string, userRole?: string): string => {
-  // 🔥 修正：业务员角色是Sales_Rep，不是salesperson
-  if (!feedback || userRole !== 'Sales_Rep') {
-    console.log('⏭️ [跳过脱敏-采购订单管理] 原因:', !feedback ? '无反馈内容' : `角色不是业务员，当前角色：${userRole}`);
-    return feedback; // 采购员和管理员可以看到完整信息
-  }
-
-  console.log('🔒 [脱敏处理-采购订单管理] 业务员查看，开始脱敏供应商信息');
-
-  // 🔥 脱敏策略：将供应商公司名称替换为"供应商X"
-  let desensitized = feedback;
-  
-  // 提取所有供应商公司名称
-  const companyPattern = /([^，：。\n]+?(?:有限公司|股份有限公司|集团|公司|厂|工厂))/g;
-  const companies = new Set<string>();
-  let match;
-  
-  while ((match = companyPattern.exec(feedback)) !== null) {
-    companies.add(match[1]);
-  }
-
-  // 为每个供应商分配编号并替换
-  const companyArray = Array.from(companies);
-  companyArray.forEach((company, index) => {
-    const supplierLabel = `供应商${String.fromCharCode(65 + index)}`; // A, B, C...
-    desensitized = desensitized.replace(new RegExp(company, 'g'), supplierLabel);
-  });
-
-  return desensitized;
+  return desensitizePurchaserFeedbackText(feedback, null, userRole);
 };
 
 /**
@@ -331,13 +322,44 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
 
     return result.join('\n');
   };
+  const normalizeComparable = (value: unknown) =>
+    String(value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
+  const findFeedbackProduct = (item: any, index: number) => {
+    if (!hasPurchaserFeedback) return null;
+    const feedbackProducts = Array.isArray(req.purchaserFeedback?.products)
+      ? req.purchaserFeedback.products
+      : [];
+    const itemId = normalizeComparable(item?.id);
+    const itemModel = normalizeComparable(
+      item?.modelNo || item?.model || item?.sku || getFormalBusinessModelNo(item)
+    );
+    const itemName = normalizeComparable(item?.productName || item?.name || item?.description);
+    const itemSpec = normalizeComparable(item?.specification || item?.spec);
+
+    const matched = feedbackProducts.find((fp: any) => {
+      const fpId = normalizeComparable(fp?.productId);
+      const fpModel = normalizeComparable(fp?.modelNo || fp?.productModelNo);
+      const fpName = normalizeComparable(fp?.productName);
+      const fpSpec = normalizeComparable(fp?.specification);
+
+      const sameId = itemId && fpId && itemId === fpId;
+      const sameModel = itemModel && fpModel && itemModel === fpModel;
+      const sameName = itemName && fpName && itemName === fpName;
+      const sameNameAndSpec = sameName && itemSpec && fpSpec && itemSpec === fpSpec;
+
+      return sameId || sameModel || sameNameAndSpec || sameName;
+    });
+
+    if (matched) return matched;
+    return feedbackProducts[index] || null;
+  };
   
   // 🔥 转换产品列表格式 - 优先使用采购员反馈的价格
   const products = req.items?.map((item, index) => {
-    // 🔥 查找对应的采购反馈产品（通过productId匹配）
-    const feedbackProduct = hasPurchaserFeedback 
-      ? req.purchaserFeedback.products.find((fp: any) => fp.productId === item.id)
-      : null;
+    const feedbackProduct = findFeedbackProduct(item, index);
     const parsedLine = parseRequirementLine(productRequirementLines[index]);
     const parsedItemProductName = parseProductSummary(item.productName);
     const parsedItemNameAlias = parseProductSummary((item as any).name);
@@ -451,7 +473,11 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
       fallbackSalesDeptNotes,
     
     // 🔥 采购部反馈 - 从采购反馈中读取采购员建议，并进行脱敏处理
-    purchaseDeptFeedback: desensitizeFeedback(req.purchaserFeedback?.purchaserRemarks || '', userRole),
+    purchaseDeptFeedback: desensitizePurchaserFeedbackText(
+      req.purchaserFeedback?.purchaserRemarks || '',
+      req.purchaserFeedback,
+      userRole,
+    ),
     
     urgency: req.urgency,
     createdBy: req.createdBy
@@ -461,10 +487,18 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
 export const buildQuoteRequirementDocumentSnapshot = (
   req: QuoteRequirement,
   userRole?: string,
+  options?: { forceRebuild?: boolean },
 ): QuoteRequirementDocumentData => {
   const existing = (req as any).documentDataSnapshot || (req as any).document_data_snapshot || null;
-  if (existing && typeof existing === 'object' && Array.isArray((existing as any).products)) {
-    return existing as QuoteRequirementDocumentData;
+  if (!options?.forceRebuild && existing && typeof existing === 'object' && Array.isArray((existing as any).products)) {
+    return {
+      ...(existing as QuoteRequirementDocumentData),
+      purchaseDeptFeedback: desensitizePurchaserFeedbackText(
+        req.purchaserFeedback?.purchaserRemarks || (existing as any).purchaseDeptFeedback || '',
+        req.purchaserFeedback,
+        userRole,
+      ),
+    };
   }
   return convertToPRData(req, userRole);
 };
@@ -480,6 +514,13 @@ export const generateXJDocumentData = (
   selectedProductIds: string[],
   xjNoOverride?: string
 ): XJData => {
+  const adminCompany = buildAdminCompanyContact();
+  const resolvedSupplierRaw = findSupplier({
+    code: supplier?.code,
+    email: supplier?.email,
+    name: supplier?.name,
+  });
+  const supplierProfile = resolvedSupplierRaw ? toSupplierProfile(resolvedSupplierRaw) : null;
   const xjNo = xjNoOverride || `XJ-${new Date().toISOString().slice(2,10).replace(/-/g,'')}-0000`; // caller must provide xjNoOverride
   const requestContext = extractProcurementRequestContext(requirement);
   const commercialTerms = requestContext.commercialTerms || {};
@@ -488,7 +529,7 @@ export const generateXJDocumentData = (
   const exposeInternalTargetToSupplier = !visibility?.maskInternalTargetCostToSupplier;
   
   // 只包含选中的产品
-  const selectedProducts = requirement.items?.filter(item => selectedProductIds.includes(item.id)) || [];
+  const selectedProducts = requirement.items?.filter(item => selectedProductIds.includes(String(item.id))) || [];
   
   // 🔥 组合询价说明
   const salesDeptNotes = (requirement as any).salesDeptNotes || 
@@ -535,38 +576,52 @@ export const generateXJDocumentData = (
   return {
     xjNo: xjNo,
     xjDate: new Date().toISOString().split('T')[0],
-    quoteDeadline: deadline.toISOString().split('T')[0],
-    requirementNo: requirement.requirementNo,
+    requiredResponseDate: deadline.toISOString().split('T')[0],
+    requiredDeliveryDate: String(
+      commercialTerms.deliveryDate ||
+      (requirement as any).requiredDate ||
+      (requirement as any).expectedDate ||
+      deadline.toISOString().split('T')[0],
+    ).split('T')[0],
     
     buyer: {
-      companyName: '福建高盛达富建材有限公司',
-      companyNameEn: 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.',
-      address: '福建省福州市仓山区金山街道浦上大道216号',
-      addressEn: 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China',
-      contactPerson: '采购部',
-      tel: '+86-591-8888-8888',
-      email: 'purchase@gaoshengdafu.com'
+      name: adminCompany.nameCN,
+      nameEn: adminCompany.nameEN,
+      address: adminCompany.addressCN,
+      addressEn: adminCompany.addressEN,
+      contactPerson: adminCompany.contactPerson,
+      tel: adminCompany.phone,
+      email: adminCompany.email
     },
     
     supplier: {
-      companyName: supplier.name,
-      supplierCode: supplier.code,
-      contactPerson: supplier.contactPerson || '联系人',
-      tel: supplier.phone || '+86-xxx-xxxx-xxxx',
-      email: supplier.email || 'supplier@example.com',
-      address: supplier.address || '供应商地址'
+      companyName: supplierProfile?.name || supplier.name,
+      supplierCode: supplierProfile?.code || supplier.code,
+      contactPerson: supplierProfile?.contactPerson || (supplier as any).contactPerson || '联系人',
+      tel: supplierProfile?.phone || supplier.phone || '+86-xxx-xxxx-xxxx',
+      email: supplierProfile?.email || supplier.email || 'supplier@example.com',
+      address: supplierProfile?.address || supplier.address || '供应商地址'
     },
     
     products: selectedProducts.map((item, index) => ({
       no: index + 1,
-      imageUrl: item.imageUrl,
-      productName: item.productName,
+      imageUrl:
+        item.imageUrl ||
+        (item as any).image ||
+        (item as any).image_url ||
+        (item as any).photoUrl ||
+        (item as any).productImage ||
+        (item as any).product_image ||
+        undefined,
+      description: item.productName || '-',
       modelNo: getFormalBusinessModelNo(item) || '-',
       specification: item.specification || '-',
       quantity: item.quantity,
       unit: item.unit,
-      targetPrice: visibility?.maskCustomerPublicPrice ? undefined : item.targetPrice,
-      targetCurrency: item.targetCurrency || 'USD',
+      targetPrice:
+        visibility?.maskCustomerPublicPrice || item.targetPrice == null
+          ? undefined
+          : String(item.targetPrice),
       remarks: item.remarks
     })),
     
@@ -615,9 +670,16 @@ export const generateXJDocumentData = (
 };
 
 export const buildXJDocumentSnapshot = (xj: XJ): XJData => {
+  const adminCompany = buildAdminCompanyContact();
   const raw = ((xj as any).documentDataSnapshot || (xj as any).document_data_snapshot || xj.documentData || {}) as any;
   const rawBuyer = raw.buyer && typeof raw.buyer === 'object' ? raw.buyer : {};
   const rawSupplier = raw.supplier && typeof raw.supplier === 'object' ? raw.supplier : {};
+  const resolvedSupplierRaw = findSupplier({
+    code: rawSupplier.supplierCode || xj.supplierCode,
+    email: rawSupplier.email || xj.supplierEmail,
+    name: rawSupplier.companyName || xj.supplierName,
+  });
+  const supplierProfile = resolvedSupplierRaw ? toSupplierProfile(resolvedSupplierRaw) : null;
   const rawTerms = raw.terms && typeof raw.terms === 'object' ? raw.terms : {};
   const sourceProducts = Array.isArray(raw.products)
     ? raw.products
@@ -633,26 +695,38 @@ export const buildXJDocumentSnapshot = (xj: XJ): XJData => {
     requiredDeliveryDate: String(raw.requiredDeliveryDate || xj.expectedDate || xj.quotationDeadline || fallbackDate),
     inquiryDescription: String(raw.inquiryDescription || xj.remarks || ''),
     buyer: {
-      name: String(rawBuyer.name || rawBuyer.companyName || '福建高盛达富建材有限公司'),
-      nameEn: String(rawBuyer.nameEn || rawBuyer.companyNameEn || 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.'),
-      address: String(rawBuyer.address || '福建省福州市仓山区金山街道浦上大道216号'),
-      addressEn: String(rawBuyer.addressEn || 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China'),
-      tel: String(rawBuyer.tel || '+86-591-8888-8888'),
-      email: String(rawBuyer.email || 'purchase@gaoshengdafu.com'),
-      contactPerson: String(rawBuyer.contactPerson || '采购部'),
+      name: String(rawBuyer.name || rawBuyer.companyName || adminCompany.nameCN),
+      nameEn: String(rawBuyer.nameEn || rawBuyer.companyNameEn || adminCompany.nameEN),
+      address: String(rawBuyer.address || adminCompany.addressCN),
+      addressEn: String(rawBuyer.addressEn || adminCompany.addressEN),
+      tel: String(rawBuyer.tel || adminCompany.phone),
+      email: String(rawBuyer.email || adminCompany.email),
+      contactPerson: String(rawBuyer.contactPerson || adminCompany.contactPerson),
     },
     supplier: {
-      companyName: String(rawSupplier.companyName || xj.supplierName || ''),
-      address: String(rawSupplier.address || ''),
-      contactPerson: String(rawSupplier.contactPerson || xj.supplierContact || ''),
-      tel: String(rawSupplier.tel || ''),
-      email: String(rawSupplier.email || xj.supplierEmail || ''),
-      supplierCode: String(rawSupplier.supplierCode || xj.supplierCode || ''),
+      companyName: String(rawSupplier.companyName || supplierProfile?.name || xj.supplierName || ''),
+      address: String(rawSupplier.address || supplierProfile?.address || ''),
+      contactPerson: String(rawSupplier.contactPerson || supplierProfile?.contactPerson || xj.supplierContact || ''),
+      tel: String(rawSupplier.tel || supplierProfile?.phone || ''),
+      email: String(rawSupplier.email || supplierProfile?.email || xj.supplierEmail || ''),
+      supplierCode: String(rawSupplier.supplierCode || supplierProfile?.code || xj.supplierCode || ''),
     },
     products: sourceProducts.map((item: any, index: number) => ({
       no: index + 1,
       modelNo: getFormalBusinessModelNo(item) || undefined,
-      imageUrl: item?.imageUrl ? String(item.imageUrl) : undefined,
+      imageUrl: item?.imageUrl
+        ? String(item.imageUrl)
+        : item?.image
+          ? String(item.image)
+          : item?.image_url
+            ? String(item.image_url)
+            : item?.photoUrl
+              ? String(item.photoUrl)
+              : item?.productImage
+                ? String(item.productImage)
+                : item?.product_image
+                  ? String(item.product_image)
+                  : undefined,
       itemCode: item?.itemCode ? String(item.itemCode) : undefined,
       description: String(item?.description || item?.productName || ''),
       specification: String(item?.specification || '-'),
@@ -700,10 +774,24 @@ export const getXJKey = (xj: any): string => String(xj?.supplierXjNo || xj?.xjNu
 /** Canonical key for a supplier quotation's source-XJ reference. */
 export const getQuotationXJKey = (q: any): string => String(q?.sourceXJ || q?.sourceXJNumber || '').trim();
 
-/** Human-readable label for a procurement request runtime status. */
+/**
+ * Human-readable label for a procurementRequestStatus value.
+ * Phase 4: all 8 values are mapped explicitly.
+ * PR-tier (on PR records): pending_procurement_assignment | partial_allocated | allocated_completed
+ * CG-tier (on CG records): draft_allocated | pending_boss_approval | approved_boss | rejected_boss | pushed_supplier
+ */
 export const getProcurementRequestStatusText = (status: string): string => {
-  if (status === 'allocated_completed') return '已分配完成';
-  if (status === 'partial_allocated') return '部分分配';
+  // PR-tier
+  if (status === 'pending_procurement_assignment') return '待分配供应商';
+  if (status === 'partial_allocated')              return '部分已分配';
+  if (status === 'allocated_completed')            return '已分配完成';
+  // CG-tier
+  if (status === 'draft_allocated')               return '草稿·待提交审核';
+  if (status === 'pending_boss_approval')         return '待老板审核';
+  if (status === 'approved_boss')                 return '审核通过·可下推';
+  if (status === 'rejected_boss')                 return '审核驳回';
+  if (status === 'pushed_supplier')               return '已推供应商';
+  // Unknown / empty — treated as unassigned PR
   return '待分配供应商';
 };
 
@@ -774,6 +862,7 @@ export const formatCompactUtcMinute = (raw?: string): string => {
  * Re-parameterised (Pass A): accepts purchaseRequirements explicitly instead of closing over component state.
  */
 export const buildXJPreviewData = (xj: XJ, purchaseRequirements: QuoteRequirement[]): XJData => {
+  const adminCompany = buildAdminCompanyContact();
   const raw = xj.documentData && typeof xj.documentData === 'object' && !Array.isArray(xj.documentData)
     ? (xj.documentData as any)
     : {};
@@ -814,13 +903,13 @@ export const buildXJPreviewData = (xj: XJ, purchaseRequirements: QuoteRequiremen
     requiredDeliveryDate: toDateText(raw.requiredDeliveryDate || xj.quotationDeadline || dateFallback),
     inquiryDescription: String(raw.inquiryDescription || ''),
     buyer: {
-      name: String(rawBuyer.name || rawBuyer.companyName || '福建高盛达富建材有限公司'),
-      nameEn: String(rawBuyer.nameEn || rawBuyer.companyNameEn || 'FUJIAN GAOSHENGDAFU BUILDING MATERIALS CO., LTD.'),
-      address: String(rawBuyer.address || '福建省福州市仓山区金山街道浦上大道216号'),
-      addressEn: String(rawBuyer.addressEn || 'No.216 Pushang Avenue, Jinshan Street, Cangshan District, Fuzhou, Fujian, China'),
-      contactPerson: String(rawBuyer.contactPerson || '采购部'),
-      tel: String(rawBuyer.tel || '+86-591-8888-8888'),
-      email: String(rawBuyer.email || 'purchase@cosun.com'),
+      name: String(rawBuyer.name || rawBuyer.companyName || adminCompany.nameCN),
+      nameEn: String(rawBuyer.nameEn || rawBuyer.companyNameEn || adminCompany.nameEN),
+      address: String(rawBuyer.address || adminCompany.addressCN),
+      addressEn: String(rawBuyer.addressEn || adminCompany.addressEN),
+      contactPerson: String(rawBuyer.contactPerson || adminCompany.contactPerson),
+      tel: String(rawBuyer.tel || adminCompany.phone),
+      email: String(rawBuyer.email || adminCompany.email),
     },
     supplier: {
       companyName: String(rawSupplier.companyName || xj.supplierName || ''),

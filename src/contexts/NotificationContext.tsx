@@ -25,7 +25,13 @@ export type NotificationType =
   | 'factory_po_approved'        // 工厂订单已审核
   | 'factory_po_sent'            // 工厂订单已发送
   | 'factory_accepted'           // 工厂接受订单
-  | 'factory_declined';          // 工厂拒绝订单
+  | 'factory_declined'           // 工厂拒绝订单
+  | 'shipment_arrival_notice'    // 到港通知
+  | 'shipment_customs_released'  // 清关放行
+  | 'shipment_delivered'         // 已收货/交付完成
+  | 'customer_third_party_inspection_requested' // 客户安排第三方验货
+  | 'inspection_report_shared'   // 我方验货报告已共享
+  | 'loading_third_party_supervision_requested'; // 客户安排第三方监装
 
 export interface Notification {
   id: string;

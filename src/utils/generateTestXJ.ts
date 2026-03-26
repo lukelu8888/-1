@@ -2,7 +2,7 @@
  * 🔥 生成测试采购询价(XJ)数据 - 正确的多产品询价单结构
  * 
  * 正确的业务流程和编号：
- * 1️⃣ 客户提交询价 → INQ-xxx（客户询价单号）
+ * 1️⃣ 客户提交询价 → ING-xxx（客户询价单号）
  * 2️⃣ COSUN创建采购需求 → QR-xxx（采购需求编号 Quotation Request）
  * 3️⃣ COSUN发送采购询价 → XJ-xxx（采购询价单号）
  * 4️⃣ 供应商提交报价 → BJ-xxx（供应商报价单号）
@@ -12,18 +12,18 @@
  * - QR-NA-251219-1234（COSUN采购需求编号）
  * - BJ-251219-0001（自己的报价单号，报价后生成）
  * 
- * ⚠️ 注意：不存在RFQ-xxx编号！xjNumber字段存储的是QR-xxx
+ * ⚠️ 注意：xjNumber 字段存储的是 QR-xxx
  */
 
-import { RFQ, RFQProduct } from '../contexts/XJContext';
+import { XJ, XJProduct } from '../contexts/XJContext';
 import { generateXJNumber } from './xjNumberGenerator'; // 🔥 导入XJ编号生成器
 
-export function generateTestMultiProductRFQ(): RFQ[] {
+export function generateTestMultiProductXJ(): XJ[] {
   const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
   const today = new Date().toISOString().split('T')[0];
   
   // 🔥 模拟产品列表
-  const products: RFQProduct[] = [
+  const products: XJProduct[] = [
     {
       id: 'prod_001',
       productName: 'Front Load Washer 5.0 cu.ft',
@@ -58,8 +58,8 @@ export function generateTestMultiProductRFQ(): RFQ[] {
 
   const qrNumber = `QR-NA-${dateStr}-${Math.floor(Math.random() * 9000) + 1000}`;
   
-  const xj: RFQ = {
-    id: `rfq_${Date.now()}_test`,
+  const xj: XJ = {
+    id: `xj_${Date.now()}_test`,
     xjNumber: qrNumber, // ⚠️ 字段名保留兼容性，实际存储QR采购需求编号
     supplierXjNo: generateXJNumber(), // 🔥 采购询价单号（从0001开始递增）
     requirementNo: qrNumber, // 🔥 COSUN采购需求编号
@@ -108,13 +108,13 @@ export function generateTestMultiProductRFQ(): RFQ[] {
 if (typeof window !== 'undefined') {
   (window as any).generateTestXJ = () => {
     const { useXJs } = require('../contexts/XJContext');
-    const testRFQs = generateTestMultiProductRFQ();
+    const testXJs = generateTestMultiProductXJ();
     
-    testRFQs.forEach(xj => {
+    testXJs.forEach(xj => {
       const { addXJ } = useXJs();
       addXJ(xj);
     });
     
-    console.log('✅ 已生成测试XJ数据:', testRFQs.length);
+    console.log('✅ 已生成测试XJ数据:', testXJs.length);
   };
 }

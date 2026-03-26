@@ -81,7 +81,7 @@ const TRADING_REQUIREMENT_FIELD_META: Array<{
   { key: 'otherRequirements', originalLabel: 'Other Requirements', chineseLabel: '其他要求' },
 ];
 
-const translateTradingRequirementValue = (
+export const translateTradingRequirementValue = (
   field: keyof TradingRequirementSnapshot,
   raw: string,
 ): string => {
@@ -121,6 +121,14 @@ const translateTradingRequirementValue = (
   replacements.forEach(([pattern, replacement]) => {
     translated = translated.replace(pattern, replacement);
   });
+
+  if (field === 'otherRequirements') {
+    translated = translated
+      .replace(/\s*,?\s*and\s+/gi, '、')
+      .replace(/\s*,\s*/g, '、')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
 
   return translated;
 };
@@ -808,7 +816,7 @@ export const buildProcurementConditionGroups = (
     {
       key: 'commercial-terms',
       title: target === 'xj' ? '对供应商邀约条件' : '业务与采购执行条件',
-      titleEn: target === 'xj' ? 'SUPPLIER RFQ TERMS' : 'INTERNAL EXECUTION TERMS',
+      titleEn: target === 'xj' ? 'SUPPLIER XJ TERMS' : 'INTERNAL EXECUTION TERMS',
       items: commercialItems,
     },
     {

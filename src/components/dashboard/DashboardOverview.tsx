@@ -21,6 +21,8 @@ interface DashboardOverviewProps {
     view:
       | 'overview'
       | 'profile'
+      | 'organization-profile'
+      | 'user-profile'
       | 'my-orders'
       | 'my-products'
       | 'rate-request'

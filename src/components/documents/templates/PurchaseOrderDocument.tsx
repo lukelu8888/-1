@@ -92,7 +92,73 @@ export interface PurchaseOrderData {
     modification?: string;      // 合同变更
     termination?: string;       // 合同终止
   };
+
+  templateSettings?: {
+    productTableColumns?: PurchaseOrderProductTableColumn[];
+  };
 }
+
+export type PurchaseOrderProductTableColumnKey =
+  | 'no'
+  | 'itemCode'
+  | 'image'
+  | 'description'
+  | 'quantity'
+  | 'unit'
+  | 'unitPrice'
+  | 'amount';
+
+export interface PurchaseOrderProductTableColumn {
+  key: PurchaseOrderProductTableColumnKey;
+  label: string;
+  widthPercent: number;
+}
+
+export const DEFAULT_PURCHASE_ORDER_PRODUCT_TABLE_COLUMNS: PurchaseOrderProductTableColumn[] = [
+  { key: 'no', label: '序号', widthPercent: 5 },
+  { key: 'itemCode', label: '型号', widthPercent: 12 },
+  { key: 'image', label: '图片', widthPercent: 8 },
+  { key: 'description', label: '产品名称/规格', widthPercent: 37 },
+  { key: 'quantity', label: '数量', widthPercent: 10 },
+  { key: 'unit', label: '单位', widthPercent: 6 },
+  { key: 'unitPrice', label: '单价', widthPercent: 11 },
+  { key: 'amount', label: '金额', widthPercent: 11 },
+];
+
+export const normalizePurchaseOrderProductTableColumns = (
+  value?: PurchaseOrderProductTableColumn[] | null,
+): PurchaseOrderProductTableColumn[] => {
+  const incoming = Array.isArray(value) ? value : [];
+  const normalized = DEFAULT_PURCHASE_ORDER_PRODUCT_TABLE_COLUMNS.map((fallbackColumn) => {
+    const matched = incoming.find((column) => column?.key === fallbackColumn.key);
+    const widthPercent = Number(matched?.widthPercent);
+
+    return {
+      key: fallbackColumn.key,
+      label: String(matched?.label || fallbackColumn.label).trim() || fallbackColumn.label,
+      widthPercent: Number.isFinite(widthPercent) ? Math.max(4, widthPercent) : fallbackColumn.widthPercent,
+    };
+  });
+
+  const total = normalized.reduce((sum, column) => sum + column.widthPercent, 0) || 100;
+
+  return normalized.map((column, index) => {
+    if (index === normalized.length - 1) {
+      const allocated = normalized
+        .slice(0, -1)
+        .reduce((sum, item) => sum + Number(((item.widthPercent / total) * 100).toFixed(2)), 0);
+      return {
+        ...column,
+        widthPercent: Number((100 - allocated).toFixed(2)),
+      };
+    }
+
+    return {
+      ...column,
+      widthPercent: Number(((column.widthPercent / total) * 100).toFixed(2)),
+    };
+  });
+};
 
 interface PurchaseOrderDocumentProps {
   data: PurchaseOrderData;
@@ -102,6 +168,23 @@ interface PurchaseOrderDocumentProps {
 export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDocumentProps>(
   ({ data, layoutConfig }, ref) => {
     const total = data.products.reduce((sum, item) => sum + item.amount, 0);
+    const productTableColumns = normalizePurchaseOrderProductTableColumns(
+      data.templateSettings?.productTableColumns,
+    );
+    const normalizedTermCurrency = String(data.terms.currency || '').trim().toUpperCase();
+    const productCurrencies = Array.from(
+      new Set(
+        data.products
+          .map((item) => String(item.currency || '').trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    );
+    const bankCurrency = String(data.supplier.bankInfo?.currency || '').trim().toUpperCase();
+    const resolvedCurrency =
+      normalizedTermCurrency ||
+      (productCurrencies.length === 1 ? productCurrencies[0] : '') ||
+      (bankCurrency && !bankCurrency.includes('/') ? bankCurrency : '') ||
+      'CNY';
     const documentWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
     const documentMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
     const fontSize = layoutConfig ? `${layoutConfig.fontSizePt}pt` : '10pt';
@@ -343,64 +426,76 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
               <table className="w-full border-collapse border-2 border-gray-300 text-xs">
                 <thead>
                   <tr className="bg-gray-100">
-                    <th className="border border-gray-300 px-2 py-2 text-left w-8">序号</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left w-20">型号</th>
-                    <th className="border border-gray-300 px-2 py-2 text-center w-16">图片</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">产品名称/规格</th>
-                    <th className="border border-gray-300 px-2 py-2 text-right w-16">数量</th>
-                    <th className="border border-gray-300 px-2 py-2 text-center w-10">单位</th>
-                    <th className="border border-gray-300 px-2 py-2 text-right w-20">单价</th>
-                    <th className="border border-gray-300 px-2 py-2 text-right w-24">金额</th>
+                    {productTableColumns.map((column) => (
+                      <th
+                        key={column.key}
+                        className={`border border-gray-300 px-2 py-2 ${
+                          column.key === 'image'
+                            ? 'text-center'
+                            : column.key === 'quantity' || column.key === 'unitPrice' || column.key === 'amount'
+                              ? 'text-right'
+                              : 'text-left'
+                        }`}
+                        style={{ width: `${column.widthPercent}%` }}
+                      >
+                        {column.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {data.products.map((product, index) => (
                     <tr key={index}>
-                      <td className="border border-gray-300 px-2 py-2 text-center">
-                        {product.no}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-gray-700">
-                        {product.modelNo || product.itemCode || '-'}
-                      </td>
-                      <td className="border border-gray-300 px-1 py-1 text-center">
-                        {product.imageUrl ? (
-                          <img 
-                            src={product.imageUrl} 
-                            alt={product.description}
-                            className="w-10 h-10 object-cover mx-auto rounded"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 bg-gray-100 mx-auto rounded flex items-center justify-center text-xs text-gray-400">
-                            无图
-                          </div>
-                        )}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2">
-                        <div className="font-semibold">{product.description}</div>
-                        <div className="text-xs text-gray-600 mt-0.5">{product.specification}</div>
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right">
-                        {product.quantity.toLocaleString()}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-center">
-                        {product.unit}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right">
-                        {product.currency} {(product.unitPrice || 0).toFixed(2)}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right font-semibold">
-                        {product.currency} {(product.amount || product.totalPrice || 0).toFixed(2)}
-                      </td>
+                      {productTableColumns.map((column) => {
+                        switch (column.key) {
+                          case 'no':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{product.no}</td>;
+                          case 'itemCode':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-gray-700">{product.modelNo || product.itemCode || '-'}</td>;
+                          case 'image':
+                            return (
+                              <td key={column.key} className="border border-gray-300 px-1 py-1 text-center">
+                                {product.imageUrl ? (
+                                  <img
+                                    src={product.imageUrl}
+                                    alt={product.description}
+                                    className="w-10 h-10 object-cover mx-auto rounded"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 bg-gray-100 mx-auto rounded flex items-center justify-center text-xs text-gray-400">
+                                    无图
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          case 'description':
+                            return (
+                              <td key={column.key} className="border border-gray-300 px-2 py-2">
+                                <div className="font-semibold">{product.description}</div>
+                                <div className="text-xs text-gray-600 mt-0.5">{product.specification}</div>
+                              </td>
+                            );
+                          case 'quantity':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{product.quantity.toLocaleString()}</td>;
+                          case 'unit':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{product.unit}</td>;
+                          case 'unitPrice':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{(product.unitPrice || 0).toFixed(2)}</td>;
+                          case 'amount':
+                          default:
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">{(product.amount || 0).toFixed(2)}</td>;
+                        }
+                      })}
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-100 font-bold">
-                    <td colSpan={7} className="border border-gray-300 px-2 py-2 text-right">
-                      采购总金额：
+                    <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 py-2 text-right">
+                      采购总金额（{resolvedCurrency}）：
                     </td>
                     <td className="border border-gray-300 px-2 py-2 text-right text-base text-black">
-                      {data.terms.currency} {total.toFixed(2)}
+                      {total.toFixed(2)}
                     </td>
                   </tr>
                 </tfoot>

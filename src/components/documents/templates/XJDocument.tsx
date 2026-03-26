@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import cosunLogo from 'figma:asset/410810351d2b1fef484ded221d682af920f7ac14.png';
+import cosunLogo from '../../../assets/410810351d2b1fef484ded221d682af920f7ac14.png';
 import { DocumentConditionsSection } from './shared/DocumentConditionsSection';
 import type { DocumentConditionGroup } from '../../../types/documentConditions';
 import type { DocumentLayoutConfig } from '../A4PageContainer';
@@ -395,7 +395,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
               {data.conditionGroups && data.conditionGroups.length > 0 && (
                 <DocumentConditionsSection
                   title="询价条件汇总"
-                  titleEn="RFQ CONDITIONS"
+                  titleEn="XJ CONDITIONS"
                   groups={data.conditionGroups}
                   emptyText="暂无询价条件"
                 />
@@ -572,46 +572,7 @@ export const XJDocument = forwardRef<HTMLDivElement, XJDocumentProps>(
               </table>
             </div>
 
-            {/* 授权签名区域 */}
-            <div className="signature-section mt-8">
-              <div className="grid grid-cols-2 gap-8">
-                <div>
-                  <h4 className="font-bold mb-4">询价方（盖章）：</h4>
-                  <div className="text-sm space-y-3">
-                    <p className="font-semibold">{data.buyer.name}</p>
-                    <p className="text-xs text-gray-600">{data.buyer.nameEn}</p>
-                    <div className="border-2 border-dashed border-gray-300 rounded p-6 mt-4 bg-gray-50 text-center">
-                      <p className="text-xs text-gray-400">公司盖章处</p>
-                    </div>
-                    <div className="mt-4 space-y-1">
-                      <div className="border-b border-gray-400 pb-1">
-                        <p className="text-xs text-gray-600">授权代表签字</p>
-                      </div>
-                      <p className="text-xs text-gray-600">日期：_________________</p>
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <h4 className="font-bold mb-4">供应商（盖章确认）：</h4>
-                  <div className="text-sm space-y-3">
-                    <p className="font-semibold">{data.supplier.companyName}</p>
-                    {data.supplier.supplierCode && (
-                      <p className="text-xs text-gray-600">供应商编号：{data.supplier.supplierCode}</p>
-                    )}
-                    <div className="border-2 border-dashed border-gray-300 rounded p-6 mt-4 bg-gray-50 text-center">
-                      <p className="text-xs text-gray-400">公司盖章处</p>
-                    </div>
-                    <div className="mt-4 space-y-1">
-                      <div className="border-b border-gray-400 pb-1">
-                        <p className="text-xs text-gray-600">授权代表签字</p>
-                      </div>
-                      <p className="text-xs text-gray-600">日期：_________________</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 页脚说明 */}
+            <div className="mt-8">
               <div className="text-xs text-gray-500 text-center border-t border-gray-200 pt-3 mt-6">
                 <p>请供应商在收到本询价单后 3 个工作日内确认回复。</p>
                 <p className="mt-1">如有疑问，请及时联系采购联系人：{data.buyer.contactPerson} | {data.buyer.email}</p>

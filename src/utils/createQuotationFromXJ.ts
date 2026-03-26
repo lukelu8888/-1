@@ -2,7 +2,7 @@
  * 从采购询价(XJ)创建供应商报价单 — Supabase-first
  */
 import { nextBJNumber } from './xjNumberGenerator';
-import { productMasterService, productModelMappingService, supplierQuotationService } from '../lib/supabaseService';
+import { productMasterService, productModelMappingService, supplierQuotationService, toUUID } from '../lib/supabaseService';
 import { adaptSupplierQuotationToDocumentData } from './documentDataAdapters';
 import { getFormalBusinessModelNo } from './productModelDisplay';
 
@@ -88,6 +88,93 @@ function assertPersistedSupplierQuotationTemplateBinding(quotation: SupplierQuot
   }
 }
 
+function refreshSupplierQuotationDocumentPayload(quotation: SupplierQuotation) {
+  const existingSnapshot =
+    quotation.documentDataSnapshot ||
+    quotation.document_data_snapshot ||
+    quotation.documentData ||
+    null;
+  const projectExecutionBaseline =
+    existingSnapshot?.projectExecutionBaseline ||
+    quotation.documentRenderMeta?.projectExecutionBaseline ||
+    null;
+
+  const adaptedSnapshot = adaptSupplierQuotationToDocumentData({
+    quotationNo: quotation.quotationNo,
+    quotationDate: quotation.quotationDate,
+    validUntil: quotation.validUntil,
+    sourceXJ: quotation.sourceXJ,
+    sourceXJNumber: quotation.sourceXJNumber,
+    inquiryReference: quotation.inquiryReference || existingSnapshot?.inquiryReference || '',
+    supplierCode: quotation.supplierCode,
+    supplierName: quotation.supplierName,
+    supplierCompany: quotation.supplierCompany,
+    supplierEmail: quotation.supplierEmail,
+    supplierPhone: quotation.supplierPhone || existingSnapshot?.supplier?.tel || '',
+    supplierAddress: quotation.supplierAddress || existingSnapshot?.supplier?.address || '',
+    items: quotation.items,
+    paymentTerms: quotation.paymentTerms,
+    deliveryTerms: quotation.deliveryTerms,
+    packingTerms: quotation.packingTerms || existingSnapshot?.terms?.packaging || '',
+    generalRemarks: quotation.generalRemarks,
+    supplierRemarks: quotation.supplierRemarks,
+  });
+
+  const mergedProducts = adaptedSnapshot.products.map((product, index) => ({
+    ...(existingSnapshot?.products?.[index] || {}),
+    ...product,
+  }));
+
+  const nextSnapshot = {
+    ...adaptedSnapshot,
+    inquiryReference: quotation.inquiryReference || existingSnapshot?.inquiryReference || adaptedSnapshot.inquiryReference,
+    supplier: {
+      ...adaptedSnapshot.supplier,
+      ...(existingSnapshot?.supplier || {}),
+      companyName: quotation.supplierCompany || quotation.supplierName || existingSnapshot?.supplier?.companyName || adaptedSnapshot.supplier.companyName,
+      companyNameEn: existingSnapshot?.supplier?.companyNameEn || quotation.supplierCompany || quotation.supplierName || adaptedSnapshot.supplier.companyNameEn,
+      address: quotation.supplierAddress || existingSnapshot?.supplier?.address || adaptedSnapshot.supplier.address,
+      addressEn: existingSnapshot?.supplier?.addressEn || quotation.supplierAddress || existingSnapshot?.supplier?.address || adaptedSnapshot.supplier.addressEn,
+      tel: quotation.supplierPhone || existingSnapshot?.supplier?.tel || adaptedSnapshot.supplier.tel,
+      email: quotation.supplierEmail || existingSnapshot?.supplier?.email || adaptedSnapshot.supplier.email,
+      contactPerson: quotation.supplierName || existingSnapshot?.supplier?.contactPerson || adaptedSnapshot.supplier.contactPerson,
+      supplierCode: quotation.supplierCode || existingSnapshot?.supplier?.supplierCode || adaptedSnapshot.supplier.supplierCode,
+    },
+    buyer: {
+      ...adaptedSnapshot.buyer,
+      ...(existingSnapshot?.buyer || {}),
+    },
+    products: mergedProducts,
+    terms: {
+      ...adaptedSnapshot.terms,
+      ...(existingSnapshot?.terms || {}),
+      paymentTerms: quotation.paymentTerms || existingSnapshot?.terms?.paymentTerms || adaptedSnapshot.terms.paymentTerms,
+      deliveryTerms: quotation.deliveryTerms || existingSnapshot?.terms?.deliveryTerms || adaptedSnapshot.terms.deliveryTerms,
+      packaging: quotation.packingTerms || existingSnapshot?.terms?.packaging || adaptedSnapshot.terms.packaging,
+      remarks: quotation.generalRemarks ?? existingSnapshot?.terms?.remarks ?? adaptedSnapshot.terms.remarks,
+      moq: existingSnapshot?.terms?.moq || (quotation.items?.[0]?.moq ? `${quotation.items[0].moq} ${quotation.items[0].unit || 'PCS'}` : adaptedSnapshot.terms.moq),
+      deliveryTime: existingSnapshot?.terms?.deliveryTime || adaptedSnapshot.terms.deliveryTime,
+      deliveryAddress: existingSnapshot?.terms?.deliveryAddress || adaptedSnapshot.terms.deliveryAddress,
+      qualityStandard: existingSnapshot?.terms?.qualityStandard || adaptedSnapshot.terms.qualityStandard,
+      warranty: existingSnapshot?.terms?.warranty || adaptedSnapshot.terms.warranty,
+      shippingMarks: existingSnapshot?.terms?.shippingMarks || adaptedSnapshot.terms.shippingMarks,
+    },
+    supplierRemarks: quotation.supplierRemarks
+      ? {
+          content: quotation.supplierRemarks,
+          remarkDate: quotation.quotationDate,
+          remarkBy: quotation.supplierName || existingSnapshot?.supplierRemarks?.remarkBy || '',
+        }
+      : existingSnapshot?.supplierRemarks || adaptedSnapshot.supplierRemarks,
+    ...(projectExecutionBaseline ? { projectExecutionBaseline } : {}),
+  };
+
+  quotation.documentDataSnapshot = nextSnapshot;
+  quotation.document_data_snapshot = nextSnapshot;
+  quotation.documentData = nextSnapshot;
+  return quotation;
+}
+
 export async function createQuotationFromXJ(
   xj: any,
   supplierUser: any,
@@ -148,7 +235,7 @@ export async function createQuotationFromXJ(
 
   if (xj.products && Array.isArray(xj.products) && xj.products.length > 0) {
     items = xj.products.map((product: any, _index: number) => ({
-      id: product.id && /^[0-9a-f-]{36}$/.test(product.id) ? product.id : crypto.randomUUID(),
+      id: product.id && /^[0-9a-f-]{36}$/.test(product.id) ? product.id : toUUID(undefined),
       productName: product.productName || '产品名称',
       modelNo: getFormalBusinessModelNo(product),
       supplierModelNo: product.supplierModelNo || options.supplierModelNo || '',
@@ -168,7 +255,7 @@ export async function createQuotationFromXJ(
     }));
   } else {
     items = [{
-      id: crypto.randomUUID(),
+      id: toUUID(undefined),
       productName: xj.productName || '产品名称',
       modelNo: getFormalBusinessModelNo(xj),
       supplierModelNo: xj.supplierModelNo || options.supplierModelNo || '',
@@ -191,14 +278,15 @@ export async function createQuotationFromXJ(
   const totalAmount = items.reduce((sum, item) => sum + (item.amount || 0), 0);
 
   const sourceTemplateSnapshot = xj?.templateSnapshot || xj?.template_snapshot || null;
-  const sourceTemplateVersion = sourceTemplateSnapshot?.version || null;
+  const sourceTemplateId = xj?.templateId || xj?.template_id || null;
+  const sourceTemplateVersionId = xj?.templateVersionId || xj?.template_version_id || null;
   const sourceDocumentData = xj?.documentDataSnapshot || xj?.document_data_snapshot || xj?.documentData || null;
-  if (!sourceTemplateVersion || !sourceDocumentData) {
+  if ((!sourceTemplateVersionId && !sourceTemplateSnapshot) || !sourceDocumentData) {
     throw new Error('当前 XJ 未绑定模板中心版本快照，无法创建 BJ');
   }
 
   const quotation: SupplierQuotation = {
-    id: crypto.randomUUID(),             // 合法 UUID → toSQRow 幂等 upsert
+    id: toUUID(undefined),             // 合法 UUID → toSQRow 幂等 upsert
     quotationNo,
     quotationNumber: quotationNo,        // toSQRow 读 quotationNumber，补充别名
     bjNumber: quotationNo,               // bj_number 列别名
@@ -238,7 +326,9 @@ export async function createQuotationFromXJ(
     createdBy: supplierEmail,
     createdDate: quotationDate,
     version: 1,
-    templateSnapshot: { pendingResolution: true },
+    templateId: sourceTemplateId,
+    templateVersionId: sourceTemplateVersionId,
+    templateSnapshot: sourceTemplateSnapshot || { pendingResolution: true },
     documentRenderMeta: projectExecutionBaseline ? { projectExecutionBaseline } : null,
   };
 
@@ -338,6 +428,7 @@ export async function createQuotationFromXJ(
  */
 export async function saveSupplierQuotation(quotation: SupplierQuotation): Promise<SupplierQuotation> {
   try {
+    refreshSupplierQuotationDocumentPayload(quotation);
     assertSupplierQuotationTemplatePayload(quotation);
     const saved = await supplierQuotationService.upsert(quotation as any);
     const items = Array.isArray(saved.items) ? saved.items : [];

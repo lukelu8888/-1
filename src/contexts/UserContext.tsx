@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { supabase } from '../lib/supabase';
 import { fetchProfile } from '../hooks/useSupabaseAuth';
 import { nextInquiryNumber } from '../lib/supabaseService';
+import { normalizeManagedAdminIdentity } from '../lib/internalAdminIdentity';
 
 export interface UserInfo {
   companyName: string;
@@ -74,6 +75,57 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  const readCachedAuthUser = (): AuthUser | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const cachedRaw = localStorage.getItem('cosun_auth_user');
+      if (!cachedRaw) return null;
+      const cached = JSON.parse(cachedRaw);
+      if (
+        cached?.email &&
+        (cached?.type === 'admin' || cached?.type === 'supplier' || cached?.type === 'customer')
+      ) {
+        return normalizeManagedAdminIdentity(cached as AuthUser);
+      }
+    } catch {
+      // ignore parse failures
+    }
+    return null;
+  };
+
+  const readCachedPortalRole = (sessionUser: any): 'admin' | 'supplier' | 'customer' => {
+    if (typeof window === 'undefined') return 'customer';
+    try {
+      const authUserRaw = localStorage.getItem('cosun_auth_user');
+      if (authUserRaw) {
+        const authUser = JSON.parse(authUserRaw);
+        const sameIdentity =
+          (authUser?.id && sessionUser?.id && authUser.id === sessionUser.id) ||
+          (authUser?.email && sessionUser?.email && String(authUser.email).toLowerCase() === String(sessionUser.email).toLowerCase());
+        const cachedType = String(authUser?.type || '').toLowerCase();
+        if (sameIdentity && (cachedType === 'admin' || cachedType === 'supplier' || cachedType === 'customer')) {
+          return cachedType as 'admin' | 'supplier' | 'customer';
+        }
+      }
+
+      const backendUserRaw = localStorage.getItem('cosun_backend_user');
+      if (backendUserRaw) {
+        const backendUser = JSON.parse(backendUserRaw);
+        const sameIdentity =
+          (backendUser?.id && sessionUser?.id && backendUser.id === sessionUser.id) ||
+          (backendUser?.email && sessionUser?.email && String(backendUser.email).toLowerCase() === String(sessionUser.email).toLowerCase());
+        const cachedRole = String(backendUser?.portal_role || '').toLowerCase();
+        if (sameIdentity && (cachedRole === 'admin' || cachedRole === 'supplier' || cachedRole === 'customer' || cachedRole === 'staff')) {
+          return cachedRole === 'staff' ? 'admin' : (cachedRole as 'admin' | 'supplier' | 'customer');
+        }
+      }
+    } catch {
+      // ignore cache parse failures and fall back to session metadata
+    }
+
+    return 'customer';
+  };
+
   // Save to localStorage whenever userInfo changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -98,11 +150,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   // 监听 Supabase Auth 状态变化（登录/登出/刷新）
   useEffect(() => {
+    const cachedUser = readCachedAuthUser();
+    if (cachedUser) {
+      setUserState(cachedUser);
+      setAuthLoading(false);
+    }
+
     // 从 session.user_metadata 立即构建用户对象（无需网络请求）
     const userFromMeta = (sessionUser: any): AuthUser => {
       const meta = sessionUser.user_metadata ?? {};
-      const portalRole = meta.portal_role ?? 'customer';
-      return {
+      const portalRole = meta.portal_role ?? readCachedPortalRole(sessionUser);
+      return normalizeManagedAdminIdentity({
         id: sessionUser.id,
         email: sessionUser.email!,
         name: meta.name ?? sessionUser.email!.split('@')[0],
@@ -113,7 +171,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         role: meta.rbac_role ?? undefined,
         userRole: meta.rbac_role ?? undefined,
         region: meta.region ?? undefined,
-      };
+      });
     };
 
     // 后台静默拉取 profile 并更新（不阻塞 UI）
@@ -123,7 +181,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         const profilePromise = fetchProfile(sessionUser.id).catch(() => null);
         const profile = await Promise.race([profilePromise, profileTimeout]);
         if (!profile) return;
-        setUserState(prev => prev ? {
+        setUserState(prev => prev ? normalizeManagedAdminIdentity({
           ...prev,
           name: profile.name ?? prev.name,
           type: profile.portal_role === 'admin' ? 'admin'
@@ -133,7 +191,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
           role: profile.rbac_role ?? prev.role,
           userRole: profile.rbac_role ?? prev.userRole,
           region: profile.region ?? prev.region,
-        } : prev);
+        }) : prev);
       } catch {
         // 静默失败，保持 user_metadata 的值
       }
@@ -141,34 +199,54 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     let initialDone = false;
 
-    // getSession() 读本地 storage，通常 < 10ms，给 1s 超时即可
-    const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 1000));
+    // getSession() 通常 < 10ms（读本地），但 token 过期时需网络刷新（可能 2-5s）
+    // 已有本地缓存时先秒开；无缓存时只给很短窗口，避免 dashboard 首屏长期 Loading
+    const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 1200));
     const sessionPromise = supabase.auth.getSession()
       .then(({ data }) => data?.session ?? null)
       .catch(() => null);
 
     Promise.race([sessionPromise, timeout]).then((session) => {
       if (initialDone) return;
-      initialDone = true;
       if (session?.user) {
-        // 立即用 metadata 解锁 UI，后台再丰富 profile
+        // 有 session：立即解锁 UI
+        initialDone = true;
         setUserState(userFromMeta(session.user));
         void enrichFromProfile(session.user);
-      } else {
-        setUserState(null);
-      }
-      setAuthLoading(false);
-    });
-
-    // 硬兜底：2s 强制解锁，不再卡死
-    const hardTimeout = setTimeout(() => {
-      if (!initialDone) {
-        console.warn('[Auth] hard timeout — forcing unlock');
+        setAuthLoading(false);
+      } else if (!cachedUser) {
         initialDone = true;
         setUserState(null);
         setAuthLoading(false);
       }
-    }, 2000);
+      // 若 session 暂时不可用：
+      // - 有缓存时继续保持已解锁状态，等待后续 onAuthStateChange 静默校正
+      // - 无缓存时尽快解锁，由路由层决定是否跳转登录
+    });
+
+    // 硬兜底：8s 强制解锁，覆盖极端网络故障场景
+    // Supabase 不可达（休眠/断网）时，优先用 localStorage 缓存的身份恢复会话，
+    // 避免用户被强制登出。只有在完全没有缓存时才清空 user。
+    const hardTimeout = setTimeout(() => {
+      if (!initialDone) {
+        initialDone = true;
+        try {
+          const cachedRaw = localStorage.getItem('cosun_auth_user');
+          if (cachedRaw) {
+            const cached = JSON.parse(cachedRaw);
+            if (cached?.email && (cached?.type === 'admin' || cached?.type === 'supplier' || cached?.type === 'customer')) {
+              console.warn('[Auth] hard timeout — Supabase unreachable, restored from localStorage cache');
+              setUserState(cached as AuthUser);
+              setAuthLoading(false);
+              return;
+            }
+          }
+        } catch { /* ignore parse errors */ }
+        console.warn('[Auth] hard timeout — no cache, forcing unlock');
+        setUserState(null);
+        setAuthLoading(false);
+      }
+    }, 8000);
 
     // 监听后续状态变化（登录/登出/token刷新）
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -207,6 +285,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('cosun_user_session');
       localStorage.removeItem('cosun_session_expiry');
       localStorage.removeItem('cosun_current_user');
+      localStorage.removeItem('cosun_switched_user');
     } catch {
       // ignore
     }

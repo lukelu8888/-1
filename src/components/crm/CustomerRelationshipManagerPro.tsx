@@ -28,6 +28,8 @@ import {
 import { LeadConversionWorkbench } from '../dashboards/LeadConversionWorkbench'; // 🔥 导入潜客转化工作台
 import PublicPoolManagementPro from '../admin/PublicPoolManagementPro'; // 🔥 导入公海客户池
 import CustomerCreditEvaluation from '../admin/CustomerCreditEvaluation'; // 🔥 导入客户信用评估系统
+import { useAuth } from '../../hooks/useAuth';
+import { permissionCenterService } from '../../lib/services/permissionCenterService';
 
 interface SocialMediaInteraction {
   id: string;
@@ -183,6 +185,7 @@ const INTERACTION_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function CustomerRelationshipManagerPro() {
+  const { currentUser } = useAuth();
   const [viewMode, setViewMode] = useState<'customer-types' | 'funnel' | 'list' | 'social' | 'analytics' | 'health' | 'lead-conversion' | 'public-pool' | 'credit'>('customer-types');
   const [selectedStage, setSelectedStage] = useState<CustomerStage | 'all'>('all');
   const [selectedSource, setSelectedSource] = useState<CustomerSource | 'all'>('all');
@@ -190,6 +193,8 @@ export default function CustomerRelationshipManagerPro() {
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerWithSocial | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [funnelLayout, setFunnelLayout] = useState<'cards' | 'visual'>('cards'); // 漏斗布局模式
+  const canCreateCrm = permissionCenterService.hasModuleActionAccess(currentUser, 'crm', 'create');
+  const canExportCrm = permissionCenterService.hasModuleActionAccess(currentUser, 'crm', 'export');
 
   const filteredCustomers = MOCK_CUSTOMERS_WITH_SOCIAL.filter(customer => {
     const matchesStage = selectedStage === 'all' || customer.stage === selectedStage;
@@ -335,8 +340,8 @@ export default function CustomerRelationshipManagerPro() {
             </Select>
           </div>
           <div className="flex items-center gap-2">
-            <Button className="bg-[#F96302] hover:bg-[#EA580C] border border-[#EA580C] text-white h-8 px-3 text-xs rounded shadow-none"><Plus className="w-3.5 h-3.5 mr-1.5" />新增</Button>
-            <Button size="sm" variant="outline" className="h-8 px-3 text-xs border-[#D1D5DB] rounded shadow-none"><Download className="w-3.5 h-3.5 mr-1.5" />导出</Button>
+            <Button disabled={!canCreateCrm} className="bg-[#F96302] hover:bg-[#EA580C] border border-[#EA580C] text-white h-8 px-3 text-xs rounded shadow-none disabled:cursor-not-allowed disabled:opacity-50"><Plus className="w-3.5 h-3.5 mr-1.5" />新增</Button>
+            <Button disabled={!canExportCrm} size="sm" variant="outline" className="h-8 px-3 text-xs border-[#D1D5DB] rounded shadow-none disabled:cursor-not-allowed disabled:opacity-50"><Download className="w-3.5 h-3.5 mr-1.5" />导出</Button>
           </div>
         </div>
         </div>
@@ -543,11 +548,11 @@ export default function CustomerRelationshipManagerPro() {
                 </button>
               </div>
               
-              <button className="px-3 py-1.5 text-xs border border-[#D1D5DB] rounded hover:bg-gray-50 transition-colors flex items-center gap-1.5">
+              <button disabled={!canCreateCrm} className="px-3 py-1.5 text-xs border border-[#D1D5DB] rounded hover:bg-gray-50 transition-colors flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50">
                 <Plus className="w-3.5 h-3.5" />
                 新增
               </button>
-              <button className="px-3 py-1.5 text-xs border border-[#D1D5DB] rounded hover:bg-gray-50 transition-colors flex items-center gap-1.5">
+              <button disabled={!canExportCrm} className="px-3 py-1.5 text-xs border border-[#D1D5DB] rounded hover:bg-gray-50 transition-colors flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50">
                 <Download className="w-3.5 h-3.5" />
                 导出
               </button>

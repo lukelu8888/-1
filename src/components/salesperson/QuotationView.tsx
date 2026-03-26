@@ -14,89 +14,66 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { toast } from 'sonner@2.0.3';
 import type { DocumentLayoutConfig } from '../documents/A4PageContainer';
-import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { adaptSalesQuotationToDocumentData } from '../../utils/documentDataAdapters';
+import { staffDirectoryService } from '../../lib/supabaseService';
+import { useAuth } from '../../hooks/useAuth';
 
 interface QuotationViewProps {
   quotation: any; // 销售报价单（QT）数据
+  viewerUser?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+  } | null;
   onClose: () => void;
 }
 
-export function QuotationView({ quotation, onClose }: QuotationViewProps) {
+export function QuotationView({ quotation, viewerUser = null, onClose }: QuotationViewProps) {
   const documentRef = useRef<HTMLDivElement>(null);
+  const { currentUser } = useAuth();
 
-  // 🔥 将QT数据转换为QuotationDocument需要的格式
-  const convertToQuotationData = (): QuotationData => {
-    return {
-      // 报价单基本信息
-      quotationNo: quotation.qtNumber,
-      quotationDate: quotation.createdAt ? new Date(quotation.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      validUntil: quotation.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      inquiryNo: quotation.inqNumber,
-      region: quotation.region || 'NA',
-      
-      // 公司信息
-      company: {
-        name: '福建高盛达富建材有限公司',
-        nameEn: 'Fujian Gaoshengdafu Building Materials Co., Ltd.',
-        address: '中国福建省厦门市思明区',
-        addressEn: 'Siming District, Xiamen, Fujian Province, China',
-        tel: '+86-592-1234567',
-        fax: '+86-592-1234568',
-        email: 'info@cosun.com',
-        website: 'www.cosun.com'
-      },
-      
-      // 客户信息
-      customer: {
-        companyName: quotation.customerCompany || '',
-        contactPerson: quotation.customerName || '',
-        address: quotation.customerAddress || '',
-        email: quotation.customerEmail || '',
-        phone: quotation.customerPhone || ''
-      },
-      
-      // 产品报价列表
-      products: quotation.items?.map((item: any, index: number) => ({
-        no: index + 1,
-        modelNo: getFormalBusinessModelNo(item),
-        imageUrl: item.imageUrl || '',
-        productName: item.productName || '',
-        specification: item.specification || '',
-        hsCode: item.hsCode || '',
-        quantity: item.quantity || 0,
-        unit: item.unit || 'PCS',
-        unitPrice: item.salesPrice || item.unitPrice || 0, // 🔥 修复：优先使用salesPrice
-        currency: 'USD',
-        amount: (item.salesPrice || item.unitPrice || 0) * (item.quantity || 0), // 🔥 修复：金额也使用salesPrice
-        moq: item.moq || 0,
-        leadTime: item.leadTime || ''
-      })) || [],
-      
-      // 贸易条款
-      tradeTerms: {
-        incoterms: quotation.tradeTerms?.incoterms || 'FOB Xiamen',
-        paymentTerms: quotation.tradeTerms?.paymentTerms || '30% T/T deposit, 70% before shipment',
-        deliveryTime: quotation.tradeTerms?.deliveryTime || '25-30 days after deposit',
-        packing: quotation.tradeTerms?.packing || 'Export carton with pallets',
-        portOfLoading: quotation.tradeTerms?.portOfLoading || 'Xiamen, China',
-        portOfDestination: quotation.tradeTerms?.portOfDestination || '',
-        warranty: quotation.tradeTerms?.warranty || '12 months from delivery date against manufacturing defects',
-        inspection: quotation.tradeTerms?.inspection || "Seller's factory inspection, buyer has the right to re-inspect upon arrival"
-      },
-      
-      // 备注
-      remarks: quotation.remarks || '',
-      
-      // 业务员信息
-      salesPerson: {
-        name: quotation.salesPersonName || 'Sales Representative',
-        position: 'Sales Manager',
-        email: quotation.salesPerson || '',
-        phone: quotation.salesPersonPhone || '+86-592-1234567',
-        whatsapp: quotation.salesPersonWhatsapp || ''
+  const resolveViewerIdentity = React.useMemo(() => {
+    const parseStoredUser = (key: string) => {
+      if (typeof window === 'undefined') return null;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        return parsed;
+      } catch {
+        return null;
       }
     };
-  };
+
+    const roleSwitchedUser = parseStoredUser('cosun_current_user');
+    const backendUser = parseStoredUser('cosun_backend_user');
+    const authUser = parseStoredUser('cosun_auth_user');
+
+    const email =
+      String(
+        viewerUser?.email
+        || currentUser?.email
+        || roleSwitchedUser?.email
+        || backendUser?.loginEmail
+        || backendUser?.email
+        || authUser?.email
+        || ''
+      ).trim();
+
+    const name =
+      String(
+        viewerUser?.name
+        || currentUser?.name
+        || roleSwitchedUser?.name
+        || backendUser?.displayName
+        || backendUser?.name
+        || authUser?.name
+        || ''
+      ).trim();
+
+    return { email, name };
+  }, [currentUser?.email, currentUser?.name, viewerUser?.email, viewerUser?.name]);
 
   // 🔥 下载为PDF
   const handleDownloadPDF = async () => {
@@ -148,7 +125,55 @@ export function QuotationView({ quotation, onClose }: QuotationViewProps) {
 
   const templateSnapshot = quotation.templateSnapshot || quotation.template_snapshot || null;
   const templateVersion = templateSnapshot?.version || null;
-  const resolvedQuotationData = (quotation.documentDataSnapshot || quotation.document_data_snapshot) as QuotationData | null;
+  const snapshotData = (quotation.documentDataSnapshot || quotation.document_data_snapshot || null) as QuotationData | null;
+  const matchedStaff = staffDirectoryService.getCachedSalesStaff().find(
+    (staff) => String(staff.email || '').trim().toLowerCase() === String(resolveViewerIdentity.email || '').trim().toLowerCase()
+  );
+  const resolvedSalesPersonName =
+    resolveViewerIdentity.name
+    || matchedStaff?.name
+    || quotation.salesPersonName
+    || '';
+  const resolvedSalesPersonEmail =
+    resolveViewerIdentity.email
+    || quotation.salesPerson
+    || '';
+  const resolvedSalesPersonPhone =
+    viewerUser?.phone
+    || quotation.salesPersonPhone
+    matchedStaff?.phone
+    || '+86-592-1234567';
+  const rebuiltQuotationData = adaptSalesQuotationToDocumentData({
+    ...quotation,
+    qtNumber: quotation.qtNumber,
+    quotationDate: quotation.quotationDate,
+    createdAt: quotation.createdAt,
+    validUntil: quotation.validUntil,
+    inqNumber: quotation.inqNumber,
+    region: quotation.region,
+    customerCompany: quotation.customerCompany,
+    customerName: quotation.customerName,
+    customerAddress: quotation.customerAddress,
+    customerEmail: quotation.customerEmail,
+    customerPhone: quotation.customerPhone,
+    items: quotation.items,
+    tradeTerms: quotation.tradeTerms,
+    remarks: quotation.remarks || quotation.notes || '',
+    salesPersonName: resolvedSalesPersonName,
+    salesPerson: resolvedSalesPersonEmail,
+    salesPersonPhone: resolvedSalesPersonPhone,
+    salesPersonWhatsapp: quotation.salesPersonWhatsapp,
+  });
+  const resolvedQuotationData: QuotationData = {
+    ...rebuiltQuotationData,
+    salesPerson: {
+      ...rebuiltQuotationData.salesPerson,
+      name: resolvedSalesPersonName || rebuiltQuotationData.salesPerson.name,
+      email: resolvedSalesPersonEmail || rebuiltQuotationData.salesPerson.email,
+      phone: resolvedSalesPersonPhone || rebuiltQuotationData.salesPerson.phone,
+    },
+    templateSettings: snapshotData?.templateSettings || rebuiltQuotationData.templateSettings,
+  };
   const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
 
   return createPortal(
@@ -160,13 +185,18 @@ export function QuotationView({ quotation, onClose }: QuotationViewProps) {
       />
       
       {/* 弹窗内容 */}
-      <div className="relative bg-white rounded-lg shadow-2xl w-[95vw] h-[95vh] flex flex-col">
+      <div className="relative flex h-[95vh] w-[min(96vw,calc(210mm+140px))] flex-col rounded-lg bg-white shadow-2xl">
         {/* 头部工具栏 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
           <div className="flex items-center gap-3">
             <FileText className="h-6 w-6 text-orange-600" />
             <div>
-              <h2 className="text-lg font-bold text-gray-900">销售报价单</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-gray-900">销售报价单</h2>
+                <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                  模板版本：{templateVersion?.version || '未绑定'}
+                </span>
+              </div>
               <p className="text-sm text-gray-500">{quotation.qtNumber}</p>
             </div>
           </div>
@@ -206,14 +236,8 @@ export function QuotationView({ quotation, onClose }: QuotationViewProps) {
         
         {/* 文档预览区域 */}
         <div className="flex-1 overflow-auto bg-gray-100 p-6">
-          <div className="max-w-[210mm] mx-auto">
-            {!templateVersion || !resolvedQuotationData ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-                该 QT 未绑定模板中心版本快照，无法预览。
-              </div>
-            ) : (
-              <QuotationDocument ref={documentRef} data={resolvedQuotationData} layoutConfig={layoutConfig || undefined} />
-            )}
+          <div className="mx-auto max-w-[210mm]">
+            <QuotationDocument ref={documentRef} data={resolvedQuotationData} layoutConfig={layoutConfig || undefined} />
           </div>
         </div>
       </div>

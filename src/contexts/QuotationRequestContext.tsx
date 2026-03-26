@@ -2,12 +2,14 @@ import React, { createContext, useCallback, useContext, useMemo, useState, React
 import { quotationRequestService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 import { useQuoteRequirements } from './QuoteRequirementContext';
+import { buildIdentityAuditMetadata, buildIdentityPersistenceFields } from '../utils/dataIsolation';
+import { assertBusinessOwnerEmail, matchesBusinessOwnerEmail } from '../utils/quotationOwnership';
 
 /**
  * 📋 报价请求兼容 Context（QR）
  *
  * 业务流程：
- * 1. 业务员收到客户询价(INQ)
+ * 1. 业务员收到客户询价(ING)
  * 2. 业务员向采购员发起"报价请求"(QR)
  * 3. 采购员向供应商发送采购询价(XJ)
  * 4. 供应商报价(BJ)
@@ -58,8 +60,8 @@ export interface QuotationRequest {
   assignedToName?: string;
   assignedDate?: string;
 
-  rfqIds?: string[];
-  rfqCount?: number;
+  xjIds?: string[];
+  xjCount?: number;
 
   quotedPrice?: number;
   quotedCurrency?: string;
@@ -69,6 +71,20 @@ export interface QuotationRequest {
 
   createdDate: string;
   updatedDate?: string;
+  ownerUserId?: string | null;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+  operatorUserId?: string | null;
+  operatorEmail?: string | null;
+  operatorRole?: string | null;
+  actingUserId?: string | null;
+  actingUserEmail?: string | null;
+  actingUserRole?: string | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserEmail?: string | null;
+  authenticatedUserRole?: string | null;
+  documentRenderMeta?: any;
 }
 
 interface QuotationRequestContextType {
@@ -115,8 +131,8 @@ const buildQuotationRequestFromQuoteRequirement = (qr: any): QuotationRequest =>
     customerName: String(customer?.companyName || customer?.contactPerson || ''),
     customerEmail: customer?.email || undefined,
     region: String(qr?.region || ''),
-    requestedBy: String(qr?.createdBy || ''),
-    requestedByName: String(qr?.createdBy || ''),
+    requestedBy: String(qr?.ownerEmail || qr?.requestedBy || qr?.createdBy || ''),
+    requestedByName: String(qr?.ownerName || qr?.requestedByName || qr?.createdBy || ''),
     requestDate: String(qr?.createdDate || qr?.createdAt || createdDate).split('T')[0],
     expectedQuoteDate: String(qr?.expectedQuoteDate || ''),
     items: Array.isArray(qr?.items) ? qr.items : [],
@@ -125,6 +141,51 @@ const buildQuotationRequestFromQuoteRequirement = (qr: any): QuotationRequest =>
     remarks: qr?.remarks || qr?.notes || undefined,
     createdDate,
     updatedDate: qr?.updatedAt || undefined,
+    ownerUserId: qr?.ownerUserId || null,
+    ownerEmail: qr?.ownerEmail || qr?.requestedBy || null,
+    ownerName: qr?.ownerName || qr?.requestedByName || null,
+    ownerRole: qr?.ownerRole || null,
+    operatorUserId: qr?.operatorUserId || null,
+    operatorEmail: qr?.operatorEmail || null,
+    operatorRole: qr?.operatorRole || null,
+    actingUserId: qr?.actingUserId || null,
+    actingUserEmail: qr?.actingUserEmail || null,
+    actingUserRole: qr?.actingUserRole || null,
+    authenticatedUserId: qr?.authenticatedUserId || null,
+    authenticatedUserEmail: qr?.authenticatedUserEmail || null,
+    authenticatedUserRole: qr?.authenticatedUserRole || null,
+    documentRenderMeta: qr?.documentRenderMeta || undefined,
+  };
+};
+
+const normalizeQuotationRequestWritePayload = (request: QuotationRequest): QuotationRequest => {
+  const ownerEmail = assertBusinessOwnerEmail(
+    request.ownerEmail || request.requestedBy,
+    request.region,
+    '报价请求',
+  );
+  const ownerName = String(request.ownerName || request.requestedByName || '').trim() || null;
+
+  return {
+    ...request,
+    requestedBy: ownerEmail,
+    requestedByName: ownerName || request.requestedByName || undefined,
+    ownerEmail,
+    ownerName,
+    documentRenderMeta: {
+      ...(request.documentRenderMeta || {}),
+      ...buildIdentityAuditMetadata({
+        ownerEmail,
+        ownerName,
+        ownerRole: request.ownerRole || null,
+        region: request.region || null,
+      }),
+    },
+    ...buildIdentityPersistenceFields({
+      ownerEmail,
+      ownerName,
+      ownerRole: request.ownerRole || null,
+    }),
   };
 };
 
@@ -239,7 +300,8 @@ export const QuotationRequestProvider: React.FC<{ children: ReactNode }> = ({ ch
   }, []);
 
   const addQuotationRequest = async (request: QuotationRequest) => {
-    const saved = await quotationRequestService.upsert(request);
+    const normalizedRequest = normalizeQuotationRequestWritePayload(request);
+    const saved = await quotationRequestService.upsert(normalizedRequest);
     if (!saved) {
       throw new Error(`QR ${request.requestNumber || request.id} 写入 quotation_requests 失败`);
     }
@@ -254,7 +316,11 @@ export const QuotationRequestProvider: React.FC<{ children: ReactNode }> = ({ ch
     if (!current) {
       throw new Error('未找到要更新的 QR 请求');
     }
-    const merged = { ...current, ...updates, updatedDate: new Date().toISOString() } as QuotationRequest;
+    const merged = normalizeQuotationRequestWritePayload({
+      ...current,
+      ...updates,
+      updatedDate: new Date().toISOString(),
+    } as QuotationRequest);
     const saved = await quotationRequestService.upsert(merged);
     if (!saved) {
       throw new Error(`QR ${current.requestNumber || id} 更新 quotation_requests 失败`);
@@ -307,7 +373,14 @@ export const QuotationRequestProvider: React.FC<{ children: ReactNode }> = ({ ch
     );
 
   const getQuotationRequestsBySalesRep = (salesRepEmail: string) =>
-    quotationRequests.filter(r => r.requestedBy === salesRepEmail);
+    quotationRequests.filter((request) =>
+      matchesBusinessOwnerEmail(
+        request.ownerEmail || request.requestedBy,
+        salesRepEmail,
+        request.region,
+        request.ownerUserId,
+      ),
+    );
 
   const getQuotationRequestsByProcurement = (procurementEmail: string) =>
     quotationRequests.filter(r => r.assignedTo === procurementEmail || !r.assignedTo);

@@ -469,7 +469,7 @@ async function createBusinessFlowData() {
   // 1. 客户询价单
   const customerInquiry = {
     id: 'inq_customer_001',
-    inquiryNumber: 'CINQ-2024-001',
+    inquiryNumber: 'CING-2024-001',
     customerId: 'customer_abc',
     customerName: 'ABC Building Supplies',
     contactPerson: 'David Johnson',
@@ -505,7 +505,7 @@ async function createBusinessFlowData() {
   const internalInquiry = {
     ...customerInquiry,
     id: 'inq_internal_001',
-    inquiryNumber: 'INQ-2024-001',
+    inquiryNumber: 'ING-2024-001',
     assignedTo: 'user_maria',
     assignedToName: 'Maria Garcia',
     status: 'pending_procurement', // 等待采购询价
@@ -514,8 +514,8 @@ async function createBusinessFlowData() {
   
   // 3. 采购向供应商发起询价
   const procurementInquiry = {
-    id: 'pinq_001',
-    inquiryNumber: 'PINQ-2024-001',
+    id: 'xj_seed_001',
+    inquiryNumber: 'XJ-2024-001',
     sourceInquiry: 'inq_internal_001',
     supplierId: 'supplier_gd',
     supplierName: '广东五金制造厂',
@@ -542,8 +542,8 @@ async function createBusinessFlowData() {
   // 4. 供应商报价
   const supplierQuotation = {
     id: 'sq_001',
-    quotationNumber: 'SQ-2024-001',
-    inquiryId: 'pinq_001',
+    quotationNumber: 'BJ-2024-001',
+    inquiryId: 'xj_seed_001',
     supplierId: 'supplier_gd',
     supplierName: '广东五金制造厂',
     products: [

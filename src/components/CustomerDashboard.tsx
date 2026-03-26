@@ -1,5 +1,5 @@
-import { useRef, useState, useEffect } from 'react';
-import { Menu, X, LogOut, ChevronLeft, ChevronRight, User, LayoutDashboard, Package, DollarSign, Bell, BarChart3, Mail, FileText, GripVertical, Home, Calculator, Target } from 'lucide-react';
+import { useMemo, useRef, useState, useEffect } from 'react';
+import { Menu, X, LogOut, ChevronLeft, ChevronRight, User, LayoutDashboard, Package, DollarSign, Bell, BarChart3, Mail, FileText, GripVertical, Home, Calculator, Target, Building2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Resizable } from 're-resizable';
 import { useRouter } from '../contexts/RouterContext';
@@ -13,9 +13,19 @@ import { InternalMessaging } from './dashboard/InternalMessaging';
 import { RateRequestForm } from './dashboard/RateRequestForm';
 import { InquiryManagement } from './dashboard/InquiryManagement';
 import { CustomerProfile } from './dashboard/CustomerProfile';
+import CustomerUserProfile from './dashboard/CustomerUserProfile';
+import CustomerEnterpriseMasterDataCenter from './dashboard/CustomerEnterpriseMasterDataCenter';
 import { MyDocuments } from './dashboard/MyDocuments'; // 📄 客户文档中心
 import { ProfitAnalyzerPro } from './dashboard/ProfitAnalyzerPro'; // 🔥 利润分析器Pro
 import { SupplierEvaluationSystem } from './dashboard/SupplierEvaluationSystem'; // 🎯 供应商评估系统 v2.0
+import { customerOrganizationService, customerPortalProfileService } from '../lib/supabaseService';
+import {
+  CUSTOMER_MASTER_DATA_LOCALE_EVENT,
+  CUSTOMER_MASTER_DATA_LOCALE_STORAGE_KEY,
+  resolveCustomerMasterDataLocale,
+  type CustomerMasterDataLocale,
+} from './dashboard/customerEnterpriseMasterDataI18n';
+import { createThemePalette, DEFAULT_CUSTOMER_THEME, extractLogoPrimaryColor, type CustomerThemePalette } from '../utils/logoTheme';
 
 interface CustomerDashboardProps {
   onLogout: () => void | Promise<void>;
@@ -23,9 +33,12 @@ interface CustomerDashboardProps {
 }
 
 const DEFAULT_DASHBOARD_VIEW = 'overview';
+const CUSTOMER_LOGO_UPDATED_EVENT = 'cosun-customer-logo-updated';
 const VALID_DASHBOARD_VIEWS = new Set([
   'overview',
   'profile',
+  'organization-profile',
+  'user-profile',
   'my-orders',
   'my-products',
   'rate-request',
@@ -50,9 +63,14 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [profileEditToken, setProfileEditToken] = useState(0);
   const [customerLogo, setCustomerLogo] = useState<string | null>(() => localStorage.getItem('cosun_customer_logo'));
+  const [theme, setTheme] = useState<CustomerThemePalette>(DEFAULT_CUSTOMER_THEME);
+  const [locale, setLocale] = useState<CustomerMasterDataLocale>(() => {
+    if (typeof window === 'undefined') return 'en';
+    return resolveCustomerMasterDataLocale(localStorage.getItem(CUSTOMER_MASTER_DATA_LOCALE_STORAGE_KEY) || navigator.language);
+  });
   const logoInputRef = useRef<HTMLInputElement>(null);
   const { navigateTo } = useRouter();
-  const { clearUser } = useUser();
+  const { clearUser, user } = useUser();
 
   // Save active view to localStorage whenever it changes
   useEffect(() => {
@@ -62,6 +80,102 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
     }
     localStorage.setItem('dashboardActiveView', activeView);
   }, [activeView]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const syncLogo = () => {
+      setCustomerLogo(localStorage.getItem('cosun_customer_logo'));
+    };
+    const syncLogoFromEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ logoUrl?: string | null }>).detail;
+      if (typeof detail?.logoUrl === 'string') {
+        setCustomerLogo(detail.logoUrl || null);
+        return;
+      }
+      syncLogo();
+    };
+    syncLogo();
+    window.addEventListener('storage', syncLogo);
+    window.addEventListener('focus', syncLogo);
+    window.addEventListener(CUSTOMER_LOGO_UPDATED_EVENT, syncLogoFromEvent as EventListener);
+    return () => {
+      window.removeEventListener('storage', syncLogo);
+      window.removeEventListener('focus', syncLogo);
+      window.removeEventListener(CUSTOMER_LOGO_UPDATED_EVENT, syncLogoFromEvent as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const syncLocale = () => {
+      setLocale(resolveCustomerMasterDataLocale(localStorage.getItem(CUSTOMER_MASTER_DATA_LOCALE_STORAGE_KEY) || navigator.language));
+    };
+    const syncLocaleFromEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ locale?: string }>).detail;
+      if (detail?.locale) {
+        setLocale(resolveCustomerMasterDataLocale(detail.locale));
+        return;
+      }
+      syncLocale();
+    };
+    syncLocale();
+    window.addEventListener('storage', syncLocale);
+    window.addEventListener('focus', syncLocale);
+    window.addEventListener(CUSTOMER_MASTER_DATA_LOCALE_EVENT, syncLocaleFromEvent as EventListener);
+    return () => {
+      window.removeEventListener('storage', syncLocale);
+      window.removeEventListener('focus', syncLocale);
+      window.removeEventListener(CUSTOMER_MASTER_DATA_LOCALE_EVENT, syncLocaleFromEvent as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!user?.id || user.type !== 'customer') return undefined;
+
+    void (async () => {
+      try {
+        const remoteOrg = await customerOrganizationService.getByAuthUser(user.id);
+        if (cancelled) return;
+        if (remoteOrg?.logoUrl) {
+          setCustomerLogo(remoteOrg.logoUrl);
+          localStorage.setItem('cosun_customer_logo', remoteOrg.logoUrl);
+        }
+      } catch (error) {
+        console.warn('[CustomerDashboard] Failed to hydrate customer logo from Supabase:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.type]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const primary = await extractLogoPrimaryColor(customerLogo);
+      if (!cancelled) {
+        setTheme(createThemePalette(primary));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customerLogo]);
+
+  const themeVars = useMemo(
+    () => ({
+      ['--customer-primary' as const]: theme.primary,
+      ['--customer-primary-hover' as const]: theme.primaryHover,
+      ['--customer-primary-soft' as const]: theme.primarySoft,
+      ['--customer-primary-border' as const]: theme.primaryBorder,
+      ['--customer-primary-text' as const]: theme.primaryText,
+      ['--customer-on-primary' as const]: theme.onPrimary,
+    }),
+    [theme],
+  );
 
   useEffect(() => {
     const handleNavigate = (event: Event) => {
@@ -117,17 +231,138 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
     navigateTo('home');
   };
 
+  const dashboardCopy = {
+    en: {
+      overview: 'Dashboard Overview',
+      organizationProfile: 'Enterprise Master Data',
+      userProfile: 'My Account',
+      myOrders: 'My Orders',
+      myProducts: 'My Products',
+      rateRequest: 'Rate Request',
+      analytics: 'Data Analytics',
+      messages: 'Messages',
+      documents: 'My Documents',
+      profitAnalyzer: 'Profit Analyzer',
+      supplierEvaluation: 'Supplier Evaluation',
+      backToWebsite: 'Back to Website',
+      logout: 'Logout',
+      premiumMember: 'Premium Member · Click to edit',
+      brandTitle: 'Empowering Your Business Growth',
+      brandSubtitle: 'Growing together to achieve business success',
+      brandMissionLabel: 'Our Mission',
+      brandMissionValue: 'Customer Growth · Win-Win Future',
+    },
+    es: {
+      overview: 'Resumen del panel',
+      organizationProfile: 'Datos maestros empresariales',
+      userProfile: 'Mi cuenta',
+      myOrders: 'Mis pedidos',
+      myProducts: 'Mis productos',
+      rateRequest: 'Solicitud de tarifa',
+      analytics: 'Análisis de datos',
+      messages: 'Mensajes',
+      documents: 'Mis documentos',
+      profitAnalyzer: 'Analizador de beneficios',
+      supplierEvaluation: 'Evaluación de proveedores',
+      backToWebsite: 'Volver al sitio web',
+      logout: 'Cerrar sesión',
+      premiumMember: 'Miembro premium · Haga clic para editar',
+      brandTitle: 'Impulsando el crecimiento de su negocio',
+      brandSubtitle: 'Creciendo juntos para lograr el éxito comercial',
+      brandMissionLabel: 'Nuestra misión',
+      brandMissionValue: 'Crecimiento del cliente · Futuro ganar-ganar',
+    },
+    pt: {
+      overview: 'Visão geral',
+      organizationProfile: 'Dados mestres empresariais',
+      userProfile: 'Minha conta',
+      myOrders: 'Meus pedidos',
+      myProducts: 'Meus produtos',
+      rateRequest: 'Solicitação de frete',
+      analytics: 'Análise de dados',
+      messages: 'Mensagens',
+      documents: 'Meus documentos',
+      profitAnalyzer: 'Analisador de lucro',
+      supplierEvaluation: 'Avaliação de fornecedores',
+      backToWebsite: 'Voltar ao site',
+      logout: 'Sair',
+      premiumMember: 'Membro premium · Clique para editar',
+      brandTitle: 'Impulsionando o crescimento do seu negócio',
+      brandSubtitle: 'Crescendo juntos para alcançar o sucesso comercial',
+      brandMissionLabel: 'Nossa missão',
+      brandMissionValue: 'Crescimento do cliente · Futuro ganha-ganha',
+    },
+    ar: {
+      overview: 'نظرة عامة',
+      organizationProfile: 'البيانات الرئيسية للشركة',
+      userProfile: 'حسابي',
+      myOrders: 'طلباتي',
+      myProducts: 'منتجاتي',
+      rateRequest: 'طلب تسعير',
+      analytics: 'تحليلات البيانات',
+      messages: 'الرسائل',
+      documents: 'مستنداتي',
+      profitAnalyzer: 'محلل الربح',
+      supplierEvaluation: 'تقييم الموردين',
+      backToWebsite: 'العودة إلى الموقع',
+      logout: 'تسجيل الخروج',
+      premiumMember: 'عضو مميز · انقر للتعديل',
+      brandTitle: 'نعزز نمو أعمالك',
+      brandSubtitle: 'ننمو معًا لتحقيق نجاح الأعمال',
+      brandMissionLabel: 'مهمتنا',
+      brandMissionValue: 'نمو العميل · مستقبل مربح للطرفين',
+    },
+  } as const;
+
+  const copy = dashboardCopy[locale];
+  const brandCard = (
+    <div
+      className="mb-3 rounded-xl border px-3 py-3 shadow-sm"
+      style={{
+        backgroundColor: 'var(--customer-primary-soft)',
+        borderColor: 'var(--customer-primary-border)',
+      }}
+    >
+      <div className="flex items-start gap-2.5">
+        <div
+          className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full"
+          style={{ backgroundColor: 'var(--customer-primary)' }}
+        >
+          <svg className="h-4 w-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M13 7h6m0 0v6m0-6l-7 7-4-4-4 4" />
+          </svg>
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold leading-5" style={{ color: 'var(--customer-primary-text)' }}>
+            {copy.brandTitle}
+          </div>
+          <div className="mt-0.5 text-xs leading-5 text-gray-600">
+            {copy.brandSubtitle}
+          </div>
+          <div className="mt-1 text-[11px] leading-4 text-gray-500">
+            <span>{copy.brandMissionLabel}:</span>
+            <span className="ml-1 font-medium" style={{ color: 'var(--customer-primary-text)' }}>
+              {copy.brandMissionValue}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   // Menu items state with drag and drop support
   const defaultMenuItems = [
-    { id: 'overview', label: 'Dashboard Overview', icon: LayoutDashboard },
-    { id: 'my-orders', label: 'My Orders', icon: Package },
-    { id: 'my-products', label: 'My Products', icon: Package },
-    { id: 'rate-request', label: 'Rate Request', icon: DollarSign },
-    { id: 'analytics', label: 'Data Analytics', icon: BarChart3 },
-    { id: 'messages', label: 'Messages', icon: Mail },
-    { id: 'documents', label: 'My Documents', icon: FileText }, // 📄 客户文档中心
-    { id: 'profit-analyzer', label: 'Profit Analyzer', icon: Calculator }, // 🔥 利润分析器
-    { id: 'supplier-evaluation', label: 'Supplier Evaluation', icon: Target }, // 🎯 供应商评估系统 v2.0
+    { id: 'overview', label: copy.overview, icon: LayoutDashboard },
+    { id: 'organization-profile', label: copy.organizationProfile, icon: Building2 },
+    { id: 'user-profile', label: copy.userProfile, icon: User },
+    { id: 'my-orders', label: copy.myOrders, icon: Package },
+    { id: 'my-products', label: copy.myProducts, icon: Package },
+    { id: 'rate-request', label: copy.rateRequest, icon: DollarSign },
+    { id: 'analytics', label: copy.analytics, icon: BarChart3 },
+    { id: 'messages', label: copy.messages, icon: Mail },
+    { id: 'documents', label: copy.documents, icon: FileText },
+    { id: 'profit-analyzer', label: copy.profitAnalyzer, icon: Calculator },
+    { id: 'supplier-evaluation', label: copy.supplierEvaluation, icon: Target },
   ];
 
   // Restore menu order from localStorage or use default
@@ -168,6 +403,19 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
     }
     return defaultMenuItems;
   });
+
+  useEffect(() => {
+    setMenuItems((prev) => {
+      const currentIds = prev.map((item) => item.id);
+      const nextById = new Map(defaultMenuItems.map((item) => [item.id, item]));
+      const existingItems = currentIds
+        .map((id) => nextById.get(id))
+        .filter(Boolean) as typeof defaultMenuItems;
+      const existingIds = new Set(existingItems.map((item) => item.id));
+      const newItems = defaultMenuItems.filter((item) => !existingIds.has(item.id));
+      return existingItems.concat(newItems);
+    });
+  }, [locale]);
 
   // Save menu order to localStorage whenever it changes
   useEffect(() => {
@@ -232,7 +480,18 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
       case 'overview':
         return <DashboardOverview userEmail={userEmail} onNavigate={setActiveView} />;
       case 'profile':
-        return <CustomerProfile forceEditToken={profileEditToken} />;
+      case 'organization-profile':
+        return (
+          <CustomerEnterpriseMasterDataCenter
+            forceEditToken={profileEditToken}
+            onBack={() => setActiveView('overview')}
+            locale={locale}
+            onLocaleChange={setLocale}
+            theme={theme}
+          />
+        );
+      case 'user-profile':
+        return <CustomerUserProfile />;
       case 'my-orders':
         return <MyOrders 
           activeOrders={activeOrders} 
@@ -271,7 +530,7 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-gray-50">
+    <div className="h-screen overflow-hidden bg-gray-50" style={themeVars}>
       {/* Mobile Header */}
       <div className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
@@ -286,11 +545,12 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleBackToWebsite}
-            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+            className="transition-colors"
+            style={{ color: 'var(--customer-primary-text)' }}
           >
             <Home className="h-5 w-5" />
           </Button>
@@ -315,13 +575,14 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
               <button
                 type="button"
                 onClick={() => {
-                  setActiveView('profile');
+                  setActiveView('organization-profile');
                   setProfileEditToken(Date.now());
                 }}
                 className="w-full flex items-center gap-3 overflow-hidden text-left group"
               >
                 <div
-                  className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden ring-2 ring-transparent group-hover:ring-blue-300 transition"
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden ring-2 ring-transparent transition"
+                  style={{ backgroundColor: 'var(--customer-primary)' }}
                   onClick={(e) => {
                     e.stopPropagation();
                     logoInputRef.current?.click();
@@ -336,7 +597,7 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 truncate whitespace-nowrap">{userEmail}</p>
-                  <p className="text-xs text-gray-500 whitespace-nowrap">Premium Member · Click to edit profile</p>
+                  <p className="text-xs text-gray-500 whitespace-nowrap">{copy.premiumMember}</p>
                 </div>
               </button>
               <input
@@ -353,6 +614,33 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                     if (!dataUrl) return;
                     setCustomerLogo(dataUrl);
                     localStorage.setItem('cosun_customer_logo', dataUrl);
+                    if (user?.id && user.type === 'customer') {
+                      void (async () => {
+                        try {
+                          const currentProfile = await customerOrganizationService.getByAuthUser(user.id);
+                          await customerOrganizationService.saveByAuthUser(user.id, {
+                            ...(currentProfile || {}),
+                            companyName: currentProfile?.companyName || '',
+                            contactPerson: currentProfile?.contactPerson || '',
+                            email: currentProfile?.email || user.email || '',
+                            phone: currentProfile?.phone || '',
+                            mobile: currentProfile?.mobile || '',
+                            address: currentProfile?.address || '',
+                            website: currentProfile?.website || '',
+                            businessType: currentProfile?.businessType || 'Importer',
+                            logoUrl: dataUrl,
+                          });
+                          await customerPortalProfileService.saveByAuthUser(user.id, {
+                            displayName: currentProfile?.contactPerson || user.name || '',
+                            loginEmail: user.email || '',
+                            portalRole: 'customer',
+                            avatarUrl: dataUrl,
+                          });
+                        } catch (error) {
+                          console.warn('[CustomerDashboard] Failed to persist customer logo:', error);
+                        }
+                      })();
+                    }
                   };
                   reader.readAsDataURL(file);
                   e.currentTarget.value = '';
@@ -366,10 +654,15 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                 {/* Back to Website - Prominent Button */}
                 <button
                   onClick={handleBackToWebsite}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg mb-3 border-2 border-blue-400 overflow-hidden"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all text-white shadow-md hover:shadow-lg mb-3 border-2 overflow-hidden"
+                  style={{
+                    background: 'linear-gradient(90deg, var(--customer-primary), var(--customer-primary-hover))',
+                    borderColor: 'var(--customer-primary-border)',
+                    color: 'var(--customer-on-primary)',
+                  }}
                 >
                   <Home className="h-4 w-4 flex-shrink-0" />
-                  <span className="text-sm font-medium whitespace-nowrap truncate">Back to Website</span>
+                  <span className="text-sm font-medium whitespace-nowrap truncate">{copy.backToWebsite}</span>
                 </button>
 
                 {/* Divider */}
@@ -404,10 +697,14 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                         className={`
                           w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all overflow-hidden
                           ${isActive 
-                            ? 'bg-red-600 text-white shadow-lg' 
+                            ? 'text-white shadow-lg' 
                             : 'text-gray-700 hover:bg-gray-100'
                           }
                         `}
+                        style={isActive ? {
+                          backgroundColor: 'var(--customer-primary)',
+                          color: 'var(--customer-on-primary)',
+                        } : undefined}
                       >
                         <GripVertical className={`h-3.5 w-3.5 flex-shrink-0 cursor-grab active:cursor-grabbing ${isActive ? 'text-white/70' : 'text-gray-400'}`} />
                         <Icon className="h-4 w-4 flex-shrink-0" />
@@ -421,13 +718,19 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
 
             {/* Sidebar Footer */}
             <div className="p-4 border-t border-gray-200 space-y-2">
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-3 text-sm overflow-hidden bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
+              {brandCard}
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-3 text-sm overflow-hidden"
+                style={{
+                  backgroundColor: 'var(--customer-primary)',
+                  borderColor: 'var(--customer-primary)',
+                  color: 'var(--customer-on-primary)',
+                }}
                 onClick={onLogout}
               >
                 <LogOut className="h-4 w-4 flex-shrink-0" />
-                <span className="whitespace-nowrap truncate">Logout</span>
+                <span className="whitespace-nowrap truncate">{copy.logout}</span>
               </Button>
             </div>
           </div>
@@ -472,13 +775,17 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveView('profile');
+                    setActiveView('organization-profile');
                     setProfileEditToken(Date.now());
                   }}
                   className="w-full flex items-center gap-3 overflow-hidden text-left group"
                 >
                   <div
-                    className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden ring-2 ring-transparent group-hover:ring-blue-300 transition"
+                    className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden ring-2 ring-transparent transition"
+                    style={{
+                      backgroundColor: 'var(--customer-primary)',
+                      boxShadow: '0 0 0 2px transparent',
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       logoInputRef.current?.click();
@@ -493,7 +800,7 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate whitespace-nowrap">{userEmail}</p>
-                    <p className="text-xs text-gray-500 whitespace-nowrap">Premium Member · Click to edit profile</p>
+                    <p className="text-xs text-gray-500 whitespace-nowrap">{copy.premiumMember}</p>
                   </div>
                 </button>
                 <input
@@ -510,6 +817,33 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                       if (!dataUrl) return;
                       setCustomerLogo(dataUrl);
                       localStorage.setItem('cosun_customer_logo', dataUrl);
+                      if (user?.id && user.type === 'customer') {
+                        void (async () => {
+                          try {
+                            const currentProfile = await customerOrganizationService.getByAuthUser(user.id);
+                            await customerOrganizationService.saveByAuthUser(user.id, {
+                              ...(currentProfile || {}),
+                              companyName: currentProfile?.companyName || '',
+                              contactPerson: currentProfile?.contactPerson || '',
+                              email: currentProfile?.email || user.email || '',
+                              phone: currentProfile?.phone || '',
+                              mobile: currentProfile?.mobile || '',
+                              address: currentProfile?.address || '',
+                              website: currentProfile?.website || '',
+                              businessType: currentProfile?.businessType || 'Importer',
+                              logoUrl: dataUrl,
+                            });
+                            await customerPortalProfileService.saveByAuthUser(user.id, {
+                              displayName: currentProfile?.contactPerson || user.name || '',
+                              loginEmail: user.email || '',
+                              portalRole: 'customer',
+                              avatarUrl: dataUrl,
+                            });
+                          } catch (error) {
+                            console.warn('[CustomerDashboard] Failed to persist customer logo:', error);
+                          }
+                        })();
+                      }
                     };
                     reader.readAsDataURL(file);
                     e.currentTarget.value = '';
@@ -521,10 +855,15 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                 <div className="space-y-1">
                   <button
                     onClick={handleBackToWebsite}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg mb-3 border-2 border-blue-400 overflow-hidden"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all text-white shadow-md hover:shadow-lg mb-3 border-2 overflow-hidden"
+                    style={{
+                      background: 'linear-gradient(90deg, var(--customer-primary), var(--customer-primary-hover))',
+                      borderColor: 'var(--customer-primary-border)',
+                      color: 'var(--customer-on-primary)',
+                    }}
                   >
                     <Home className="h-4 w-4 flex-shrink-0" />
-                    <span className="text-sm font-medium whitespace-nowrap truncate">Back to Website</span>
+                    <span className="text-sm font-medium whitespace-nowrap truncate">{copy.backToWebsite}</span>
                   </button>
 
                   <div className="border-t border-gray-200 my-3"></div>
@@ -553,11 +892,12 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
                           onClick={() => setActiveView(item.id)}
                           className={`
                             w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all overflow-hidden
-                            ${isActive 
-                              ? 'bg-red-600 text-white shadow-lg' 
-                              : 'text-gray-700 hover:bg-gray-100'
-                            }
+                            ${isActive ? 'text-white shadow-lg' : 'text-gray-700 hover:bg-gray-100'}
                           `}
+                          style={isActive ? {
+                            backgroundColor: 'var(--customer-primary)',
+                            color: 'var(--customer-on-primary)',
+                          } : undefined}
                         >
                           <GripVertical className={`h-3.5 w-3.5 flex-shrink-0 cursor-grab active:cursor-grabbing ${isActive ? 'text-white/70' : 'text-gray-400'}`} />
                           <Icon className="h-4 w-4 flex-shrink-0" />
@@ -570,13 +910,19 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
               </nav>
 
               <div className="p-4 border-t border-gray-200 space-y-2">
-                <Button 
-                  variant="outline" 
-                  className="w-full justify-start gap-3 text-sm overflow-hidden bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
+                {brandCard}
+                <Button
+                  variant="outline"
+                  className="w-full justify-start gap-3 text-sm overflow-hidden"
+                  style={{
+                    backgroundColor: 'var(--customer-primary)',
+                    borderColor: 'var(--customer-primary)',
+                    color: 'var(--customer-on-primary)',
+                  }}
                   onClick={onLogout}
                 >
                   <LogOut className="h-4 w-4 flex-shrink-0" />
-                  <span className="whitespace-nowrap truncate">Logout</span>
+                  <span className="whitespace-nowrap truncate">{copy.logout}</span>
                 </Button>
               </div>
             </div>
@@ -593,33 +939,6 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
 
         {/* Main Content */}
         <main className="relative z-0 flex-1 min-w-0 h-screen overflow-y-auto overflow-x-hidden">
-          {/* 🌟 客户成长使命Banner */}
-          <div className="bg-gradient-to-r from-orange-50 via-amber-50 to-orange-50 border-b-2 border-orange-200">
-            <div className="px-4 lg:px-8 py-4 max-w-[1600px] mx-auto">
-              <div className="flex items-center gap-4">
-                <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-[#F96302] to-orange-600 rounded-full flex items-center justify-center shadow-lg">
-                  <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <h2 className="text-xl font-bold text-gray-900 mb-0.5">
-                    Empowering Your Business Growth 🚀
-                  </h2>
-                  <p className="text-sm text-gray-700">
-                    COSUN is committed to providing quality products and services, growing together with you to achieve business success
-                  </p>
-                </div>
-                <div className="hidden lg:flex items-center gap-3 text-sm">
-                  <div className="bg-white px-4 py-2 rounded-lg shadow-sm border border-orange-200">
-                    <span className="text-gray-600">Our Mission:</span>
-                    <span className="font-semibold text-[#F96302] ml-1">Customer Growth · Win-Win Future</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
           <div className="p-4 pb-8 lg:p-8 lg:pb-10">
             {renderContent()}
           </div>

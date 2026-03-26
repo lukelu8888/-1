@@ -1,19 +1,29 @@
 // 🔥 RBAC权限配置 - 基于角色的访问控制系统
 // Role-Based Access Control Configuration
 
+import { permissionCenterService, type PermissionModuleId } from './services/permissionCenterService';
+
 // 用户角色定义
 export type UserRole = 
   | 'CEO'                  // 老板
   | 'CFO'                  // 财务总监
   | 'Sales_Director'       // 销售总监
-  | 'Regional_Manager'     // 🆕 区域业务经理（管理本区域业务员）
+  | 'Regional_Manager'     // 区域主管（管理本区域业务员）
   | 'Sales_Manager'        // 销售主管
   | 'Sales_Rep'            // 业务员
+  | 'Sales_Assistant'      // 业务助理
   | 'Finance'              // 财务
+  | 'External_Accountant'  // 代理记账财务
+  | 'Procurement_Manager'  // 采购主管
   | 'Procurement'          // 采购
   | 'Supplier'             // 供应商
   | 'Marketing_Ops'        // 运营专员（社媒营销与线索获取）
-  | 'Documentation_Officer' // 🆕 单证员（出口单证管理）
+  | 'Marketing_Assistant'  // 运营助理
+  | 'Documentation_Officer' // 单证员（出口单证管理）
+  | 'QC'                   // 验货员
+  | 'Warehouse_Ops'        // 仓配运营
+  | 'HR_Admin'             // 人事主管
+  | 'Admin_Ops'            // 行政专员
   | 'Admin';               // 系统管理员
 
 // 🔥 业务类型定义
@@ -530,16 +540,65 @@ export const ROLE_LABELS: Record<UserRole, { zh: string; en: string; color: stri
   CEO: { zh: '老板', en: 'CEO', color: 'purple' },
   CFO: { zh: '财务总监', en: 'CFO', color: 'blue' },
   Sales_Director: { zh: '销售总监', en: 'Sales Director', color: 'green' },
-  Regional_Manager: { zh: '区域业务经理', en: 'Regional Manager', color: 'green' },
+  Regional_Manager: { zh: '区域主管', en: 'Regional Manager', color: 'green' },
   Sales_Manager: { zh: '销售主管', en: 'Sales Manager', color: 'green' },
   Sales_Rep: { zh: '业务员', en: 'Sales Rep', color: 'orange' },
-  Finance: { zh: '财务', en: 'Finance', color: 'cyan' },
-  Procurement: { zh: '采购', en: 'Procurement', color: 'yellow' },
+  Sales_Assistant: { zh: '业务助理', en: 'Sales Assistant', color: 'orange' },
+  Finance: { zh: '内部财务', en: 'Finance', color: 'cyan' },
+  External_Accountant: { zh: '代理记账财务', en: 'External Accountant', color: 'cyan' },
+  Procurement_Manager: { zh: '采购主管', en: 'Procurement Manager', color: 'yellow' },
+  Procurement: { zh: '采购员', en: 'Procurement', color: 'yellow' },
   Supplier: { zh: '供应商', en: 'Supplier', color: 'brown' },
   Marketing_Ops: { zh: '运营专员', en: 'Marketing Ops', color: 'pink' },
+  Marketing_Assistant: { zh: '运营助理', en: 'Marketing Assistant', color: 'pink' },
   Documentation_Officer: { zh: '单证员', en: 'Documentation Officer', color: 'teal' },
+  QC: { zh: '验货员', en: 'QC', color: 'teal' },
+  Warehouse_Ops: { zh: '仓配运营', en: 'Warehouse Ops', color: 'cyan' },
+  HR_Admin: { zh: '人事主管', en: 'HR Admin', color: 'blue' },
+  Admin_Ops: { zh: '行政专员', en: 'Admin Ops', color: 'yellow' },
   Admin: { zh: '系统管理员', en: 'Admin', color: 'red' },
 };
+
+const ACCESS_PERMISSION_MODULE_MAP: Partial<Record<Permission, PermissionModuleId[]>> = {
+  'access:dashboard': ['overview'],
+  'access:analytics': ['analytics', 'global-bi-dashboard'],
+  'access:customer_management': ['crm', 'public-pool'],
+  'access:supplier_management': ['supplier-management', 'accounts-payable-management', 'inspection-management'],
+  'access:service_provider': ['service-provider-management'],
+  'access:order_management': ['order-management-center'],
+  'access:purchase_orders': ['purchase-order-management'],
+  'access:shipping': ['shipping-document-management', 'documentation-workbench-ultimate'],
+  'access:data_management': [
+    'people-admin-center',
+    'admin-ops-center',
+    'admin-company-profile',
+    'template-workbench',
+    'form-manager',
+    'workflow-validation',
+    'status-flow-simulator',
+    'role-permission',
+    'menu-permission-matrix',
+    'permission-center',
+    'enterprise-backup-center',
+    'supabase-diagnostic',
+    'multi-language-currency',
+  ],
+  'access:product_management': ['product-management'],
+  'access:product_push': ['product-push'],
+  'access:social_media': ['social-media-marketing'],
+  'access:finance_management': ['finance-management'],
+  'access:backup_center': ['enterprise-backup-center'],
+};
+
+function getPermissionCenterAccessOverride(user: User, permission: Permission): boolean | null {
+  const mappedModules = ACCESS_PERMISSION_MODULE_MAP[permission];
+  if (!mappedModules || mappedModules.length === 0) return null;
+
+  const enabledModules = permissionCenterService.getEnabledModulesForUser(user);
+  if (!enabledModules || enabledModules.length === 0) return null;
+
+  return mappedModules.some((moduleId) => enabledModules.includes(moduleId));
+}
 
 // 🔥 权限检查函数（支持基于region的动态权限扩展）
 export function hasPermission(user: User, permission: Permission): boolean {
@@ -616,6 +675,11 @@ export function hasPermission(user: User, permission: Permission): boolean {
       return false; // 销售总监不能审批付款（财务职责）
     }
   }
+
+  const permissionCenterOverride = getPermissionCenterAccessOverride(user, permission);
+  if (permissionCenterOverride !== null) {
+    return permissionCenterOverride;
+  }
   
   // 基础权限检查
   return userPermissions.includes(permission);
@@ -641,7 +705,7 @@ export function getAccessibleModules(user: User): string[] {
 
 // 🔥 获取用户角色显示名称（根据region区分）
 export function getUserRoleLabel(user: User): { zh: string; en: string; color: string } {
-  const baseLabel = ROLE_LABELS[user.role];
+  const baseLabel = ROLE_LABELS[user.role] || { zh: user.role || '未分配', en: user.role || 'Unassigned', color: 'gray' };
   
   // 🔥 特殊处理：区分销售总监和区域主管
   if (user.role === 'Sales_Manager') {

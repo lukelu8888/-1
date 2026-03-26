@@ -1,0 +1,4 @@
+-- Remote-only migration placeholder.
+-- This file exists to align local migration history with the linked Supabase
+-- project, which already has migration version 20260319005019 applied.
+-- The actual schema change was created directly on the remote project.

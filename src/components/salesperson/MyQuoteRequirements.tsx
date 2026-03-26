@@ -27,6 +27,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
+import { useInquiries } from '../../contexts/InquiryContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { PurchaserFeedbackView } from './PurchaserFeedbackView';
 import { CreateQuotationFromFeedback } from './CreateQuotationFromFeedback';
@@ -38,9 +39,12 @@ import {
   buildDefaultQuoteRequirementTextOverrides,
 } from '../documents/templates/QuoteRequirementDocument';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { buildSalesSafeQuoteRequirementDocument, desensitizePurchaserFeedbackText } from '../../utils/purchaserFeedbackSanitizer';
+import { matchesBusinessOwnerEmail, resolveQuoteRequirementOwner } from '../../utils/quotationOwnership';
 
 export function MyQuoteRequirements() {
   const { requirements: quoteRequirements } = useQuoteRequirements();
+  const { inquiries } = useInquiries();
   const currentUser = getCurrentUser();
   
   // 🔥 状态管理
@@ -54,8 +58,8 @@ export function MyQuoteRequirements() {
   // 🔥 筛选我的 QR
   const myRequirements = useMemo(() => {
     return quoteRequirements.filter(qr => {
-      // 只显示当前业务员创建的QR
-      if (qr.createdBy !== currentUser?.name && qr.createdBy !== currentUser?.email) {
+      const owner = resolveQuoteRequirementOwner(qr, inquiries, currentUser);
+      if (!matchesBusinessOwnerEmail(owner.email, currentUser?.email, qr?.region, qr?.ownerUserId, currentUser?.id)) {
         return false;
       }
       
@@ -82,7 +86,7 @@ export function MyQuoteRequirements() {
       
       return true;
     });
-  }, [quoteRequirements, currentUser, filterStatus, searchTerm]);
+  }, [quoteRequirements, inquiries, currentUser, filterStatus, searchTerm]);
   
   // 🔥 统计信息
   const stats = useMemo(() => {
@@ -118,7 +122,7 @@ export function MyQuoteRequirements() {
     requiredDeliveryDate: qr.deliveryDate || qr.requiredDate || new Date().toISOString().split('T')[0],
     customer: {
       companyName: qr.customerName || 'N/A',
-      contactPerson: qr.createdBy || '',
+      contactPerson: qr.requestedByName || qr.createdBy || '',
       email: qr.customerEmail || '',
       phone: '',
       address: '',
@@ -141,9 +145,13 @@ export function MyQuoteRequirements() {
       specialRequirements: qr.remarks || qr.specialRequirements,
     },
     salesDeptNotes: qr.notes || qr.specialRequirements,
-    purchaseDeptFeedback: qr.purchaserFeedback?.overallComment || undefined,
+    purchaseDeptFeedback: desensitizePurchaserFeedbackText(
+      qr.purchaserFeedback?.purchaserRemarks || '',
+      qr.purchaserFeedback,
+      'Sales_Rep',
+    ) || undefined,
     urgency: 'medium',
-    createdBy: qr.createdBy || '',
+    createdBy: qr.requestedByName || qr.createdBy || '',
   });
 
   const handlePreviewDocument = (qr: any) => {
@@ -235,7 +243,7 @@ export function MyQuoteRequirements() {
               <Input 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="搜索 QR 编号、INQ 编号、产品名称..."
+                placeholder="搜索 QR 编号、ING 编号、产品名称..."
                 className="pl-10"
               />
             </div>
@@ -439,7 +447,7 @@ export function MyQuoteRequirements() {
               {(() => {
                 const templateSnapshot = selectedQR.templateSnapshot || selectedQR.template_snapshot || null;
                 const templateVersion = templateSnapshot?.version || null;
-                const documentData = (selectedQR.documentDataSnapshot || selectedQR.document_data_snapshot) as QuoteRequirementDocumentData | null;
+                const documentData = buildSalesSafeQuoteRequirementDocument(selectedQR, 'Sales_Rep') as QuoteRequirementDocumentData | null;
                 if (!templateVersion || !documentData) {
                   return (
                     <div className="mx-auto rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">

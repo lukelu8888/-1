@@ -33,14 +33,24 @@ import {
   type QuoteRequirementPreviewLayout,
 } from '../documents/templates/QuoteRequirementDocument';
 import { buildQuoteRequirementDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
+import { adaptSalesQuotationToDocumentData } from '../../utils/documentDataAdapters';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { normalizePersonnelEmail } from '../../lib/notification-rules';
+import { sanitizeQuoteRequirementDocumentForSales } from '../../utils/purchaserFeedbackSanitizer';
+import { isSystemOwnerEmail, pickBusinessOwnerEmail, resolveInquirySalesOwner, resolveOwnerName } from '../../utils/quotationOwnership';
 
 type TabType = 'all' | 'pending' | 'partial' | 'processing' | 'completed';
 interface CostInquiryQuotationManagementProps {
   onSwitchToQuotationManagement?: (qtNumber: string) => void; // 🔥 切换到报价管理并高亮指定单号
+  viewerRole?: string;
+  forceDesensitizePreview?: boolean;
 }
 
-export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }: CostInquiryQuotationManagementProps = {}) {
+export function CostInquiryQuotationManagement({
+  onSwitchToQuotationManagement,
+  viewerRole,
+  forceDesensitizePreview,
+}: CostInquiryQuotationManagementProps = {}) {
   const { inquiries } = useInquiry();
   const quoteRequirementContext = useQuoteRequirements();
   const quoteRequirements = quoteRequirementContext.requirements;
@@ -84,6 +94,54 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   const [showQuoteCreation, setShowQuoteCreation] = useState(false);
   const [selectedQRForQuote, setSelectedQRForQuote] = useState<any>(null);
   const [pushingQrId, setPushingQrId] = useState<string | null>(null);
+  const resolvedCurrentUserRole = viewerRole || currentUser?.role || currentUser?.userRole;
+  const previewSanitizeRole = forceDesensitizePreview ? 'Sales_Rep' : viewerRole === 'Sales_Rep' ? 'Sales_Rep' : resolvedCurrentUserRole;
+
+  const resolveQuotationOwner = React.useCallback((qr: any) => {
+    const relatedInquiry = qr?.sourceInquiry || findRelatedInquiryForProcurementDoc(qr, inquiries);
+    const ownerRegion = qr?.region || relatedInquiry?.region;
+    const normalizedCurrentEmail = normalizePersonnelEmail(currentUser?.email, ownerRegion);
+    const ownerCandidates = [
+      qr?.requestedBy,
+      relatedInquiry?.salesRepEmail,
+      relatedInquiry?.assignedTo,
+      qr?.sourceInquiry?.salesRepEmail,
+      qr?.sourceInquiry?.assignedTo,
+      qr?.salesPerson,
+      qr?.salesPersonEmail,
+      qr?.createdBy,
+    ];
+    const ownerEmail = pickBusinessOwnerEmail(ownerCandidates, ownerRegion, normalizedCurrentEmail);
+    const ownerName = resolveOwnerName(
+      ownerEmail,
+      [
+        qr?.requestedByName,
+        relatedInquiry?.salesRepName,
+        qr?.sourceInquiry?.salesRepName,
+        qr?.salesPersonName,
+        ownerEmail === normalizedCurrentEmail ? currentUser?.name : '',
+      ],
+      ownerRegion,
+      currentUser?.name || '',
+    );
+
+    return {
+      email: ownerEmail || currentUser?.email || '',
+      name: ownerName || currentUser?.name || '',
+    };
+  }, [currentUser, inquiries]);
+
+  const resolveInquiryOwnerForQrCreation = React.useCallback((inq: any) => {
+    const inquiryOwner = resolveInquirySalesOwner(inq, currentUser);
+    if (inquiryOwner.email && !isSystemOwnerEmail(inquiryOwner.email, inq?.region)) {
+      return inquiryOwner;
+    }
+
+    return {
+      email: normalizePersonnelEmail(currentUser?.email, inq?.region) || currentUser?.email || '',
+      name: currentUser?.name || '',
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     if (!showViewModal) return;
@@ -113,10 +171,10 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     if (!showViewModal || !selectedQR) return;
     const relatedInquiry = findRelatedInquiryForProcurementDoc(selectedQR, inquiries);
     const requirementForView = hydrateProcurementRequirementWithInquiry(selectedQR, relatedInquiry);
-    const nextData = buildQuoteRequirementDocumentSnapshot(requirementForView, currentUser?.role);
+    const nextData = buildQuoteRequirementDocumentSnapshot(requirementForView, previewSanitizeRole);
     setPreviewDocumentData(nextData);
     setPreviewLayout(DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT);
-  }, [showViewModal, selectedQR, inquiries, currentUser?.role]);
+  }, [showViewModal, selectedQR, inquiries, previewSanitizeRole]);
 
   const handleViewDialogDragStart = (event: React.MouseEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button')) return;
@@ -204,10 +262,12 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     if (isAdmin) return quoteRequirements;
 
     const userRegion = currentUser?.region;
-    return quoteRequirements.filter(qr =>
-      qr.createdBy === currentUser?.email && qr.region === userRegion
+    const normalizedCurrentEmail = normalizePersonnelEmail(currentUser?.email, userRegion);
+    return quoteRequirements.filter((qr) =>
+      normalizePersonnelEmail(resolveQuotationOwner(qr).email, qr?.region || userRegion) === normalizedCurrentEmail &&
+      qr.region === userRegion
     );
-  }, [quoteRequirements, currentUser]);
+  }, [quoteRequirements, currentUser, resolveQuotationOwner]);
 
   // 🔥 根据状态和搜索词筛选
   const filteredQRs = useMemo(() => {
@@ -260,14 +320,11 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
   // 🔥 创建采购需求（从INQ）
   const handleCreateQRFromINQ = async (inq: any) => {
     try {
-      const sourceTemplateSnapshot = inq.templateSnapshot || inq.template_snapshot || null;
-      const sourceDocumentData = inq.documentDataSnapshot || inq.document_data_snapshot || null;
-      if (!sourceDocumentData) {
-        throw new Error('该 ING 缺少文档数据快照，无法创建 QR');
-      }
-
+      // QR 的 documentDataSnapshot 由 buildQuoteRequirementDocumentSnapshot 重新生成，
+      // 不依赖 ING 的快照，因此无需检查 ING 是否有快照。
       const regionCode = inq.region === 'South America' ? 'SA' : inq.region === 'Europe & Africa' ? 'EA' : 'NA';
       const qrNumber = await nextQRNumber(regionCode);
+      const quotationOwner = resolveInquiryOwnerForQrCreation(inq);
       const customerRequirements = buildCustomerRequirementsSnapshot(inq, inq.products || []);
       const commercialTerms = buildCommercialTermsSnapshotFromInquiry(inq);
       const salesDeptNotes = buildBilingualTradingRequirementsText({
@@ -282,6 +339,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
     const newQR = {
         id: crypto.randomUUID(),
         requirementNo: qrNumber,
+      sourceInquiryId: inq.id,
       sourceInquiryNumber: inq.inquiryNumber || `ING-${inq.id}`,
       createdDate: String(
         inq.createdDate ||
@@ -293,6 +351,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       urgency: 'medium' as const,
       status: 'pending' as const,
       createdBy: currentUser?.email || '',
+      requestedBy: quotationOwner.email || null,
+      requestedByName: quotationOwner.name || null,
       region: inq.region,
         notes: buildProcurementRequestNotes(commercialTerms || {}) || inq.message || '',
         expectedQuoteDate: commercialTerms?.expectedQuoteDate,
@@ -333,7 +393,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       };
       const saved = await quoteRequirementService.upsert({
         ...newQR,
-        documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(newQR as any, currentUser?.role),
+        documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(newQR as any, resolvedCurrentUserRole),
       });
       if (!saved) {
         throw new Error('QR 写入 Supabase 失败');
@@ -382,10 +442,14 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       const payload: any = {
         id: selectedQR.id,
         requirementNo: selectedQR.requirementNo,
+        sourceInquiryId: selectedQR.sourceInquiryId,
         sourceInquiryNumber: selectedQR.sourceInquiryNumber,
         region: selectedQR.region,
         urgency: selectedQR.urgency,
         requiredDate: selectedQR.requiredDate,
+        requestedBy: selectedQR.requestedBy || null,
+        requestedByName: selectedQR.requestedByName || null,
+        assignedTo: selectedQR.assignedTo || null,
         customer: selectedQR.customer,
         items: updatedItems || selectedQR.items,
         status: 'submitted',
@@ -405,7 +469,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
 
       const saved = await quoteRequirementService.upsert({
         ...payload,
-        documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(payload as any, currentUser?.role),
+        documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(payload as any, resolvedCurrentUserRole),
       });
       if (!saved) {
         throw new Error('QR 写入 Supabase 失败');
@@ -490,22 +554,20 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           : allSalesQuotations.find(qt => qt.qrNumber === qr.requirementNo);
         
         if (existingQT) {
-          const activeEmail = String(currentUser?.email || '').toLowerCase();
           const ownerEmail = String(existingQT.salesPerson || '').toLowerCase();
+          const expectedOwner = resolveQuotationOwner(qr);
+          const shouldRepairOwner =
+            Boolean(expectedOwner.email) &&
+            ownerEmail !== String(expectedOwner.email).toLowerCase();
 
-          // 兼容历史错归属：如果该 QR 属于当前业务员，但 QT 归属被写成他人，自动修正到当前业务员
-          if (
-            activeEmail &&
-            ownerEmail &&
-            ownerEmail !== activeEmail &&
-            String(qr.createdBy || '').toLowerCase() === activeEmail
-          ) {
+          // 兼容历史错归属：如果当前 QT 被写成管理员或错误业务员，自动回正到 QR 所属业务员
+          if (shouldRepairOwner) {
             await updateSalesQuotation(String(existingQT.id), {
               ...existingQT,
-              salesPerson: currentUser?.email || existingQT.salesPerson,
-              salesPersonName: currentUser?.name || existingQT.salesPersonName || '',
+              salesPerson: expectedOwner.email || existingQT.salesPerson,
+              salesPersonName: expectedOwner.name || existingQT.salesPersonName || '',
             } as any);
-            toast.success(`✅ 已修复历史归属：${existingQT.qtNumber} 归属到 ${currentUser?.email}`);
+            toast.success(`✅ 已修复历史归属：${existingQT.qtNumber} 归属到 ${expectedOwner.email}`);
             if (onSwitchToQuotationManagement) {
               onSwitchToQuotationManagement(existingQT.qtNumber);
             }
@@ -538,6 +600,10 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
       };
       
       const fullRegion = regionMap[qr.region] || 'North America';
+      const sourceTemplateSnapshot = qr.templateSnapshot || qr.template_snapshot || null;
+      const sourceTemplateId = qr.templateId || qr.template_id || null;
+      const sourceTemplateVersionId = qr.templateVersionId || qr.template_version_id || null;
+      const quotationOwner = resolveQuotationOwner(qr);
       
       // 🔥 自动创建draft状态的业务员销售报价单（QT）
       const regionCode = qr.region === 'South America' ? 'SA' : qr.region === 'Europe & Africa' ? 'EA' : 'NA';
@@ -553,6 +619,20 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         itemsCount: qr.items.length,
         feedbackProductsCount: qr.purchaserFeedback.products.length
       });
+
+      const resolvedCustomerEmail = [
+        qr.customer?.email,
+        qr.customerEmail,
+        qr.sourceInquiry?.userEmail,
+        qr.sourceInquiry?.buyerInfo?.email,
+        qr.sourceInquiry?.customerEmail,
+      ]
+        .map((value) => String(value || '').trim())
+        .find((value) => value && value.includes('@')) || '';
+
+      if (!resolvedCustomerEmail) {
+        throw new Error('当前 QR 缺少客户邮箱，无法创建报价单');
+      }
       
       // 🔥 映射产品项：合并QR产品信息和采购反馈成本
       const quotationItems = qr.items.map((item: any) => {
@@ -640,14 +720,14 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         // 客户信息（从QR）
         customerCompany: qr.customer?.companyName || 'N/A',
         customerName: qr.customer?.contactPerson || 'N/A',
-        customerEmail: [qr.customer?.email, qr.sourceInquiry?.userEmail, qr.sourceInquiry?.buyerInfo?.email].find(e => e && e !== 'N/A' && e.includes('@')) || qr.customer?.email || '',
+        customerEmail: resolvedCustomerEmail,
         customerPhone: qr.customer?.phone || '',
         customerAddress: qr.customer?.address || '',
         
         // 业务信息
         region: qr.region || 'NA',
-        salesPerson: currentUser?.email || '',
-        salesPersonName: currentUser?.name || '',
+        salesPerson: quotationOwner.email,
+        salesPersonName: quotationOwner.name,
         
         // 产品清单
         items: quotationItems,
@@ -683,8 +763,18 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
         createdBy: currentUser?.email || '',
         
         // 备注
-        notes: qr.purchaserFeedback.purchaserRemarks || ''
+        notes: qr.purchaserFeedback.purchaserRemarks || '',
+        templateId: sourceTemplateId,
+        templateVersionId: sourceTemplateVersionId,
+        templateSnapshot: sourceTemplateSnapshot || { pendingResolution: true },
       };
+
+      (newQuotation as any).documentDataSnapshot = adaptSalesQuotationToDocumentData({
+        ...newQuotation,
+        customerAddress: newQuotation.customerAddress || '',
+        customerPhone: newQuotation.customerPhone || '',
+        customerCountry: (qr.customer as any)?.country || '',
+      });
       
       
       try {
@@ -890,12 +980,12 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
                           <div className="space-y-2 p-1">
                             <p className="font-semibold text-sm">📋 报价请求单（QR）定义：</p>
                             <p className="text-xs leading-relaxed">
-                              报价请求单是从客户询价单（INQ）下推生成的内部询价请求单据，用于向采购部门发起报价请求。
+                              报价请求单是从客户询价单（ING）下推生成的内部询价请求单据，用于向采购部门发起报价请求。
                             </p>
                             <div className="text-xs space-y-1 pt-2 border-t border-gray-200">
                               <p><span className="font-medium">• 作用：</span>获取供应商成本价格，为销售报价提供依据</p>
                               <p><span className="font-medium">• 编号规则：</span>QR-{'{区域代码}'}-{'{日期}'}-{'{流水号}'}</p>
-                              <p><span className="font-medium">• 流转关系：</span>INQ → QR → XJ → BJ → QT → SC → CG</p>
+                              <p><span className="font-medium">• 流转关系：</span>ING → QR → XJ → BJ → QT → SC → PR → CG</p>
                             </div>
                           </div>
                         </TooltipContent>
@@ -1265,7 +1355,13 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
             >
               {previewDocumentData && (
                 <QuoteRequirementDocument
-                  data={previewDocumentData}
+                  data={
+                    sanitizeQuoteRequirementDocumentForSales(
+                      previewDocumentData,
+                      selectedQR?.purchaserFeedback,
+                      previewSanitizeRole === 'Sales_Rep' ? 'Sales_Rep' : previewSanitizeRole,
+                    ) || previewDocumentData
+                  }
                   layoutConfig={previewLayout}
                 />
               )}
@@ -1285,6 +1381,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
           }}
           onSubmit={async (quoteData) => {
             try {
+            const quotationOwner = resolveQuotationOwner(selectedQRForQuote);
             // 🔥 转换为 SalesQuotation 格式并保存到 Context
             const salesQuotation = {
               id: `sq-${Date.now()}`,
@@ -1297,8 +1394,8 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
               customerEmail: quoteData.customerEmail || '',
               customerCompany: quoteData.customerName || '',
               
-              salesPerson: currentUser?.email || '',
-              salesPersonName: currentUser?.name || '',
+              salesPerson: quotationOwner.email || currentUser?.email || '',
+              salesPersonName: quotationOwner.name || currentUser?.name || '',
               
               items: quoteData.items || [],
               
@@ -1327,7 +1424,7 @@ export function CostInquiryQuotationManagement({ onSwitchToQuotationManagement }
               updatedAt: quoteData.updatedAt || new Date().toISOString(),
               notes: quoteData.approvalNotes || ''
             };
-            
+
               await addSalesQuotation(salesQuotation);
 
               // Supabase 强校验：确认该 QR 的 QT 已可查询

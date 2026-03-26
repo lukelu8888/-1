@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Quotation } from '../components/admin/QuotationManagement';
 import { getCurrentUser } from '../utils/dataIsolation';
-import { addTombstones, filterNotDeleted } from '../lib/erp-core/deletion-tombstone';
+import { addTombstones, filterNotDeleted, removeTombstonesByMarkers } from '../lib/erp-core/deletion-tombstone';
 import { ERP_EVENT_KEYS } from '../lib/erp-core/events';
 import { emitErpEvent } from '../lib/erp-core/event-bus';
 import { salesQuotationService, inquiryService } from '../lib/supabaseService';
@@ -170,6 +170,10 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
     if (!Array.isArray(raw)) return;
 
     const mapped = raw.filter(Boolean).map(fromServicePayload);
+    removeTombstonesByMarkers(
+      'qt',
+      mapped.flatMap((q) => [q?.id, (q as any)?.qtNumber, q?.quotationNumber]),
+    );
     const visible = filterNotDeleted('qt', mapped, (q) => getQuotationMarkers(q));
     setQuotations(visible);
   };

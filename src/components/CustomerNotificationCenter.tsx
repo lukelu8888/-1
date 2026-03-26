@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bell, X, Check, Trash2, Eye, Clock, CheckCircle2, MessageSquare } from 'lucide-react';
+import { Bell, X, Check, Trash2, Eye, Clock, CheckCircle2, MessageSquare, ShipWheel, FileCheck, PackageCheck, ClipboardCheck, Camera } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
@@ -40,6 +40,18 @@ export function CustomerNotificationCenter() {
         return <CheckCircle2 className="w-5 h-5 text-green-600" />;
       case 'inquiry_processing':
         return <Clock className="w-5 h-5 text-orange-600" />;
+      case 'shipment_arrival_notice':
+        return <ShipWheel className="w-5 h-5 text-cyan-600" />;
+      case 'shipment_customs_released':
+        return <FileCheck className="w-5 h-5 text-emerald-600" />;
+      case 'shipment_delivered':
+        return <PackageCheck className="w-5 h-5 text-green-600" />;
+      case 'customer_third_party_inspection_requested':
+        return <ClipboardCheck className="w-5 h-5 text-amber-600" />;
+      case 'inspection_report_shared':
+        return <FileCheck className="w-5 h-5 text-blue-600" />;
+      case 'loading_third_party_supervision_requested':
+        return <Camera className="w-5 h-5 text-violet-600" />;
       default:
         return <Bell className="w-5 h-5 text-gray-600" />;
     }
@@ -58,6 +70,18 @@ export function CustomerNotificationCenter() {
         return 'bg-green-50/50 border-l-4 border-l-green-500';
       case 'inquiry_processing':
         return 'bg-orange-50/50 border-l-4 border-l-orange-500';
+      case 'shipment_arrival_notice':
+        return 'bg-cyan-50/50 border-l-4 border-l-cyan-500';
+      case 'shipment_customs_released':
+        return 'bg-emerald-50/50 border-l-4 border-l-emerald-500';
+      case 'shipment_delivered':
+        return 'bg-green-50/50 border-l-4 border-l-green-500';
+      case 'customer_third_party_inspection_requested':
+        return 'bg-amber-50/50 border-l-4 border-l-amber-500';
+      case 'inspection_report_shared':
+        return 'bg-blue-50/50 border-l-4 border-l-blue-500';
+      case 'loading_third_party_supervision_requested':
+        return 'bg-violet-50/50 border-l-4 border-l-violet-500';
       default:
         return 'bg-gray-50/50';
     }
@@ -75,6 +99,9 @@ export function CustomerNotificationCenter() {
       navigateTo('dashboard');
       setIsOpen(false);
     } else if (notification.relatedType === 'ing') {
+      navigateTo('dashboard');
+      setIsOpen(false);
+    } else if (notification.relatedType === 'order') {
       navigateTo('dashboard');
       setIsOpen(false);
     }

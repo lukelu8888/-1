@@ -2,7 +2,7 @@
  * 🔧 产品数据智能提取工具
  * 
  * 用途：统一提取产品的 modelNo 和 specification 字段
- * 确保在不同模块（INQ→QR→XJ等）之间数据同步一致
+ * 确保在不同模块（ING→QR→XJ等）之间数据同步一致
  */
 
 export interface ProductData {

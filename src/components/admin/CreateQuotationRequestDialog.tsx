@@ -159,13 +159,7 @@ export function CreateQuotationRequestDialog({
   const handleSubmit = async () => {
     if (!inquiry) return;
 
-    const sourceTemplateSnapshot = inquiry.templateSnapshot || inquiry.template_snapshot || null;
-    const sourceTemplateVersion = sourceTemplateSnapshot?.version || null;
-    const sourceDocumentData = inquiry.documentDataSnapshot || inquiry.document_data_snapshot || null;
-    if (!sourceTemplateVersion || !sourceDocumentData) {
-      toast.error('该 ING 未绑定模板中心版本快照，无法下推 QR');
-      return;
-    }
+    // QR 的 documentDataSnapshot 由下游重新生成，不依赖 ING 的快照。
 
     if (!expectedQuoteDate) {
       toast.error('请设置期望报价日期');
@@ -256,7 +250,7 @@ export function CreateQuotationRequestDialog({
         remarks: remarks,
         notes: flowNotes,
         createdDate: new Date().toISOString().split('T')[0],
-        rfqCount: 0, // 🔥 初始化下推计数，创建时未下推
+        xjCount: 0, // 🔥 初始化下推计数，创建时未下推
       };
 
       console.log('📤 [CreateQuotationRequestDialog] 提交报价请求:', quotationRequest);
@@ -337,7 +331,7 @@ export function CreateQuotationRequestDialog({
 
       console.log('📤 [CreateQuotationRequestDialog] 同时创建 QR 主承载记录:', quoteRequirement);
       console.log('🔍 数据流转说明:');
-      console.log(`  ├─ 业务员询价单号: ${inquiry.id} (INQ)`);
+      console.log(`  ├─ 业务员询价单号: ${inquiry.id} (ING)`);
       console.log(`  ├─ QR 编号: ${requestNumber}`);
       console.log(`  ├─ 来源单号: ${inquiry.id} (追溯业务源头)`);
       console.log(`  └─ 区域: ${inquiry.region || '未设置'}`);

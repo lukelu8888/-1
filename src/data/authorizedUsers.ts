@@ -7,7 +7,7 @@ export interface AuthorizedUser {
   company: string;
   companyId: string; // 🆕 Company ID for multi-user support
   role: 'admin' | 'customer' | 'supplier' | 'agent';
-  userRole?: 'company_admin' | 'standard_user'; // 🆕 Role within the company
+  userRole?: 'company_admin' | 'standard_user' | 'Sales_Director' | 'Regional_Manager' | 'Sales_Rep' | 'Admin_Ops' | 'HR_Admin' | 'Finance' | 'External_Accountant' | 'Procurement_Manager' | 'Procurement' | 'Documentation_Officer' | 'Marketing_Ops' | 'Marketing_Assistant' | 'QC' | 'Admin'; // 🆕 Role within the company
   permissions: string[];
   registeredDate: string;
   hasOrders: boolean; // Whether the user has placed orders
@@ -49,7 +49,7 @@ export const authorizedUsers: AuthorizedUser[] = [
     company: 'COSUN Building Materials',
     companyId: 'cosun001',
     role: 'admin',
-    userRole: 'standard_user',
+    userRole: 'Regional_Manager',
     permissions: ['manage_users', 'manage_settings', 'view_all_data', 'backup_data'], // 🔧 仅系统管理权限
     registeredDate: '2024-01-15',
     hasOrders: false,
@@ -66,7 +66,7 @@ export const authorizedUsers: AuthorizedUser[] = [
     company: 'COSUN Building Materials',
     companyId: 'cosun001',
     role: 'admin',
-    userRole: 'standard_user',
+    userRole: 'Regional_Manager',
     permissions: ['view_all_shipments', 'manage_customers', 'manage_suppliers', 'manage_orders', 'manage_quotations', 'view_finance', 'manage_finance'],
     registeredDate: '2024-01-15',
     hasOrders: true,
@@ -100,7 +100,7 @@ export const authorizedUsers: AuthorizedUser[] = [
     company: 'COSUN Building Materials',
     companyId: 'cosun001',
     role: 'admin',
-    userRole: 'standard_user',
+    userRole: 'Regional_Manager',
     permissions: ['manage_customers', 'manage_orders', 'manage_quotations', 'view_finance'],
     registeredDate: '2024-01-15',
     hasOrders: true,
@@ -274,8 +274,42 @@ export const authorizedUsers: AuthorizedUser[] = [
     company: 'COSUN Building Materials',
     companyId: 'cosun001',
     role: 'admin',
-    userRole: 'Sales_Rep', // 🔥 RBAC角色
+    userRole: 'Marketing_Ops', // 🔥 RBAC角色
     permissions: ['manage_customers', 'view_finance'], // 🔥 社媒营销权限
+    registeredDate: '2024-01-15',
+    hasOrders: false,
+    orderCount: 0,
+    activeShipments: []
+  },
+
+  // 1️⃣2️⃣-1️⃣ 验货员（质检 / 验货）
+  {
+    id: 'admin013',
+    username: 'luyi',
+    password: 'cosun2024',
+    email: 'luyi@cosun.com',
+    company: 'COSUN Building Materials',
+    companyId: 'cosun001',
+    role: 'admin',
+    userRole: 'QC',
+    permissions: ['manage_orders', 'manage_suppliers', 'view_all_shipments'],
+    registeredDate: '2024-01-15',
+    hasOrders: false,
+    orderCount: 0,
+    activeShipments: []
+  },
+
+  // 1️⃣2️⃣-2️⃣ 行政专员
+  {
+    id: 'admin014',
+    username: 'xingzheng',
+    password: 'cosun2024',
+    email: 'xingzheng@cosunchina.com',
+    company: 'COSUN Building Materials',
+    companyId: 'cosun001',
+    role: 'admin',
+    userRole: 'Admin_Ops',
+    permissions: ['manage_users', 'manage_settings', 'view_all_data'],
     registeredDate: '2024-01-15',
     hasOrders: false,
     orderCount: 0,

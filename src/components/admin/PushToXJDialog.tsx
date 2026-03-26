@@ -195,10 +195,10 @@ export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogPro
         const supplier = mockSuppliers.find(s => s.id === supplierId);
         if (!supplier) return;
 
-        const xjNumber = `RFQ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+        const xjNumber = `XJ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
         
         const xjPayload = {
-          id: `rfq_${Date.now()}_${supplierId}`,
+          id: `xj_${Date.now()}_${supplierId}`,
           xjNumber,
           
           // 🔥 产品信息（来自采购需求）

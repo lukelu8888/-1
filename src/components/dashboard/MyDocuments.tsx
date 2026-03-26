@@ -7,13 +7,11 @@ import { A4PageContainer } from '../documents/A4PageContainer';
 import { CustomerInquiryDocument } from '../documents/templates/CustomerInquiryDocument';
 import { QuotationDocument } from '../documents/templates/QuotationDocument';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument';
-import { ProformaInvoiceDocument } from '../documents/templates/ProformaInvoiceDocument';
 import { CommercialInvoiceDocument } from '../documents/templates/CommercialInvoiceDocument';
 import { PackingListDocument } from '../documents/templates/PackingListDocument';
 import type { CustomerInquiryData } from '../documents/templates/CustomerInquiryDocument';
 import type { QuotationData } from '../documents/templates/QuotationDocument';
 import type { SalesContractData } from '../documents/templates/SalesContractDocument';
-import type { ProformaInvoiceData } from '../documents/templates/ProformaInvoiceDocument';
 import type { CommercialInvoiceData } from '../documents/templates/CommercialInvoiceDocument';
 import type { PackingListData } from '../documents/templates/PackingListDocument';
 import html2canvas from 'html2canvas';
@@ -25,6 +23,7 @@ import { useOrders } from '../../contexts/OrderContext';
 import { useUser } from '../../contexts/UserContext';
 import type { BusinessDomain } from '../../lib/erp-core/types';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
+import { getStoredAdminOrgProfile } from '../../contexts/AdminOrganizationContext';
 
 /**
  * 📄 客户文档中心
@@ -38,7 +37,7 @@ import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 
 interface DocumentItem {
   id: string;
-  type: 'ing' | 'qt' | 'sc' | 'pi' | 'ci' | 'pl';
+  type: 'ing' | 'qt' | 'sc' | 'ci' | 'pl';
   number: string;
   externalNumber?: string;
   date: string;
@@ -156,19 +155,6 @@ export function MyDocuments() {
         amount,
       });
 
-      if (['sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'po_generated', 'production', 'shipped', 'completed'].includes(String(sc.status || '').toLowerCase())) {
-        result.push({
-          id: `pi-${sc.id}`,
-          type: 'pi',
-          number: `PI-${scNo}`,
-          externalNumber: getMappedExternalNo('document', `PI-${scNo}`),
-          date: baseDate,
-          title: 'Proforma Invoice',
-          status: scStatus === 'completed' ? 'completed' : 'sent',
-          amount,
-        });
-      }
-
       if (orderStatus === 'shipped' || orderStatus === 'delivered' || String(sc.status || '').toLowerCase() === 'completed') {
         result.push({
           id: `ci-${sc.id}`,
@@ -201,7 +187,6 @@ export function MyDocuments() {
     ing: { label: 'ING', color: 'bg-blue-100 text-blue-700' },
     qt: { label: 'QT', color: 'bg-purple-100 text-purple-700' },
     sc: { label: 'Sales Contract', color: 'bg-green-100 text-green-700' },
-    pi: { label: 'Proforma Invoice', color: 'bg-yellow-100 text-yellow-700' },
     ci: { label: 'Commercial Invoice', color: 'bg-orange-100 text-orange-700' },
     pl: { label: 'Packing List', color: 'bg-pink-100 text-pink-700' },
   };
@@ -225,6 +210,16 @@ export function MyDocuments() {
 
   // 获取文档数据（示例数据）
   const getDocumentData = (doc: DocumentItem) => {
+    const adminOrg = getStoredAdminOrgProfile();
+    const sellerInfo = {
+      companyName: String(adminOrg.nameCN || ''),
+      companyNameEn: String(adminOrg.nameEN || adminOrg.nameCN || ''),
+      address: String(adminOrg.addressCN || ''),
+      addressEn: String(adminOrg.addressEN || adminOrg.addressCN || ''),
+      phone: String(adminOrg.phone || ''),
+      email: String(adminOrg.email || ''),
+    };
+    const usdBank = adminOrg.bankUSD;
     const baseCustomer = {
       companyName: 'ABC Trading Corporation',
       contactPerson: 'John Smith',
@@ -232,9 +227,8 @@ export function MyDocuments() {
       email: 'john.smith@abctrading.com',
       phone: '+1-323-555-0123',
       address: '123 Main Street, Suite 500, Los Angeles, CA 90001',
-      country: 'United States'
+      country: 'United States',
     };
-
     const baseItems = [
       {
         itemNo: '1',
@@ -244,7 +238,7 @@ export function MyDocuments() {
         quantity: 5000,
         unit: 'pcs',
         unitPrice: 1.25,
-        amount: 6250.00
+        amount: 6250.0,
       },
       {
         itemNo: '2',
@@ -254,9 +248,25 @@ export function MyDocuments() {
         quantity: 3000,
         unit: 'pcs',
         unitPrice: 1.85,
-        amount: 5550.00
+        amount: 5550.0,
       },
     ];
+    const quotationTradeTerms = {
+      incoterms: 'FOB Shanghai',
+      paymentTerms: '30% T/T in advance, 70% before shipment',
+      deliveryTime: '30 days after deposit received',
+      packing: 'Standard export carton with inner poly bag',
+      portOfLoading: 'Shanghai, China',
+      portOfDestination: 'Los Angeles, USA',
+      warranty: '12 months after shipment',
+      inspection: 'Seller self-inspection before shipment',
+    };
+    const salesPerson = {
+      name: String(adminOrg.contactPerson || adminOrg.defaultSignatory || 'Luke'),
+      position: 'Sales Representative',
+      email: sellerInfo.email,
+      phone: sellerInfo.phone,
+    };
 
     switch (doc.type) {
       case 'ing':
@@ -265,12 +275,12 @@ export function MyDocuments() {
           inquiryDate: doc.date,
           region: 'NA',
           customer: baseCustomer,
-          items: baseItems.map(item => ({
+          items: baseItems.map((item) => ({
             ...item,
             unitPrice: undefined,
             amount: undefined,
           })),
-          notes: 'Please provide your best price for the items listed above.'
+          notes: 'Please provide your best price for the items listed above.',
         } as CustomerInquiryData;
 
       case 'qt':
@@ -278,154 +288,185 @@ export function MyDocuments() {
           quotationNo: doc.number,
           quotationDate: doc.date,
           validUntil: '2025-12-31',
-          inquiryRef: 'ING-NA-20251210-001',
+          inquiryNo: 'ING-NA-20251210-001',
           region: 'NA',
-          customer: baseCustomer,
-          items: baseItems,
-          subtotal: 11800.00,
-          discount: 0,
-          tax: 0,
-          shipping: 4090.00,
-          total: 15890.00,
-          paymentTerms: '30% T/T in advance, 70% before shipment',
-          deliveryTerms: 'FOB Shanghai',
-          leadTime: '30 days after deposit received',
-          validity: '30 days from quotation date',
-          notes: 'Prices are quoted in USD and valid for 30 days.'
+          company: {
+            name: sellerInfo.companyName,
+            nameEn: sellerInfo.companyNameEn,
+            address: sellerInfo.address,
+            addressEn: sellerInfo.addressEn,
+            tel: sellerInfo.phone,
+            email: sellerInfo.email,
+          },
+          customer: {
+            companyName: baseCustomer.companyName,
+            contactPerson: baseCustomer.contactPerson,
+            address: baseCustomer.address,
+            email: baseCustomer.email,
+            phone: baseCustomer.phone,
+          },
+          products: baseItems.map((item, index) => ({
+            no: index + 1,
+            modelNo: '-',
+            productName: item.description,
+            specification: item.specifications,
+            quantity: item.quantity,
+            unit: item.unit,
+            unitPrice: item.unitPrice,
+            currency: 'USD',
+            amount: item.amount,
+          })),
+          tradeTerms: quotationTradeTerms,
+          remarks: 'Prices are quoted in USD and valid for 30 days.',
+          salesPerson,
         } as QuotationData;
 
       case 'sc':
         return {
           contractNo: doc.number,
           contractDate: doc.date,
-          quotationRef: 'QT-NA-20251211-001',
+          quotationNo: 'QT-NA-20251211-001',
           region: 'NA',
-          buyer: baseCustomer,
-          seller: {
-            companyName: '福建高盛达富建材有限公司',
-            companyNameEn: 'Fujian COSUN Building Materials Co., Ltd.',
-            address: '福建省福州市仓山区建新镇金山工业区',
-            addressEn: 'Jinshan Industrial Zone, Jianxin Town, Cangshan District, Fuzhou, Fujian, China',
-            phone: '+86-591-8888-8888',
-            email: 'sales@cosun-bm.com',
-            representative: 'Zhang Wei',
-            representativeEn: 'Mr. Zhang Wei'
+          buyer: {
+            companyName: baseCustomer.companyName,
+            address: baseCustomer.address,
+            country: baseCustomer.country,
+            contactPerson: baseCustomer.contactPerson,
+            tel: baseCustomer.phone,
+            email: baseCustomer.email,
           },
-          items: baseItems,
-          subtotal: 11800.00,
-          discount: 0,
-          tax: 0,
-          shipping: 4090.00,
-          total: 15890.00,
-          paymentTerms: '30% T/T in advance, 70% before shipment',
-          deliveryTerms: 'FOB Shanghai',
-          deliveryDate: '2026-01-15',
-          packingRequirements: 'Standard export carton with inner poly bag',
-          inspectionTerms: 'SGS inspection before shipment',
-          notes: 'Both parties agree to the terms and conditions stated above.'
+          seller: {
+            name: sellerInfo.companyName,
+            nameEn: sellerInfo.companyNameEn,
+            address: sellerInfo.address,
+            addressEn: sellerInfo.addressEn,
+            tel: sellerInfo.phone,
+            email: sellerInfo.email,
+            legalRepresentative: String(adminOrg.contactPerson || adminOrg.defaultSignatory || ''),
+            bankInfo: {
+              bankName: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
+              accountName: String(usdBank.accountNameEN || usdBank.accountNameCN || sellerInfo.companyNameEn || sellerInfo.companyName),
+              accountNumber: String(usdBank.accountNumber || ''),
+              swiftCode: String(usdBank.swiftCode || ''),
+              bankAddress: String(usdBank.bankAddress || ''),
+              paymentNote: String(usdBank.paymentNote || ''),
+              currency: 'USD',
+            },
+          },
+          products: baseItems.map((item, index) => ({
+            no: index + 1,
+            modelNo: '-',
+            description: item.description,
+            specification: item.specifications,
+            quantity: item.quantity,
+            unit: item.unit,
+            unitPrice: item.unitPrice,
+            currency: 'USD',
+            amount: item.amount,
+          })),
+          terms: {
+            totalAmount: 11800.0,
+            currency: 'USD',
+            tradeTerms: quotationTradeTerms.incoterms,
+            paymentTerms: quotationTradeTerms.paymentTerms,
+            depositAmount: 3540.0,
+            balanceAmount: 8260.0,
+            deliveryTime: quotationTradeTerms.deliveryTime,
+            portOfLoading: quotationTradeTerms.portOfLoading,
+            portOfDestination: quotationTradeTerms.portOfDestination || '',
+            packing: quotationTradeTerms.packing,
+            inspection: 'SGS inspection before shipment',
+          },
         } as SalesContractData;
-
-      case 'pi':
-        return {
-          invoiceNo: doc.number,
-          invoiceDate: doc.date,
-          contractRef: 'SC-NA-20251212-001',
-          region: 'NA',
-          buyer: baseCustomer,
-          seller: {
-            companyName: '福建高盛达富建材有限公司',
-            companyNameEn: 'Fujian COSUN Building Materials Co., Ltd.',
-            address: '福建省福州市仓山区建新镇金山工业区',
-            addressEn: 'Jinshan Industrial Zone, Jianxin Town, Cangshan District, Fuzhou, Fujian, China',
-            phone: '+86-591-8888-8888',
-            email: 'sales@cosun-bm.com',
-            bankName: 'Bank of China, Fuzhou Branch',
-            bankAccount: '1234567890123456789',
-            swiftCode: 'BKCHCNBJ950'
-          },
-          items: baseItems,
-          subtotal: 11800.00,
-          discount: 0,
-          tax: 0,
-          shipping: 4090.00,
-          total: 15890.00,
-          paymentTerms: '30% T/T in advance, 70% before shipment',
-          deliveryTerms: 'FOB Shanghai',
-          notes: 'This is a proforma invoice for customs clearance purposes only.'
-        } as ProformaInvoiceData;
 
       case 'ci':
         return {
           invoiceNo: doc.number,
           invoiceDate: doc.date,
-          contractRef: 'SC-NA-20251212-001',
-          region: 'NA',
-          buyer: baseCustomer,
-          seller: {
-            companyName: '福建高盛达富建材有限公司',
-            companyNameEn: 'Fujian COSUN Building Materials Co., Ltd.',
-            address: '福建省福州市仓山区建新镇金山工业区',
-            addressEn: 'Jinshan Industrial Zone, Jianxin Town, Cangshan District, Fuzhou, Fujian, China',
-            phone: '+86-591-8888-8888',
-            email: 'sales@cosun-bm.com',
+          contractNo: 'SC-NA-20251212-001',
+          exporter: {
+            name: sellerInfo.companyName,
+            nameEn: sellerInfo.companyNameEn,
+            address: sellerInfo.address,
+            addressEn: sellerInfo.addressEn,
+            tel: sellerInfo.phone,
           },
-          items: baseItems,
-          subtotal: 11800.00,
-          discount: 0,
-          tax: 0,
-          shipping: 4090.00,
-          total: 15890.00,
-          paymentTerms: '30% T/T in advance, 70% before shipment',
-          deliveryTerms: 'FOB Shanghai',
-          shippingInfo: {
+          importer: {
+            name: baseCustomer.companyName,
+            address: baseCustomer.address,
+            country: baseCustomer.country,
+            tel: baseCustomer.phone,
+          },
+          shippingMarks: {
+            mainMark: 'ABC-LA-001',
+            sideMark: 'C/NO. 1-50',
+            cautionMark: 'MADE IN CHINA\nFRAGILE - HANDLE WITH CARE',
+          },
+          goods: baseItems.map((item, index) => ({
+            no: index + 1,
+            description: `${item.description}, ${item.specifications}`,
+            hsCode: '8536.6990',
+            quantity: item.quantity,
+            unit: item.unit.toUpperCase(),
+            unitPrice: item.unitPrice,
+            currency: 'USD',
+            amount: item.amount,
+            grossWeight: item.quantity * 0.15,
+            netWeight: item.quantity * 0.12,
+            measurement: item.quantity * 0.0008,
+          })),
+          shipping: {
+            tradeTerms: 'FOB Shanghai',
+            paymentTerms: '30% T/T in advance, 70% before shipment',
             portOfLoading: 'Shanghai, China',
             portOfDischarge: 'Los Angeles, USA',
+            finalDestination: 'Los Angeles, USA',
             vesselName: 'COSCO Glory',
             voyageNo: 'V2025-001',
-            containerNo: 'COSU1234567',
-            sealNo: 'SEAL123456',
-            blNo: 'BL-2025-001'
+            blNo: 'BL-2025-001',
           },
-          notes: 'All goods have been shipped as per contract terms.'
+          packing: {
+            totalCartons: 80,
+            totalGrossWeight: 1250,
+            totalNetWeight: 1000,
+            totalMeasurement: 5.76,
+          },
         } as CommercialInvoiceData;
 
       case 'pl':
         return {
-          packingListNo: doc.number,
-          packingListDate: doc.date,
-          invoiceRef: 'CI-NA-20251214-001',
-          contractRef: 'SC-NA-20251212-001',
-          region: 'NA',
-          buyer: baseCustomer,
-          seller: {
-            companyName: '福建高盛达富建材有限公司',
-            companyNameEn: 'Fujian COSUN Building Materials Co., Ltd.',
-            address: '福建省福州市仓山区建新镇金山工业区',
-            addressEn: 'Jinshan Industrial Zone, Jianxin Town, Cangshan District, Fuzhou, Fujian, China',
-            phone: '+86-591-8888-8888',
-            email: 'sales@cosun-bm.com',
+          plNo: doc.number,
+          invoiceNo: 'CI-NA-20251214-001',
+          date: doc.date,
+          exporter: {
+            name: sellerInfo.companyNameEn || sellerInfo.companyName,
+            address: sellerInfo.addressEn || sellerInfo.address,
           },
-          items: baseItems.map(item => ({
-            ...item,
+          importer: {
+            name: baseCustomer.companyName,
+            address: baseCustomer.address,
+          },
+          shippingMarks: 'ABC-LA-001\nC/NO. 1-50\nMADE IN CHINA\nFRAGILE - HANDLE WITH CARE',
+          packages: baseItems.map((item) => ({
             cartonNo: '1-50',
-            grossWeight: item.quantity * 0.15,
-            netWeight: item.quantity * 0.12,
-            measurements: '60x40x30 cm',
-            cartons: Math.ceil(item.quantity / 100)
+            description: `${item.description}, ${item.specifications}`,
+            qtyPerCarton: 100,
+            totalCartons: Math.ceil(item.quantity / 100),
+            totalQty: item.quantity,
+            unit: item.unit.toUpperCase(),
+            netWeight: 12,
+            grossWeight: 15,
+            measurement: 0.072,
+            totalNW: Math.ceil(item.quantity / 100) * 12,
+            totalGW: Math.ceil(item.quantity / 100) * 15,
+            totalCBM: Math.ceil(item.quantity / 100) * 0.072,
           })),
-          shippingInfo: {
+          shipping: {
             portOfLoading: 'Shanghai, China',
             portOfDischarge: 'Los Angeles, USA',
             vesselName: 'COSCO Glory',
-            voyageNo: 'V2025-001',
-            containerNo: 'COSU1234567',
-            sealNo: 'SEAL123456',
+            blNo: 'BL-2025-001',
           },
-          totalGrossWeight: 1125,
-          totalNetWeight: 900,
-          totalCartons: 80,
-          totalCbm: 5.76,
-          notes: 'Handle with care. Keep dry.'
         } as PackingListData;
 
       default:
@@ -445,8 +486,6 @@ export function MyDocuments() {
         return <QuotationDocument data={data as QuotationData} />;
       case 'sc':
         return <SalesContractDocument data={data as SalesContractData} />;
-      case 'pi':
-        return <ProformaInvoiceDocument data={data as ProformaInvoiceData} />;
       case 'ci':
         return <CommercialInvoiceDocument data={data as CommercialInvoiceData} />;
       case 'pl':
@@ -526,7 +565,6 @@ export function MyDocuments() {
                   <option value="ing">Inquiry</option>
                   <option value="qt">Quotation</option>
                   <option value="sc">Sales Contract</option>
-                  <option value="pi">Proforma Invoice</option>
                   <option value="ci">Commercial Invoice</option>
                   <option value="pl">Packing List</option>
                 </select>

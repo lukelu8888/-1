@@ -42,6 +42,7 @@ interface PurchaserFeedbackFormProps {
   qr: QuoteRequirement;
   onSubmit: (feedback: QuoteRequirementFeedback) => void;
   currentUserName: string;
+  preferredBJNumber?: string;
 }
 
 export function PurchaserFeedbackForm({
@@ -49,7 +50,8 @@ export function PurchaserFeedbackForm({
   onOpenChange,
   qr,
   onSubmit,
-  currentUserName
+  currentUserName,
+  preferredBJNumber,
 }: PurchaserFeedbackFormProps) {
   
   const { xjs } = useXJs();
@@ -63,6 +65,13 @@ export function PurchaserFeedbackForm({
   const [suggestedMargin, setSuggestedMargin] = useState(30);
   const [riskLevel, setRiskLevel] = useState<'low' | 'medium' | 'high'>('medium');
   const [purchaserRemarks, setPurchaserRemarks] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setComparisonResult(null);
+      setShowComparisonForm(false);
+    }
+  }, [open, qr.id, preferredBJNumber]);
   
   // 🔥 自动加载：当对话框打开时，尝试智能比价
   useEffect(() => {
@@ -129,17 +138,17 @@ export function PurchaserFeedbackForm({
         
         // 匹配XJ编号
         const matched = relatedXJs.some(xj => {
-          const matchBySupplierRfqNo = bj.sourceXJ === xj.supplierXjNo;
-          const matchByRfqNumber = bj.sourceXJ === xj.xjNumber;
+          const matchBySupplierXJNo = bj.sourceXJ === xj.supplierXjNo;
+          const matchByXJNumber = bj.sourceXJ === xj.xjNumber;
           
-          if (matchBySupplierRfqNo || matchByRfqNumber) {
+          if (matchBySupplierXJNo || matchByXJNumber) {
             console.log(`  ✅ BJ ${bj.quotationNo} 匹配成功！`);
             console.log(`    - BJ.sourceXJ: ${bj.sourceXJ}`);
             console.log(`    - XJ.supplierXjNo: ${xj.supplierXjNo}`);
             console.log(`    - XJ.xjNumber: ${xj.xjNumber}`);
           }
           
-          return matchBySupplierRfqNo || matchByRfqNumber;
+          return matchBySupplierXJNo || matchByXJNumber;
         });
         
         return matched;
@@ -161,12 +170,24 @@ export function PurchaserFeedbackForm({
         qr.items,
         relatedBJs
       );
+
+      const preferredResult = preferredBJNumber
+        ? {
+            ...result,
+            products: result.products.map((product) => {
+              const hasPreferred = product.quotations.some((q) => q.bjNumber === preferredBJNumber);
+              return hasPreferred
+                ? { ...product, selectedBJNumber: preferredBJNumber }
+                : product;
+            }),
+          }
+        : result;
       
-      setComparisonResult(result);
-      setRiskLevel(result.overallRisk);
+      setComparisonResult(preferredResult);
+      setRiskLevel(preferredResult.overallRisk);
       
       // 5. 生成默认采购建议
-      const defaultRemarks = generateDefaultPurchaserRemarks(result);
+      const defaultRemarks = generateDefaultPurchaserRemarks(preferredResult);
       setPurchaserRemarks(defaultRemarks);
       
       toast.success(`✅ 智能比价完成！收到 ${relatedBJs.length} 个供应商报价`, {
@@ -174,7 +195,7 @@ export function PurchaserFeedbackForm({
       });
       
       // 6. 如果有多供应商报价，显示比价表
-      const hasMultipleQuotations = result.products.some(p => p.quotationCount > 1);
+      const hasMultipleQuotations = preferredResult.products.some(p => p.quotationCount > 1);
       if (hasMultipleQuotations) {
         setShowComparisonForm(true);
       }
@@ -354,7 +375,7 @@ ${result.products.map((p, idx) => {
               智能采购反馈 - {qr.requirementNo}
             </DialogTitle>
             <DialogDescription>
-              为业务员 <span className="font-semibold text-blue-600">{qr.createdBy}</span> 提供成本信息，帮助其完成客户报价
+              为业务员 <span className="font-semibold text-blue-600">{qr.requestedByName || qr.createdBy}</span> 提供成本信息，帮助其完成客户报价
             </DialogDescription>
           </DialogHeader>
           

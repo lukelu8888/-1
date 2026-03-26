@@ -79,30 +79,29 @@ export default function QuickQuotationCreator() {
         }
       );
 
-      await saveSupplierQuotation(quotation);
+      const savedQuotation = await saveSupplierQuotation(quotation);
 
       // Supabase-first: BJ 草稿仅建立关联，提交后才把 XJ 标记为 quoted
       try {
         if (status === 'submitted') {
           await updateXJ(xj.id, {
-            supplierQuotationNo: quotation.quotationNo,
+            supplierQuotationNo: savedQuotation.quotationNo,
             status: 'quoted' as any
           });
         } else {
           await updateXJ(xj.id, {
-            supplierQuotationNo: quotation.quotationNo
+            supplierQuotationNo: savedQuotation.quotationNo
           });
         }
       } catch (error: any) {
-        toast.error(`同步 XJ 状态失败：${error?.message || '未知错误'}`);
-        return;
+        toast.warning(`报价单已创建，但 XJ 状态同步失败：${error?.message || '未知错误'}`);
       }
 
       toast.success(
         <div className="space-y-1">
           <p className="font-semibold">✅ 报价单创建成功！</p>
           <p className="text-sm">询价单号: {xjNumber}</p>
-          <p className="text-sm">报价单号: {quotation.quotationNo}</p>
+          <p className="text-sm">报价单号: {savedQuotation.quotationNo}</p>
           <p className="text-sm">状态: {status === 'draft' ? '草稿' : '已提交'}</p>
           <p className="text-xs text-slate-500 mt-2">
             请前往"订单管理中心 → 我的报价"查看
@@ -117,9 +116,11 @@ export default function QuickQuotationCreator() {
         window.location.reload();
       }, 2000);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('创建报价单失败:', error);
-      toast.error('创建报价单失败，请重试');
+      toast.error('创建报价单失败，请重试', {
+        description: error?.message || '请查看控制台日志'
+      });
     }
   };
 

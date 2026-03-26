@@ -18,62 +18,192 @@ export interface AuthUser {
 
 export type PortalRole = 'admin' | 'staff' | 'supplier' | 'customer' | null;
 
+function parseStoredJson(key: string) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getPreferredRbacUser() {
+  const switchedUser = parseStoredJson('cosun_switched_user');
+  const currentUser = parseStoredJson('cosun_current_user');
+
+  if (switchedUser?.email) {
+    if (!currentUser?.email || String(switchedUser.email).trim().toLowerCase() === String(currentUser.email).trim().toLowerCase()) {
+      return switchedUser;
+    }
+  }
+
+  return currentUser;
+}
+
+export function getAuthenticatedUser(): AuthUser | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const authUser = parseStoredJson('cosun_auth_user');
+    const backendUser = parseStoredJson('cosun_backend_user');
+
+    if (authUser?.email && authUser?.type) {
+      return {
+        ...authUser,
+        id: authUser.id ?? backendUser?.id,
+        name: authUser.name ?? backendUser?.name,
+        role: authUser.role ?? backendUser?.role ?? backendUser?.rbac_role,
+        userRole: authUser.userRole ?? authUser.role ?? backendUser?.role ?? backendUser?.rbac_role,
+        region: authUser.region ?? backendUser?.region,
+      } as AuthUser;
+    }
+
+    if (backendUser?.email) {
+      const portalRole = String(backendUser?.portal_role || '').trim().toLowerCase();
+      const type: UserType =
+        portalRole === 'supplier' ? 'supplier' :
+        portalRole === 'customer' ? 'customer' :
+        'admin';
+      return {
+        id: backendUser.id,
+        email: backendUser.email,
+        name: backendUser.name,
+        type,
+        role: backendUser.role ?? backendUser.rbac_role,
+        userRole: backendUser.userRole ?? backendUser.role ?? backendUser.rbac_role,
+        region: backendUser.region,
+      };
+    }
+  } catch (e) {
+    console.error('Failed to get authenticated user:', e);
+  }
+
+  return null;
+}
+
+export function getActingUser(): AuthUser | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const rbacUser = getPreferredRbacUser();
+    const authUser = getAuthenticatedUser();
+
+    if (rbacUser?.email) {
+      const role = rbacUser.role || rbacUser.userRole || '';
+      let userType: UserType = 'admin';
+      if (role === 'Supplier') userType = 'supplier';
+      else if (role === 'Customer') userType = 'customer';
+
+      return {
+        id: rbacUser.id ?? authUser?.id,
+        email: rbacUser.email,
+        name: rbacUser.name ?? authUser?.name,
+        type: authUser?.type ?? userType,
+        role: rbacUser.role ?? authUser?.role,
+        userRole: rbacUser.userRole || rbacUser.role || authUser?.userRole || authUser?.role,
+        region: rbacUser.region ?? authUser?.region,
+      };
+    }
+
+    return authUser;
+  } catch (e) {
+    console.error('Failed to get acting user:', e);
+  }
+
+  return null;
+}
+
 /**
  * 获取当前登录用户
  * 优先读取 UserContext 写入的 cosun_auth_user（Supabase Auth 格式）
  * 兼容旧的 cosun_current_user（RBAC 格式）
  */
 export function getCurrentUser(): AuthUser | null {
-  if (typeof window === 'undefined') return null;
+  return getActingUser();
+}
 
-  try {
-    // 1. 读取旧 RBAC 用户（用于补齐 role/name/region）
-    const rbacUserStr = localStorage.getItem('cosun_current_user');
-    const rbacUser = rbacUserStr ? JSON.parse(rbacUserStr) : null;
+export function getOperatorUser(): AuthUser | null {
+  return getAuthenticatedUser() || getActingUser();
+}
 
-    // 2. 优先读取 Supabase Auth 写入的 cosun_auth_user
-    const authUserStr = localStorage.getItem('cosun_auth_user');
-    if (authUserStr) {
-      const authUser = JSON.parse(authUserStr);
-      // 验证格式有效（必须有 email 和 type）
-      if (authUser?.email && authUser?.type) {
-        const sameEmail = rbacUser?.email && rbacUser.email === authUser.email;
-        return {
-          ...authUser,
-          id: authUser.id ?? (sameEmail ? rbacUser.id : undefined),
-          name: authUser.name ?? (sameEmail ? rbacUser.name : undefined),
-          role: authUser.role ?? (sameEmail ? rbacUser.role : undefined),
-          userRole: authUser.userRole ?? (sameEmail ? (rbacUser.userRole || rbacUser.role) : undefined),
-          region: authUser.region ?? (sameEmail ? rbacUser.region : undefined),
-        } as AuthUser;
-      }
-    }
+export function buildIdentityAuditMetadata(input: {
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+  region?: string | null;
+}) {
+  const authenticatedUser = getAuthenticatedUser();
+  const actingUser = getActingUser();
+  const operatorUser = getOperatorUser();
 
-    // 3. 降级：读取旧 RBAC cosun_current_user
-    if (rbacUserStr) {
-      if (!rbacUser?.email) return null;
+  return {
+    identityAudit: {
+      authenticatedUser: authenticatedUser
+        ? {
+            id: authenticatedUser.id || null,
+            email: authenticatedUser.email || null,
+            name: authenticatedUser.name || null,
+            role: authenticatedUser.userRole || authenticatedUser.role || null,
+            region: authenticatedUser.region || null,
+            type: authenticatedUser.type || null,
+          }
+        : null,
+      actingUser: actingUser
+        ? {
+            id: actingUser.id || null,
+            email: actingUser.email || null,
+            name: actingUser.name || null,
+            role: actingUser.userRole || actingUser.role || null,
+            region: actingUser.region || null,
+            type: actingUser.type || null,
+          }
+        : null,
+      operatorUser: operatorUser
+        ? {
+            id: operatorUser.id || null,
+            email: operatorUser.email || null,
+            name: operatorUser.name || null,
+            role: operatorUser.userRole || operatorUser.role || null,
+            region: operatorUser.region || null,
+            type: operatorUser.type || null,
+          }
+        : null,
+      businessOwner: {
+        email: input.ownerEmail || null,
+        name: input.ownerName || null,
+        role: input.ownerRole || null,
+        region: input.region || null,
+      },
+      capturedAt: new Date().toISOString(),
+    },
+  };
+}
 
-      // 根据 role 推断 type（兼容大小写）
-      const role = rbacUser.role || '';
-      let userType: UserType = 'admin';
-      if (role === 'Supplier') userType = 'supplier';
-      else if (role === 'Customer') userType = 'customer';
+export function buildIdentityPersistenceFields(input: {
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+}) {
+  const authenticatedUser = getAuthenticatedUser();
+  const actingUser = getActingUser();
+  const operatorUser = getOperatorUser();
 
-      return {
-        id: rbacUser.id,
-        email: rbacUser.email,
-        name: rbacUser.name,
-        type: userType,
-        role: rbacUser.role,
-        userRole: rbacUser.userRole || rbacUser.role,
-        region: rbacUser.region,
-      };
-    }
-  } catch (e) {
-    console.error('Failed to get current user:', e);
-  }
-
-  return null;
+  return {
+    ownerUserId: null,
+    ownerEmail: input.ownerEmail || null,
+    ownerName: input.ownerName || null,
+    ownerRole: input.ownerRole || null,
+    operatorUserId: operatorUser?.id || null,
+    operatorEmail: operatorUser?.email || null,
+    operatorRole: operatorUser?.userRole || operatorUser?.role || null,
+    actingUserId: actingUser?.id || null,
+    actingUserEmail: actingUser?.email || null,
+    actingUserRole: actingUser?.userRole || actingUser?.role || null,
+    authenticatedUserId: authenticatedUser?.id || null,
+    authenticatedUserEmail: authenticatedUser?.email || null,
+    authenticatedUserRole: authenticatedUser?.userRole || authenticatedUser?.role || null,
+  };
 }
 
 export function getStoredPortalRole(): PortalRole {

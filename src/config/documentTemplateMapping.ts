@@ -84,6 +84,33 @@ export const DOCUMENT_TEMPLATE_MAPPING = {
       }
     ]
   },
+
+  // 🔥 采购请求单模板（PR）
+  pr: {
+    templateId: 'pr',
+    templateName: '采购请求单',
+    templateNameEn: 'Procurement Request',
+    templateComponent: '@/components/documents/templates/QuoteRequirementDocument',
+    dataInterface: 'QuoteRequirementDocumentData',
+    canonicalDocumentCode: 'PR',
+    usedInModules: [
+      {
+        module: 'procurement-portal',
+        subModule: 'procurement-request-management',
+        description: '采购端 - 采购请求与供应商分配'
+      },
+      {
+        module: 'admin-portal',
+        subModule: 'sales-contract-management',
+        description: '销售端 - 销售合同下推采购请求'
+      },
+      {
+        module: 'procurement-portal',
+        subModule: 'purchase-contract-generation',
+        description: '采购端 - 基于分配结果生成多份采购合同'
+      }
+    ]
+  },
   
   // 🔥 采购合同模板（兼容旧 purchase-order 键）
   cg: {

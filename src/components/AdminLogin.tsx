@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Building2, Eye, EyeOff, Globe, Shield } from 'lucide-react';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
-import { useUser } from '../contexts/UserContext';
+import { useOptionalUser } from '../contexts/UserContext';
 import { useRouter } from '../contexts/RouterContext';
 import { signInWithEmail, fetchProfile } from '../hooks/useSupabaseAuth';
+import {
+  getStoredAdminOrgProfile,
+  recordStoredAdminAccountLastLogin,
+} from '../contexts/AdminOrganizationContext';
+import { adminLoginAuditService } from '../lib/supabaseService';
 
 function readCachedAdminProfile(email: string) {
   try {
@@ -12,12 +17,12 @@ function readCachedAdminProfile(email: string) {
     if (!backendUserRaw) return null;
     const backendUser = JSON.parse(backendUserRaw);
     if (String(backendUser?.email || '').toLowerCase() !== email.toLowerCase()) return null;
-    if (backendUser?.portal_role !== 'admin') return null;
+    if (backendUser?.portal_role !== 'admin' && backendUser?.portal_role !== 'staff') return null;
     return {
       name: backendUser.username as string | undefined,
       rbac_role: backendUser.rbac_role as string | null | undefined,
       region: backendUser.region as string | null | undefined,
-      portal_role: 'admin' as const,
+      portal_role: (backendUser.portal_role === 'staff' ? 'staff' : 'admin') as 'admin' | 'staff',
     };
   } catch {
     return null;
@@ -31,6 +36,7 @@ function persistFallbackAdminState(params: {
   rbacRole?: string | null;
   region?: string | null;
 }) {
+  localStorage.removeItem('cosun_switched_user');
   localStorage.setItem('cosun_auth_user', JSON.stringify({
     id: params.id,
     email: params.email,
@@ -61,7 +67,8 @@ function persistFallbackAdminState(params: {
 }
 
 export default function AdminLogin() {
-  const { setUser } = useUser();
+  const userContext = useOptionalUser();
+  const setUser = userContext?.setUser ?? (() => {});
   const { navigateTo } = useRouter();
   const REMEMBER_KEY = 'cosun_remember_admin';
   const MIGRATE_VERSION = 'v3';
@@ -83,28 +90,56 @@ export default function AdminLogin() {
   const [isLoading, setIsLoading] = useState(false);
   const [language, setLanguage] = useState<'zh' | 'en'>('zh');
 
-  // 将用户名/短名映射为邮箱（开发快捷登录用）
-  const USERNAME_MAP: Record<string, string> = {
-    admin: 'admin@cosun.com',
-    ceo: 'ceo@cosun.com',
-    cfo: 'cfo@cosun.com',
-    'sales.director': 'sales.director@cosun.com',
-    'john.smith': 'john.smith@cosun.com',
-    'carlos.silva': 'carlos.silva@cosun.com',
-    'hans.mueller': 'hans.mueller@cosun.com',
-    zhangwei: 'zhangwei@cosun.com',
-    lifang: 'lifang@cosun.com',
-    wangfang: 'wangfang@cosun.com',
-    finance: 'finance@cosun.com',
-    procurement: 'procurement@cosun.com',
-    marketing: 'marketing@cosun.com',
-    supplier: 'gd.supplier@test.com',
-  };
+  const adminOrgProfile = getStoredAdminOrgProfile();
+  const adminLoginAccounts = useMemo(() => adminOrgProfile.internalAccounts
+    .filter((account) => {
+      if (!account.canLogin || account.accountStatus !== 'active') return false;
+      return Boolean(account.loginEmail && account.loginPassword);
+    })
+    .map((account) => {
+      const linkedContact = adminOrgProfile.internalContacts.find((contact) => contact.id === account.employeeId);
+      return {
+        id: account.id,
+        username: account.username || account.loginEmail.split('@')[0],
+        email: account.loginEmail,
+        password: account.loginPassword,
+        name: linkedContact?.name || account.username || '内部账号',
+        title: linkedContact?.title || account.role || '内部岗位',
+        employeeNo: linkedContact?.employeeNo || '',
+      };
+    })
+    .sort((left, right) => {
+      const leftNo = Number(String(left.employeeNo || '').replace(/\D/g, '') || 0);
+      const rightNo = Number(String(right.employeeNo || '').replace(/\D/g, '') || 0);
+      if (leftNo !== rightNo) return leftNo - rightNo;
+      return left.name.localeCompare(right.name, 'zh-CN');
+    }), [adminOrgProfile.internalAccounts, adminOrgProfile.internalContacts]);
+
+  const unifiedAdminAccount = useMemo(() => {
+    return adminLoginAccounts.find((account) => {
+      const username = String(account.username || '').trim().toLowerCase();
+      const email = String(account.email || '').trim().toLowerCase();
+      return username === 'admin' || email === 'admin@cosun.com';
+    }) || null;
+  }, [adminLoginAccounts]);
+
+  const usernameMap = useMemo(() => {
+    const entries: Array<[string, string]> = [];
+    adminLoginAccounts.forEach((account) => {
+      const emailPrefix = String(account.email || '').split('@')[0]?.trim().toLowerCase();
+      const username = String(account.username || '').trim().toLowerCase();
+      const name = String(account.name || '').trim().toLowerCase();
+      if (emailPrefix) entries.push([emailPrefix, account.email]);
+      if (username) entries.push([username, account.email]);
+      if (name) entries.push([name, account.email]);
+    });
+    return new Map(entries);
+  }, [adminLoginAccounts]);
 
   const resolveEmail = (input: string): string => {
     const trimmed = input.trim().toLowerCase();
     if (trimmed.includes('@')) return trimmed;
-    return USERNAME_MAP[trimmed] ?? trimmed;
+    return usernameMap.get(trimmed) ?? trimmed;
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -113,15 +148,42 @@ export default function AdminLogin() {
     setIsLoading(true);
 
     const email = resolveEmail(username);
+    const normalizedUsername = username.trim().toLowerCase();
+    const unifiedAdminEmail = String(unifiedAdminAccount?.email || 'admin@cosun.com').trim().toLowerCase();
+    const isUnifiedAdminLogin = normalizedUsername === 'admin' || email === unifiedAdminEmail;
+    const attemptedAt = new Date().toISOString();
     if (!email) {
+      void adminLoginAuditService.record({
+        attemptedAt,
+        enteredIdentifier: username,
+        loginEmail: '',
+        normalizedLoginEmail: '',
+        status: 'failure',
+        failureReason: 'missing_identifier',
+      });
       setError(language === 'zh' ? '请输入有效的用户名或邮箱' : 'Please enter a valid username or email');
+      setIsLoading(false);
+      return;
+    }
+    if (!isUnifiedAdminLogin) {
+      void adminLoginAuditService.record({
+        attemptedAt,
+        enteredIdentifier: username,
+        loginEmail: email,
+        normalizedLoginEmail: unifiedAdminEmail,
+        status: 'failure',
+        failureReason: 'non_unified_admin_login_blocked',
+      });
+      setError(language === 'zh'
+        ? '内部员工请统一使用 admin 主账号登录，登录后再通过右上角“切换角色”进入对应身份。'
+        : 'Please use the admin master account to sign in, then switch identity from the role dropdown.');
       setIsLoading(false);
       return;
     }
 
     try {
       // Supabase Auth 登录
-      const { session } = await signInWithEmail(email, password);
+      const { session } = await signInWithEmail(unifiedAdminEmail, password);
       if (!session?.user) throw new Error('登录失败，请重试');
 
       // 获取用户 profile（portal_role / rbac_role / region）
@@ -135,8 +197,21 @@ export default function AdminLogin() {
         console.warn('[AdminLogin] profile lookup failed, using fallback session.', profileError);
       }
 
-      // 仅允许 admin portal_role 登录此页面
-      if (profile && profile.portal_role !== 'admin') {
+      // 允许 admin / staff 进入内部管理门户
+      if (profile && profile.portal_role !== 'admin' && profile.portal_role !== 'staff') {
+        void adminLoginAuditService.record({
+          attemptedAt,
+          enteredIdentifier: username,
+          loginEmail: session.user.email!,
+          normalizedLoginEmail: unifiedAdminEmail,
+          authUserId: session.user.id,
+          adminName: profile?.name ?? session.user.email!.split('@')[0],
+          portalRole: profile.portal_role,
+          rbacRole: profile.rbac_role ?? '',
+          region: profile.region ?? '',
+          status: 'failure',
+          failureReason: 'portal_role_not_admin',
+        });
         await import('../hooks/useSupabaseAuth').then(m => m.signOut());
         throw new Error(language === 'zh'
           ? '此账号无管理员权限，请使用客户/供应商入口登录'
@@ -166,6 +241,20 @@ export default function AdminLogin() {
         rbacRole: profile?.rbac_role,
         region: profile?.region,
       });
+      await recordStoredAdminAccountLastLogin(session.user.email!, attemptedAt);
+      void adminLoginAuditService.record({
+        attemptedAt,
+        enteredIdentifier: username,
+        loginEmail: session.user.email!,
+        normalizedLoginEmail: unifiedAdminEmail,
+        authUserId: session.user.id,
+        adminName: profile?.name ?? session.user.email!.split('@')[0],
+        portalRole: profile?.portal_role ?? 'admin',
+        rbacRole: profile?.rbac_role ?? 'Admin',
+        region: profile?.region ?? 'all',
+        status: 'success',
+        failureReason: degraded ? 'profile_lookup_degraded_to_cache' : '',
+      });
       if (degraded) {
         console.warn('[AdminLogin] continuing with fallback admin profile state.');
       }
@@ -176,6 +265,16 @@ export default function AdminLogin() {
 
     } catch (err: any) {
       const msg = err?.message || '';
+      void adminLoginAuditService.record({
+        attemptedAt,
+        enteredIdentifier: username,
+        loginEmail: email,
+        normalizedLoginEmail: unifiedAdminEmail,
+        status: 'failure',
+        failureReason: msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')
+          ? 'invalid_credentials'
+          : (msg || 'login_failed'),
+      });
       if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) {
         setError(language === 'zh' ? '邮箱或密码错误' : 'Invalid email or password');
       } else {
@@ -187,11 +286,13 @@ export default function AdminLogin() {
   };
 
   // 快速登录（开发模式）：直接用传入的账密，绕过 state 异步问题
-  const quickLogin = async (email: string, pass: string) => {
-    setUsername(email);
+  const quickLogin = async (identifier: string, pass: string) => {
+    const email = resolveEmail(identifier);
+    setUsername(identifier);
     setPassword(pass);
     setError('');
     setIsLoading(true);
+    const attemptedAt = new Date().toISOString();
     try {
       const { signInWithEmail: signIn, fetchProfile: getProfile } = await import('../hooks/useSupabaseAuth');
       const { session } = await signIn(email, pass);
@@ -202,7 +303,20 @@ export default function AdminLogin() {
       } catch {
         profile = readCachedAdminProfile(session.user.email!);
       }
-      if (profile && profile.portal_role !== 'admin') {
+      if (profile && profile.portal_role !== 'admin' && profile.portal_role !== 'staff') {
+        void adminLoginAuditService.record({
+          attemptedAt,
+          enteredIdentifier: identifier,
+          loginEmail: session.user.email!,
+          normalizedLoginEmail: email,
+          authUserId: session.user.id,
+          adminName: profile?.name ?? session.user.email!.split('@')[0],
+          portalRole: profile.portal_role,
+          rbacRole: profile.rbac_role ?? '',
+          region: profile.region ?? '',
+          status: 'failure',
+          failureReason: 'portal_role_not_admin',
+        });
         const { signOut } = await import('../hooks/useSupabaseAuth');
         await signOut();
         throw new Error('此账号无管理员权限');
@@ -214,8 +328,29 @@ export default function AdminLogin() {
         rbacRole: profile?.rbac_role,
         region: profile?.region,
       });
+      await recordStoredAdminAccountLastLogin(session.user.email!, attemptedAt);
+      void adminLoginAuditService.record({
+        attemptedAt,
+        enteredIdentifier: identifier,
+        loginEmail: session.user.email!,
+        normalizedLoginEmail: email,
+        authUserId: session.user.id,
+        adminName: profile?.name ?? session.user.email!.split('@')[0],
+        portalRole: profile?.portal_role ?? 'admin',
+        rbacRole: profile?.rbac_role ?? 'Admin',
+        region: profile?.region ?? 'all',
+        status: 'success',
+      });
       // useAuth 监听 onAuthStateChange 自动同步 RBAC 用户
     } catch (err: any) {
+      void adminLoginAuditService.record({
+        attemptedAt,
+        enteredIdentifier: identifier,
+        loginEmail: email,
+        normalizedLoginEmail: email,
+        status: 'failure',
+        failureReason: String(err?.message || 'quick_login_failed'),
+      });
       setError(err?.message || '快速登录失败');
     } finally {
       setIsLoading(false);
@@ -436,170 +571,35 @@ export default function AdminLogin() {
                 <span>{language === 'zh' ? '初始化数据库（首次使用）' : 'Initialize Database (First Time)'}</span>
               </button>
               
-              {/* 核心角色快速登录 */}
               <div className="space-y-3">
-                {/* 🏢 最高层级 */}
                 <div>
                   <p className="text-[10px] text-slate-400 mb-1.5 font-medium flex items-center gap-1">
-                    <span>👑</span>
-                    <span>最高层级</span>
+                    <span>🔐</span>
+                    <span>统一登录入口</span>
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('ceo', 'Cosun2024!')}
-                      className="px-3 py-2.5 bg-gradient-to-br from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-700 rounded-lg text-xs transition-all border border-purple-200 font-semibold shadow-sm hover:shadow"
-                    >
-                      👨‍💼 CEO
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('cfo', 'Cosun2024!')}
-                      className="px-3 py-2.5 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 rounded-lg text-xs transition-all border border-blue-200 font-semibold shadow-sm hover:shadow"
-                    >
-                      💼 CFO
-                    </button>
-                  </div>
-                </div>
-                
-                {/* 📊 销售团队 */}
-                <div>
-                  <p className="text-[10px] text-slate-400 mb-1.5 font-medium flex items-center gap-1">
-                    <span>📊</span>
-                    <span>销售团队</span>
+                  {unifiedAdminAccount ? (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => quickLogin(unifiedAdminAccount.username, unifiedAdminAccount.password)}
+                        className="w-full rounded-lg border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-3 py-3 text-left text-xs text-slate-700 transition-all hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm"
+                      >
+                        <div className="font-semibold text-slate-800">{unifiedAdminAccount.name}</div>
+                        <div className="mt-0.5 text-[10px] text-slate-500">{unifiedAdminAccount.title}</div>
+                        <div className="mt-1 text-[10px] text-slate-400">{unifiedAdminAccount.username} · {unifiedAdminAccount.email}</div>
+                      </button>
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-5 text-amber-700">
+                        旧内部账号不再单独登录。统一先用 `admin` 进入，再从右上角 `切换角色` 下拉切换到对应人员身份。
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-5 text-amber-700">
+                      未找到 `admin` 主账号，请先在企业主数据中心检查内部账号配置。
+                    </p>
+                  )}
+                  <p className="mt-2 text-[10px] text-slate-400">
+                    数据来源：企业主数据中心中的内部账号。人员账号已统一并入右上角“切换角色”下拉框。
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => quickLogin('sales.director', 'Cosun2024!')}
-                    className="w-full px-3 py-2.5 bg-gradient-to-br from-indigo-50 to-indigo-100 hover:from-indigo-100 hover:to-indigo-200 text-indigo-700 rounded-lg text-xs transition-all border border-indigo-200 font-semibold shadow-sm hover:shadow"
-                  >
-                    📊 销售总监
-                  </button>
-                </div>
-                
-                {/* 🌎 区域主管（3个区域） */}
-                <div>
-                  <p className="text-[10px] text-slate-400 mb-1.5 font-medium flex items-center gap-1">
-                    <span>🌍</span>
-                    <span>区域主管</span>
-                  </p>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('john.smith', 'Cosun2024!')}
-                      className="px-2 py-2 bg-gradient-to-br from-rose-50 to-rose-100 hover:from-rose-100 hover:to-rose-200 text-rose-700 rounded-lg text-[10px] transition-all border border-rose-200 font-semibold leading-tight shadow-sm hover:shadow"
-                    >
-                      🇺🇸 北美
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('carlos.silva', 'Cosun2024!')}
-                      className="px-2 py-2 bg-gradient-to-br from-amber-50 to-amber-100 hover:from-amber-100 hover:to-amber-200 text-amber-700 rounded-lg text-[10px] transition-all border border-amber-200 font-semibold leading-tight shadow-sm hover:shadow"
-                    >
-                      🇧🇷 南美
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('hans.mueller', 'Cosun2024!')}
-                      className="px-2 py-2 bg-gradient-to-br from-sky-50 to-sky-100 hover:from-sky-100 hover:to-sky-200 text-sky-700 rounded-lg text-[10px] transition-all border border-sky-200 font-semibold leading-tight shadow-sm hover:shadow"
-                    >
-                      🇪🇺 欧非
-                    </button>
-                  </div>
-                </div>
-                
-                {/* 👔 区域业务员（3个区域） */}
-                <div>
-                  <p className="text-[10px] text-slate-400 mb-1.5 font-medium flex items-center gap-1">
-                    <span>👔</span>
-                    <span>区域业务员</span>
-                  </p>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('zhangwei', 'Cosun2024!')}
-                      className="px-2 py-2 bg-gradient-to-br from-orange-50 to-orange-100 hover:from-orange-100 hover:to-orange-200 text-orange-700 rounded-lg text-[10px] transition-all border border-orange-200 font-semibold leading-tight shadow-sm hover:shadow"
-                    >
-                      👨‍💼 张伟
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('lifang', 'Cosun2024!')}
-                      className="px-2 py-2 bg-gradient-to-br from-yellow-50 to-yellow-100 hover:from-yellow-100 hover:to-yellow-200 text-yellow-700 rounded-lg text-[10px] transition-all border border-yellow-200 font-semibold leading-tight shadow-sm hover:shadow"
-                    >
-                      👩 李芳
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('wangfang', 'Cosun2024!')}
-                      className="px-2 py-2 bg-gradient-to-br from-teal-50 to-teal-100 hover:from-teal-100 hover:to-teal-200 text-teal-700 rounded-lg text-[10px] transition-all border border-teal-200 font-semibold leading-tight shadow-sm hover:shadow"
-                    >
-                      👩‍💻 王芳
-                    </button>
-                  </div>
-                </div>
-                
-                {/* 💼 职能部门 */}
-                <div>
-                  <p className="text-[10px] text-slate-400 mb-1.5 font-medium flex items-center gap-1">
-                    <span>💼</span>
-                    <span>职能部门</span>
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('finance', 'Cosun2024!')}
-                      className="px-3 py-2.5 bg-gradient-to-br from-cyan-50 to-cyan-100 hover:from-cyan-100 hover:to-cyan-200 text-cyan-700 rounded-lg text-xs transition-all border border-cyan-200 font-semibold shadow-sm hover:shadow"
-                    >
-                      💰 财务
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('procurement', 'Cosun2024!')}
-                      className="px-3 py-2.5 bg-gradient-to-br from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 text-emerald-700 rounded-lg text-xs transition-all border border-emerald-200 font-semibold shadow-sm hover:shadow"
-                    >
-                      🛒 采购
-                    </button>
-                  </div>
-                </div>
-                
-                {/* 🔧 系统管理 */}
-                <div>
-                  <p className="text-[10px] text-slate-400 mb-1.5 font-medium flex items-center gap-1">
-                    <span>🔧</span>
-                    <span>系统管理</span>
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('admin', 'Cosun2024!')}
-                      className="px-3 py-2.5 bg-gradient-to-br from-slate-50 to-slate-100 hover:from-slate-100 hover:to-slate-200 text-slate-700 rounded-lg text-xs transition-all border border-slate-200 font-semibold shadow-sm hover:shadow"
-                    >
-                      🛠️ 系统管理员
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => quickLogin('marketing', 'Cosun2024!')}
-                      className="px-3 py-2.5 bg-gradient-to-br from-pink-50 to-pink-100 hover:from-pink-100 hover:to-pink-200 text-pink-700 rounded-lg text-xs transition-all border border-pink-200 font-semibold shadow-sm hover:shadow"
-                    >
-                      📱 运营专员
-                    </button>
-                  </div>
-                </div>
-                
-                {/* 🏭 供应商（测试用） */}
-                <div>
-                  <p className="text-[10px] text-slate-400 mb-1.5 font-medium flex items-center gap-1">
-                    <span>🏭</span>
-                    <span>供应商测试</span>
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => quickLogin('supplier', 'Supplier123!')}
-                    className="w-full px-3 py-2.5 bg-gradient-to-br from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-700 rounded-lg text-xs transition-all border border-green-200 font-semibold shadow-sm hover:shadow"
-                  >
-                    🏭 张涛 - 供应商
-                  </button>
                 </div>
               </div>
             </div>

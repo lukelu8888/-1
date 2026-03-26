@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from '../contexts/RouterContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,11 +8,25 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { User, Building2, Mail, Lock, Eye, EyeOff, Phone, MapPin, Building } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
 import { toast } from 'sonner@2.0.3';
+import { upsertPortalPasswordMirror } from '../lib/portalPasswordMirror';
+import { supabase } from '../lib/supabase';
+import {
+  customerEnterpriseInvitationService,
+  customerOrganizationService,
+  customerPortalProfileService,
+} from '../lib/supabaseService';
 
 export function Register() {
   const { navigateTo } = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [customerInvite, setCustomerInvite] = useState<null | {
+    token: string;
+    loginEmail: string;
+    role: string;
+    companyName: string;
+  }>(null);
   
   const [customerData, setCustomerData] = useState({
     fullName: '',
@@ -37,7 +51,43 @@ export function Register() {
     agreeToTerms: false,
   });
 
-  const handleCustomerRegister = (e: React.FormEvent) => {
+  useEffect(() => {
+    const inviteToken = new URLSearchParams(window.location.search).get('invite');
+    if (!inviteToken) return;
+
+    setInviteLoading(true);
+    void (async () => {
+      try {
+        const invitation = await customerEnterpriseInvitationService.getByToken(inviteToken);
+        if (!invitation || invitation.status !== 'pending') {
+          toast.error('This invitation is no longer available');
+          return;
+        }
+        if (invitation.expiresAt && new Date(invitation.expiresAt).getTime() < Date.now()) {
+          toast.error('This invitation has expired');
+          return;
+        }
+        const enterpriseProfile = await customerOrganizationService.getByAuthUser(invitation.enterpriseAuthUserId);
+        setCustomerInvite({
+          token: inviteToken,
+          loginEmail: invitation.loginEmail,
+          role: invitation.role,
+          companyName: enterpriseProfile?.companyName || '',
+        });
+        setCustomerData((prev) => ({
+          ...prev,
+          email: invitation.loginEmail || prev.email,
+          companyName: enterpriseProfile?.companyName || prev.companyName,
+        }));
+      } catch (error) {
+        toast.error(String((error as Error)?.message || error || 'Failed to load invitation'));
+      } finally {
+        setInviteLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleCustomerRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Validation
@@ -51,13 +101,76 @@ export function Register() {
       return;
     }
 
-    console.log('Customer registration:', customerData);
-    toast.success('Registration successful! Please check your email to verify your account.');
-    
-    // Redirect to login after 2 seconds
-    setTimeout(() => {
-      navigateTo('login');
-    }, 2000);
+    if (customerInvite && customerData.email.trim().toLowerCase() !== customerInvite.loginEmail.toLowerCase()) {
+      toast.error(`This invitation is assigned to ${customerInvite.loginEmail}`);
+      return;
+    }
+
+    try {
+      const email = customerData.email.trim().toLowerCase();
+      const displayName = customerData.fullName || customerData.companyName || customerData.email;
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: customerData.password,
+        options: {
+          data: {
+            portal_role: 'customer',
+            name: displayName,
+            company: customerInvite?.companyName || customerData.companyName || null,
+            rbac_role: customerInvite?.role || null,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      const authUserId = data.user?.id;
+      if (authUserId) {
+        const { error: profileError } = await supabase.from('user_profiles').upsert({
+          id: authUserId,
+          email,
+          name: displayName,
+          portal_role: 'customer',
+          rbac_role: customerInvite?.role || null,
+          company: customerInvite?.companyName || customerData.companyName || null,
+          phone: customerData.phone || null,
+          updated_at: new Date().toISOString(),
+        });
+
+        if (profileError) throw profileError;
+
+        await customerPortalProfileService.saveByAuthUser(authUserId, {
+          displayName,
+          loginEmail: email,
+          portalRole: 'customer',
+          avatarUrl: null,
+        });
+
+        if (customerInvite?.token) {
+          await customerEnterpriseInvitationService.acceptInvitation(customerInvite.token, authUserId);
+        }
+      }
+
+      upsertPortalPasswordMirror({
+        portalType: 'customer',
+        loginEmail: customerData.email,
+        displayName,
+        password: customerData.password,
+        source: customerInvite ? 'enterprise_invite_accept' : 'user_self_set',
+      });
+
+      toast.success(
+        customerInvite
+          ? 'Invitation accepted. Please check your email to confirm the account, then sign in.'
+          : 'Registration successful! Please check your email to verify your account.',
+      );
+
+      setTimeout(() => {
+        navigateTo('login');
+      }, 2000);
+    } catch (error) {
+      toast.error(String((error as Error)?.message || error || 'Registration failed'));
+    }
   };
 
   const handleManufacturerRegister = (e: React.FormEvent) => {
@@ -75,6 +188,13 @@ export function Register() {
     }
 
     console.log('Manufacturer registration:', manufacturerData);
+    upsertPortalPasswordMirror({
+      portalType: 'supplier',
+      loginEmail: manufacturerData.email,
+      displayName: manufacturerData.contactName || manufacturerData.companyName || manufacturerData.email,
+      password: manufacturerData.password,
+      source: 'user_self_set',
+    });
     toast.success('Application submitted successfully! Our team will review and contact you within 24-48 hours.');
     
     // Redirect to login after 2 seconds
@@ -114,14 +234,29 @@ export function Register() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <User className="h-5 w-5 text-blue-600" />
-                    Customer Registration
+                    {customerInvite ? 'Accept Enterprise Invitation' : 'Customer Registration'}
                   </CardTitle>
                   <CardDescription>
-                    Create your customer account to start ordering and tracking shipments
+                    {customerInvite
+                      ? `Join ${customerInvite.companyName || 'your enterprise'} as ${customerInvite.role}.`
+                      : 'Create your customer account to start ordering and tracking shipments'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={handleCustomerRegister} className="space-y-4">
+                    {customerInvite && (
+                      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                        This invitation is reserved for <span className="font-semibold">{customerInvite.loginEmail}</span>.
+                        Use this email to activate your enterprise access.
+                      </div>
+                    )}
+
+                    {inviteLoading && (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                        Loading invitation details...
+                      </div>
+                    )}
+
                     {/* Full Name */}
                     <div className="space-y-2">
                       <Label htmlFor="customer-fullname">Full Name *</Label>
@@ -149,6 +284,7 @@ export function Register() {
                           type="email"
                           placeholder="your.email@company.com"
                           className="pl-10"
+                          disabled={Boolean(customerInvite)}
                           value={customerData.email}
                           onChange={(e) => setCustomerData({ ...customerData, email: e.target.value })}
                           required
@@ -183,6 +319,7 @@ export function Register() {
                           type="text"
                           placeholder="Your Company Ltd."
                           className="pl-10"
+                          disabled={Boolean(customerInvite?.companyName)}
                           value={customerData.companyName}
                           onChange={(e) => setCustomerData({ ...customerData, companyName: e.target.value })}
                         />
@@ -258,8 +395,8 @@ export function Register() {
                       </label>
                     </div>
 
-                    <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
-                      Create Customer Account
+                    <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={inviteLoading}>
+                      {customerInvite ? 'Activate Enterprise Account' : 'Create Customer Account'}
                     </Button>
 
                     <div className="text-center text-sm text-gray-600">

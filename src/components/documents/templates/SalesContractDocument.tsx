@@ -39,6 +39,7 @@ export interface SalesContractData {
       routingNumber?: string;   // Routing number (USA)
       iban?: string;            // IBAN number (Europe)
       currency?: string;        // Currency
+      paymentNote?: string;     // Payment note
     };
   };
   
@@ -104,7 +105,73 @@ export interface SalesContractData {
     buyerSignatory: string;      // Buyer's signatory
     signDate?: string;           // Signing date
   };
+
+  templateSettings?: {
+    productTableColumns?: SalesContractProductTableColumn[];
+  };
 }
+
+export type SalesContractProductTableColumnKey =
+  | 'no'
+  | 'modelNo'
+  | 'image'
+  | 'itemNameSpecification'
+  | 'quantity'
+  | 'unit'
+  | 'unitPrice'
+  | 'amount';
+
+export interface SalesContractProductTableColumn {
+  key: SalesContractProductTableColumnKey;
+  label: string;
+  widthPercent: number;
+}
+
+export const DEFAULT_SALES_CONTRACT_PRODUCT_TABLE_COLUMNS: SalesContractProductTableColumn[] = [
+  { key: 'no', label: 'No.', widthPercent: 5 },
+  { key: 'modelNo', label: 'Model No.', widthPercent: 12 },
+  { key: 'image', label: 'Image', widthPercent: 8 },
+  { key: 'itemNameSpecification', label: 'Item Name / Specification', widthPercent: 32 },
+  { key: 'quantity', label: 'Quantity', widthPercent: 10 },
+  { key: 'unit', label: 'Unit', widthPercent: 7 },
+  { key: 'unitPrice', label: 'Unit Price', widthPercent: 11 },
+  { key: 'amount', label: 'Amount', widthPercent: 15 },
+];
+
+export const normalizeSalesContractProductTableColumns = (
+  value?: SalesContractProductTableColumn[] | null,
+): SalesContractProductTableColumn[] => {
+  const incoming = Array.isArray(value) ? value : [];
+  const normalized = DEFAULT_SALES_CONTRACT_PRODUCT_TABLE_COLUMNS.map((fallbackColumn) => {
+    const matched = incoming.find((column) => column?.key === fallbackColumn.key);
+    const widthPercent = Number(matched?.widthPercent);
+
+    return {
+      key: fallbackColumn.key,
+      label: String(matched?.label || fallbackColumn.label).trim() || fallbackColumn.label,
+      widthPercent: Number.isFinite(widthPercent) ? Math.max(4, widthPercent) : fallbackColumn.widthPercent,
+    };
+  });
+
+  const total = normalized.reduce((sum, column) => sum + column.widthPercent, 0) || 100;
+
+  return normalized.map((column, index) => {
+    if (index === normalized.length - 1) {
+      const allocated = normalized
+        .slice(0, -1)
+        .reduce((sum, item) => sum + Number(((item.widthPercent / total) * 100).toFixed(2)), 0);
+      return {
+        ...column,
+        widthPercent: Number((100 - allocated).toFixed(2)),
+      };
+    }
+
+    return {
+      ...column,
+      widthPercent: Number(((column.widthPercent / total) * 100).toFixed(2)),
+    };
+  });
+};
 
 interface SalesContractDocumentProps {
   data: SalesContractData;
@@ -113,7 +180,12 @@ interface SalesContractDocumentProps {
 
 export const SalesContractDocument = forwardRef<HTMLDivElement, SalesContractDocumentProps>(
   ({ data, layoutConfig }, ref) => {
+    const sellerDisplayName = data.seller.nameEn || data.seller.name;
+    const sellerDisplayAddress = data.seller.addressEn || data.seller.address;
     const total = data.products.reduce((sum, item) => sum + item.amount, 0);
+    const productTableColumns = normalizeSalesContractProductTableColumns(
+      data.templateSettings?.productTableColumns,
+    );
     const pageWidth = layoutConfig ? `${layoutConfig.canvasWidthMm}mm` : '794px';
     const pageMinHeight = layoutConfig ? `${layoutConfig.canvasMinHeightMm}mm` : '1123px';
     const pagePaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '15mm';
@@ -270,8 +342,8 @@ export const SalesContractDocument = forwardRef<HTMLDivElement, SalesContractDoc
                         SELLER
                       </div>
                       <div className="px-2 py-1.5 space-y-0.5">
-                        <div><span className="font-semibold">{data.seller.nameEn}</span></div>
-                        <div><span className="text-gray-600">Address:</span> {data.seller.addressEn}</div>
+                        <div><span className="font-semibold">{sellerDisplayName}</span></div>
+                        <div><span className="text-gray-600">Address:</span> {sellerDisplayAddress}</div>
                         <div><span className="text-gray-600">Tel:</span> {data.seller.tel} {data.seller.fax && `| Fax: ${data.seller.fax}`}</div>
                         <div><span className="text-gray-600">Email:</span> {data.seller.email}</div>
                         {data.seller.legalRepresentative && (
@@ -305,58 +377,72 @@ export const SalesContractDocument = forwardRef<HTMLDivElement, SalesContractDoc
               <table className="w-full border-collapse border-2 border-gray-300 text-xs product-table">
                 <thead>
                   <tr className="bg-gray-100">
-                    <th className="border border-gray-300 px-2 py-2 text-left w-8">No.</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left w-20">Model No.</th>
-                    <th className="border border-gray-300 px-2 py-2 text-center w-16">Image</th>
-                    <th className="border border-gray-300 px-2 py-2 text-left">Item Name / Specification</th>
-                    <th className="border border-gray-300 px-2 py-2 text-right w-16">Quantity</th>
-                    <th className="border border-gray-300 px-2 py-2 text-center w-10">Unit</th>
-                    <th className="border border-gray-300 px-2 py-2 text-right w-20">Unit Price</th>
-                    <th className="border border-gray-300 px-2 py-2 text-right w-24">Amount</th>
+                    {productTableColumns.map((column) => (
+                      <th
+                        key={column.key}
+                        className={`border border-gray-300 px-2 py-2 ${
+                          column.key === 'quantity' || column.key === 'unitPrice' || column.key === 'amount'
+                            ? 'text-right'
+                            : column.key === 'unit' || column.key === 'image'
+                              ? 'text-center'
+                              : 'text-left'
+                        }`}
+                        style={{ width: `${column.widthPercent}%` }}
+                      >
+                        {column.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {data.products.map((product) => (
                     <tr key={product.no}>
-                      <td className="border border-gray-300 px-2 py-2 text-center">{product.no}</td>
-                      <td className="border border-gray-300 px-2 py-2 text-gray-700">
-                        {product.modelNo || '-'}
-                      </td>
-                      <td className="border border-gray-300 px-1 py-1 text-center">
-                        {product.imageUrl ? (
-                          <img 
-                            src={product.imageUrl} 
-                            alt={product.description}
-                            className="w-10 h-10 object-cover mx-auto rounded"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 bg-gray-100 mx-auto rounded flex items-center justify-center text-xs text-gray-400">
-                            N/A
-                          </div>
-                        )}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2">
-                        <div className="font-semibold">{product.description}</div>
-                        <div className="text-xs text-gray-600 mt-0.5">{product.specification}</div>
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right">
-                        {product.quantity.toLocaleString()}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-center">
-                        {product.unit}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right">
-                        {product.currency} {product.unitPrice.toFixed(2)}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-2 text-right font-semibold">
-                        {product.currency} {product.amount.toFixed(2)}
-                      </td>
+                      {productTableColumns.map((column) => {
+                        switch (column.key) {
+                          case 'no':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{product.no}</td>;
+                          case 'modelNo':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-gray-700">{product.modelNo || '-'}</td>;
+                          case 'image':
+                            return (
+                              <td key={column.key} className="border border-gray-300 px-1 py-1 text-center">
+                                {product.imageUrl ? (
+                                  <img
+                                    src={product.imageUrl}
+                                    alt={product.description}
+                                    className="w-10 h-10 object-cover mx-auto rounded"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 bg-gray-100 mx-auto rounded flex items-center justify-center text-xs text-gray-400">
+                                    N/A
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          case 'itemNameSpecification':
+                            return (
+                              <td key={column.key} className="border border-gray-300 px-2 py-2">
+                                <div className="font-semibold">{product.description}</div>
+                                <div className="text-xs text-gray-600 mt-0.5">{product.specification}</div>
+                              </td>
+                            );
+                          case 'quantity':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{product.quantity.toLocaleString()}</td>;
+                          case 'unit':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{product.unit}</td>;
+                          case 'unitPrice':
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{product.currency} {product.unitPrice.toFixed(2)}</td>;
+                          case 'amount':
+                          default:
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">{product.currency} {product.amount.toFixed(2)}</td>;
+                        }
+                      })}
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-100 font-bold">
-                    <td colSpan={7} className="border border-gray-300 px-2 py-2 text-right">
+                    <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 py-2 text-right">
                       Total Value ({tradeTerm}):
                     </td>
                     <td className="border border-gray-300 px-2 py-2 text-right font-semibold">
@@ -423,6 +509,12 @@ export const SalesContractDocument = forwardRef<HTMLDivElement, SalesContractDoc
                       <tr>
                         <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">Bank Address</td>
                         <td className="border border-gray-400 px-2 py-1.5" colSpan={3}>{data.seller.bankInfo.bankAddress}</td>
+                      </tr>
+                    )}
+                    {data.seller.bankInfo.paymentNote && (
+                      <tr>
+                        <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">Payment Note</td>
+                        <td className="border border-gray-400 px-2 py-1.5" colSpan={3}>{data.seller.bankInfo.paymentNote}</td>
                       </tr>
                     )}
                   </tbody>
