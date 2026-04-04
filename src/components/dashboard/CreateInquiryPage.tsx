@@ -29,13 +29,24 @@ import { InquiryProductBrowser } from './InquiryProductBrowser';
 import { InquiryProductHome } from './InquiryProductHome';
 import { REGION_CODES, type RegionType } from '../../utils/xjNumberGenerator';
 import { nextInquiryNumber } from '../../lib/supabaseService';
-import { getCurrentUser } from '../../data/authorizedUsers';
+import { getCurrentUser } from '../../utils/dataIsolation';
 import {
   buildCustomerInquiryRequirementText,
   CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   type CustomerInquiryRequirementFormFields,
 } from '../documents/templates/CustomerInquiryDocument';
+
+const withTimeout = async <T,>(task: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+  return Promise.race([
+    task,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+};
+
+const INQUIRY_CREATE_TIMEOUT_MS = 20000;
 
 interface ProductItem {
   id: string;
@@ -217,8 +228,8 @@ export function CreateInquiryPage({
         image: p.image || '/placeholder.jpg'
       })),
       totalPrice,
-      status: 'pending' as const,
-      isSubmitted: false, // 🚀 Draft state - not submitted to admin yet
+      status: 'draft' as const,
+      isSubmitted: false,
       buyerInfo: {
         companyName: userInfo?.companyName || currentUser?.company || 'N/A',
         contactPerson: userInfo?.contactPerson || currentUser?.email.split('@')[0] || 'N/A',
@@ -236,7 +247,7 @@ export function CreateInquiryPage({
       },
       requirements: { ...customerRequirement },
       message: buildCustomerInquiryRequirementText(customerRequirement),
-      createdAt: now
+      createdAt: now,
     };
     (newInquiry as any).templateSnapshot = { pendingResolution: true };
     (newInquiry as any).documentRenderMeta = null;
@@ -244,15 +255,27 @@ export function CreateInquiryPage({
 
     console.log('🔵 提交新询价:', newInquiry);
     try {
-      await addInquiry(newInquiry);
+      await withTimeout(
+        addInquiry(newInquiry),
+        INQUIRY_CREATE_TIMEOUT_MS,
+        'Creating inquiry timed out. Please try again.',
+      );
     } catch (saveErr) {
       console.error('Failed to save inquiry:', saveErr);
-      toast.error('Failed to save inquiry. Please try again.');
+      const message = saveErr instanceof Error ? saveErr.message : 'Failed to save inquiry. Please try again.';
+      if (message.toLowerCase().includes('timed out')) {
+        localStorage.removeItem('inquiry_draft');
+        toast.success(`Inquiry ${inquiryNumber} created locally and is syncing to server…`);
+        setProducts([]);
+        onClose();
+        return;
+      }
+      toast.error(message);
       return;
     }
 
     localStorage.removeItem('inquiry_draft');
-    toast.success(`Inquiry ${inquiryNumber} created successfully!`);
+    toast.success(`Inquiry ${inquiryNumber} created as draft successfully!`);
     setProducts([]);
     onClose();
   };

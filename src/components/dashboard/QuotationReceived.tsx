@@ -12,6 +12,7 @@ import QuotationDetailView from './QuotationDetailView';
 import { Quotation } from '../admin/QuotationManagement';
 import { toast } from 'sonner';
 import { salesQuotationService } from '../../lib/supabaseService';
+import { readCustomerQuotationCache, writeCustomerQuotationCache } from '../../lib/customerPortalCache';
 import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { canDeleteQuotation } from '../../lib/erp-core/delete-guard';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
@@ -25,22 +26,25 @@ interface QuotationReceivedProps {
 }
 
 export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: QuotationReceivedProps) {
+  const { user } = useUser();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [detailInitialAction, setDetailInitialAction] = useState<'accepted' | 'rejected' | 'negotiating' | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]); // 🆕 批量选择状态
-  const [serverQuotations, setServerQuotations] = useState<any[]>([]);
+  const [serverQuotations, setServerQuotations] = useState<any[]>(() => readCustomerQuotationCache(user?.email));
   const [loading, setLoading] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const { user } = useUser();
-
   useEffect(() => {
     setSelectedIds([]);
+  }, [user?.email]);
+
+  useEffect(() => {
+    setServerQuotations(readCustomerQuotationCache(user?.email));
   }, [user?.email]);
 
   // 🔥 从服务器加载“客户收到的报价”（接口：GET /api/sales-quotations，customer 角色会自动按 customer_email 过滤）
@@ -57,6 +61,7 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
         if (!alive) return;
         const apiList = Array.isArray(rows) ? rows : [];
         setServerQuotations(apiList);
+        writeCustomerQuotationCache(user.email, apiList);
         setLastFetchedAt(new Date().toISOString());
       } catch (e: any) {
         console.error('❌ [QuotationReceived] 加载 /api/sales-quotations 失败:', e);

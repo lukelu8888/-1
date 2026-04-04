@@ -12,19 +12,12 @@ import { ResizableQuotationTable } from './ResizableQuotationTable';
 import { productDetailsData } from '../../data/productDetailsData';
 import { copyToClipboard } from '../../utils/clipboard';
 import { useUser } from '../../contexts/UserContext';
+import { useOrders } from '../../contexts/OrderContext';
 import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
-
-interface DraftOrder {
-  id: string;
-  orderDate: string;
-  deliveryDate: string;
-  sourceOrderId?: string;
-  products: any[];
-  status: 'draft';
-  createdAt: string;
-  updatedAt: string;
-}
+import { directOrderDraftService } from '../../lib/services/direct-order-draft/directOrderDraftService';
+import { directOrderSubmissionBridgeService } from '../../lib/services/direct-order-draft/directOrderSubmissionBridgeService';
+import type { DirectOrderDraftRecord as DraftOrder } from '../../lib/services/direct-order-draft/directOrderDraftTypes';
 
 interface CreateOrderProps {
   draftOrder?: any;
@@ -35,6 +28,7 @@ interface CreateOrderProps {
 
 export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory, onNavigateToShop }: CreateOrderProps) {
   const { user } = useUser(); // 🔥 获取当前用户信息
+  const { addOrder } = useOrders();
   const [draftOrders, setDraftOrders] = useState<DraftOrder[]>([]);
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [orderItems, setOrderItems] = useState<any[]>([]);
@@ -82,91 +76,81 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
   // Load draft orders from localStorage on mount
   useEffect(() => {
     const loadDrafts = () => {
-      const savedDrafts = localStorage.getItem('draftOrders');
       let drafts: DraftOrder[] = [];
-      if (savedDrafts) {
-        try {
-          drafts = JSON.parse(savedDrafts);
-          drafts = filterNotDeleted('order', drafts, (draft) => [
-            String(draft?.id || ''),
-            String(draft?.sourceOrderId || ''),
-          ]);
+      try {
+        drafts = filterNotDeleted('order', directOrderDraftService.listDrafts(), (draft) => [
+          String(draft?.id || ''),
+          String(draft?.sourceOrderId || ''),
+        ]);
           
           // Auto-fix missing images and itemNumbers from productDetailsData
-          let hasChanges = false;
-          drafts = drafts.map(draft => {
-            const updatedProducts = draft.products.map(product => {
-              if (!product.image || !product.itemNumber) {
-                // Try to find matching product in productDetailsData
-                // First try by product.id, then by product.name
-                let productKey = null;
-                let productData = null;
-                
-                // Search for matching key in productDetailsData
-                for (const [key, data] of Object.entries(productDetailsData)) {
-                  if (key === product.id || key === product.name || data.name === product.name) {
-                    productKey = key;
-                    productData = data;
-                    break;
-                  }
-                }
-                
-                if (productData && productKey) {
-                  hasChanges = true;
-                  console.log(`🔧 Auto-fixing product: ${product.name}`, {
-                    addedImage: !product.image && productData.image,
-                    addedItemNumber: !product.itemNumber && productData.sku,
-                    sku: productData.sku
-                  });
-                  return {
-                    ...product,
-                    image: product.image || productData.image,
-                    itemNumber: product.itemNumber || productData.sku  // ✅ Use real SKU from productData
-                  };
+        let hasChanges = false;
+        drafts = drafts.map(draft => {
+          const updatedProducts = draft.products.map(product => {
+            if (!product.image || !product.itemNumber) {
+              let productKey = null;
+              let productData = null;
+
+              for (const [key, data] of Object.entries(productDetailsData)) {
+                if (key === product.id || key === product.name || data.name === product.name) {
+                  productKey = key;
+                  productData = data;
+                  break;
                 }
               }
-              return product;
-            });
-            
-            return {
-              ...draft,
-              products: updatedProducts
-            };
-          });
-          
-          // Save if we made any changes
-          if (hasChanges) {
-            console.log('✅ Auto-fixed missing product images and SKUs');
-            localStorage.setItem('draftOrders', JSON.stringify(drafts));
-            toast.success('Product data synchronized', { duration: 2000 });
-          }
-          
-          setDraftOrders(drafts);
-          
-          // 🔥 Update current order items if viewing a draft
-          if (currentDraftId) {
-            const currentDraft = drafts.find(d => d.id === currentDraftId);
-            if (currentDraft) {
-              setOrderItems(currentDraft.products);
-              
-              // 🔥 If dialog is open, also update selectedProduct
-              if (selectedProduct) {
-                setSelectedProduct({ 
-                  ...selectedProduct, 
-                  orderItems: currentDraft.products 
+
+              if (productData && productKey) {
+                hasChanges = true;
+                console.log(`🔧 Auto-fixing product: ${product.name}`, {
+                  addedImage: !product.image && productData.image,
+                  addedItemNumber: !product.itemNumber && productData.sku,
+                  sku: productData.sku
                 });
-                console.log('🔄 Updated dialog data:', { 
-                  orderId: currentDraftId, 
-                  productsCount: currentDraft.products.length 
-                });
+                return {
+                  ...product,
+                  image: product.image || productData.image,
+                  itemNumber: product.itemNumber || productData.sku
+                };
               }
-              
-              console.log('🔄 Refreshed order items for:', currentDraftId);
             }
-          }
-        } catch (error) {
-          console.error('Failed to load draft orders:', error);
+            return product;
+          });
+
+          return {
+            ...draft,
+            products: updatedProducts
+          };
+        });
+
+        if (hasChanges) {
+          console.log('✅ Auto-fixed missing product images and SKUs');
+          saveDraftsToLocalStorage(drafts);
+          toast.success('Product data synchronized', { duration: 2000 });
         }
+
+        setDraftOrders(drafts);
+
+        if (currentDraftId) {
+          const currentDraft = drafts.find(d => d.id === currentDraftId);
+          if (currentDraft) {
+            setOrderItems(currentDraft.products);
+
+            if (selectedProduct) {
+              setSelectedProduct({
+                ...selectedProduct,
+                orderItems: currentDraft.products
+              });
+              console.log('🔄 Updated dialog data:', {
+                orderId: currentDraftId,
+                productsCount: currentDraft.products.length
+              });
+            }
+
+            console.log('🔄 Refreshed order items for:', currentDraftId);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load draft orders:', error);
       }
 
       // Restore view state AFTER drafts are loaded - ONLY ON INITIAL MOUNT
@@ -179,16 +163,16 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
             const draft = drafts.find(d => d.id === viewState.currentDraftId);
             if (draft) {
               setCurrentDraftId(draft.id);
-              setNewOrderId(draft.id);
+              setNewOrderId(draft.draftNumber);
               setOrderDate(draft.orderDate);
               setDeliveryDate(draft.deliveryDate);
               setOrderItems(draft.products);
               
               // Restore dialog state if it was open
               if (viewState.isProductDetailOpen && draft.products.length > 0) {
-                setSelectedProduct({ orderItems: draft.products, itemNumber: draft.id });
+                setSelectedProduct({ orderItems: draft.products, itemNumber: draft.draftNumber });
                 setIsProductDetailOpen(true);
-                console.log('✅ Restored view state: Dialog opened for order', draft.id);
+                console.log('✅ Restored view state: Dialog opened for order', draft.draftNumber);
               }
             }
           }
@@ -219,38 +203,26 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
   // Load draft order when provided (from Order History reorder)
   useEffect(() => {
     if (draftOrder && draftOrder.products) {
-      const orderId = draftOrder.id || generateOrderId();
-      const newDraft: DraftOrder = {
-        id: orderId,
+      const newDraft = directOrderDraftService.create({
         orderDate: draftOrder.date,
         deliveryDate: draftOrder.deliveryDate,
-        sourceOrderId: draftOrder.sourceOrderId,
+        sourceOrderId: draftOrder.sourceOrderId || draftOrder.id || null,
         products: draftOrder.products.map((p: any, idx: number) => ({
           ...p,
           id: `product-${Date.now()}-${idx}`,
-          itemNumber: `${orderId}-${String(idx + 1).padStart(3, '0')}`,
+          itemNumber: `${draftOrder.id || `SRC-${Date.now()}`}-${String(idx + 1).padStart(3, '0')}`,
           pcsPerCarton: p.pcsPerCarton || 4,
           cartonSize: p.cartonSize || '60x60x18cm',
           moq: p.moq || 100
         })),
-        status: 'draft',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+        sourceChannel: 'history_reorder',
+      });
 
       // Read latest drafts from localStorage to ensure we have the most recent data
-      const savedDrafts = localStorage.getItem('draftOrders');
-      let existingDrafts: DraftOrder[] = [];
-      if (savedDrafts) {
-        try {
-          existingDrafts = JSON.parse(savedDrafts);
-        } catch (error) {
-          console.error('Failed to load existing drafts:', error);
-        }
-      }
+      const existingDrafts = directOrderDraftService.listDrafts();
 
       // Add to draft orders
-      const updatedDrafts = [...existingDrafts, newDraft];
+      const updatedDrafts = [newDraft, ...existingDrafts.filter((item) => item.id !== newDraft.id)];
       setDraftOrders(updatedDrafts);
       saveDraftsToLocalStorage(updatedDrafts);
       
@@ -358,16 +330,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
   ];
 
   const saveDraftsToLocalStorage = (drafts: DraftOrder[]) => {
-    localStorage.setItem('draftOrders', JSON.stringify(drafts));
-  };
-
-  const generateOrderId = () => {
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const random = Math.floor(Math.random() * 10000);
-    return `ORD-${year}${month}${day}-${random}`;
+    directOrderDraftService.replaceDrafts(drafts);
   };
 
   const generateDeliveryDate = () => {
@@ -377,15 +340,13 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
   };
 
   const createNewDraft = () => {
-    const newDraft: DraftOrder = {
-      id: generateOrderId(),
+    const newDraft = directOrderDraftService.create({
       orderDate: new Date().toISOString().split('T')[0],
       deliveryDate: generateDeliveryDate(),
       products: [],
       status: 'draft',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+      sourceChannel: 'customer_portal',
+    });
 
     const updatedDrafts = [...draftOrders, newDraft];
     setDraftOrders(updatedDrafts);
@@ -400,7 +361,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
     const draft = draftsToSearch.find(d => d.id === draftId);
     if (draft) {
       setCurrentDraftId(draft.id);
-      setNewOrderId(draft.id);
+      setNewOrderId(draft.draftNumber);
       setOrderDate(draft.orderDate);
       setDeliveryDate(draft.deliveryDate);
       setOrderItems(draft.products);
@@ -458,9 +419,9 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
   const deleteDraftOrder = (draftId: string) => {
     const draft = draftOrders.find((d) => d.id === draftId);
     const markers = [String(draftId), String(draft?.sourceOrderId || '')].filter(Boolean);
-    const updatedDrafts = draftOrders.filter(d => d.id !== draftId);
+    directOrderDraftService.markCancelled(draftId);
+    const updatedDrafts = directOrderDraftService.listDrafts();
     setDraftOrders(updatedDrafts);
-    saveDraftsToLocalStorage(updatedDrafts);
     if (markers.length > 0) {
       addTombstones('order', markers, {
         reason: 'manual_delete',
@@ -494,36 +455,18 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
     const currentDraft = draftOrders.find(d => d.id === currentDraftId);
     if (!currentDraft) return;
 
-    // Calculate totals
-    const totals = calculateTotals();
-
-    // Create active order
-    const activeOrder = {
-      id: currentDraft.id,
-      customerEmail: user.email, // 🔥 添加用户邮箱用于数据隔离
-      orderDate: currentDraft.orderDate,
-      deliveryDate: currentDraft.deliveryDate,
-      sourceOrderId: currentDraft.sourceOrderId,
+    // Keep the draft record aligned with the latest table edits before submission.
+    directOrderDraftService.update(currentDraftId, {
       products: orderItems,
-      status: 'processing',
-      totalAmount: totals.totalAmount,
-      totalCBM: totals.totalCBM,
-      totalGrossWeight: totals.totalGrossWeight,
-      totalNetWeight: totals.totalNetWeight,
-      totalCartons: totals.totalCartons,
-      submittedAt: new Date().toISOString()
-    };
+      orderDate,
+      deliveryDate,
+      customerEmail: user.email,
+    });
 
-    // Save to Active Orders
-    const existingActiveOrders = localStorage.getItem('activeOrders');
-    const activeOrders = existingActiveOrders ? JSON.parse(existingActiveOrders) : [];
-    activeOrders.unshift(activeOrder);
-    localStorage.setItem('activeOrders', JSON.stringify(activeOrders));
-
-    // Remove from draft orders
-    const updatedDrafts = draftOrders.filter(d => d.id !== currentDraftId);
+    const activeOrder = directOrderSubmissionBridgeService.submitDraft(currentDraftId, user.email);
+    addOrder(activeOrder);
+    const updatedDrafts = directOrderDraftService.listDrafts();
     setDraftOrders(updatedDrafts);
-    saveDraftsToLocalStorage(updatedDrafts);
 
     // Clear current draft
     setCurrentDraftId(null);
@@ -554,7 +497,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
     const productsWithIds = order.products.map((p: any, idx: number) => ({
       ...p,
       id: `product-${Date.now()}-${idx}`,
-      itemNumber: `${newOrderId || generateOrderId()}-${String(idx + 1).padStart(3, '0')}`,
+      itemNumber: `${newOrderId || `ORD-${Date.now()}`}-${String(idx + 1).padStart(3, '0')}`,
     }));
     setOrderItems(productsWithIds);
     toast.success('Products loaded from historical order');
@@ -663,7 +606,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
 
                     const numberDisplay = resolveDisplayNumber({
                       domain: 'order',
-                      internalNo: String(draft.id),
+                      internalNo: String(draft.draftNumber),
                       companyId: (user as any)?.companyId ? String((user as any).companyId) : undefined,
                     });
 
@@ -673,17 +616,17 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
                         <TableCell>
                           <button
                             onClick={() => {
-                              setSelectedProduct({ orderItems: draft.products, itemNumber: draft.id });
+                              setSelectedProduct({ orderItems: draft.products, itemNumber: draft.draftNumber });
                               setIsProductDetailOpen(true);
                               setCurrentDraftId(draft.id);
-                              setNewOrderId(draft.id);
+                              setNewOrderId(draft.draftNumber);
                               setOrderDate(draft.orderDate);
                               setDeliveryDate(draft.deliveryDate);
                               setOrderItems(draft.products);
                             }}
                             className="flex items-center gap-1.5 text-blue-600 hover:underline"
                           >
-                            <span>{draft.id}</span>
+                            <span>{draft.draftNumber}</span>
                             <ExternalLink className="h-3.5 w-3.5" />
                           </button>
                           {numberDisplay.externalNo && (
@@ -729,10 +672,10 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
                               size="sm"
                               className="h-8 w-8 p-0 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
                               onClick={() => {
-                                setSelectedProduct({ orderItems: draft.products, itemNumber: draft.id });
+                                setSelectedProduct({ orderItems: draft.products, itemNumber: draft.draftNumber });
                                 setIsProductDetailOpen(true);
                                 setCurrentDraftId(draft.id);
-                                setNewOrderId(draft.id);
+                                setNewOrderId(draft.draftNumber);
                                 setOrderDate(draft.orderDate);
                                 setDeliveryDate(draft.deliveryDate);
                                 setOrderItems(draft.products);
@@ -746,7 +689,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
                               size="sm"
                               className="h-8 w-8 p-0 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
                               onClick={() => {
-                                copyToClipboard(draft.id);
+                                copyToClipboard(draft.draftNumber);
                                 toast.success('Order number copied');
                               }}
                               title="Copy order number"
@@ -758,7 +701,7 @@ export function CreateOrder({ draftOrder, onOrderSubmitted, onNavigateToHistory,
                               size="sm"
                               className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
                               onClick={() => {
-                                if (confirm(`Are you sure you want to delete order ${draft.id}?`)) {
+                                if (confirm(`Are you sure you want to delete order ${draft.draftNumber}?`)) {
                                   deleteDraftOrder(draft.id);
                                 }
                               }}

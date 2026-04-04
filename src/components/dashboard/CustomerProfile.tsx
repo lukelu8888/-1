@@ -6,7 +6,7 @@ import { Label } from '../ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
-import { getCurrentUser } from '../../data/authorizedUsers';
+import { getCurrentUser } from '../../utils/dataIsolation';
 import { useUser } from '../../contexts/UserContext';
 import {
   customerEnterpriseMemberService,
@@ -128,7 +128,7 @@ export function CustomerProfile({
       }
     } else {
       // Initialize with user registration data
-      const currentUser = getCurrentUser();
+      const currentUser = getCurrentUser() as any;
       if (currentUser) {
         setProfile(prev => ({
           ...prev,

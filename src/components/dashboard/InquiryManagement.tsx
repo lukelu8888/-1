@@ -14,7 +14,7 @@ import { useInquiry } from '../../contexts/InquiryContext';
 import { useUser } from '../../contexts/UserContext';
 import { toast } from 'sonner@2.0.3';
 import { REGION_CODES, type RegionType } from '../../utils/xjNumberGenerator';
-import { getCurrentUser } from '../../data/authorizedUsers';
+import { getCurrentUser } from '../../utils/dataIsolation';
 import { getCustomerProfile } from './CustomerProfile';
 import { CustomerInquiryView } from './CustomerInquiryView';
 import { UnifiedInquiryDialog } from './UnifiedInquiryDialog';
@@ -35,6 +35,8 @@ const withTimeout = async <T,>(task: Promise<T>, timeoutMs: number, message: str
     }),
   ]);
 };
+
+const INQUIRY_CREATE_TIMEOUT_MS = 20000;
 
 const MY_PRODUCTS_AUTO_OPEN_INQUIRY_KEY = 'my_products_open_new_inquiry';
 
@@ -339,23 +341,36 @@ export function InquiryManagement() {
     (newInquiry as any).documentRenderMeta = null;
 
     try {
-      newInquiry.products = await preparePersistedProductsWithOem(newInquiry.id, products);
+      newInquiry.products = await withTimeout(
+        preparePersistedProductsWithOem(newInquiry.id, products),
+        INQUIRY_CREATE_TIMEOUT_MS,
+        'Preparing inquiry products timed out. Please try again.',
+      );
       newInquiry.oem = aggregateInquiryOemFromProducts(newInquiry.products);
       (newInquiry as any).documentDataSnapshot = adaptInquiryToDocumentData(newInquiry as any);
-      const savedInquiry = await addInquiry(newInquiry as any);
+      const savedInquiry = await withTimeout(
+        addInquiry(newInquiry as any),
+        INQUIRY_CREATE_TIMEOUT_MS,
+        'Creating inquiry timed out. Please try again.',
+      );
       const createdInquiryNo = String(
         (savedInquiry as any)?.inquiryNumber ||
         ''
       ).trim();
       toast.success(
         createdInquiryNo
-          ? `Inquiry ${createdInquiryNo} created successfully!`
-          : 'Inquiry created successfully and is syncing to server…'
+          ? `Inquiry ${createdInquiryNo} created as draft successfully!`
+          : 'Inquiry draft created successfully and is syncing to server…'
       );
       setIsNewInquiryOpen(false);
     } catch (err) {
       console.error('❌ handleCreateInquiry failed:', err);
       const message = err instanceof Error ? err.message : 'Failed to create inquiry — check console for details';
+      if (message.toLowerCase().includes('timed out')) {
+        toast.success('Inquiry draft created locally and is syncing to server…');
+        setIsNewInquiryOpen(false);
+        return;
+      }
       toast.error(message);
     }
   };

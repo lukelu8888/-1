@@ -12,6 +12,7 @@ import { PackingListDocument } from '../documents/templates/PackingListDocument'
 import type { CustomerInquiryData } from '../documents/templates/CustomerInquiryDocument';
 import type { QuotationData } from '../documents/templates/QuotationDocument';
 import type { SalesContractData } from '../documents/templates/SalesContractDocument';
+import { resolveUsdSellerBankInfo } from '../../utils/documentBankInfo';
 import type { CommercialInvoiceData } from '../documents/templates/CommercialInvoiceDocument';
 import type { PackingListData } from '../documents/templates/PackingListDocument';
 import html2canvas from 'html2canvas';
@@ -343,15 +344,7 @@ export function MyDocuments() {
             tel: sellerInfo.phone,
             email: sellerInfo.email,
             legalRepresentative: String(adminOrg.contactPerson || adminOrg.defaultSignatory || ''),
-            bankInfo: {
-              bankName: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
-              accountName: String(usdBank.accountNameEN || usdBank.accountNameCN || sellerInfo.companyNameEn || sellerInfo.companyName),
-              accountNumber: String(usdBank.accountNumber || ''),
-              swiftCode: String(usdBank.swiftCode || ''),
-              bankAddress: String(usdBank.bankAddress || ''),
-              paymentNote: String(usdBank.paymentNote || ''),
-              currency: 'USD',
-            },
+            bankInfo: resolveUsdSellerBankInfo(adminOrg, undefined, sellerInfo.companyNameEn || sellerInfo.companyName),
           },
           products: baseItems.map((item, index) => ({
             no: index + 1,

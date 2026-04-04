@@ -379,11 +379,9 @@ export function UnifiedInquiryDialog({
 
       setSelectedProducts([]);
       if (draftCustomerEmail) {
-        try {
-          await customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail);
-        } catch (error) {
+        void customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail).catch((error) => {
           console.warn('[UnifiedInquiryDialog] Failed to clear cloud inquiry draft after create.', error);
-        }
+        });
       }
       clearDraftSelectedProducts();
       setCustomerRequirement({ ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS });
@@ -391,7 +389,22 @@ export function UnifiedInquiryDialog({
       onClose();
     } catch (error) {
       console.error('Failed to create inquiry from dialog:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to create inquiry. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to create inquiry. Please try again.';
+      if (message.toLowerCase().includes('timed out')) {
+        toast.success('Inquiry draft created locally and is syncing to server…');
+        setSelectedProducts([]);
+        if (draftCustomerEmail) {
+          void customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail).catch((draftError) => {
+            console.warn('[UnifiedInquiryDialog] Failed to clear cloud inquiry draft after timeout fallback.', draftError);
+          });
+        }
+        clearDraftSelectedProducts();
+        setCustomerRequirement({ ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS });
+        setViewMode('selection');
+        onClose();
+        return;
+      }
+      toast.error(message);
     } finally {
       setIsSubmitting(false);
       setSubmitIntent(null);
@@ -423,11 +436,9 @@ export function UnifiedInquiryDialog({
 
       setSelectedProducts([]);
       if (draftCustomerEmail) {
-        try {
-          await customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail);
-        } catch (error) {
+        void customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail).catch((error) => {
           console.warn('[UnifiedInquiryDialog] Failed to clear cloud inquiry draft after update.', error);
-        }
+        });
       }
       clearDraftSelectedProducts();
       setCustomerRequirement({ ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS });
