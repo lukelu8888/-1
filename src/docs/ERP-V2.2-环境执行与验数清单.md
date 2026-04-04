@@ -214,7 +214,7 @@ from public.audit_logs;
 | `[~]` | `purchase_order_execution` 状态分布 | 当前为 `0` 行 | 受控样本已清理，说明共享环境当前仍没有真实执行业务样本 |
 | `[x]` | `audit_logs` 当前行数 | `1` | 已通过远端验数脚本插入 1 条 `erp_v22_environment_validation` 样本 |
 | `[x]` | 超时升级真跑 | 已通过 | 2026-04-04 已完成真实写库验证，`scanned = 75`、`enqueued = 65`、`deduped = 82`、`failures = []` |
-| `[~]` | GitHub Actions 托管环境复跑 | 待触发 | 当前本机无 GitHub Actions 触发凭据；建议按 `超时升级调度方案.md` 中的托管环境参数在仓库 `lukelu8888/-1` 的 `main@45c591d7` 上手工触发 |
+| `[x]` | GitHub Actions 托管环境复跑 | 已完成 | 2026-04-04 已在仓库 `lukelu8888/-1` 的 `main@c0f04c30` 上完成 `workflow_dispatch` 手工验收；运行状态 `Success` |
 
 ## 5. 抽样验收建议
 

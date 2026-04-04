@@ -58,14 +58,14 @@
 |---|---|---|---|
 | `[x]` | 选定后台定时方案（pg_cron / Edge Function / 外部 cron） | VIS-1 / Workstream D | 已确定采用 `外部 cron`，见 `超时升级调度方案.md` |
 | `[x]` | 新建 `deadlineEscalationService` | Workstream D | 已完成（规则服务已落地） |
-| `[x]` | ING 24h 未首响升级 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；生产启用仅依赖外部 secrets 配置 |
-| `[x]` | QT 7天未反馈升级 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；生产启用仅依赖外部 secrets 配置 |
-| `[x]` | SC 3天未签升级 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；生产启用仅依赖外部 secrets 配置 |
-| `[x]` | SC 定金超期升级 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；生产启用仅依赖外部 secrets 配置 |
-| `[x]` | O/A 账期 T-7 预警 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；生产启用仅依赖外部 secrets 配置 |
-| `[x]` | DA 到期 T-3 预警 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；生产启用仅依赖外部 secrets 配置 |
-| `[x]` | Usance L/C 到期 T-5 预警 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；生产启用仅依赖外部 secrets 配置 |
-| `[x]` | 超时升级链路补齐 secrets 守卫 / 去重 / 失败重试 / 日志输出 / 启用步骤 | VIS-1 / Workstream D | 已完成（fixture dry-run 与 service-role 真跑均已跑通；2026-04-04 已补齐表授权与通知字段兼容，真实写库结果 `scanned=75 / enqueued=65 / deduped=82 / failures=[]`） |
+| `[x]` | ING 24h 未首响升级 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；2026-04-04 GitHub Actions 托管环境手工验收通过 |
+| `[x]` | QT 7天未反馈升级 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；2026-04-04 GitHub Actions 托管环境手工验收通过 |
+| `[x]` | SC 3天未签升级 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；2026-04-04 GitHub Actions 托管环境手工验收通过 |
+| `[x]` | SC 定金超期升级 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；2026-04-04 GitHub Actions 托管环境手工验收通过 |
+| `[x]` | O/A 账期 T-7 预警 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；2026-04-04 GitHub Actions 托管环境手工验收通过 |
+| `[x]` | DA 到期 T-3 预警 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；2026-04-04 GitHub Actions 托管环境手工验收通过 |
+| `[x]` | Usance L/C 到期 T-5 预警 | Workstream D | 代码、脚本、workflow、环境守卫与 `dry-run` 入口均已完成；2026-04-04 GitHub Actions 托管环境手工验收通过 |
+| `[x]` | 超时升级链路补齐 secrets 守卫 / 去重 / 失败重试 / 日志输出 / 启用步骤 | VIS-1 / Workstream D | 已完成（fixture dry-run、service-role 真跑与 GitHub Actions 托管环境手工验收均已跑通；2026-04-04 已补齐表授权与通知字段兼容，真实写库结果 `scanned=75 / enqueued=65 / deduped=82 / failures=[]`） |
 
 ## E. 放货治理 / 例外审批
 
