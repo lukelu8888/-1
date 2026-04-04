@@ -45,14 +45,11 @@ export function UploadPaymentProofDialog({
   setPaymentFile,
   paymentType // 🔥 新增
 }: UploadPaymentProofDialogProps) {
-  
   const { updateARByOrderNumber } = useFinance();
   const [submitting, setSubmitting] = useState(false);
-
-  if (!order) return null;
-
-  // 选择文件后先存本地 File 对象，不再转 base64
   const [selectedFileObj, setSelectedFileObj] = useState<File | null>(null);
+  const orderUid = order?.id || order?.orderNumber || '';
+  const orderNumber = order?.orderNumber || order?.id || '';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -67,6 +64,14 @@ export function UploadPaymentProofDialog({
 
   // 提交付款凭证：上传到 Supabase Storage，只保存 URL
   const handleSubmitProof = async () => {
+    if (!order || !orderUid || !orderNumber) {
+      toast.error('Order data is missing', {
+        description: 'Please reopen the dialog and try again.',
+        duration: 3000,
+      });
+      return;
+    }
+
     if (!paymentAmount || !paymentReference || (!paymentFile && !selectedFileObj)) {
       toast.error('Missing Required Fields', {
         description: 'Please fill in all required fields and upload a payment proof file.',
@@ -77,8 +82,7 @@ export function UploadPaymentProofDialog({
 
     const isBalance = paymentType === 'balance';
     const paymentTypeLabel = isBalance ? 'Balance' : 'Deposit';
-    const orderUid = order.id || order.orderNumber;
-    const defaultFileName = (paymentType === 'balance' ? 'balance' : 'deposit') + '_proof_' + (order.orderNumber || order.id) + '.jpg';
+    const defaultFileName = (paymentType === 'balance' ? 'balance' : 'deposit') + '_proof_' + orderNumber + '.jpg';
 
     setSubmitting(true);
     try {
@@ -91,7 +95,7 @@ export function UploadPaymentProofDialog({
       if (fileToUpload) {
         const result = await paymentProofStorage.upload(
           fileToUpload,
-          order.orderNumber || order.id,
+          orderNumber,
           paymentType || 'deposit',
           user?.email || 'unknown'
         );
@@ -109,7 +113,7 @@ export function UploadPaymentProofDialog({
         [proofField]: { fileUrl, fileName, storagePath, amount: parseFloat(paymentAmount), transactionId: paymentReference, notes: paymentNotes || null, uploadedAt: new Date().toISOString() },
       });
 
-      const contractNumber = order.orderNumber || order.id;
+      const contractNumber = orderNumber;
       const proofData = {
         fileName,
         fileUrl,
@@ -200,7 +204,7 @@ export function UploadPaymentProofDialog({
       const arUpdates = isBalance
         ? { balanceProof: paymentProofData, status: 'balance_proof_uploaded' }
         : { depositProof: paymentProofData, status: 'proof_uploaded' };
-      updateARByOrderNumber(order.orderNumber, arUpdates);
+      updateARByOrderNumber(orderNumber, arUpdates);
 
       // 通知 Admin / 财务（本地消息）
       sendNotificationToUser('admin@cosun.com', {
@@ -413,7 +417,7 @@ export function UploadPaymentProofDialog({
           <Button
             className="bg-green-600 hover:bg-green-700"
             onClick={handleSubmitProof}
-            disabled={!paymentAmount || !paymentReference || !paymentFile || submitting}
+            disabled={!order || !paymentAmount || !paymentReference || !paymentFile || submitting}
           >
             <Upload className="w-4 h-4 mr-2" />
             {submitting ? 'Submitting...' : 'Submit Payment Proof'}

@@ -4,6 +4,22 @@ function buildSupabaseError(context: string, error: any) {
   return new Error(`${context} failed: ${String(error?.message || error || 'Unknown Supabase error').trim()}`)
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, context: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${context} timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 type CustomerOrganizationSupabaseRecord = {
   id?: string | null
   auth_user_id?: string | null
@@ -120,6 +136,20 @@ export const customerOrganizationService = {
     return mapCustomerOrganizationRow(data as CustomerOrganizationSupabaseRecord | null)
   },
 
+  async getByEmail(email: string) {
+    const normalizedEmail = String(email || '').trim().toLowerCase()
+    if (!normalizedEmail) return null
+
+    const { data, error } = await supabase
+      .from('customer_organizations')
+      .select('id, auth_user_id, company_name, contact_person, email, phone, mobile, address, website, business_type, logo_url')
+      .eq('email', normalizedEmail)
+      .maybeSingle()
+
+    if (error) throw buildSupabaseError('load customer organization profile by email', error)
+    return mapCustomerOrganizationRow(data as CustomerOrganizationSupabaseRecord | null)
+  },
+
   async saveByAuthUser(authUserId: string, profile: Record<string, any>) {
     const payload = {
       auth_user_id: authUserId,
@@ -135,9 +165,13 @@ export const customerOrganizationService = {
       updated_at: new Date().toISOString(),
     }
 
-    const { error } = await supabase
-      .from('customer_organizations')
-      .upsert(payload, { onConflict: 'auth_user_id' })
+    const { error } = await withTimeout(
+      supabase
+        .from('customer_organizations')
+        .upsert(payload, { onConflict: 'auth_user_id' }),
+      12000,
+      'save customer organization profile',
+    )
 
     if (error) throw buildSupabaseError('save customer organization profile', error)
     return profile
@@ -156,6 +190,20 @@ export const customerPortalProfileService = {
     return mapCustomerPortalProfileRow(data as CustomerPortalProfileSupabaseRecord | null)
   },
 
+  async getByLoginEmail(loginEmail: string) {
+    const normalizedEmail = String(loginEmail || '').trim().toLowerCase()
+    if (!normalizedEmail) return null
+
+    const { data, error } = await supabase
+      .from('customer_portal_profiles')
+      .select('id, auth_user_id, display_name, login_email, portal_role, avatar_url')
+      .eq('login_email', normalizedEmail)
+      .maybeSingle()
+
+    if (error) throw buildSupabaseError('load customer portal profile by login email', error)
+    return mapCustomerPortalProfileRow(data as CustomerPortalProfileSupabaseRecord | null)
+  },
+
   async saveByAuthUser(authUserId: string, profile: Record<string, any>) {
     const payload = {
       auth_user_id: authUserId,
@@ -166,9 +214,13 @@ export const customerPortalProfileService = {
       updated_at: new Date().toISOString(),
     }
 
-    const { error } = await supabase
-      .from('customer_portal_profiles')
-      .upsert(payload, { onConflict: 'auth_user_id' })
+    const { error } = await withTimeout(
+      supabase
+        .from('customer_portal_profiles')
+        .upsert(payload, { onConflict: 'auth_user_id' }),
+      12000,
+      'save customer portal profile',
+    )
 
     if (error) throw buildSupabaseError('save customer portal profile', error)
     return profile

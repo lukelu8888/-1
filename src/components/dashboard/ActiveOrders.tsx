@@ -55,6 +55,25 @@ interface ActiveOrdersProps {
 }
 
 export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOrdersProps) {
+  const normalizePortalOrder = (order: any) => {
+    if (!order) return order;
+    return {
+      ...order,
+      orderNumber: order.orderNumber || order.order_number || '',
+      customerEmail: order.customerEmail || order.customer_email || '',
+      quotationId: order.quotationId || order.quotation_id || null,
+      quotationNumber: order.quotationNumber || order.quotation_number || null,
+      contractNumber: order.contractNumber || order.contract_number || null,
+      expectedDelivery: order.expectedDelivery || order.expected_delivery || '',
+      totalAmount: order.totalAmount ?? order.total_amount ?? 0,
+      paymentStatus: order.paymentStatus || order.payment_status || '',
+      shippingMethod: order.shippingMethod || order.shipping_method || '',
+      trackingNumber: order.trackingNumber || order.tracking_number || '',
+      createdAt: order.createdAt || order.created_at || null,
+      updatedAt: order.updatedAt || order.updated_at || null,
+    };
+  };
+
   const toSafeNumber = (value: unknown): number => {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value === 'string') {
@@ -164,16 +183,18 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   }, [contracts]);
 
   // 🔥 筛选当前用户的活跃订单（合并 OrderContext + 合同上下文）
-  const contextOrders = allOrders.filter(order =>
-    customerEmail &&
-    (order.customerEmail || '').toLowerCase() === customerEmail &&
-    order.status !== 'delivered' &&
-    order.status !== 'completed' &&
-    order.status !== 'cancelled'
-  );
+  const contextOrders = allOrders
+    .map((order) => normalizePortalOrder(order))
+    .filter(order =>
+      customerEmail &&
+      (order.customerEmail || '').toLowerCase() === customerEmail &&
+      order.status !== 'delivered' &&
+      order.status !== 'completed' &&
+      order.status !== 'cancelled'
+    );
   // 合并去重
   const seen = new Set<string>();
-  const activeOrders = [...contextOrders, ...contractOrders].filter(order => {
+  const activeOrders = [...contextOrders, ...contractOrders.map((order) => normalizePortalOrder(order))].filter(order => {
     const key = order.orderNumber || order.id;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -854,8 +875,8 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
       <Dialog open={isDetailOpen} onOpenChange={(open) => {
         setIsDetailOpen(open);
       }}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto p-4">
-          <div className="sticky top-0 bg-white z-10 border-b px-4 py-3">
+        <DialogContent className="w-[calc(210mm+56px)] max-w-[calc(100vw-2rem)] h-[95vh] overflow-hidden p-0 flex flex-col">
+          <div className="shrink-0 border-b bg-white px-6 py-4">
             <DialogTitle className="text-lg">
               Sales Contract - {sanitizeDisplayText(selectedOrder?.orderNumber || selectedOrder?.id)}
             </DialogTitle>
@@ -864,13 +885,9 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
             </DialogDescription>
           </div>
           {selectedOrder && (
-            <div className="py-4">
-              {/* 合同模板 - 放大32% (1.2 × 1.1 = 1.32) */}
-              <div className="flex justify-center">
-                <div style={{ 
-                  transform: 'scale(1.32)', 
-                  transformOrigin: 'top center'
-                }}>
+            <>
+              <div className="min-h-0 flex-1 overflow-auto bg-[#525659] px-6 py-6">
+                <div className="mx-auto flex w-fit justify-center">
                   <SalesContractDocument 
                     data={adaptOrderToSalesContract({
                       orderNumber: selectedOrder.orderNumber || selectedOrder.id,
@@ -909,8 +926,8 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                   />
                 </div>
               </div>
-              
-              <div className="flex justify-end gap-2 pt-4 mt-4 border-t print:hidden sticky bottom-0 bg-white">
+
+              <div className="shrink-0 flex justify-end gap-2 border-t bg-white px-6 py-4 print:hidden">
                 <Button
                   variant="outline"
                   size="sm"
@@ -927,7 +944,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                   Print / Download PDF
                 </Button>
               </div>
-            </div>
+            </>
           )}
         </DialogContent>
       </Dialog>
