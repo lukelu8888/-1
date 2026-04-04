@@ -1,0 +1,53 @@
+name: Deadline Escalation
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run without inserting notifications'
+        required: false
+        default: true
+        type: boolean
+      use_fixture:
+        description: 'Use built-in fixture snapshot (manual verification only)'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '17 * * * *'
+
+concurrency:
+  group: deadline-escalation
+  cancel-in-progress: false
+
+jobs:
+  run-deadline-escalation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run deadline escalation
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DEADLINE_ESCALATION_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+          DEADLINE_ESCALATION_USE_FIXTURE: ${{ github.event_name == 'workflow_dispatch' && inputs.use_fixture || 'false' }}
+          DEADLINE_ESCALATION_RETRY_COUNT: '2'
+          DEADLINE_ESCALATION_DEDUPE_HOURS: '12'
+        run: |
+          if [ "${DEADLINE_ESCALATION_DRY_RUN}" = "true" ]; then
+            npm run deadline:escalation:dry-run
+          else
+            npm run deadline:escalation
+          fi

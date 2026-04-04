@@ -68,7 +68,14 @@
       },
       "scripts": {
             "dev": "vite",
-            "build": "npm run guard:business-storage && vite build",
-            "guard:business-storage": "node ./scripts/guard-business-storage.mjs"
+            "build": "npm run guard:business-storage && npm run guard:admin-roster && vite build",
+            "guard:business-storage": "node ./scripts/guard-business-storage.mjs",
+            "guard:admin-roster": "node ./scripts/guard-admin-roster.mjs",
+            "guard:deadline-escalation-env": "node ./scripts/guard-deadline-escalation-env.mjs",
+            "deadline:escalation": "npm run guard:deadline-escalation-env && node ./scripts/run-deadline-escalation.mjs",
+            "deadline:escalation:dry-run": "npm run guard:deadline-escalation-env && DEADLINE_ESCALATION_DRY_RUN=1 node ./scripts/run-deadline-escalation.mjs",
+            "deadline:escalation:fixture": "DEADLINE_ESCALATION_USE_FIXTURE=1 npm run guard:deadline-escalation-env && DEADLINE_ESCALATION_USE_FIXTURE=1 DEADLINE_ESCALATION_DRY_RUN=1 node ./scripts/run-deadline-escalation.mjs",
+            "erp:v22:validate-remote": "node ./scripts/validate-erp-v22-remote.mjs",
+            "erp:v22:execution-sample": "node ./scripts/manage-erp-v22-execution-validation-sample.mjs"
       }
 }
