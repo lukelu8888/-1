@@ -195,6 +195,23 @@ export type CustomerMasterDataCopy = {
       access: string;
       roles: string;
     };
+    governance: {
+      title: string;
+      description: string;
+      legalEntityTitle: string;
+      legalEntityDescription: string;
+      operatorIdentityTitle: string;
+      operatorIdentityDescription: string;
+      memberDirectoryTitle: string;
+      memberDirectoryDescription: string;
+    };
+    sourceLabels: {
+      sessionUser: string;
+      companyProfile: string;
+      memberDirectory: string;
+      loginSource: string;
+      legalEntitySource: string;
+    };
     dialogs: {
       peopleDetails: string;
       accountDetails: string;
@@ -216,6 +233,7 @@ export type CustomerMasterDataCopy = {
     identityDescription: string;
     roleLabels: {
       Owner: string;
+      'Purchase Manager': string;
       Purchaser: string;
       Finance: string;
       Viewer: string;
@@ -226,6 +244,7 @@ export type CustomerMasterDataCopy = {
       createInquiries: string;
       viewPrices: string;
       placeOrders: string;
+      managePurchaseRequests: string;
       viewFinanceDocs: string;
       uploadPaymentProof: string;
       viewBillingDetails: string;
@@ -542,6 +561,23 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
         access: 'Manage login availability, invitation links, and account security from one list.',
         roles: 'Align customer-side responsibilities and permissions clearly by business role.',
       },
+      governance: {
+        title: 'Identity & Governance Boundary',
+        description: 'Separate enterprise legal identity, enterprise member records, and current signed-in users so customer-side operations stay clear and auditable.',
+        legalEntityTitle: 'Enterprise legal identity',
+        legalEntityDescription: 'Company name, legal address, and country should come from Basic Information and represent the contracting entity.',
+        operatorIdentityTitle: 'Current signed-in operator',
+        operatorIdentityDescription: 'Contact, login email, and actual submission actions should follow the current authenticated customer user.',
+        memberDirectoryTitle: 'Reusable member directory',
+        memberDirectoryDescription: 'People records remain reusable for orders, approvals, and access management without overwriting company master data.',
+      },
+      sourceLabels: {
+        sessionUser: 'Session User',
+        companyProfile: 'Company Profile',
+        memberDirectory: 'Member Directory',
+        loginSource: 'Login Source',
+        legalEntitySource: 'Legal Entity Source',
+      },
       dialogs: {
         peopleDetails: 'People Details',
         accountDetails: 'Account Details',
@@ -563,6 +599,7 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
       identityDescription: 'Keep the current signed-in user profile separate from enterprise contacts and permissions.',
       roleLabels: {
         Owner: 'Owner',
+        'Purchase Manager': 'Purchase Manager',
         Purchaser: 'Purchaser',
         Finance: 'Finance',
         Viewer: 'Viewer',
@@ -573,6 +610,7 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
         createInquiries: 'Create inquiries',
         viewPrices: 'View prices',
         placeOrders: 'Place orders',
+        managePurchaseRequests: 'Manage purchase requests',
         viewFinanceDocs: 'View finance documents',
         uploadPaymentProof: 'Upload payment proof',
         viewBillingDetails: 'View billing details',
@@ -880,6 +918,23 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
         access: 'Administre acceso, enlaces de invitación y seguridad de cuentas desde una sola lista.',
         roles: 'Alinee claramente las responsabilidades y permisos del cliente por rol de negocio.',
       },
+      governance: {
+        title: 'Límite de identidad y gobernanza',
+        description: 'Separe la identidad legal de la empresa, el directorio de miembros y el usuario conectado para mantener operaciones claras y auditables.',
+        legalEntityTitle: 'Identidad legal de la empresa',
+        legalEntityDescription: 'El nombre de la empresa, la dirección legal y el país deben venir de Información básica y representar a la entidad contratante.',
+        operatorIdentityTitle: 'Operador actualmente conectado',
+        operatorIdentityDescription: 'El contacto, el correo de acceso y las acciones reales deben seguir al usuario autenticado que está operando.',
+        memberDirectoryTitle: 'Directorio reutilizable de miembros',
+        memberDirectoryDescription: 'Las fichas de personas siguen siendo reutilizables para pedidos, aprobaciones y gestión de accesos sin sobrescribir los datos maestros de la empresa.',
+      },
+      sourceLabels: {
+        sessionUser: 'Usuario de la sesión',
+        companyProfile: 'Perfil de empresa',
+        memberDirectory: 'Directorio de miembros',
+        loginSource: 'Origen del acceso',
+        legalEntitySource: 'Origen de la entidad legal',
+      },
       dialogs: {
         peopleDetails: 'Detalle de personas',
         accountDetails: 'Detalle de cuenta',
@@ -901,6 +956,7 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
       identityDescription: 'Mantenga separado el perfil del usuario conectado de los contactos y permisos de la empresa.',
       roleLabels: {
         Owner: 'Propietario',
+        'Purchase Manager': 'Gerente de compras',
         Purchaser: 'Compras',
         Finance: 'Finanzas',
         Viewer: 'Visualizador',
@@ -911,6 +967,7 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
         createInquiries: 'Crear consultas',
         viewPrices: 'Ver precios',
         placeOrders: 'Realizar pedidos',
+        managePurchaseRequests: 'Gestionar solicitudes de compra',
         viewFinanceDocs: 'Ver documentos financieros',
         uploadPaymentProof: 'Subir comprobantes de pago',
         viewBillingDetails: 'Ver datos de facturación',
@@ -1218,6 +1275,23 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
         access: 'Gerencie acesso, links de convite e segurança de conta em uma única lista.',
         roles: 'Alinhe responsabilidades e permissões do cliente com clareza por função de negócio.',
       },
+      governance: {
+        title: 'Limite de identidade e governança',
+        description: 'Separe a identidade legal da empresa, o diretório de membros e o usuário autenticado para manter as operações claras e auditáveis.',
+        legalEntityTitle: 'Identidade legal da empresa',
+        legalEntityDescription: 'Nome da empresa, endereço legal e país devem vir de Informações básicas e representar a entidade contratante.',
+        operatorIdentityTitle: 'Operador autenticado atual',
+        operatorIdentityDescription: 'Contato, e-mail de login e ações reais devem seguir o usuário autenticado que está operando.',
+        memberDirectoryTitle: 'Diretório reutilizável de membros',
+        memberDirectoryDescription: 'Os registros de pessoas continuam reutilizáveis para pedidos, aprovações e gestão de acessos sem sobrescrever os dados mestres da empresa.',
+      },
+      sourceLabels: {
+        sessionUser: 'Usuário da sessão',
+        companyProfile: 'Perfil da empresa',
+        memberDirectory: 'Diretório de membros',
+        loginSource: 'Origem do login',
+        legalEntitySource: 'Origem da entidade legal',
+      },
       dialogs: {
         peopleDetails: 'Detalhes da pessoa',
         accountDetails: 'Detalhes da conta',
@@ -1239,6 +1313,7 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
       identityDescription: 'Mantenha o perfil do usuário conectado separado dos contatos e permissões da empresa.',
       roleLabels: {
         Owner: 'Proprietário',
+        'Purchase Manager': 'Gerente de compras',
         Purchaser: 'Compras',
         Finance: 'Financeiro',
         Viewer: 'Visualizador',
@@ -1249,6 +1324,7 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
         createInquiries: 'Criar consultas',
         viewPrices: 'Ver preços',
         placeOrders: 'Fazer pedidos',
+        managePurchaseRequests: 'Gerenciar solicitações de compra',
         viewFinanceDocs: 'Ver documentos financeiros',
         uploadPaymentProof: 'Enviar comprovante de pagamento',
         viewBillingDetails: 'Ver dados de faturamento',
@@ -1556,6 +1632,23 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
         access: 'أدر إتاحة الدخول وروابط الدعوة وأمان الحساب من قائمة واحدة.',
         roles: 'نسّق مسؤوليات وصلاحيات جانب العميل بوضوح حسب الدور التجاري.',
       },
+      governance: {
+        title: 'حدود الهوية والحوكمة',
+        description: 'افصل بين الهوية القانونية للشركة ودليل الأعضاء والمستخدم المسجّل حالياً حتى تبقى العمليات واضحة وقابلة للتدقيق.',
+        legalEntityTitle: 'الهوية القانونية للشركة',
+        legalEntityDescription: 'يجب أن يأتي اسم الشركة والعنوان القانوني والدولة من المعلومات الأساسية وأن تمثل الجهة المتعاقدة.',
+        operatorIdentityTitle: 'المشغّل المسجّل حالياً',
+        operatorIdentityDescription: 'يجب أن تتبع جهة الاتصال وبريد الدخول وإجراءات التقديم الفعلية المستخدم المعتمد الحالي.',
+        memberDirectoryTitle: 'دليل أعضاء قابل لإعادة الاستخدام',
+        memberDirectoryDescription: 'تبقى سجلات الأشخاص قابلة لإعادة الاستخدام في الطلبات والموافقات وإدارة الوصول دون الكتابة فوق البيانات الأساسية للشركة.',
+      },
+      sourceLabels: {
+        sessionUser: 'مستخدم الجلسة',
+        companyProfile: 'ملف الشركة',
+        memberDirectory: 'دليل الأعضاء',
+        loginSource: 'مصدر الدخول',
+        legalEntitySource: 'مصدر الكيان القانوني',
+      },
       dialogs: {
         peopleDetails: 'تفاصيل الشخص',
         accountDetails: 'تفاصيل الحساب',
@@ -1577,6 +1670,7 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
       identityDescription: 'افصل ملف المستخدم الحالي عن جهات الاتصال المؤسسية والصلاحيات.',
       roleLabels: {
         Owner: 'مالك',
+        'Purchase Manager': 'مدير المشتريات',
         Purchaser: 'مشتريات',
         Finance: 'مالية',
         Viewer: 'مشاهد',
@@ -1587,6 +1681,7 @@ export const customerMasterDataCopy: Record<CustomerMasterDataLocale, CustomerMa
         createInquiries: 'إنشاء استفسارات',
         viewPrices: 'عرض الأسعار',
         placeOrders: 'إنشاء الطلبات',
+        managePurchaseRequests: 'إدارة طلبات الشراء',
         viewFinanceDocs: 'عرض المستندات المالية',
         uploadPaymentProof: 'رفع إثبات الدفع',
         viewBillingDetails: 'عرض بيانات الفوترة',

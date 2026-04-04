@@ -54,6 +54,9 @@ const VALID_DASHBOARD_VIEWS = new Set([
 export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProps) {
   // Restore active view from localStorage on mount
   const [activeView, setActiveView] = useState<string>(() => {
+    if (typeof window === 'undefined') {
+      return DEFAULT_DASHBOARD_VIEW;
+    }
     const savedView = localStorage.getItem('dashboardActiveView');
     if (savedView && VALID_DASHBOARD_VIEWS.has(savedView)) {
       return savedView;
@@ -62,7 +65,10 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
   });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [profileEditToken, setProfileEditToken] = useState(0);
-  const [customerLogo, setCustomerLogo] = useState<string | null>(() => localStorage.getItem('cosun_customer_logo'));
+  const [customerLogo, setCustomerLogo] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('cosun_customer_logo');
+  });
   const [theme, setTheme] = useState<CustomerThemePalette>(DEFAULT_CUSTOMER_THEME);
   const [locale, setLocale] = useState<CustomerMasterDataLocale>(() => {
     if (typeof window === 'undefined') return 'en';
@@ -367,6 +373,9 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
 
   // Restore menu order from localStorage or use default
   const [menuItems, setMenuItems] = useState(() => {
+    if (typeof window === 'undefined') {
+      return defaultMenuItems;
+    }
     const savedOrder = localStorage.getItem('dashboardMenuOrder');
     if (savedOrder) {
       try {
@@ -429,6 +438,9 @@ export function CustomerDashboard({ onLogout, userEmail }: CustomerDashboardProp
 
   // Sidebar width state
   const [sidebarWidth, setSidebarWidth] = useState(() => {
+    if (typeof window === 'undefined') {
+      return 256;
+    }
     const savedWidth = localStorage.getItem('dashboardSidebarWidth');
     const parsedWidth = savedWidth ? parseInt(savedWidth, 10) : 256;
     if (!Number.isFinite(parsedWidth)) {
