@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Trash2, Eye, Edit, Calculator } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { Search } from 'lucide-react';
 import { QuoteRequirement } from '../../../contexts/QuoteRequirementContext';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
@@ -8,12 +7,13 @@ import { Input } from '../../ui/input';
 import { TabsContent } from '../../ui/tabs';
 import { calculateRequirementStatus } from './purchaseOrderUtils';
 import {
-  ERP_LIST_DELETE_BUTTON_CLASS,
-  ERP_LIST_DELETE_BUTTON_STYLE,
   ERP_LIST_UI_SPEC_V1,
+  getErpListBatchDeletePillClass,
+  getErpListBatchDeletePillStyle,
   getErpListFilterPillClass,
   getErpListFilterPillStyle,
 } from '../../shared/erpListUiSpec';
+import { useResizableTableColumns } from '../../shared/useResizableTableColumns';
 import { normalizeLegacyQrNumber } from '../../../utils/quoteRequirementNumber';
 
 type RequirementStats = {
@@ -35,12 +35,59 @@ type QuoteRequirementsTabProps = {
   hasDownstreamXJForRequirement: (req: QuoteRequirement) => boolean;
   setViewRequirement: (req: QuoteRequirement) => void;
   setShowRequirementDialog: (show: boolean) => void;
+  setEditingRequirement: (req: QuoteRequirement) => void;
+  setShowEditRequirementDialog: (show: boolean) => void;
   handleCreateXJFromRequirement: (req: QuoteRequirement) => void;
   handleCreateOrderFromRequirement: (req: QuoteRequirement) => void;
   handleSmartFeedback: (req: QuoteRequirement) => void;
   handlePushToSalesInquiry: (req: QuoteRequirement) => void;
   deleteRequirement: (id: string) => Promise<void>;
 };
+
+type QuoteRequirementColumnKey =
+  | 'selection'
+  | 'index'
+  | 'date'
+  | 'number'
+  | 'region'
+  | 'products'
+  | 'status'
+  | 'actions';
+
+const QUOTE_REQUIREMENT_COLUMN_ORDER: QuoteRequirementColumnKey[] = [
+  'selection',
+  'index',
+  'date',
+  'number',
+  'region',
+  'products',
+  'status',
+  'actions',
+];
+
+const QUOTE_REQUIREMENT_COLUMN_DEFAULT_WIDTHS: Record<QuoteRequirementColumnKey, number> = {
+  selection: 52,
+  index: 56,
+  date: 170,
+  number: 210,
+  region: 96,
+  products: 110,
+  status: 140,
+  actions: 360,
+};
+
+const QUOTE_REQUIREMENT_COLUMN_MIN_WIDTHS: Record<QuoteRequirementColumnKey, number> = {
+  selection: 52,
+  index: 56,
+  date: 140,
+  number: 180,
+  region: 88,
+  products: 96,
+  status: 120,
+  actions: 280,
+};
+
+const QUOTE_REQUIREMENT_TABLE_UI_PREFERENCE_KEY = 'quote_requirements_table_column_widths_v1';
 
 export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
   requirementStats,
@@ -53,6 +100,8 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
   hasDownstreamXJForRequirement,
   setViewRequirement,
   setShowRequirementDialog,
+  setEditingRequirement,
+  setShowEditRequirementDialog,
   handleCreateXJFromRequirement,
   handleCreateOrderFromRequirement,
   handleSmartFeedback,
@@ -61,6 +110,17 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
 }) => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'partial' | 'processing'>('all');
   const [expandedRelatedIds, setExpandedRelatedIds] = useState<string[]>([]);
+  const {
+    getColumnStyle,
+    renderResizeHandle,
+    renderHeaderCell,
+  } = useResizableTableColumns<QuoteRequirementColumnKey>({
+    storageKey: QUOTE_REQUIREMENT_TABLE_UI_PREFERENCE_KEY,
+    order: QUOTE_REQUIREMENT_COLUMN_ORDER,
+    defaults: QUOTE_REQUIREMENT_COLUMN_DEFAULT_WIDTHS,
+    minWidths: QUOTE_REQUIREMENT_COLUMN_MIN_WIDTHS,
+    fixedColumns: ['selection', 'index'],
+  });
   const hasPositivePricingPayload = (req: QuoteRequirement) => {
     const feedbackProducts = Array.isArray(req.purchaserFeedback?.products)
       ? req.purchaserFeedback.products
@@ -134,10 +194,12 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
               variant="outline"
               onClick={handleBatchDeleteRequirements}
               disabled={selectedRequirementIds.length === 0}
-              style={ERP_LIST_DELETE_BUTTON_STYLE}
-              className={ERP_LIST_DELETE_BUTTON_CLASS.replace('h-9', 'h-8').replace('text-[12px]', ERP_LIST_UI_SPEC_V1.buttonTextClass)}
+              style={getErpListBatchDeletePillStyle(selectedRequirementIds.length > 0)}
+              className={getErpListBatchDeletePillClass(selectedRequirementIds.length > 0)
+                .replace('h-9', 'h-8')
+                .replace('px-4', 'px-3')
+                .replace('text-[12px]', ERP_LIST_UI_SPEC_V1.buttonTextClass)}
             >
-              <Trash2 className="w-3.5 h-3.5 mr-1" />
               批量删除{selectedRequirementIds.length > 0 ? ` (${selectedRequirementIds.length})` : ''}
             </Button>
           </div>
@@ -145,30 +207,44 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
 
         <div className="border border-gray-200 rounded bg-white flex flex-1 min-h-0 flex-col overflow-visible min-h-[calc(100dvh-360px)]">
           <div className="overflow-x-auto overflow-y-visible bg-white flex-1 rounded-[inherit] min-h-0">
-          <table className="w-full text-[14px]">
+          <table className="w-full table-fixed text-[14px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                    checked={selectedRequirementIds.length === displayRequirements.length && displayRequirements.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedRequirementIds(displayRequirements.map(r => r.id));
-                      } else {
-                        setSelectedRequirementIds([]);
-                      }
-                    }}
-                  />
+                <th
+                  className="group relative overflow-hidden px-2 py-3 text-left font-semibold text-gray-700"
+                  style={getColumnStyle('selection')}
+                >
+                  <div className="flex min-h-5 w-full items-center justify-center pr-4 text-left">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
+                      checked={selectedRequirementIds.length === displayRequirements.length && displayRequirements.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedRequirementIds(displayRequirements.map(r => r.id));
+                        } else {
+                          setSelectedRequirementIds([]);
+                        }
+                      }}
+                    />
+                  </div>
+                  {renderResizeHandle('selection', { hitAreaClassName: 'w-8 -right-4' })}
                 </th>
-                <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                <th className="text-left py-1.5 px-2 font-medium text-gray-700">日期</th>
-                <th className="text-left py-1.5 px-2 font-medium text-gray-700">编号</th>
-                <th className="text-left py-1.5 px-2 font-medium text-gray-700">区域</th>
-                <th className="text-center py-1.5 px-2 font-medium text-gray-700">产品数</th>
-                <th className="text-left py-1.5 px-2 font-medium text-gray-700">状态</th>
-                <th className="text-center py-1.5 px-2 font-medium text-gray-700">操作</th>
+                <th
+                  className="group relative overflow-hidden px-2 py-3 text-left font-semibold text-gray-700"
+                  style={getColumnStyle('index')}
+                >
+                  <div className="flex min-h-5 w-full items-center justify-center pr-4 text-left">
+                    <span className="block whitespace-nowrap text-[13px] font-semibold leading-4">#</span>
+                  </div>
+                  {renderResizeHandle('index', { hitAreaClassName: 'w-8 -right-4' })}
+                </th>
+                {renderHeaderCell('date', '日期', 'text-left text-gray-700', { hitAreaClassName: 'w-8 -right-4' })}
+                {renderHeaderCell('number', '编号', 'text-left text-gray-700')}
+                {renderHeaderCell('region', '区域', 'text-left text-gray-700')}
+                {renderHeaderCell('products', '产品数', 'text-left text-gray-700')}
+                {renderHeaderCell('status', '状态', 'text-left text-gray-700')}
+                {renderHeaderCell('actions', '操作', 'text-left text-gray-700')}
               </tr>
             </thead>
             <tbody>
@@ -197,24 +273,28 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
 
                 return (
                   <tr key={req.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-                    <td className="py-2 px-2 text-center">
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                        checked={selectedRequirementIds.includes(req.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedRequirementIds([...selectedRequirementIds, req.id]);
-                          } else {
-                            setSelectedRequirementIds(selectedRequirementIds.filter(id => id !== req.id));
-                          }
-                        }}
-                      />
+                    <td className="py-2 px-2 text-left" style={getColumnStyle('selection')}>
+                      <div className="flex items-center justify-center pr-4">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
+                          checked={selectedRequirementIds.includes(req.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedRequirementIds([...selectedRequirementIds, req.id]);
+                            } else {
+                              setSelectedRequirementIds(selectedRequirementIds.filter(id => id !== req.id));
+                            }
+                          }}
+                        />
+                      </div>
                     </td>
-                    <td className="py-2 px-2 text-center text-gray-500">
-                      {idx + 1}
+                    <td className="py-2 px-2 text-left text-gray-500" style={getColumnStyle('index')}>
+                      <div className="flex items-center justify-center pr-4">
+                        {idx + 1}
+                      </div>
                     </td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2" style={getColumnStyle('date')}>
                       <div className="space-y-1 text-gray-900">
                         <div>
                           <span className="mr-1 text-[12px] text-gray-500">提交日期</span>
@@ -226,7 +306,7 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                         </div>
                       </div>
                     </td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2" style={getColumnStyle('number')}>
                       <div className="relative inline-block">
                       <button
                         onClick={() => {
@@ -263,7 +343,7 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                       ) : null}
                       </div>
                     </td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2" style={getColumnStyle('region')}>
                       {regionConfig ? (
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-medium ${regionConfig.color}`}>
                           {regionConfig.label}
@@ -272,12 +352,12 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                         <span className="text-gray-400 text-[12px]">-</span>
                       )}
                     </td>
-                    <td className="py-2 px-2 text-center">
+                    <td className="py-2 px-2 text-left" style={getColumnStyle('products')}>
                       <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
                         {itemCount}
                       </span>
                     </td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2" style={getColumnStyle('status')}>
                       <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${
                         dynamicStatus === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-200' :
                         dynamicStatus === 'partial' ? 'bg-orange-50 text-orange-700 border-orange-200' :
@@ -289,8 +369,8 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                          dynamicStatus === 'processing' ? '全部提交' : '已完成'}
                       </span>
                     </td>
-                    <td className="py-2 px-2 text-center">
-                      <div className="flex gap-1 justify-center">
+                    <td className="py-2 px-2 text-left" style={getColumnStyle('actions')}>
+                      <div className="flex flex-wrap gap-1 justify-start">
                         {/* 🔥 查看按钮 */}
                         <Button
                           size="sm"
@@ -302,7 +382,6 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                           className="h-6 text-[12px] px-2 border-gray-300 text-gray-600 hover:bg-gray-50 gap-1"
                           title="查看报价请求单详情"
                         >
-                          <Eye className="w-3 h-3" />
                           <span>查看</span>
                         </Button>
 
@@ -311,11 +390,8 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                           size="sm"
                           variant="outline"
                           onClick={() => {
-                            // TODO: 实现编辑功能
-                            toast.info('编辑功能开发中...', {
-                              description: '即将支持编辑报价请求单',
-                              duration: 2000
-                            });
+                            setEditingRequirement(req);
+                            setShowEditRequirementDialog(true);
                           }}
                           disabled={disableEdit}
                           className={`h-6 text-[12px] px-2 gap-1 ${
@@ -325,7 +401,6 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                           }`}
                           title="编辑报价请求单"
                         >
-                          <Edit className="w-3 h-3" />
                           <span>编辑</span>
                         </Button>
 
@@ -362,7 +437,6 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                           className="h-6 text-[12px] bg-emerald-600 hover:bg-emerald-700 px-2 gap-1"
                           title={req.purchaserFeedback ? '重新查看/调整智能对比建议' : '智能提取BJ报价，生成对比建议'}
                         >
-                          <Calculator className="w-3 h-3" />
                           <span>智能对比建议</span>
                         </Button>
 
@@ -387,38 +461,7 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                               : '反馈业务员询报'
                           }
                         >
-                          <Calculator className="w-3 h-3" />
                           <span>{hasActualSalesInquiryPush(req) ? '重新反馈业务员询报' : '反馈业务员询报'}</span>
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={async () => {
-                            if (hasLinkedXJ) {
-                              toast.error('该报价请求单已生成下游询价(XJ)，不可删除');
-                              return;
-                            }
-                            if (window.confirm(`确定要删除报价请求单 "${req.requirementNo}" 吗？\n\n产品: ${req.productName}\n数量: ${req.quantity} ${req.unit}`)) {
-                              try {
-                                await deleteRequirement(req.id);
-                                toast.success('报价请求单已删除', {
-                                  description: `${req.requirementNo} - ${req.productName}`,
-                                  duration: 3000
-                                });
-                              } catch (error: any) {
-                                toast.error(`删除报价请求单失败：${error?.message || '未知错误'}`);
-                              }
-                            }
-                          }}
-                          disabled={hasLinkedXJ}
-                          className={`h-6 text-[12px] px-2 ${
-                            hasLinkedXJ
-                              ? 'border-gray-200 text-gray-300 cursor-not-allowed'
-                              : 'border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400'
-                          }`}
-                          title="删除报价请求单"
-                        >
-                          <Trash2 className="w-3 h-3" />
                         </Button>
                       </div>
                     </td>

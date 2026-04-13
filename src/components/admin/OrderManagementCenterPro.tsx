@@ -1,7 +1,7 @@
 // 🔥 THE COSUN BM - 订单管理中心 Pro版
 // B2B全流程订单管理：询价 → 报价 → 合同 → 订单 → 收款
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
@@ -11,34 +11,49 @@ import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '../ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { 
-  FileText, Package, DollarSign, Bell, Wallet, Search, Filter, 
+import {
+  FileText, Package, DollarSign, Bell, Wallet, Search, Filter,
   Eye, Plus, Download, FileCheck, Loader2, CheckCircle2,
   Container, TrendingUp, Clock, ArrowRight, X, Send,
-  ClipboardList, Receipt, Truck, CreditCard
+  ClipboardList, Receipt, Truck, CreditCard, Ship
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
-import AdminInquiryManagement from './AdminInquiryManagementNew'; // 🔥 导入新的询价管理组件
-import QuotationManagement from './QuotationManagement'; // 📋 导入独立的报价管理组件
 import { Inquiry as CustomerInquiry } from '../../contexts/InquiryContext';
-import OrderTracking from './OrderTracking';
-import CollectionManagement from './CollectionManagement';
-import OrderOverviewDashboard from './OrderOverviewDashboard'; // 🔥 订单全盘
-import { CostInquiryQuotationManagement } from './CostInquiryQuotationManagement'; // 🔥 成本询报
-import { SalesQuotationManagement } from '../salesperson/SalesQuotationManagement'; // 🔥 QT销售报价管理
-import { SalesContractManagement } from '../salesperson/SalesContractManagement'; // 🔥 SC销售合同管理（业务员订单）
-import { ApprovalCenter } from './ApprovalCenter'; // 🔥 审批中心
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：获取待审批数量
+import { useInquiry } from '../../contexts/InquiryContext';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
+import { useSalesContracts } from '../../contexts/SalesContractContext';
+import { usePayments } from '../../contexts/PaymentContext';
+import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
+import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext';
 import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 新增：获取当前用户
 import { useAuth } from '../../hooks/useAuth';
 import { permissionCenterService } from '../../lib/services/permissionCenterService';
+import { exportServiceOrdersDb } from '../../lib/supabase-db';
+import { subscribeErpEvent } from '../../lib/erp-core/event-bus';
+import { approvalRecordService } from '../../lib/supabaseService';
+import {
+  EMPTY_SALES_WORKFLOW_SOURCE_SNAPSHOT,
+  hasSalesWorkflowSnapshotData,
+  loadSalesWorkflowSourceSnapshot,
+  readCachedSalesWorkflowSourceSnapshot,
+} from '../../lib/services/salesWorkflowSourceService';
+import { computeOrderManagementCounts } from '../../lib/services/orderManagementCountService';
+import { deriveOrderCoordinatorTaskSummary } from '../../lib/services/orderCoordinatorTaskCenterService';
 import { QuotationPDFTemplate } from './QuotationPDFTemplate';
 import { SalesContractTemplate } from './SalesContractTemplate';
 import { SalesContractDocumentPaginated } from '../documents/SalesContractDocumentPaginated'; // 🔥 分页版销售合同
 import { SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 销售合同数据类型
 import { exportToPDF, generatePDFFilename } from '../../utils/pdfExport';
 import type { User } from '../../lib/rbac-config';
+import type { PaymentMode } from '../../contexts/SalesQuotationContext';
+import {
+  buildPaymentTermsText,
+  deriveBalanceTrigger,
+  getPaymentModeLabel,
+  type BalanceTrigger,
+} from '../../lib/paymentFlow';
 const APPROVAL_CENTER_CACHE_PREFIX = 'approval_center_cache_v1';
 const getApprovalCenterCacheKey = (email: string) => `${APPROVAL_CENTER_CACHE_PREFIX}:${email || 'anonymous'}`;
 const getSwitchedRbacUser = () => {
@@ -87,6 +102,8 @@ interface Quotation {
   totalAmount: number;
   status: 'Draft' | 'Sent' | 'Negotiating' | 'Accepted' | 'Rejected' | 'Expired' | 'Contract Generated';
   products: QuotationProduct[];
+  paymentMode?: PaymentMode | null;
+  balanceTrigger?: BalanceTrigger | null;
   paymentTerms?: string;
   deliveryTerms?: string;
   portOfLoading?: string;
@@ -104,16 +121,100 @@ interface OrderManagementCenterProProps {
   currentUser?: User | null;
 }
 
+const LazyApprovalCenter = React.lazy(() =>
+  import('./ApprovalCenter').then((module) => ({ default: module.ApprovalCenter }))
+);
+const LazyOrderOverviewDashboard = React.lazy(() => import('./OrderOverviewDashboard'));
+const loadAdminInquiryManagement = () => import('./AdminInquiryManagementNew');
+const LazyAdminInquiryManagement = React.lazy(loadAdminInquiryManagement);
+const loadCostInquiryQuotationManagement = () =>
+  import('./CostInquiryQuotationManagement').then((module) => ({ default: module.CostInquiryQuotationManagement }));
+const LazyCostInquiryQuotationManagement = React.lazy(loadCostInquiryQuotationManagement);
+const loadSalesQuotationManagement = () =>
+  import('../salesperson/SalesQuotationManagement').then((module) => ({ default: module.SalesQuotationManagement }));
+const LazySalesQuotationManagement = React.lazy(loadSalesQuotationManagement);
+const loadSalesContractManagement = () =>
+  import('../salesperson/SalesContractManagement').then((module) => ({ default: module.SalesContractManagement }));
+const LazySalesContractManagement = React.lazy(loadSalesContractManagement);
+const loadCollectionManagement = () => import('./CollectionManagement');
+const LazyCollectionManagement = React.lazy(loadCollectionManagement);
+const loadExportServiceWorkbench = () =>
+  import('../salesperson/export-service/ExportServiceWorkbench').then((module) => ({ default: module.ExportServiceWorkbench }));
+const LazyExportServiceWorkbench = React.lazy(loadExportServiceWorkbench);
+const ORDER_CENTER_TAB_PRELOADERS = {
+  overview: () => import('./OrderOverviewDashboard'),
+  inquiries: loadAdminInquiryManagement,
+  'cost-inquiry': loadCostInquiryQuotationManagement,
+  quotations: loadSalesQuotationManagement,
+  orders: loadSalesContractManagement,
+  collections: loadCollectionManagement,
+  approvals: () => import('./ApprovalCenter').then((module) => ({ default: module.ApprovalCenter })),
+  'export-service': loadExportServiceWorkbench,
+} as const;
+
+const OrderCenterTabFallback = ({
+  title,
+  rows = 4,
+}: {
+  title: string;
+  rows?: number;
+}) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="h-5 w-40 animate-pulse rounded bg-slate-200" />
+    <p className="mt-3 text-sm text-slate-500">{title}</p>
+    <div className="mt-5 space-y-3">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div key={`${title}-fallback-${index}`} className="h-16 animate-pulse rounded-xl bg-slate-50" />
+      ))}
+    </div>
+  </div>
+);
+
+const logPerf = (label: string, startAt: number, extra?: Record<string, unknown>) => {
+  const duration = Math.round(performance.now() - startAt);
+  console.info(`[perf] ${label}: ${duration}ms`, extra || {});
+};
+
+const scheduleBrowserIdleTask = (callback: () => void, timeout = 1500) => {
+  if (typeof window === 'undefined') return () => {};
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (cb: () => void, options?: { timeout?: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+
+  if (typeof idleWindow.requestIdleCallback === 'function') {
+    const idleId = idleWindow.requestIdleCallback(() => {
+      callback();
+    }, { timeout });
+
+    return () => {
+      idleWindow.cancelIdleCallback?.(idleId);
+    };
+  }
+
+  const timer = window.setTimeout(callback, timeout);
+  return () => {
+    window.clearTimeout(timer);
+  };
+};
+
 export default function OrderManagementCenterPro({ currentUser: dashboardCurrentUser = null }: OrderManagementCenterProProps) {
   const { currentUser: authCurrentUser } = useAuth();
-  const [runtimeUser, setRuntimeUser] = useState(() => dashboardCurrentUser || getSwitchedRbacUser() || getCurrentUser());
+  const { inquiries } = useInquiry();
+  const { requirements } = useQuoteRequirements();
+  const { quotationRequests } = useQuotationRequests();
+  const { quotations: salesQuotations } = useSalesQuotations();
+  const { contracts } = useSalesContracts();
+  const { payments } = usePayments();
+  const { purchaseOrders } = usePurchaseOrders();
+  const [runtimeUser, setRuntimeUser] = useState(() => dashboardCurrentUser || getCurrentUser() || getSwitchedRbacUser());
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(() => {
-    return dashboardCurrentUser?.role || getSwitchedRbacUser()?.role || null;
+    return dashboardCurrentUser?.role || getCurrentUser()?.role || getCurrentUser()?.userRole || getSwitchedRbacUser()?.role || null;
   });
   const [currentUserEmail, setCurrentUserEmail] = useState<string>(() => {
-    return dashboardCurrentUser?.email || getSwitchedRbacUser()?.email || '';
+    return dashboardCurrentUser?.email || getCurrentUser()?.email || getSwitchedRbacUser()?.email || '';
   });
-  const [activeTab, setActiveTab] = useState<'overview' | 'inquiries' | 'cost-inquiry' | 'quotations' | 'orders' | 'collections' | 'approvals'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'inquiries' | 'cost-inquiry' | 'quotations' | 'orders' | 'collections' | 'approvals' | 'export-service'>('overview');
   const [selectedInquiry, setSelectedInquiry] = useState<CustomerInquiry | null>(null);
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -121,28 +222,53 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
   
   // 🔥 高亮QT报价单号（用于下推报价管理后高亮显示）
   const [highlightQtNumber, setHighlightQtNumber] = useState<string | undefined>(undefined);
+  const [highlightInquiryNumber, setHighlightInquiryNumber] = useState<string | undefined>(undefined);
+  const [highlightQrNumber, setHighlightQrNumber] = useState<string | undefined>(undefined);
   
   // 🔥 高亮SC销售合同号（用于下推订单管理后高亮显示）
   const [highlightScNumber, setHighlightScNumber] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      void ORDER_CENTER_TAB_PRELOADERS.overview();
+      void ORDER_CENTER_TAB_PRELOADERS.inquiries();
+      void ORDER_CENTER_TAB_PRELOADERS['cost-inquiry']();
+      void ORDER_CENTER_TAB_PRELOADERS.quotations();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, []);
   
   useEffect(() => {
     const pendingTargetTab = localStorage.getItem('orderManagementCenterActiveTab');
     if (!pendingTargetTab) return;
-    if (['overview', 'inquiries', 'cost-inquiry', 'quotations', 'orders', 'collections', 'approvals'].includes(pendingTargetTab)) {
+    if (['overview', 'inquiries', 'cost-inquiry', 'quotations', 'orders', 'collections', 'approvals', 'export-service'].includes(pendingTargetTab)) {
       setActiveTab(pendingTargetTab as any);
     }
     localStorage.removeItem('orderManagementCenterActiveTab');
   }, []);
+
+  useEffect(() => {
+    if (tabSwitchPerfRef.current?.tab !== activeTab) return;
+    requestAnimationFrame(() => {
+      if (tabSwitchPerfRef.current?.tab !== activeTab) return;
+      logPerf(`order-management tab ready: ${activeTab}`, tabSwitchPerfRef.current.startAt, { tab: activeTab });
+      tabSwitchPerfRef.current = null;
+    });
+  }, [activeTab]);
   
   useEffect(() => {
     const syncRuntimeUser = () => {
+      const actingUser = getCurrentUser();
       const switchedUser = getSwitchedRbacUser();
-      const nextUser = dashboardCurrentUser || switchedUser || getCurrentUser();
+      const nextUser = dashboardCurrentUser || actingUser || switchedUser;
       setRuntimeUser(nextUser);
       setCurrentUserRole(
-        dashboardCurrentUser?.role || switchedUser?.role || nextUser?.role || nextUser?.userRole || null,
+        dashboardCurrentUser?.role || actingUser?.role || actingUser?.userRole || switchedUser?.role || nextUser?.role || nextUser?.userRole || null,
       );
-      setCurrentUserEmail(dashboardCurrentUser?.email || switchedUser?.email || nextUser?.email || '');
+      setCurrentUserEmail(dashboardCurrentUser?.email || actingUser?.email || switchedUser?.email || nextUser?.email || '');
     };
     syncRuntimeUser();
     window.addEventListener('userChanged', syncRuntimeUser as EventListener);
@@ -166,6 +292,8 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
   
   const quotationPDFRef = useRef<HTMLDivElement>(null);
   const contractPDFRef = useRef<HTMLDivElement>(null);
+  const tabSwitchPerfRef = useRef<{ tab: string; startAt: number } | null>(null);
+  const preloadedTabsRef = useRef<Set<keyof typeof ORDER_CENTER_TAB_PRELOADERS>>(new Set());
   
   const { notifications, unreadCount, addNotification } = useNotifications();
   
@@ -210,6 +338,14 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
       return 0;
     }
   });
+  const [exportServiceOrders, setExportServiceOrders] = useState<any[]>([]);
+  const [salesWorkflowSnapshot, setSalesWorkflowSnapshot] = useState(() => readCachedSalesWorkflowSourceSnapshot({
+    email: dashboardCurrentUser?.email || getCurrentUser()?.email || getSwitchedRbacUser()?.email || '',
+    name: dashboardCurrentUser?.name || getCurrentUser()?.name || getSwitchedRbacUser()?.name || '',
+    role: dashboardCurrentUser?.role || getCurrentUser()?.role || getCurrentUser()?.userRole || getSwitchedRbacUser()?.role || '',
+    region: dashboardCurrentUser?.region || getCurrentUser()?.region || getSwitchedRbacUser()?.region || '',
+  }));
+  const [isRefreshingWorkflowSnapshot, setIsRefreshingWorkflowSnapshot] = useState(false);
 
   useEffect(() => {
     if (!currentUserEmail) {
@@ -242,6 +378,283 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
     };
   }, [currentUserEmail]);
 
+  useEffect(() => {
+    if (!shouldShowApprovalCenter || !currentUserEmail) return;
+
+    void import('./ApprovalCenter');
+
+    const canReadBroadApprovalPool = ['Regional_Manager', 'Sales_Director', 'CEO'].includes(String(effectiveRuntimeRole || ''));
+    const prefetchApprovalSummaries = async () => {
+      try {
+        if (canReadBroadApprovalPool) {
+          await approvalRecordService.prefetchAllSummaries();
+        } else {
+          await approvalRecordService.prefetchForApproverSummaries(currentUserEmail);
+        }
+      } catch (error) {
+        console.warn('[OrderManagementCenterPro] approval summary prefetch failed:', (error as any)?.message || error);
+      }
+    };
+
+    void prefetchApprovalSummaries();
+  }, [currentUserEmail, effectiveRuntimeRole, shouldShowApprovalCenter]);
+
+  useEffect(() => {
+    let alive = true;
+
+    const syncExportServiceOrders = async () => {
+      try {
+        const rows = await exportServiceOrdersDb.getAll();
+        if (!alive) return;
+        setExportServiceOrders(Array.isArray(rows) ? rows : []);
+      } catch {
+        if (alive) setExportServiceOrders([]);
+      }
+    };
+
+    void syncExportServiceOrders();
+    const subscription = exportServiceOrdersDb.subscribeChanges(() => {
+      void syncExportServiceOrders();
+    });
+
+    return () => {
+      alive = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const syncSalesWorkflowSnapshot = React.useCallback(async () => {
+    setIsRefreshingWorkflowSnapshot(true);
+    try {
+      const nextSnapshot = await loadSalesWorkflowSourceSnapshot({
+        email: currentUserEmail || permissionRuntimeUser?.email || '',
+        name: permissionRuntimeUser?.name || runtimeUser?.name || dashboardCurrentUser?.name || authCurrentUser?.name || '',
+        role: effectiveRuntimeRole || rawRuntimeRole || '',
+        region: permissionRuntimeUser?.region || runtimeUser?.region || dashboardCurrentUser?.region || authCurrentUser?.region || '',
+      });
+      setSalesWorkflowSnapshot(nextSnapshot);
+    } finally {
+      setIsRefreshingWorkflowSnapshot(false);
+    }
+  }, [
+    authCurrentUser?.region,
+    currentUserEmail,
+    dashboardCurrentUser?.region,
+    effectiveRuntimeRole,
+    permissionRuntimeUser?.email,
+    permissionRuntimeUser?.region,
+    rawRuntimeRole,
+    runtimeUser?.region,
+  ]);
+
+  useEffect(() => {
+    let alive = true;
+
+    const guardedSync = async () => {
+      setIsRefreshingWorkflowSnapshot(true);
+      try {
+        const nextSnapshot = await loadSalesWorkflowSourceSnapshot({
+          email: currentUserEmail || permissionRuntimeUser?.email || '',
+          name: permissionRuntimeUser?.name || runtimeUser?.name || dashboardCurrentUser?.name || authCurrentUser?.name || '',
+          role: effectiveRuntimeRole || rawRuntimeRole || '',
+          region: permissionRuntimeUser?.region || runtimeUser?.region || dashboardCurrentUser?.region || authCurrentUser?.region || '',
+        });
+        if (alive) setSalesWorkflowSnapshot(nextSnapshot);
+      } finally {
+        if (alive) setIsRefreshingWorkflowSnapshot(false);
+      }
+    };
+
+    void guardedSync();
+    window.addEventListener('userChanged', guardedSync as EventListener);
+    const unsubscribe = subscribeErpEvent(() => {
+      void guardedSync();
+    });
+    return () => {
+      alive = false;
+      window.removeEventListener('userChanged', guardedSync as EventListener);
+      unsubscribe();
+    };
+  }, [
+    authCurrentUser?.region,
+    currentUserEmail,
+    dashboardCurrentUser?.region,
+    effectiveRuntimeRole,
+    permissionRuntimeUser?.email,
+    permissionRuntimeUser?.region,
+    rawRuntimeRole,
+    runtimeUser?.region,
+  ]);
+
+  const effectiveSnapshot = useMemo(() => {
+    const isSalesScopedRole = ['Sales_Rep', 'Sales_Assistant', 'Regional_Manager', 'Sales_Manager', 'Sales_Director', 'CEO'].includes(
+      String(effectiveRuntimeRole || rawRuntimeRole || '').trim(),
+    );
+    const hasSnapshot = hasSalesWorkflowSnapshotData(salesWorkflowSnapshot);
+    if (isSalesScopedRole && !hasSnapshot) {
+      return salesWorkflowSnapshot;
+    }
+
+    return {
+      inquiries: salesWorkflowSnapshot.inquiries.length > 0 ? salesWorkflowSnapshot.inquiries : inquiries,
+      quoteRequirements: salesWorkflowSnapshot.quoteRequirements.length > 0 ? salesWorkflowSnapshot.quoteRequirements : requirements,
+      quotationRequests: salesWorkflowSnapshot.quotationRequests.length > 0 ? salesWorkflowSnapshot.quotationRequests : quotationRequests,
+      quotations: salesWorkflowSnapshot.quotations.length > 0 ? salesWorkflowSnapshot.quotations : salesQuotations,
+      contracts: salesWorkflowSnapshot.contracts.length > 0 ? salesWorkflowSnapshot.contracts : contracts,
+      purchaseOrders: salesWorkflowSnapshot.purchaseOrders.length > 0 ? salesWorkflowSnapshot.purchaseOrders : purchaseOrders,
+      payments: salesWorkflowSnapshot.payments.length > 0 ? salesWorkflowSnapshot.payments : payments,
+      exportServiceOrders: salesWorkflowSnapshot.exportServiceOrders.length > 0 ? salesWorkflowSnapshot.exportServiceOrders : exportServiceOrders,
+    };
+  }, [
+    salesWorkflowSnapshot,
+    inquiries,
+    requirements,
+    quotationRequests,
+    salesQuotations,
+    contracts,
+    purchaseOrders,
+    payments,
+    exportServiceOrders,
+  ]);
+
+  const orderManagementCounts = useMemo(() => computeOrderManagementCounts({
+    actor: {
+      email: currentUserEmail || permissionRuntimeUser?.email || '',
+      name: permissionRuntimeUser?.name || runtimeUser?.name || dashboardCurrentUser?.name || authCurrentUser?.name || '',
+      role: effectiveRuntimeRole,
+      rawRole: rawRuntimeRole,
+      region: permissionRuntimeUser?.region || runtimeUser?.region || dashboardCurrentUser?.region || authCurrentUser?.region || '',
+    },
+    snapshot: effectiveSnapshot,
+    approvalPendingCount: myPendingCount,
+  }), [
+    currentUserEmail,
+    permissionRuntimeUser?.email,
+    permissionRuntimeUser?.name,
+    permissionRuntimeUser?.region,
+    runtimeUser?.name,
+    runtimeUser?.region,
+    dashboardCurrentUser?.name,
+    dashboardCurrentUser?.region,
+    authCurrentUser?.name,
+    authCurrentUser?.region,
+    effectiveRuntimeRole,
+    rawRuntimeRole,
+    effectiveSnapshot,
+    myPendingCount,
+  ]);
+
+  const inquiryCount = orderManagementCounts.inquiries;
+  const costInquiryCount = orderManagementCounts.costInquiry;
+  const quotationCount = orderManagementCounts.quotations;
+  const orderCount = orderManagementCounts.orders;
+  const collectionCount = orderManagementCounts.collections;
+  const exportServiceCount = orderManagementCounts.exportService;
+
+  useEffect(() => {
+    console.info('[OrderManagementCenterPro][runtime]', {
+      dashboardCurrentUser: dashboardCurrentUser
+        ? {
+            email: dashboardCurrentUser.email || null,
+            role: dashboardCurrentUser.role || null,
+            region: dashboardCurrentUser.region || null,
+          }
+        : null,
+      authCurrentUser: authCurrentUser
+        ? {
+            email: authCurrentUser.email || null,
+            role: authCurrentUser.role || null,
+            region: authCurrentUser.region || null,
+          }
+        : null,
+      runtimeUser: runtimeUser
+        ? {
+            email: runtimeUser.email || null,
+            role: runtimeUser.role || runtimeUser.userRole || null,
+            region: runtimeUser.region || null,
+          }
+        : null,
+      currentUserRole,
+      currentUserEmail,
+      effectiveRuntimeRole,
+      inquiryCount,
+      costInquiryCount,
+      quotationCount,
+      orderCount,
+      collectionCount,
+      unreadCount,
+      myPendingCount,
+      exportServiceCount,
+    });
+  }, [
+    dashboardCurrentUser,
+    authCurrentUser,
+    runtimeUser,
+    currentUserRole,
+    currentUserEmail,
+    effectiveRuntimeRole,
+    inquiryCount,
+    costInquiryCount,
+    quotationCount,
+    orderCount,
+    collectionCount,
+    unreadCount,
+    myPendingCount,
+    exportServiceCount,
+  ]);
+  const overviewCount = orderManagementCounts.overview;
+  const orderCoordinatorTaskSummary = useMemo(
+    () =>
+      deriveOrderCoordinatorTaskSummary({
+        snapshot: effectiveSnapshot,
+        pendingCounts: orderManagementCounts,
+      }),
+    [effectiveSnapshot, orderManagementCounts],
+  );
+  const { taskCenter } = orderCoordinatorTaskSummary;
+  const collaborationSections = taskCenter.collaborationSections;
+  const showOrderCoordinatorSummary = ['Order_Coordinator', 'Sales_Assistant'].includes(String(effectiveRuntimeRole || rawRuntimeRole || '').trim());
+
+  const renderTabCountBadge = (count: number) => {
+    if (count <= 0) return null;
+
+    return (
+      <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-red-500 text-white rounded">
+        {count}
+      </span>
+    );
+  };
+
+  const preloadOrderCenterTab = React.useCallback((tab: keyof typeof ORDER_CENTER_TAB_PRELOADERS) => {
+    if (preloadedTabsRef.current.has(tab)) return;
+    preloadedTabsRef.current.add(tab);
+    void ORDER_CENTER_TAB_PRELOADERS[tab]().catch(() => {
+      preloadedTabsRef.current.delete(tab);
+    });
+  }, []);
+
+  useEffect(() => {
+    const cancelSecondaryPreload = scheduleBrowserIdleTask(() => {
+      preloadOrderCenterTab('orders');
+      preloadOrderCenterTab('collections');
+      preloadOrderCenterTab('export-service');
+      if (shouldShowApprovalCenter) {
+        preloadOrderCenterTab('approvals');
+      }
+    }, 900);
+
+    return () => {
+      cancelSecondaryPreload();
+    };
+  }, [preloadOrderCenterTab, shouldShowApprovalCenter]);
+
+  const switchOrderManagementTab = (tab: typeof activeTab) => {
+    preloadOrderCenterTab(tab);
+    tabSwitchPerfRef.current = { tab, startAt: performance.now() };
+    console.info('[perf] order-management tab click', { tab });
+    setActiveTab(tab);
+  };
+
   // 初始化模拟数据
   useEffect(() => {
     setQuotations([
@@ -257,7 +670,7 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
         status: 'Sent',
         region: 'NA',
         currency: 'USD',
-        paymentTerms: '30% T/T in advance, 70% before shipment',
+        paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
         deliveryTerms: 'FOB Xiamen',
         portOfLoading: 'Xiamen',
         portOfDestination: 'Los Angeles',
@@ -309,7 +722,7 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
         status: 'Accepted',
         region: 'SA',
         currency: 'USD',
-        paymentTerms: 'L/C at sight',
+        paymentTerms: buildPaymentTermsText('lc_100', 'lc_ready'),
         deliveryTerms: 'CIF Santos',
         portOfLoading: 'Shanghai',
         portOfDestination: 'Santos',
@@ -347,7 +760,7 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
         status: 'Negotiating',
         region: 'EA',
         currency: 'EUR',
-        paymentTerms: '50% deposit, 50% before shipment',
+        paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
         deliveryTerms: 'FOB Ningbo',
         portOfLoading: 'Ningbo',
         portOfDestination: 'Hamburg',
@@ -660,11 +1073,11 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
       )}
       
       {/* 主标签页 */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="flex-1 flex flex-col">
+      <Tabs value={activeTab} onValueChange={(v) => switchOrderManagementTab(v as typeof activeTab)} className="flex-1 flex flex-col">
         <div className="bg-[#F3F4F6] border-b border-gray-300">
           <div className="flex">
             <button
-              onClick={() => setActiveTab('overview')}
+              onClick={() => switchOrderManagementTab('overview')}
               className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
                 activeTab === 'overview'
                   ? 'border-[#F96302] text-[#F96302] bg-white'
@@ -673,11 +1086,11 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
             >
               <TrendingUp className="w-4 h-4" />
               订单全盘
-              <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-[#F96302] text-white rounded">NEW</span>
+              {renderTabCountBadge(overviewCount)}
             </button>
             
             <button
-              onClick={() => setActiveTab('inquiries')}
+              onClick={() => switchOrderManagementTab('inquiries')}
               className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
                 activeTab === 'inquiries'
                   ? 'border-[#F96302] text-[#F96302] bg-white'
@@ -686,10 +1099,13 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
             >
               <ClipboardList className="w-4 h-4" />
               询价管理
+              {renderTabCountBadge(inquiryCount)}
             </button>
             
             <button
-              onClick={() => setActiveTab('cost-inquiry')}
+              onClick={() => switchOrderManagementTab('cost-inquiry')}
+              onMouseEnter={() => { void loadCostInquiryQuotationManagement(); }}
+              onFocus={() => { void loadCostInquiryQuotationManagement(); }}
               className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
                 activeTab === 'cost-inquiry'
                   ? 'border-[#F96302] text-[#F96302] bg-white'
@@ -698,10 +1114,13 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
             >
               <FileText className="w-4 h-4" />
               成本询报
+              {renderTabCountBadge(costInquiryCount)}
             </button>
             
             <button
-              onClick={() => setActiveTab('quotations')}
+              onClick={() => switchOrderManagementTab('quotations')}
+              onMouseEnter={() => { void loadSalesQuotationManagement(); }}
+              onFocus={() => { void loadSalesQuotationManagement(); }}
               className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
                 activeTab === 'quotations'
                   ? 'border-[#F96302] text-[#F96302] bg-white'
@@ -710,10 +1129,13 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
             >
               <FileText className="w-4 h-4" />
               报价管理
+              {renderTabCountBadge(quotationCount)}
             </button>
             
             <button
-              onClick={() => setActiveTab('orders')}
+              onClick={() => switchOrderManagementTab('orders')}
+              onMouseEnter={() => { void loadSalesContractManagement(); }}
+              onFocus={() => { void loadSalesContractManagement(); }}
               className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
                 activeTab === 'orders'
                   ? 'border-[#F96302] text-[#F96302] bg-white'
@@ -722,10 +1144,13 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
             >
               <Package className="w-4 h-4" />
               订单管理
+              {renderTabCountBadge(orderCount)}
             </button>
             
             <button
-              onClick={() => setActiveTab('collections')}
+              onClick={() => switchOrderManagementTab('collections')}
+              onMouseEnter={() => { void loadCollectionManagement(); }}
+              onFocus={() => { void loadCollectionManagement(); }}
               className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
                 activeTab === 'collections'
                   ? 'border-[#F96302] text-[#F96302] bg-white'
@@ -734,12 +1159,13 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
             >
               <Wallet className="w-4 h-4" />
               收款管理
+              {renderTabCountBadge(collectionCount)}
             </button>
             
             {/* 🔥 审批中心 - 仅主管、总监、CEO可见 */}
             {shouldShowApprovalCenter && (
               <button
-                onClick={() => setActiveTab('approvals')}
+                onClick={() => switchOrderManagementTab('approvals')}
                 className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
                   activeTab === 'approvals'
                     ? 'border-[#F96302] text-[#F96302] bg-white'
@@ -748,69 +1174,271 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
               >
                 <Bell className="w-4 h-4" />
                 审批中心
-                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-red-500 text-white rounded">{myPendingCount}</span>
+                {renderTabCountBadge(myPendingCount)}
               </button>
             )}
+
+            {/* 借抬头出口服务 */}
+            <button
+              onClick={() => switchOrderManagementTab('export-service')}
+              onMouseEnter={() => { void loadExportServiceWorkbench(); }}
+              onFocus={() => { void loadExportServiceWorkbench(); }}
+              className={`relative px-4 py-2 text-sm font-medium transition-colors flex items-center gap-2 border-b-2 ${
+                activeTab === 'export-service'
+                  ? 'border-[#F96302] text-[#F96302] bg-white'
+                  : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+            >
+              <Ship className="w-4 h-4" />
+              借抬头出口服务
+              {renderTabCountBadge(exportServiceCount)}
+            </button>
           </div>
         </div>
 
         {/* 订单全盘标签页 - NEW */}
         <TabsContent value="overview" className="mt-6">
-          <OrderOverviewDashboard />
+          <Suspense fallback={<OrderCenterTabFallback title="正在加载订单全盘..." rows={5} />}>
+            {activeTab === 'overview' ? (
+              <div className="space-y-4">
+                {showOrderCoordinatorSummary && (
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="text-[11px] text-gray-500">合同待跟进</div>
+                        <div className="mt-1 text-lg font-semibold text-gray-900">{orderCoordinatorTaskSummary.counts.contractsPending}</div>
+                      </div>
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="text-[11px] text-gray-500">采购待衔接</div>
+                        <div className="mt-1 text-lg font-semibold text-amber-700">{orderCoordinatorTaskSummary.counts.procurementPending}</div>
+                      </div>
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="text-[11px] text-gray-500">履约待推进</div>
+                        <div className="mt-1 text-lg font-semibold text-gray-900">{orderCoordinatorTaskSummary.counts.fulfillmentPending}</div>
+                      </div>
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="text-[11px] text-gray-500">收款待协同</div>
+                        <div className="mt-1 text-lg font-semibold text-red-600">{orderCoordinatorTaskSummary.counts.collectionsPending}</div>
+                      </div>
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="text-[11px] text-gray-500">放单风险</div>
+                        <div className="mt-1 text-lg font-semibold text-red-600">{orderCoordinatorTaskSummary.counts.releaseRisk}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="text-sm font-semibold text-gray-900">跟单风险摘要</div>
+                          <Clock className="w-4 h-4 text-amber-600" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="text-xs text-slate-700">合同跟进</div>
+                            <div className="mt-1 text-xl font-semibold text-slate-900">{orderCoordinatorTaskSummary.riskSummary.contractFollowUp}</div>
+                          </div>
+                          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <div className="text-xs text-amber-700">采购衔接</div>
+                            <div className="mt-1 text-xl font-semibold text-amber-900">{orderCoordinatorTaskSummary.riskSummary.procurementHandover}</div>
+                          </div>
+                          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                            <div className="text-xs text-blue-700">履约推进</div>
+                            <div className="mt-1 text-xl font-semibold text-blue-900">{orderCoordinatorTaskSummary.riskSummary.fulfillmentPush}</div>
+                          </div>
+                          <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                            <div className="text-xs text-red-700">放单风险</div>
+                            <div className="mt-1 text-xl font-semibold text-red-900">{orderCoordinatorTaskSummary.riskSummary.releaseRisk}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border bg-white p-3">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="text-sm font-semibold text-gray-900">协同角色入口</div>
+                          <Truck className="w-4 h-4 text-slate-600" />
+                        </div>
+                        <div className="space-y-2">
+                          {collaborationSections.map((section) => (
+                            <div key={section.key} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-slate-900">{section.label}</div>
+                                  <div className="mt-0.5 text-xs text-slate-600">{section.roles.join(' / ')}</div>
+                                </div>
+                                <div className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-700 border border-slate-200">
+                                  {section.count}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {collaborationSections.length === 0 && (
+                            <div className="text-xs text-gray-500">暂无待协同事项</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+                <LazyOrderOverviewDashboard
+                  pendingCounts={orderManagementCounts}
+                  snapshot={effectiveSnapshot}
+                  onRefresh={syncSalesWorkflowSnapshot}
+                  refreshing={isRefreshingWorkflowSnapshot}
+                />
+              </div>
+            ) : null}
+          </Suspense>
         </TabsContent>
 
         {/* 询价管理标签页 */}
-        <TabsContent value="inquiries" className="mt-6">
-          <AdminInquiryManagement 
-            onCreateQuotation={handleCreateQuotation}
-            onSwitchToCostInquiry={() => setActiveTab('cost-inquiry')} // 🔥 下推成本询报后自动切换标签页
-          />
+        <TabsContent value="inquiries" className="mt-6 flex flex-1 min-h-0 flex-col">
+          <Suspense fallback={<OrderCenterTabFallback title="正在加载询价管理..." rows={5} />}>
+            {activeTab === 'inquiries' ? (
+              <div className="px-3 pb-2 flex flex-1 min-h-0 flex-col">
+                <LazyAdminInquiryManagement 
+                  onCreateQuotation={handleCreateQuotation}
+                  onSwitchToCostInquiry={() => setActiveTab('cost-inquiry')} // 🔥 下推成本询报后自动切换标签页
+                  highlightInquiryNumber={highlightInquiryNumber}
+                />
+              </div>
+            ) : null}
+          </Suspense>
         </TabsContent>
 
         {/* 成本询报标签页 */}
-        <TabsContent value="cost-inquiry" className="mt-6">
-          <CostInquiryQuotationManagement 
-            onSwitchToQuotationManagement={(qtNumber) => {
-              // 🔥 下推报价管理：切换到报价管理页面并高亮指定QT
-              setHighlightQtNumber(qtNumber);
-              setActiveTab('quotations');
-              // 3秒后清除高亮参数
-              setTimeout(() => setHighlightQtNumber(undefined), 3500);
-            }}
-          />
+        <TabsContent value="cost-inquiry" className="mt-6 flex flex-1 min-h-0 flex-col">
+          <Suspense fallback={<OrderCenterTabFallback title="正在加载成本询报..." rows={5} />}>
+            {activeTab === 'cost-inquiry' ? (
+              <div className="px-3 pb-2 flex flex-1 min-h-0 flex-col">
+                <LazyCostInquiryQuotationManagement
+                  highlightQrNumber={highlightQrNumber}
+                  onNavigateToInquiryManagementWithHighlight={(inquiryNumber) => {
+                    setHighlightInquiryNumber(inquiryNumber);
+                    setActiveTab('inquiries');
+                    setTimeout(() => setHighlightInquiryNumber(undefined), 3500);
+                  }}
+                  onSwitchToQuotationManagement={(qtNumber) => {
+                    // 🔥 下推报价管理：切换到报价管理页面并高亮指定QT
+                    setHighlightQtNumber(qtNumber);
+                    setActiveTab('quotations');
+                    // 3秒后清除高亮参数
+                    setTimeout(() => setHighlightQtNumber(undefined), 3500);
+                  }}
+                />
+              </div>
+            ) : null}
+          </Suspense>
         </TabsContent>
 
         {/* 报价管理标签页 */}
-        <TabsContent value="quotations" className="mt-6">
-          {/* 🔥 使用SalesQuotationManagement组件，管理QT销售报价单 */}
-          <SalesQuotationManagement 
-            currentUser={currentUser}
-            highlightQtNumber={highlightQtNumber} 
-            onNavigateToOrders={() => setActiveTab('orders')} 
-            onNavigateToOrdersWithHighlight={(scNumber) => {
-              // 🔥 下推订单管理：切换到订单管理页面并高亮指定SC
-              console.log('🔍 [OrderManagementCenterPro] 下推到订单管理并高亮SC:', scNumber);
-              setHighlightScNumber(scNumber);
-              setActiveTab('orders');
-              // 3秒后清除高亮参数
-              setTimeout(() => setHighlightScNumber(undefined), 3500);
-            }}
-          />
+        <TabsContent value="quotations" className="mt-6 flex flex-1 min-h-0 flex-col">
+          <Suspense fallback={<OrderCenterTabFallback title="正在加载报价管理..." rows={5} />}>
+            {activeTab === 'quotations' ? (
+              <div className="px-3 pb-2 flex flex-1 min-h-0 flex-col">
+                <LazySalesQuotationManagement 
+                  currentUser={currentUser}
+                  initialQuotations={effectiveSnapshot.quotations}
+                  highlightQtNumber={highlightQtNumber} 
+                  onNavigateToInquiryWithHighlight={(inquiryNumber) => {
+                    setHighlightInquiryNumber(inquiryNumber);
+                    setActiveTab('inquiries');
+                    setTimeout(() => setHighlightInquiryNumber(undefined), 3500);
+                  }}
+                  onNavigateToCostInquiryWithHighlight={(qrNumber) => {
+                    setHighlightQrNumber(qrNumber);
+                    setActiveTab('cost-inquiry');
+                    setTimeout(() => setHighlightQrNumber(undefined), 3500);
+                  }}
+                  onNavigateToOrders={() => setActiveTab('orders')} 
+                  onNavigateToOrdersWithHighlight={(scNumber) => {
+                    // 🔥 下推订单管理：切换到订单管理页面并高亮指定SC
+                    console.log('🔍 [OrderManagementCenterPro] 下推到订单管理并高亮SC:', scNumber);
+                    setHighlightScNumber(scNumber);
+                    setActiveTab('orders');
+                    // 3秒后清除高亮参数
+                    setTimeout(() => setHighlightScNumber(undefined), 3500);
+                  }}
+                />
+              </div>
+            ) : null}
+          </Suspense>
         </TabsContent>
 
         {/* 订单管理标签页 - 🔥 使用SalesContractManagement组件 */}
-        <TabsContent value="orders" className="mt-6">
-          <SalesContractManagement highlightScNumber={highlightScNumber} />
+        <TabsContent value="orders" className="mt-6 flex flex-1 min-h-0 flex-col">
+          <Suspense fallback={<OrderCenterTabFallback title="正在加载订单管理..." rows={5} />}>
+            {activeTab === 'orders' ? (
+              <div className="px-3 pb-2 flex flex-1 min-h-0 flex-col">
+                <LazySalesContractManagement
+                  highlightScNumber={highlightScNumber}
+                  onNavigateToInquiryWithHighlight={(inquiryNumber) => {
+                    setHighlightInquiryNumber(inquiryNumber);
+                    setActiveTab('inquiries');
+                    setTimeout(() => setHighlightInquiryNumber(undefined), 3500);
+                  }}
+                  onNavigateToCostInquiryWithHighlight={(qrNumber) => {
+                    setHighlightQrNumber(qrNumber);
+                    setActiveTab('cost-inquiry');
+                    setTimeout(() => setHighlightQrNumber(undefined), 3500);
+                  }}
+                  onNavigateToQuotationWithHighlight={(qtNumber) => {
+                    setHighlightQtNumber(qtNumber);
+                    setActiveTab('quotations');
+                    setTimeout(() => setHighlightQtNumber(undefined), 3500);
+                  }}
+                />
+              </div>
+            ) : null}
+          </Suspense>
         </TabsContent>
 
         {/* 收款管理标签页 */}
-        <TabsContent value="collections" className="mt-6">
-          <CollectionManagement />
+        <TabsContent value="collections" className="mt-6 flex flex-1 min-h-0 flex-col">
+          <Suspense fallback={<OrderCenterTabFallback title="正在加载收款管理..." rows={4} />}>
+            {activeTab === 'collections' ? (
+              <div className="px-3 pb-2 flex flex-1 min-h-0 flex-col">
+                <LazyCollectionManagement />
+              </div>
+            ) : null}
+          </Suspense>
         </TabsContent>
 
         {/* 审批中心标签页 */}
         <TabsContent value="approvals" className="mt-6">
-          <ApprovalCenter currentUser={currentUser} />
+          <Suspense
+            fallback={(
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="h-5 w-36 animate-pulse rounded bg-slate-200" />
+                <div className="mt-4 grid grid-cols-4 gap-4">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <div key={`approval-skeleton-${index}`} className="rounded-xl border border-slate-100 p-4">
+                      <div className="h-4 w-20 animate-pulse rounded bg-slate-100" />
+                      <div className="mt-3 h-8 w-12 animate-pulse rounded bg-slate-200" />
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-6 rounded-xl border border-slate-100 p-4">
+                  <div className="h-10 w-full animate-pulse rounded bg-slate-100" />
+                  <div className="mt-4 space-y-3">
+                    {Array.from({ length: 5 }).map((_, index) => (
+                      <div key={`approval-row-${index}`} className="h-16 animate-pulse rounded-lg bg-slate-50" />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          >
+            {activeTab === 'approvals' ? <LazyApprovalCenter currentUser={currentUser} /> : null}
+          </Suspense>
+        </TabsContent>
+
+        {/* 借抬头出口服务标签页 */}
+        <TabsContent value="export-service" className="mt-0 flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-hidden" style={{ height: 'calc(100vh - 180px)' }}>
+            <Suspense fallback={<OrderCenterTabFallback title="正在加载借抬头出口服务..." rows={5} />}>
+              {activeTab === 'export-service' ? <LazyExportServiceWorkbench /> : null}
+            </Suspense>
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -862,7 +1490,16 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-gray-600">付款条款</Label>
-                    <div className="mt-1">{selectedQuotation.paymentTerms}</div>
+                    <div className="mt-1">
+                      {selectedQuotation.paymentTerms || buildPaymentTermsText(
+                        selectedQuotation.paymentMode,
+                        deriveBalanceTrigger(selectedQuotation.paymentMode, selectedQuotation.balanceTrigger || null),
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-gray-600">付款模式</Label>
+                    <div className="mt-1">{getPaymentModeLabel(selectedQuotation.paymentMode)}</div>
                   </div>
                   <div>
                     <Label className="text-gray-600">交货条款</Label>
@@ -1033,7 +1670,11 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
                     totalAmount: selectedQuotation.totalAmount,
                     currency: selectedQuotation.currency || 'USD',
                     tradeTerms: selectedQuotation.deliveryTerms || 'FOB Xiamen',
-                    paymentTerms: selectedQuotation.paymentTerms || '30% T/T in advance, 70% before shipment',
+                    paymentTerms: selectedQuotation.paymentTerms
+                      || buildPaymentTermsText(
+                        selectedQuotation.paymentMode,
+                        deriveBalanceTrigger(selectedQuotation.paymentMode, selectedQuotation.balanceTrigger || null),
+                      ),
                     depositAmount: selectedQuotation.totalAmount * 0.3,
                     balanceAmount: selectedQuotation.totalAmount * 0.7,
                     deliveryTime: '42 days after deposit received',

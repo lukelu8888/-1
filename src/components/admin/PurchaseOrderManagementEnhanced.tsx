@@ -71,6 +71,7 @@ import { SupplierAllocationDialog } from './purchase-order/SupplierAllocationDia
 import { PurchaseOrderDetailDialog } from './purchase-order/PurchaseOrderDetailDialog';
 import { PurchaseOrderPreviewDialog } from './purchase-order/PurchaseOrderPreviewDialog';
 import { QuoteRequirementPreviewDialog } from './purchase-order/QuoteRequirementPreviewDialog';
+import { EditQuoteRequirementDialog } from './purchase-order/EditQuoteRequirementDialog';
 import {
   createInitialCreateOrderForm,
   createInitialEditPOForm,
@@ -523,6 +524,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 智能采购反馈 - 状态管理
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackRequirement, setFeedbackRequirement] = useState<QuoteRequirement | null>(null);
+  const [showEditRequirementDialog, setShowEditRequirementDialog] = useState(false);
+  const [editingRequirement, setEditingRequirement] = useState<QuoteRequirement | null>(null);
+  const [savingRequirementEdit, setSavingRequirementEdit] = useState(false);
 
   // 🔥 采购需求数据 - 从Context获取
   const purchaseRequirements = useMemo(
@@ -3582,6 +3586,42 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
   };
 
+  const handleSaveEditedRequirement = async (updates: Partial<QuoteRequirement>) => {
+    if (!editingRequirement) return;
+
+    try {
+      setSavingRequirementEdit(true);
+      const nextRequirement = {
+        ...editingRequirement,
+        ...updates,
+        items: Array.isArray(updates.items) ? updates.items : editingRequirement.items,
+      } as QuoteRequirement;
+      const nextDocumentSnapshot = buildQuoteRequirementDocumentSnapshot(
+        nextRequirement,
+        user?.type || user?.role,
+        { forceRebuild: true },
+      );
+
+      await updateRequirement(editingRequirement.id, {
+        ...updates,
+        items: nextRequirement.items,
+        documentDataSnapshot: nextDocumentSnapshot,
+        document_data_snapshot: nextDocumentSnapshot as any,
+      });
+      await refreshQuoteRequirementsFromApi();
+      setEditingRequirement({
+        ...nextRequirement,
+        documentDataSnapshot: nextDocumentSnapshot,
+      });
+      setShowEditRequirementDialog(false);
+      toast.success('报价请求单已更新');
+    } catch (error: any) {
+      toast.error(`保存报价请求单失败：${error?.message || '未知错误'}`);
+    } finally {
+      setSavingRequirementEdit(false);
+    }
+  };
+
   // 🔥 处理删除采购订单
   const handleDeletePurchaseOrder = async (po: PurchaseOrderType) => {
     const firstProductName = po.items?.[0]?.productName || 'N/A';
@@ -3743,10 +3783,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             setSelectedRequirementIds={setSelectedRequirementIds}
             filteredRequirements={filteredRequirements}
             handleBatchDeleteRequirements={handleBatchDeleteRequirements}
-            hasDownstreamXJForRequirement={hasDownstreamXJForRequirement}
-            setViewRequirement={setViewRequirement}
-            setShowRequirementDialog={setShowRequirementDialog}
-            handleCreateXJFromRequirement={handleCreateXJFromRequirement}
+        hasDownstreamXJForRequirement={hasDownstreamXJForRequirement}
+        setViewRequirement={setViewRequirement}
+        setShowRequirementDialog={setShowRequirementDialog}
+        setEditingRequirement={setEditingRequirement}
+        setShowEditRequirementDialog={setShowEditRequirementDialog}
+        handleCreateXJFromRequirement={handleCreateXJFromRequirement}
             handleCreateOrderFromRequirement={handleCreateOrderFromRequirement}
             handleSmartFeedback={handleSmartFeedback}
             handlePushToSalesInquiry={handlePushToSalesInquiry}
@@ -3874,6 +3916,17 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         viewRequirement={viewRequirement}
         userRole={user?.role || user?.userRole}
         supplierQuotations={supplierQuotations}
+      />
+
+      <EditQuoteRequirementDialog
+        open={showEditRequirementDialog}
+        onOpenChange={(open) => {
+          setShowEditRequirementDialog(open);
+          if (!open) setEditingRequirement(null);
+        }}
+        requirement={editingRequirement}
+        saving={savingRequirementEdit}
+        onSave={handleSaveEditedRequirement}
       />
 
       {/* 🔥 编辑采购订单对话框 */}

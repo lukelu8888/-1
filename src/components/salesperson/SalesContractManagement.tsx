@@ -8,8 +8,7 @@
  * - 查看客户签署状态
  */
 
-import React, { useState, useMemo } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -23,7 +22,6 @@ import {
   XCircle, 
   Clock, 
   AlertCircle,
-  FileSignature,
   Trash2,
   Edit,
   Package,
@@ -32,7 +30,7 @@ import {
   DollarSign,
   ShoppingCart,
   FileText, // 🔥 新增：文档图标
-  Zap       // Phase 4: active-production icon for SC 'production' status
+  Zap
 } from 'lucide-react';
 import { SalesContractContext, useSalesContracts } from '../../contexts/SalesContractContext';
 import { useOrders } from '../../contexts/OrderContext';
@@ -40,11 +38,11 @@ import { useApproval } from '../../contexts/ApprovalContext'; // 🔥 添加审�
 import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext'; // 🔥 新增：采购订单Context
 import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // Phase 6a: estimated profit from QT
+import { sortDocumentFlowRefs } from '../../utils/documentFlowRefOrder';
 import { computeSCProfit, ACTUAL_UNAVAILABLE_LABEL, ACTUAL_UNAVAILABLE_TOOLTIP, ACTUAL_UNAVAILABLE_ICON } from '../../utils/scProfitUtils'; // Phase 6a/6c: SC profit utility
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { nextPRNumber } from '../../utils/xjNumberGenerator';
 import { toast } from 'sonner@2.0.3';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog'; // 🔥 新增：Dialog组件
 import { SalesContractDocument, SalesContractData } from '../documents/templates/SalesContractDocument'; // 🔥 新增：销售合同文档模板
 import type { DocumentLayoutConfig } from '../documents/A4PageContainer';
 import {
@@ -53,19 +51,381 @@ import {
 } from '../admin/purchase-order/purchaseOrderUtils';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import { matchesBusinessOwnerEmail } from '../../utils/quotationOwnership';
+import { sharedRoleUiPreferenceService } from '../../lib/supabaseService';
+import { adminOrganizationService } from '../../lib/supabaseService';
+import { deriveScApprovalGovernance } from '../../lib/services/salesApprovalGovernanceService';
+import { getColumnStyle, renderColumnResizeHandle } from '../admin/admin-organization-profile/peopleCenterVisuals';
+import { ERP_LIST_UI_SPEC_V1 } from '../shared/erpListUiSpec';
+import { resolveUsdSellerBankInfo } from '../../utils/documentBankInfo';
+import { normalizeFlowProductCore, resolveSalesContractBuyerData } from '../../utils/documentDataAdapters';
+import { BALANCE_TRIGGER_OPTIONS, getPaymentModeLabel } from '../../lib/paymentFlow';
+import { deriveSalesContractSplitFields } from '../../lib/customerPortalContractStatus';
+import { derivePurchaseOrderWorkflowFields } from '../../lib/services/purchaseOrderQuoteRequirementServices';
+import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport';
+import { StandardDocumentViewerShell } from '../documents/StandardDocumentViewerShell';
 
 interface SalesContractManagementProps {
   highlightScNumber?: string; // 🔥 高亮显示的销售合同号
+  onNavigateToInquiryWithHighlight?: (inquiryNumber: string) => void;
+  onNavigateToCostInquiryWithHighlight?: (qrNumber: string) => void;
+  onNavigateToQuotationWithHighlight?: (qtNumber: string) => void;
 }
 
-export function SalesContractManagement({ highlightScNumber }: SalesContractManagementProps = {}) {
-  const { contracts, deleteContract, submitForApproval, sendToCustomer, clearAllContracts, updateContract, refreshFromBackend, confirmBalancePayment, advanceSCToShipped, advanceSCToCompleted, markPRInitiated } = useSalesContracts();
+type SalesContractColumnKey =
+  | 'select'
+  | 'index'
+  | 'date'
+  | 'contractNo'
+  | 'country'
+  | 'customer'
+  | 'product'
+  | 'unitPrice'
+  | 'amount'
+  | 'approvalStatus'
+  | 'procurementProgress'
+  | 'customerStatus'
+  | 'actions';
+
+const SALES_CONTRACT_TABLE_UI_PREFERENCE_PREFIX = 'sales_contract_table_column_widths';
+const SALES_CONTRACT_COLUMN_ORDER: SalesContractColumnKey[] = [
+  'select',
+  'index',
+  'date',
+  'contractNo',
+  'country',
+  'customer',
+  'product',
+  'unitPrice',
+  'amount',
+  'approvalStatus',
+  'procurementProgress',
+  'customerStatus',
+  'actions',
+];
+
+const SALES_CONTRACT_COLUMN_MIN_WIDTHS: Record<SalesContractColumnKey, number> = {
+  select: 24,
+  index: 24,
+  date: 24,
+  contractNo: 24,
+  country: 24,
+  customer: 24,
+  product: 24,
+  unitPrice: 24,
+  amount: 24,
+  approvalStatus: 24,
+  procurementProgress: 24,
+  customerStatus: 24,
+  actions: 24,
+};
+
+const SALES_CONTRACT_TABLE_DEFAULT_WIDTHS: Record<SalesContractColumnKey, number> = {
+  select: 44,
+  index: 51,
+  date: 120,
+  contractNo: 276,
+  country: 80,
+  customer: 176,
+  product: 196,
+  unitPrice: 91,
+  amount: 244,
+  approvalStatus: 99,
+  procurementProgress: 122,
+  customerStatus: 104,
+  actions: 148,
+};
+
+const normalizeSalesContractPreferenceRole = (role?: string | null) => {
+  const normalized = String(role || '').trim();
+  return normalized || 'Sales_Rep';
+};
+
+const getSalesContractPreferenceKey = (subTab: string) =>
+  `${SALES_CONTRACT_TABLE_UI_PREFERENCE_PREFIX}:${subTab}:v8`;
+
+const formatSalesContractDateOnly = (value: unknown) => {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '-';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+  const match = normalized.match(/^\d{4}-\d{2}-\d{2}/);
+  if (match) return match[0];
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return normalized;
+  return date.toISOString().slice(0, 10);
+};
+
+const REGION_LABEL_MAP: Record<string, string> = {
+  NA: '北美',
+  SA: '南美',
+  EA: '欧非',
+};
+
+const normalizeSalesContractProfitPercent = (value: unknown, fallback = Number.NaN) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed > 0 && parsed < 1) return parsed * 100;
+  return parsed;
+};
+
+const deriveQuotationFinancialSummaryForContract = (
+  quotationLike: Record<string, any> | null | undefined,
+  contractLike?: Record<string, any> | null,
+) => {
+  const contractFinancialSummary =
+    contractLike?.documentDataSnapshot?.financialSummary ||
+    contractLike?.documentDataSnapshot?.financials ||
+    contractLike?.documentRenderMeta?.financialSummary ||
+    contractLike?.documentRenderMeta?.financials ||
+    contractLike?.documentRenderMeta?.quotationFinancialBridge ||
+    null;
+  const quotationSnapshot =
+    quotationLike?.documentDataSnapshot?.financialSummary ||
+    quotationLike?.documentDataSnapshot?.financials ||
+    quotationLike?.documentRenderMeta?.financialSummary ||
+    quotationLike?.documentRenderMeta?.financials ||
+    null;
+  const items = Array.isArray(quotationLike?.items)
+    ? quotationLike.items
+    : Array.isArray(quotationLike?.documentDataSnapshot?.products)
+      ? quotationLike.documentDataSnapshot.products
+      : Array.isArray(quotationLike?.templateSnapshot?.products)
+        ? quotationLike.templateSnapshot.products
+        : [];
+  const itemsTotalAmount = items.reduce((sum: number, item: any) => {
+    const quantity = Number(item?.quantity ?? item?.qty ?? item?.pcs ?? item?.count ?? 0);
+    const unitPrice = Number(
+      item?.salesPrice ??
+      item?.unitPrice ??
+      item?.quotePrice ??
+      item?.sales_price ??
+      item?.quote_price ??
+      0,
+    );
+    const lineAmount = Number(item?.totalPrice ?? item?.totalAmount ?? item?.total_price);
+    if (Number.isFinite(lineAmount)) return sum + lineAmount;
+    return sum + ((Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(unitPrice) ? unitPrice : 0));
+  }, 0);
+  const itemsTotalCost = items.reduce((sum: number, item: any) => {
+    const quantity = Number(item?.quantity ?? item?.qty ?? item?.pcs ?? item?.count ?? 0);
+    const costPrice = Number(
+      item?.costPrice ??
+      item?.costUSD ??
+      item?.cost_price ??
+      item?.cost_usd ??
+      0,
+    );
+    const lineCost = Number(item?.totalCost ?? item?.total_cost);
+    if (Number.isFinite(lineCost)) return sum + lineCost;
+    return sum + ((Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(costPrice) ? costPrice : 0));
+  }, 0);
+
+  const totalAmount = Number(
+    contractFinancialSummary?.totalAmount ??
+    contractFinancialSummary?.totalPrice ??
+    quotationLike?.totalAmount ??
+    quotationLike?.totalPrice ??
+    quotationSnapshot?.totalAmount ??
+    quotationSnapshot?.totalPrice ??
+    itemsTotalAmount,
+  );
+  const totalCost = Number(
+    contractFinancialSummary?.totalCost ??
+    contractFinancialSummary?.total_cost ??
+    quotationLike?.totalCost ??
+    quotationLike?.total_cost ??
+    quotationSnapshot?.totalCost ??
+    quotationSnapshot?.total_cost ??
+    itemsTotalCost,
+  );
+  const rawTotalProfit =
+    contractFinancialSummary?.totalProfit ??
+    contractFinancialSummary?.total_profit ??
+    quotationLike?.totalProfit ??
+    quotationLike?.total_profit ??
+    quotationSnapshot?.totalProfit ??
+    quotationSnapshot?.total_profit;
+  const totalProfit = Number.isFinite(Number(rawTotalProfit))
+    ? Number(rawTotalProfit)
+    : (totalAmount - totalCost);
+  const storedProfitRate = normalizeSalesContractProfitPercent(
+    contractFinancialSummary?.profitRate ??
+    contractFinancialSummary?.profit_rate ??
+    contractFinancialSummary?.profitMargin ??
+    contractFinancialSummary?.profit_margin ??
+    quotationLike?.profitRate ??
+    quotationLike?.profit_rate ??
+    quotationLike?.profitMargin ??
+    quotationLike?.profit_margin ??
+    quotationSnapshot?.profitRate ??
+    quotationSnapshot?.profit_rate ??
+    quotationSnapshot?.profitMargin ??
+    quotationSnapshot?.profit_margin,
+    Number.NaN,
+  );
+  const profitRate = Number.isFinite(storedProfitRate)
+    ? storedProfitRate
+    : totalCost > 0
+      ? (totalProfit / totalCost) * 100
+      : Number.NaN;
+
+  return {
+    totalAmount,
+    totalCost,
+    totalProfit,
+    profitRate,
+  };
+};
+
+type ProcurementTrackingSummary = {
+  requestNumbers: string[];
+  requestStatusLabel: string | null;
+  requestStatusTone: string;
+  cgCount: number;
+  pushedCgCount: number;
+  cgNumbers: string[];
+};
+
+const PROCUREMENT_STATUS_COPY = {
+  uncreated: '未创建PR',
+  created: '已创建PR',
+  pendingAssignment: '待采购分配',
+  partiallyAllocated: '部分分配',
+  fullyAllocated: '已分配完成',
+  processing: '采购处理中',
+  cgNotCreated: '未生成CG',
+  cgCreated: '已生成CG',
+  cgPushed: '已下推供应商',
+} as const;
+
+const getProcurementCurrentActionLabel = (tracking: ProcurementTrackingSummary) => {
+  if (tracking.requestNumbers.length === 0) {
+    return '业务侧尚未发起采购请求';
+  }
+  if (tracking.requestStatusLabel === PROCUREMENT_STATUS_COPY.pendingAssignment) {
+    return '待采购员分配供应商';
+  }
+  if (tracking.requestStatusLabel === PROCUREMENT_STATUS_COPY.partiallyAllocated) {
+    return '采购员已部分分配，待补齐剩余供应商';
+  }
+  if (tracking.cgCount === 0) {
+    return '采购请求已分配完成，待生成CG';
+  }
+  if (tracking.pushedCgCount < tracking.cgCount) {
+    return '已生成CG，待采购员下推供应商';
+  }
+  return '采购已下推供应商，等待后续执行';
+};
+
+const getProcurementCgProgressLabel = (tracking: ProcurementTrackingSummary) => {
+  if (!tracking.requestStatusLabel) return '';
+  if (tracking.cgCount === 0) return PROCUREMENT_STATUS_COPY.cgNotCreated;
+  if (tracking.pushedCgCount === 0) {
+    return `${PROCUREMENT_STATUS_COPY.cgCreated} ${tracking.cgCount}，待下推供应商`;
+  }
+  return `${PROCUREMENT_STATUS_COPY.cgCreated} ${tracking.cgCount}，${PROCUREMENT_STATUS_COPY.cgPushed} ${tracking.pushedCgCount}`;
+};
+
+const buildSalesContractRelatedRefs = (
+  contract: any,
+  quotation: any,
+  procurementTracking: ProcurementTrackingSummary,
+  quoteRequirements: any[] = [],
+) => {
+  const refs: Array<{ value: string; className: string }> = [];
+  const seen = new Set<string>();
+  const contractDataSnapshot = (contract?.documentDataSnapshot || {}) as Record<string, any>;
+  const contractRenderMeta = (contract?.documentRenderMeta || {}) as Record<string, any>;
+  const fallbackRequirement = (Array.isArray(quoteRequirements) ? quoteRequirements : []).find((requirement: any) => {
+    const requirementNo = String(requirement?.requirementNo || requirement?.qrNumber || '').trim();
+    if (!requirementNo) return false;
+    const sourceInquiryNumber = String(requirement?.sourceInquiryNumber || requirement?.sourceInquiryId || '').trim();
+    const finalQuotationNumber = String(requirement?.finalQuotationNumber || requirement?.quotationNumber || '').trim();
+    return (
+      sourceInquiryNumber &&
+      sourceInquiryNumber === String(contract?.inquiryNumber || quotation?.inqNumber || quotation?.inq_number || quotation?.inquiryNumber || '').trim()
+    ) || (
+      finalQuotationNumber &&
+      finalQuotationNumber === String(contract?.quotationNumber || quotation?.qtNumber || quotation?.quotationNumber || '').trim()
+    );
+  });
+  const pushRef = (value: string, className: string) => {
+    const normalized = String(value || '').trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    refs.push({ value: normalized, className });
+  };
+
+  pushRef(
+    String(
+      contract?.qrNumber
+      || contractDataSnapshot?.qrNumber
+      || contractDataSnapshot?.requirementNo
+      || contractRenderMeta?.qrNumber
+      || contractRenderMeta?.requirementNo
+      || quotation?.qrNumber
+      || quotation?.requirementNo
+      || quotation?.documentDataSnapshot?.qrNumber
+      || quotation?.documentDataSnapshot?.requirementNo
+      || quotation?.documentRenderMeta?.qrNumber
+      || quotation?.documentRenderMeta?.requirementNo
+      || fallbackRequirement?.requirementNo
+      || '',
+    ).trim(),
+    'text-emerald-600',
+  );
+  pushRef(String(contract.quotationNumber || '').trim(), 'text-violet-600');
+  pushRef(String(contract.inquiryNumber || quotation?.inqNumber || quotation?.inq_number || quotation?.inquiryNumber || '').trim(), 'text-purple-500');
+  procurementTracking.requestNumbers.forEach((value) => pushRef(value, 'text-cyan-600'));
+
+  return sortDocumentFlowRefs(refs);
+};
+
+type SalesContractFilterStatus =
+  | 'all'
+  | 'draft'
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'sent'
+  | 'confirmed'
+  | 'profit_unavailable'
+  | 'profit_alert'
+  | 'profit_deviation';
+
+const mergeStoredSalesContractColumnWidths = (
+  stored: Partial<Record<SalesContractColumnKey, number>> | null | undefined,
+) => {
+  const next = { ...SALES_CONTRACT_TABLE_DEFAULT_WIDTHS };
+  SALES_CONTRACT_COLUMN_ORDER.forEach((key) => {
+    const candidate = Number(stored?.[key]);
+    if (Number.isFinite(candidate) && candidate > 0) {
+      next[key] = Math.max(SALES_CONTRACT_COLUMN_MIN_WIDTHS[key], Math.round(candidate));
+    }
+  });
+  return next;
+};
+
+export function SalesContractManagement({
+  highlightScNumber,
+  onNavigateToInquiryWithHighlight,
+  onNavigateToCostInquiryWithHighlight,
+  onNavigateToQuotationWithHighlight,
+}: SalesContractManagementProps = {}) {
+  const { contracts, deleteContract, submitForApproval, sendToCustomer, updateContract, refreshFromBackend, confirmBalancePayment, advanceSCToShipped, advanceSCToCompleted, markPRInitiated } = useSalesContracts();
   const { orders } = useOrders(); // 🔥 获取订单数据
   const { addApprovalRequest } = useApproval(); // 🔥 审批功能
   const { purchaseOrders, addPurchaseOrder, updatePurchaseOrder } = usePurchaseOrders(); // 🔥 新增：采购订单功能
-  const { addRequirement } = useQuoteRequirements();
+  const { addRequirement, requirements: quoteRequirements } = useQuoteRequirements();
   const { getQuotationByNumber } = useSalesQuotations(); // Phase 6a: QT look-up for estimated profit
   const currentUser = getCurrentUser();
+  const [sendingContractIds, setSendingContractIds] = useState<string[]>([]);
+  const [expandedRelatedIds, setExpandedRelatedIds] = useState<string[]>([]);
+  const salesContractTableContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const salesContractColumnResizeRef = React.useRef<{
+    key: SalesContractColumnKey;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
   const ensureBoundSalesContractSnapshot = (contract: any) => {
     const templateSnapshot = contract?.templateSnapshot || contract?.template_snapshot || null;
     const templateVersion = templateSnapshot?.version || null;
@@ -114,11 +474,16 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
         },
         items: (newPO?.items || []).map((item: any) => ({
           id: item.id || `item-${Math.random().toString(36).slice(2, 8)}`,
-          productName: item.productName || item.name || 'Unknown Product',
-          modelNo: getFormalBusinessModelNo(item),
-          specification: item.specification || '',
+          productName: normalizeFlowProductCore(item).productName,
+          productNameEn: normalizeFlowProductCore(item).productNameEn,
+          productNameZh: normalizeFlowProductCore(item).productNameZh,
+          modelNo: normalizeFlowProductCore(item).modelNo,
+          imageUrl: normalizeFlowProductCore(item).imageUrl,
+          specification: normalizeFlowProductCore(item).specification,
+          specificationEn: normalizeFlowProductCore(item).specificationEn,
+          specificationZh: normalizeFlowProductCore(item).specificationZh,
           quantity: Number(item.quantity || 0) || 1,
-          unit: item.unit || 'PCS',
+          unit: normalizeFlowProductCore(item).unit || 'PCS',
           targetPrice: Number(item.unitPrice || 0) || 0,
           targetCurrency: item.currency || contract.currency || 'USD',
           hsCode: item.hsCode || '',
@@ -198,17 +563,22 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     }
   }, [highlightScNumber, contracts]);
   
-  // 🔥 子Tab状态
-  const [activeSubTab, setActiveSubTab] = useState('in-progress');
+  // 🔥 订单管理当前仅保留销售订单主线
+  const activeSubTab = 'sales-orders';
+  const salesContractPreferenceRoleScope = useMemo(
+    () => normalizeSalesContractPreferenceRole((currentUser as any)?.role || (currentUser as any)?.userRole),
+    [currentUser],
+  );
   
   // 🔥 状态管理
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'draft' | 'pending' | 'approved' | 'rejected' | 'sent' | 'confirmed' | 'profit_unavailable' | 'profit_alert' | 'profit_deviation'>('all');
+  const [filterStatus, setFilterStatus] = useState<SalesContractFilterStatus>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
   // 🔥 新增：文档预览状态
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
   const [selectedContract, setSelectedContract] = useState<any>(null);
+  const contractPreviewRef = useRef<HTMLDivElement | null>(null);
 
   // Phase 6b: inline edit state for SC-level additional cost
   const [editingAdditionalCostId, setEditingAdditionalCostId] = useState<string | null>(null);
@@ -223,7 +593,11 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   // editingFxKey is "${contractId}::${CURRENCY}" so each currency on each contract
   // has its own independent edit state without extra state arrays.
   const [editingFxKey, setEditingFxKey] = useState<string | null>(null);
+  const [documentAdminOrg, setDocumentAdminOrg] = useState<any>(null);
   const [fxRateDraft, setFxRateDraft] = useState('');
+  const [salesContractColumnWidths, setSalesContractColumnWidths] = useState<Record<SalesContractColumnKey, number>>(SALES_CONTRACT_TABLE_DEFAULT_WIDTHS);
+  const [salesContractHasCustomWidths, setSalesContractHasCustomWidths] = useState(false);
+  const [salesContractPreferenceHydrated, setSalesContractPreferenceHydrated] = useState(false);
   const handleSaveFxRate = async (contractId: string, currency: string) => {
     const parsed = parseFloat(fxRateDraft);
     if (isNaN(parsed) || parsed <= 0) return;
@@ -233,6 +607,195 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     await updateContract(contractId, { fxRates: updatedRates });
     setEditingFxKey(null);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    void adminOrganizationService
+      .get()
+      .then((org) => {
+        if (!cancelled) setDocumentAdminOrg(org || null);
+      })
+      .catch(() => {
+        if (!cancelled) setDocumentAdminOrg(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadRemotePreference = async () => {
+      setSalesContractPreferenceHydrated(false);
+      try {
+        const value = await sharedRoleUiPreferenceService.get(
+          salesContractPreferenceRoleScope,
+          getSalesContractPreferenceKey(activeSubTab),
+        );
+        if (cancelled) return;
+        if (value) {
+          setSalesContractColumnWidths(
+            mergeStoredSalesContractColumnWidths(
+              value as Partial<Record<SalesContractColumnKey, number>>,
+            ),
+          );
+          setSalesContractHasCustomWidths(true);
+        } else {
+          setSalesContractColumnWidths(SALES_CONTRACT_TABLE_DEFAULT_WIDTHS);
+          setSalesContractHasCustomWidths(true);
+        }
+      } catch {
+        setSalesContractColumnWidths(SALES_CONTRACT_TABLE_DEFAULT_WIDTHS);
+        setSalesContractHasCustomWidths(true);
+      } finally {
+        if (!cancelled) setSalesContractPreferenceHydrated(true);
+      }
+    };
+    void loadRemotePreference();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSubTab, salesContractPreferenceRoleScope]);
+
+  useEffect(() => {
+    if (!salesContractHasCustomWidths || !salesContractPreferenceHydrated) return;
+    const timer = window.setTimeout(() => {
+      void sharedRoleUiPreferenceService
+        .save(
+          salesContractPreferenceRoleScope,
+          getSalesContractPreferenceKey(activeSubTab),
+          salesContractColumnWidths,
+        )
+        .catch(() => {});
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeSubTab,
+    salesContractColumnWidths,
+    salesContractHasCustomWidths,
+    salesContractPreferenceHydrated,
+    salesContractPreferenceRoleScope,
+  ]);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!salesContractColumnResizeRef.current) return;
+      const { key, startX, startWidth } = salesContractColumnResizeRef.current;
+      const nextWidth = Math.max(
+        SALES_CONTRACT_COLUMN_MIN_WIDTHS[key],
+        Math.round(startWidth + (event.clientX - startX)),
+      );
+      setSalesContractHasCustomWidths(true);
+      setSalesContractColumnWidths((current) => (
+        current[key] === nextWidth ? current : { ...current, [key]: nextWidth }
+      ));
+    };
+
+    const stopResize = () => {
+      salesContractColumnResizeRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', stopResize);
+    window.addEventListener('blur', stopResize);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', stopResize);
+      window.removeEventListener('blur', stopResize);
+    };
+  }, []);
+
+  const renderedSalesContractColumnWidths = useMemo(
+    () => salesContractColumnWidths,
+    [salesContractColumnWidths],
+  );
+
+  const salesContractColumnWidthTotal = useMemo(
+    () => SALES_CONTRACT_COLUMN_ORDER.reduce((sum, key) => sum + renderedSalesContractColumnWidths[key], 0),
+    [renderedSalesContractColumnWidths],
+  );
+
+  const getSalesContractColumnStyle = (key: SalesContractColumnKey) => {
+    const ratio = salesContractColumnWidthTotal > 0
+      ? renderedSalesContractColumnWidths[key] / salesContractColumnWidthTotal
+      : 1 / SALES_CONTRACT_COLUMN_ORDER.length;
+    const width = `${(ratio * 100).toFixed(4)}%`;
+    return {
+      width,
+      minWidth: 0,
+      maxWidth: width,
+    } as const;
+  };
+
+  const startSalesContractColumnResize = (
+    key: SalesContractColumnKey,
+    event: React.MouseEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSalesContractHasCustomWidths(true);
+    salesContractColumnResizeRef.current = {
+      key,
+      startX: event.clientX,
+      startWidth: renderedSalesContractColumnWidths[key],
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const shrinkSalesContractColumnToMinimum = (
+    key: SalesContractColumnKey,
+    event: React.MouseEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSalesContractHasCustomWidths(true);
+    setSalesContractColumnWidths((current) => (
+      current[key] === SALES_CONTRACT_COLUMN_MIN_WIDTHS[key]
+        ? current
+        : { ...current, [key]: SALES_CONTRACT_COLUMN_MIN_WIDTHS[key] }
+    ));
+  };
+
+  const renderSalesContractColumnResizeHandle = (key: SalesContractColumnKey) =>
+    renderColumnResizeHandle(
+      key,
+      startSalesContractColumnResize,
+      shrinkSalesContractColumnToMinimum,
+      {
+        lineHoverClassName: 'group-hover:bg-slate-400',
+        hitAreaClassName: key === 'select' ? 'translate-x-[17%]' : undefined,
+      },
+    );
+
+  const renderSalesContractHeaderCell = (
+    key: SalesContractColumnKey,
+    label: string,
+    className = '',
+  ) => {
+    const alignClass = className.includes('text-right')
+      ? 'justify-end text-right'
+      : className.includes('text-center')
+        ? 'justify-center text-center'
+        : 'justify-start text-left';
+
+    return (
+      <TableHead
+        className={`group relative overflow-hidden py-3 px-3 align-middle ${className}`.trim()}
+        style={getSalesContractColumnStyle(key)}
+      >
+        <div className={`flex min-h-5 w-full items-center pr-4 ${alignClass}`}>
+          <span className="block break-words whitespace-normal text-[11px] font-semibold leading-4 tracking-[0.01em]">
+            {label}
+          </span>
+        </div>
+        {renderSalesContractColumnResizeHandle(key)}
+      </TableHead>
+    );
+  };
+
   const requestProcurementFromContract = async (contract: any) => {
     if (!ensureBoundSalesContractSnapshot(contract)) {
       return;
@@ -261,20 +824,39 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     }
 
     const poNumber = await nextPRNumber();
-    const items = (contract.products || []).map((product: any, index: number) => ({
-      id: String(product?.id || product?.productId || `item-${index + 1}`),
-      productName: product?.productName || 'Unknown Product',
-      modelNo: getFormalBusinessModelNo(product),
-      specification: product?.specification || '',
-      quantity: Number(product?.quantity || 0),
-      unit: product?.unit || 'PCS',
-      unitPrice: 0,
-      currency: contract?.currency || 'USD',
-      subtotal: 0,
-      hsCode: product?.hsCode || '',
-      packingRequirement: product?.packingRequirement || '',
-      remarks: product?.remarks || ''
-    }));
+    const items = (contract.products || []).map((product: any, index: number) => {
+      const quantity = Number(product?.quantity || 0);
+      const inheritedUnitPrice = Number(
+        product?.unitPrice ??
+        product?.price ??
+        product?.targetPrice ??
+        0,
+      );
+      const inheritedSubtotal = Number(
+        product?.amount ??
+        product?.totalPrice ??
+        (quantity * inheritedUnitPrice),
+      );
+      return {
+        id: String(product?.id || product?.productId || `item-${index + 1}`),
+        productName: normalizeFlowProductCore(product, index).productName,
+        productNameEn: normalizeFlowProductCore(product, index).productNameEn,
+        productNameZh: normalizeFlowProductCore(product, index).productNameZh,
+        modelNo: normalizeFlowProductCore(product, index).modelNo,
+        imageUrl: normalizeFlowProductCore(product, index).imageUrl,
+        specification: normalizeFlowProductCore(product, index).specification,
+        specificationEn: normalizeFlowProductCore(product, index).specificationEn,
+        specificationZh: normalizeFlowProductCore(product, index).specificationZh,
+        quantity,
+        unit: normalizeFlowProductCore(product, index).unit || 'PCS',
+        unitPrice: Number.isFinite(inheritedUnitPrice) ? inheritedUnitPrice : 0,
+        currency: product?.currency || contract?.currency || 'USD',
+        subtotal: Number.isFinite(inheritedSubtotal) ? inheritedSubtotal : 0,
+        hsCode: product?.hsCode || '',
+        packingRequirement: product?.packingRequirement || '',
+        remarks: product?.remarks || ''
+      };
+    });
 
     const procurementRequestOrder = {
       id: `po-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
@@ -298,9 +880,11 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       supplierCode: 'TBD',
       region: contract.region,
       items,
-      totalAmount: 0,
+      totalAmount: items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0),
       currency: contract.currency || 'USD',
-      paymentTerms: '待采购确认',
+      paymentMode: contract.paymentMode || null,
+      balanceTrigger: contract.balanceTrigger || null,
+      paymentTerms: contract.paymentTerms || '待采购确认',
       deliveryTerms: contract.deliveryTime || '待采购确认',
       orderDate: new Date().toISOString(),
       expectedDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
@@ -420,7 +1004,8 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     console.log('📤 [SO] 提交审批:', contract);
     
     // 判断审批流程
-    const requiresDirectorApproval = contract.totalAmount >= 20000;
+    const governance = deriveScApprovalGovernance(contract);
+    const requiresDirectorApproval = governance.requiresDirectorApproval;
     
     // 🔥 获取主管和总监信息
     const getRegionalManager = (region: string) => {
@@ -469,7 +1054,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     });
 
     // 🔥 更新销售合同状态
-    await submitForApproval(contract.id, `销售合同 ${contract.contractNumber} 已准备好，请审批。`);
+    await submitForApproval(contract.id, `${governance.summary}。销售合同 ${contract.contractNumber} 已准备好，请审批。`);
     
     // 🔥 显示审批流程提示
     const approvalMessage = requiresDirectorApproval
@@ -485,12 +1070,19 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
   };
   
   // 🔥 发送给客户
-  const handleSendToCustomer = (contract: any) => {
+  const handleSendToCustomer = async (contract: any) => {
     if (contract.status !== 'approved') {
       toast.error('只有审批通过的合同才能发送给客户！');
       return;
     }
-    sendToCustomer(contract.id);
+    if (sendingContractIds.includes(contract.id)) return;
+
+    setSendingContractIds((prev) => [...prev, contract.id]);
+    try {
+      await sendToCustomer(contract.id);
+    } finally {
+      setSendingContractIds((prev) => prev.filter((item) => item !== contract.id));
+    }
   };
 
   // Phase 6c: statuses where the profit block is shown and profit filters are applied.
@@ -508,16 +1100,12 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     const idsFromContract = Array.isArray(contract?.purchaseOrderNumbers)
       ? new Set(contract.purchaseOrderNumbers.map((v: any) => String(v)))
       : new Set<string>();
-    return (purchaseOrders || []).filter((po: any) => {
+
+    const directlyLinkedOrders = (purchaseOrders || []).filter((po: any) => {
       const poNo = String(po?.poNumber || '').trim();
       const sourceRef = String(po?.sourceRef || '').trim();
       const sourceSONumber = String(po?.sourceSONumber || '').trim();
       const salesContractNumber = String(po?.salesContractNumber || '').trim();
-      const reqStatus = String(po?.procurementRequestStatus || '').trim();
-      const isCq = poNo.startsWith('CQ-');
-      if (!isCq) return false;
-      // 已下推供应商后的历史请求不阻止再次“请求采购”
-      if (reqStatus === 'pushed_supplier' || reqStatus === 'allocated_completed') return false;
       return (
         (poNo && idsFromContract.has(poNo)) ||
         (sourceRef && sourceRef === contractNo) ||
@@ -525,10 +1113,108 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
         (salesContractNumber && salesContractNumber === contractNo)
       );
     });
+
+    const liveRequestNumbers = new Set(
+      directlyLinkedOrders
+        .filter((po: any) => derivePurchaseOrderWorkflowFields(po).documentType === 'PR')
+        .map((po: any) => String(po?.poNumber || '').trim())
+        .filter(Boolean),
+    );
+
+    return directlyLinkedOrders.filter((po: any) => {
+      const workflow = derivePurchaseOrderWorkflowFields(po);
+      const reqStatus = String(po?.procurementRequestStatus || '').trim();
+      const parentRequestPoNumber = String(po?.parentRequestPoNumber || po?.parent_request_po_number || '').trim();
+
+      if (workflow.documentType === 'PR') {
+        // 已下推供应商后的历史请求不阻止再次“请求采购”
+        return reqStatus !== 'pushed_supplier' && reqStatus !== 'allocated_completed';
+      }
+
+      return Boolean(parentRequestPoNumber && liveRequestNumbers.has(parentRequestPoNumber));
+    });
+  };
+
+  const getProcurementTrackingSummary = (contract: any): ProcurementTrackingSummary => {
+    const contractNo = String(contract?.contractNumber || '').trim();
+    const idsFromContract = Array.isArray(contract?.purchaseOrderNumbers)
+      ? new Set(contract.purchaseOrderNumbers.map((v: any) => String(v)))
+      : new Set<string>();
+
+    const directlyLinkedOrders = (purchaseOrders || []).filter((po: any) => {
+      const poNo = String(po?.poNumber || '').trim();
+      const sourceRef = String(po?.sourceRef || '').trim();
+      const sourceSONumber = String(po?.sourceSONumber || '').trim();
+      const salesContractNumber = String(po?.salesContractNumber || '').trim();
+      return (
+        (poNo && idsFromContract.has(poNo)) ||
+        (sourceRef && sourceRef === contractNo) ||
+        (sourceSONumber && sourceSONumber === contractNo) ||
+        (salesContractNumber && salesContractNumber === contractNo)
+      );
+    });
+
+    const requestOrders = directlyLinkedOrders.filter((po: any) => derivePurchaseOrderWorkflowFields(po).documentType === 'PR');
+    const requestNumbers = requestOrders
+      .map((po: any) => String(po?.poNumber || '').trim())
+      .filter(Boolean);
+    const requestNumberSet = new Set(requestNumbers);
+
+    const cgOrders = (purchaseOrders || []).filter((po: any) => {
+      const workflow = derivePurchaseOrderWorkflowFields(po);
+      if (workflow.documentType !== 'CG') return false;
+      const poNo = String(po?.poNumber || '').trim();
+      const sourceRef = String(po?.sourceRef || '').trim();
+      const sourceSONumber = String(po?.sourceSONumber || '').trim();
+      const salesContractNumber = String(po?.salesContractNumber || '').trim();
+      const parentRequestPoNumber = String(po?.parentRequestPoNumber || po?.parent_request_po_number || '').trim();
+      return (
+        (poNo && idsFromContract.has(poNo)) ||
+        (sourceRef && sourceRef === contractNo) ||
+        (sourceSONumber && sourceSONumber === contractNo) ||
+        (salesContractNumber && salesContractNumber === contractNo) ||
+        (parentRequestPoNumber && requestNumberSet.has(parentRequestPoNumber))
+      );
+    });
+
+    const primaryRequest = requestOrders[0] || null;
+    const primaryWorkflow = primaryRequest ? derivePurchaseOrderWorkflowFields(primaryRequest) : null;
+    const requestExecutionStatus = String(primaryWorkflow?.executionStatus || '').trim();
+    const requestStatusMap: Record<string, { label: string; tone: string }> = {
+      pending_assignment: { label: PROCUREMENT_STATUS_COPY.pendingAssignment, tone: 'border-amber-300 bg-amber-50 text-amber-700' },
+      partially_allocated: { label: PROCUREMENT_STATUS_COPY.partiallyAllocated, tone: 'border-sky-300 bg-sky-50 text-sky-700' },
+      fully_allocated: { label: PROCUREMENT_STATUS_COPY.fullyAllocated, tone: 'border-emerald-300 bg-emerald-50 text-emerald-700' },
+      initiated: { label: PROCUREMENT_STATUS_COPY.created, tone: 'border-slate-300 bg-slate-50 text-slate-600' },
+    };
+    const requestStatusConfig = requestStatusMap[requestExecutionStatus] || (
+      primaryRequest
+        ? { label: PROCUREMENT_STATUS_COPY.processing, tone: 'border-slate-300 bg-slate-50 text-slate-600' }
+        : { label: null, tone: 'border-slate-200 bg-slate-50 text-slate-500' }
+    );
+
+    const pushedCgCount = cgOrders.filter((po: any) => {
+      const workflow = derivePurchaseOrderWorkflowFields(po);
+      return String(workflow.executionStatus || '').trim() === 'pushed_to_supplier';
+    }).length;
+    const cgNumbers = cgOrders
+      .map((po: any) => String(po?.poNumber || '').trim())
+      .filter(Boolean);
+
+    return {
+      requestNumbers,
+      requestStatusLabel: requestStatusConfig.label,
+      requestStatusTone: requestStatusConfig.tone,
+      cgCount: cgOrders.length,
+      pushedCgCount,
+      cgNumbers,
+    };
   };
   
   // 🔥 筛选：只做状态、搜索筛选；数据来自接口，后端已按权限过滤
   const myContracts = useMemo(() => {
+    const financeVisibleRoles = new Set(['Finance', 'CFO', 'CEO', 'Admin', 'External_Accountant']);
+    const canViewAllContracts = financeVisibleRoles.has(String(currentUser?.role || ''));
+
     console.log('🔍 [SalesContractManagement] 筛选业务员合同:');
     console.log('  - 总合同数:', contracts.length);
     console.log('  - 当前用户邮箱:', currentUser?.email);
@@ -538,8 +1224,8 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       customerEmail: c.customerEmail 
     })));
     
-    return contracts.filter(contract => {
-      if (!matchesBusinessOwnerEmail(
+    const visibleContracts = contracts.filter(contract => {
+      if (!canViewAllContracts && !matchesBusinessOwnerEmail(
         contract.ownerEmail || contract.salesPerson,
         currentUser?.email,
         contract.region,
@@ -585,16 +1271,39 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         const displayContractNo = formatContractNumberForDisplay(contract.contractNumber).toLowerCase();
+        const procurementTracking = getProcurementTrackingSummary(contract);
         return (
           contract.contractNumber.toLowerCase().includes(term) ||
           displayContractNo.includes(term) ||
           contract.quotationNumber.toLowerCase().includes(term) ||
           contract.customerCompany.toLowerCase().includes(term) ||
-          contract.customerName.toLowerCase().includes(term)
+          contract.customerName.toLowerCase().includes(term) ||
+          procurementTracking.requestNumbers.some((value) => value.toLowerCase().includes(term))
         );
       }
       
       return true;
+    });
+
+    const latestByQuotation = new Map<string, typeof visibleContracts[number]>();
+    for (const contract of visibleContracts) {
+      const rawKey = String(contract.quotationNumber || contract.contractNumber || contract.id || '').trim();
+      if (!rawKey) continue;
+      const previous = latestByQuotation.get(rawKey);
+      if (!previous) {
+        latestByQuotation.set(rawKey, contract);
+        continue;
+      }
+      const previousTime = new Date(previous.updatedAt || previous.createdAt || 0).getTime();
+      const currentTime = new Date(contract.updatedAt || contract.createdAt || 0).getTime();
+      if (currentTime >= previousTime) {
+        latestByQuotation.set(rawKey, contract);
+      }
+    }
+
+    return visibleContracts.filter((contract) => {
+      const key = String(contract.quotationNumber || contract.contractNumber || contract.id || '').trim();
+      return !key || latestByQuotation.get(key)?.id === contract.id;
     });
   }, [contracts, currentUser, filterStatus, searchTerm, getQuotationByNumber, purchaseOrders]);
   
@@ -627,6 +1336,64 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
     }).length;
     return { total, draft, pending, approved, rejected, sent, confirmed, profitUnavailable, profitAlert, profitDeviation };
   }, [myContracts, getQuotationByNumber, purchaseOrders]);
+
+  const overviewCards: Array<{
+    label: string;
+    value: number;
+    tone: string;
+    activeTone: string;
+    filter: SalesContractFilterStatus;
+  }> = [
+    {
+      label: '全部合同',
+      value: stats.total,
+      tone: 'border-slate-200 bg-white text-slate-900',
+      activeTone: 'border-slate-900 bg-slate-900 text-white',
+      filter: 'all',
+    },
+    {
+      label: '草稿',
+      value: stats.draft,
+      tone: 'border-slate-200 bg-white text-slate-600',
+      activeTone: 'border-slate-800 bg-slate-800 text-white',
+      filter: 'draft',
+    },
+    {
+      label: '待审批',
+      value: stats.pending,
+      tone: 'border-amber-200 bg-amber-50/70 text-amber-700',
+      activeTone: 'border-amber-500 bg-amber-500 text-white',
+      filter: 'pending',
+    },
+    {
+      label: '已批准',
+      value: stats.approved,
+      tone: 'border-emerald-200 bg-emerald-50/70 text-emerald-700',
+      activeTone: 'border-emerald-500 bg-emerald-500 text-white',
+      filter: 'approved',
+    },
+    {
+      label: '已驳回',
+      value: stats.rejected,
+      tone: 'border-rose-200 bg-rose-50/70 text-rose-700',
+      activeTone: 'border-rose-500 bg-rose-500 text-white',
+      filter: 'rejected',
+    },
+    {
+      label: '已发送',
+      value: stats.sent,
+      tone: 'border-sky-200 bg-sky-50/70 text-sky-700',
+      activeTone: 'border-sky-500 bg-sky-500 text-white',
+      filter: 'sent',
+    },
+    {
+      label: '已确认',
+      value: stats.confirmed,
+      tone: 'border-teal-200 bg-teal-50/70 text-teal-700',
+      activeTone: 'border-teal-500 bg-teal-500 text-white',
+      filter: 'confirmed',
+    },
+  ];
 
   const filteredContracts = myContracts;
   
@@ -683,193 +1450,175 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
       ? <span title={config.tooltip}>{badge}</span>
       : badge;
   };
+
+  const getApprovalStatusBadge = (status: string) => {
+    if (status === 'rejected') {
+      return (
+        <Badge className="h-5 rounded-full border border-rose-200 bg-rose-50 px-2 text-[10px] font-medium text-rose-700">
+          <XCircle className="mr-1 h-3 w-3" />
+          已驳回
+        </Badge>
+      );
+    }
+    if (['pending_supervisor', 'pending_director'].includes(status)) {
+      return (
+        <Badge className="h-5 rounded-full border border-amber-200 bg-amber-50 px-2 text-[10px] font-medium text-amber-700">
+          <Clock className="mr-1 h-3 w-3" />
+          待审批
+        </Badge>
+      );
+    }
+    if (status === 'draft') {
+      return (
+        <Badge className="h-5 rounded-full border border-slate-200 bg-slate-50 px-2 text-[10px] font-medium text-slate-600">
+          <Edit className="mr-1 h-3 w-3" />
+          草稿
+        </Badge>
+      );
+    }
+    return (
+      <Badge className="h-5 rounded-full border border-emerald-200 bg-emerald-50 px-2 text-[10px] font-medium text-emerald-700">
+        <CheckCircle className="mr-1 h-3 w-3" />
+        已批准
+      </Badge>
+    );
+  };
+
+  const getContractCustomerStatusBadge = (status: string) => {
+    if (['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'po_generated', 'production', 'balance_confirmed', 'shipped', 'completed'].includes(status)) {
+      return (
+        <Badge className="h-5 rounded-full border border-emerald-200 bg-emerald-50 px-2 text-[10px] font-medium text-emerald-700">
+          <CheckCircle className="mr-1 h-3 w-3" />
+          已确认
+        </Badge>
+      );
+    }
+    if (['sent', 'sent_to_customer'].includes(status)) {
+      return (
+        <Badge className="h-5 rounded-full border border-sky-200 bg-sky-50 px-2 text-[10px] font-medium text-sky-700">
+          <Send className="mr-1 h-3 w-3" />
+          已发送
+        </Badge>
+      );
+    }
+    if (status === 'customer_rejected') {
+      return (
+        <Badge className="h-5 rounded-full border border-rose-200 bg-rose-50 px-2 text-[10px] font-medium text-rose-700">
+          <XCircle className="mr-1 h-3 w-3" />
+          已拒绝
+        </Badge>
+      );
+    }
+    if (status === 'customer_requested_changes') {
+      return (
+        <Badge className="h-5 rounded-full border border-orange-200 bg-orange-50 px-2 text-[10px] font-medium text-orange-700">
+          <AlertCircle className="mr-1 h-3 w-3" />
+          待修改
+        </Badge>
+      );
+    }
+    return (
+      <span className="text-[11px] text-slate-300">—</span>
+    );
+  };
   
   return (
-    <div className="space-y-4">
-      {/* 🔥 统计卡片 */}
-      <div className="grid grid-cols-7 gap-3">
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-          <div className="text-xs text-gray-500 mt-1">全部合同</div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="text-2xl font-bold text-gray-600">{stats.draft}</div>
-          <div className="text-xs text-gray-500 mt-1">草稿</div>
-        </div>
-        <div className="bg-white border border-yellow-200 rounded-lg p-4 bg-yellow-50">
-          <div className="text-2xl font-bold text-yellow-700">{stats.pending}</div>
-          <div className="text-xs text-yellow-600 mt-1">待审批</div>
-        </div>
-        <div className="bg-white border border-green-200 rounded-lg p-4 bg-green-50">
-          <div className="text-2xl font-bold text-green-700">{stats.approved}</div>
-          <div className="text-xs text-green-600 mt-1">已批准</div>
-        </div>
-        <div className="bg-white border border-red-200 rounded-lg p-4 bg-red-50">
-          <div className="text-2xl font-bold text-red-700">{stats.rejected}</div>
-          <div className="text-xs text-red-600 mt-1">已驳回</div>
-        </div>
-        <div className="bg-white border border-blue-200 rounded-lg p-4 bg-blue-50">
-          <div className="text-2xl font-bold text-blue-700">{stats.sent}</div>
-          <div className="text-xs text-blue-600 mt-1">已发送</div>
-        </div>
-        <div className="bg-white border border-emerald-200 rounded-lg p-4 bg-emerald-50">
-          <div className="text-2xl font-bold text-emerald-700">{stats.confirmed}</div>
-          <div className="text-xs text-emerald-600 mt-1">已确认</div>
-        </div>
-      </div>
-      
+    <div className="flex h-full flex-1 min-h-[calc(100dvh-360px)] min-h-0 flex-col">
+      <div className="flex h-full flex-1 min-h-0 flex-col">
       {/* 🔥 合同列表 */}
-      <div className="bg-white border border-gray-200 rounded-lg">
-        <div className="border-b border-gray-200">
-          <div className="px-5 py-3 bg-gray-50">
-            <div className="flex gap-3 items-center">
+      <div className="flex h-full flex-1 min-h-[calc(100dvh-360px)] min-h-0 w-full max-w-full flex-col overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 bg-slate-50/70">
+          <div className="px-5 py-4">
+            <div className="flex flex-wrap items-center gap-2.5">
               {/* 搜索框 */}
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
+                <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
                   placeholder="搜索合同号、报价单号、客户名称..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 h-9 text-xs"
+                  className={`h-9 rounded-xl border-slate-200 bg-slate-50 pl-10 shadow-sm placeholder:text-slate-400 ${ERP_LIST_UI_SPEC_V1.searchTextClass}`}
                 />
               </div>
               
-              {/* 批量删除按钮 */}
               <Button
                 variant="destructive"
                 size="sm"
                 onClick={handleBatchDelete}
                 disabled={selectedIds.length === 0}
-                className="gap-1"
+                className={`h-9 shrink-0 whitespace-nowrap gap-1 rounded-xl px-3 ${ERP_LIST_UI_SPEC_V1.buttonTextClass}`}
               >
-                <Trash2 className="h-3.5 w-3.5" />
                 批量删除 {selectedIds.length > 0 && `(${selectedIds.length})`}
               </Button>
-              
-              {/* 🔥 清空所有按钮 */}
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  if (window.confirm('⚠️ 确定要清空所有销售合同吗？\n\n此操作不可恢复！\n\n这将删除所有在制订单和订单历史。')) {
-                    clearAllContracts();
-                    setSelectedIds([]);
-                  }
-                }}
-                disabled={myContracts.length === 0}
-                className="gap-1 bg-red-600 hover:bg-red-700"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                清空所有
-              </Button>
-              
-              {/* 状态筛选标签 */}
-              <div className="flex gap-2">
-                <Button 
-                  variant={filterStatus === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('all')}
-                >
-                  全部 ({stats.total})
-                </Button>
-                <Button 
-                  variant={filterStatus === 'draft' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('draft')}
-                >
-                  草稿 ({stats.draft})
-                </Button>
-                <Button 
-                  variant={filterStatus === 'pending' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('pending')}
-                >
-                  待审批 ({stats.pending})
-                </Button>
-                <Button 
-                  variant={filterStatus === 'approved' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('approved')}
-                >
-                  已批准 ({stats.approved})
-                </Button>
-                <Button 
-                  variant={filterStatus === 'sent' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('sent')}
-                >
-                  已发送 ({stats.sent})
-                </Button>
-                <Button
-                  variant={filterStatus === 'confirmed' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('confirmed')}
-                >
-                  已确认 ({stats.confirmed})
-                </Button>
-                {/* Phase 6c: profit-state filters */}
-                <Button
-                  variant={filterStatus === 'profit_unavailable' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('profit_unavailable')}
-                  title="实际利润数据尚未齐备的采购执行中合同"
-                  className={filterStatus !== 'profit_unavailable' ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'bg-amber-500 hover:bg-amber-600'}
-                >
-                  ⏳ 实际待定 ({stats.profitUnavailable})
-                </Button>
-                <Button
-                  variant={filterStatus === 'profit_alert' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('profit_alert')}
-                  title="实际毛利率为负的合同（亏损预警）"
-                  className={filterStatus !== 'profit_alert' ? 'border-red-300 text-red-600 hover:bg-red-50' : 'bg-red-500 hover:bg-red-600'}
-                >
-                  ⚠ 利润预警 ({stats.profitAlert})
-                </Button>
-                {/* Phase 6d: negative-deviation filter */}
-                <Button
-                  variant={filterStatus === 'profit_deviation' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFilterStatus('profit_deviation')}
-                  title="实际毛利率低于估算超过5个百分点的合同"
-                  className={filterStatus !== 'profit_deviation' ? 'border-orange-300 text-orange-600 hover:bg-orange-50' : 'bg-orange-500 hover:bg-orange-600'}
-                >
-                  ↓ 偏差较大 ({stats.profitDeviation})
-                </Button>
+
+              {/* 流程状态筛选 */}
+              <div className="flex flex-wrap gap-2">
+                {overviewCards.map((item) => (
+                  <Button
+                    key={item.filter}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setFilterStatus(item.filter)}
+                    style={filterStatus === item.filter ? {
+                      backgroundColor: '#F5222D',
+                      borderColor: '#F5222D',
+                      color: '#ffffff',
+                    } : undefined}
+                    className={`h-9 rounded-xl px-4 shadow-sm transition-colors ${ERP_LIST_UI_SPEC_V1.buttonTextClass} ${
+                      filterStatus === item.filter
+                        ? 'shrink-0 whitespace-nowrap border-[#F5222D] bg-[#F5222D] !text-white hover:bg-[#d71922]'
+                        : 'shrink-0 whitespace-nowrap border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {item.filter === 'all' ? '全部' : item.label} ({item.value})
+                  </Button>
+                ))}
               </div>
+              
             </div>
           </div>
         </div>
         
         {/* 🔥 合同表格 */}
-        <div className="overflow-x-auto">
-          <Table>
+        <div ref={salesContractTableContainerRef} className="w-full max-w-full flex-1 min-h-0 overflow-x-hidden overflow-y-visible bg-white rounded-[inherit]">
+          <Table className="table-fixed border-collapse bg-white" style={{ width: '100%', maxWidth: '100%' }}>
+            <colgroup>
+              {SALES_CONTRACT_COLUMN_ORDER.map((key) => (
+                <col key={key} style={getSalesContractColumnStyle(key)} />
+              ))}
+            </colgroup>
             <TableHeader>
-              <TableRow className="bg-gray-50 text-[12px]">
-                <TableHead className="w-12">
-                  <Checkbox
-                    checked={
-                      selectedIds.length > 0 &&
-                      selectedIds.length === filteredContracts.filter((c) => isContractDeletable(c)).length
-                    }
-                    onCheckedChange={handleSelectAll}
-                  />
+              <TableRow className={`bg-gray-50 text-slate-700 ${ERP_LIST_UI_SPEC_V1.headerTextClass}`}>
+                <TableHead className="group relative overflow-hidden px-0 py-3 align-middle text-center" style={getSalesContractColumnStyle('select')}>
+                  <div className="flex w-full items-center justify-center">
+                    <Checkbox
+                      checked={
+                        selectedIds.length > 0 &&
+                        selectedIds.length === filteredContracts.filter((c) => isContractDeletable(c)).length
+                      }
+                      onCheckedChange={handleSelectAll}
+                    />
+                  </div>
+                  {renderSalesContractColumnResizeHandle('select')}
                 </TableHead>
-                <TableHead className="w-16">序号</TableHead>
-                <TableHead className="w-40">合同编号</TableHead>
-                <TableHead className="w-24">区域</TableHead>
-                <TableHead>客户信息</TableHead>
-                <TableHead>产品信息</TableHead>
-                <TableHead className="w-28 text-right">商品单价</TableHead>
-                <TableHead className="w-32 text-right">合同金额</TableHead>
-                <TableHead className="w-24 text-center">状态</TableHead>
-                <TableHead className="w-32 text-right">操作</TableHead>
+                {renderSalesContractHeaderCell('index', '序号', 'text-center')}
+                {renderSalesContractHeaderCell('date', '日期')}
+                {renderSalesContractHeaderCell('contractNo', '编号')}
+                {renderSalesContractHeaderCell('country', '国家', 'text-center')}
+                {renderSalesContractHeaderCell('customer', '客户信息')}
+                {renderSalesContractHeaderCell('product', '产品信息')}
+                {renderSalesContractHeaderCell('unitPrice', '商品单价', 'text-right')}
+                {renderSalesContractHeaderCell('amount', '合同金额', 'text-right')}
+                {renderSalesContractHeaderCell('approvalStatus', '审批状态', 'text-center')}
+                {renderSalesContractHeaderCell('procurementProgress', '采购进度', 'text-center')}
+                {renderSalesContractHeaderCell('customerStatus', '客户状态', 'text-center')}
+                {renderSalesContractHeaderCell('actions', '操作', 'text-center')}
               </TableRow>
             </TableHeader>
-            <TableBody className="text-[12px]">
+            <TableBody className="text-[11px] text-slate-700">
               {filteredContracts.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-12 text-gray-500">
+                  <TableCell colSpan={13} className="text-center py-12 text-gray-500">
                     <AlertCircle className="h-12 w-12 mx-auto mb-3 text-gray-400" />
                     <p>{myContracts.length === 0 ? '暂无销售合同' : '没有符合当前筛选条件的合同'}</p>
                     <p className="text-sm mt-1">
@@ -882,120 +1631,274 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
               ) : (
                 filteredContracts.map((contract, index) => {
                   const isHighlighted = highlightedId === contract.id; // 🔥 判断是否高亮
+                  const linkedQuotation = getQuotationByNumber(contract.quotationNumber) as any;
+                  const quotationFinancialSummary = deriveQuotationFinancialSummaryForContract(linkedQuotation, contract);
+                  const normalizedProfitRate = Number.isFinite(quotationFinancialSummary.profitRate)
+                    ? quotationFinancialSummary.profitRate
+                    : 0;
+                  const profitLevelLabel =
+                    normalizedProfitRate >= 20 ? '优秀'
+                    : normalizedProfitRate >= 10 ? '良好'
+                    : normalizedProfitRate > 0 ? '正常'
+                    : '待定';
                   
-                  // 🔥 查找对应的订单数据，检查定金支付状态
-                  const correspondingOrder = orders.find(o => o.orderNumber === contract.contractNumber);
-                  const depositConfirmed = correspondingOrder?.depositPaymentProof?.status === 'confirmed';
+                  const splitFields = deriveSalesContractSplitFields(contract);
+                  const executionStatus = String(splitFields.executionStatus || contract.executionStatus || '').trim().toLowerCase();
+                  const paymentStatusDeposit = String(splitFields.paymentStatusDeposit || contract.paymentStatusDeposit || '').trim().toLowerCase();
+                  const paymentStatusBalance = String(splitFields.paymentStatusBalance || contract.paymentStatusBalance || '').trim().toLowerCase();
+                  const procurementTracking = getProcurementTrackingSummary(contract);
                   const hasLiveProcurementRequest = getLivePurchaseOrdersForContract(contract).length > 0;
+                  const hasExistingProcurementChain = procurementTracking.requestNumbers.length > 0;
+                  const procurementFullyPushed =
+                    procurementTracking.cgCount > 0 &&
+                    procurementTracking.pushedCgCount >= procurementTracking.cgCount;
+                  const relatedRefs = buildSalesContractRelatedRefs(contract, linkedQuotation, procurementTracking, quoteRequirements);
+                  const relatedRefsExpanded = expandedRelatedIds.includes(contract.id);
+                  const canReactivateProcurement =
+                    hasLiveProcurementRequest &&
+                    hasExistingProcurementChain &&
+                    !procurementFullyPushed;
+                  // 🔥 查找对应的订单数据，兼容历史订单层 proof
+                  const correspondingOrder = orders.find(o => o.orderNumber === contract.contractNumber);
+                  const depositConfirmed =
+                    paymentStatusDeposit === 'confirmed' ||
+                    executionStatus === 'deposit_confirmed' ||
+                    executionStatus === 'in_procurement' ||
+                    executionStatus === 'in_pre_production' ||
+                    executionStatus === 'in_production' ||
+                    correspondingOrder?.depositPaymentProof?.status === 'confirmed';
                   // Phase 2b-i: ship-first mode flag (balance paid AFTER shipment)
                   const isShipFirst = contract.paymentMode === 'tt_deposit_balance_against_bl' ||
-                    contract.paymentMode === 'dp' || contract.paymentMode === 'oa';
+                    contract.paymentMode === 'dp' || contract.paymentMode === 'da' || contract.paymentMode === 'oa';
                   // Phase 2b-ii: LC mode flag — balance_confirmed means LC readiness, not a cash receipt
                   const isLC = contract.paymentMode === 'lc_100' || contract.paymentMode === 'deposit_plus_lc';
                   // Phase 2b-ii: procurement-eligible — aligned with generatePurchaseOrder gate in context
                   // lc_100: no deposit stage, trigger from customer_confirmed onwards
-                  // all other modes: keep existing depositConfirmed gate (order-level confirmed flag)
+                  // all other modes: trigger from split deposit-confirmed/in-procurement states
                   const procurementEligible = contract.paymentMode === 'lc_100'
-                    ? ['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'po_generated', 'production'].includes(contract.status)
-                    : depositConfirmed;
+                    ? ['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'in_procurement', 'in_pre_production', 'in_production'].includes(executionStatus || contract.status)
+                    : (depositConfirmed || hasLiveProcurementRequest);
                   
                   return (
                     <TableRow 
                       key={contract.id} 
-                      className={`hover:bg-gray-50 transition-all duration-300 ${
-                        isHighlighted ? 'bg-yellow-100 border-2 border-yellow-400 shadow-lg' : ''
+                      className={`[&>td]:py-3 [&>td]:align-top border-b border-slate-200/90 transition-all duration-200 hover:bg-gray-50 ${
+                        isHighlighted ? 'bg-yellow-100 border-2 border-yellow-400 shadow-lg' : 'bg-white'
                       }`}
                       style={isHighlighted ? { animation: 'pulse 1s ease-in-out 3' } : undefined}
                     >
-                      <TableCell>
-                        <Checkbox
-                          checked={selectedIds.includes(contract.id)}
-                          disabled={!isContractDeletable(contract)}
-                          onCheckedChange={(checked) => handleSelectOne(contract.id, checked as boolean)}
-                        />
+                      <TableCell className="px-0 py-3 text-center align-middle" style={getSalesContractColumnStyle('select')}>
+                        <div className="flex w-full items-center justify-center px-2">
+                          <Checkbox
+                            checked={selectedIds.includes(contract.id)}
+                            disabled={!isContractDeletable(contract)}
+                            onCheckedChange={(checked) => handleSelectOne(contract.id, checked as boolean)}
+                          />
+                        </div>
                       </TableCell>
-                      <TableCell className="text-gray-500">
-                        {index + 1}
+                      <TableCell className="px-2 py-3 text-center align-middle text-[11px] text-gray-500" style={getSalesContractColumnStyle('index')}>
+                        <div className="flex w-full items-center justify-center">
+                          {index + 1}
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-2 py-3 align-top overflow-hidden" style={getSalesContractColumnStyle('date')}>
+                        <div className="flex flex-col">
+                          <div className="min-h-[20px] flex items-start">
+                            <span className="mr-1 text-[12px] text-slate-500">创</span>
+                            <span className="text-[12px] font-medium text-slate-900">
+                              {formatSalesContractDateOnly(contract.createdAt || contract.created_at)}
+                            </span>
+                          </div>
+                          <div className="min-h-[16px]" />
+                          <div className="min-h-[16px]" />
+                        </div>
                       </TableCell>
                       <TableCell 
-                        className="font-mono font-semibold text-purple-600 cursor-pointer hover:text-purple-700 hover:underline"
+                        className="px-2 cursor-pointer overflow-hidden align-top font-mono font-semibold text-blue-600 hover:text-blue-700"
+                        style={getSalesContractColumnStyle('contractNo')}
                         onClick={() => {
                           setSelectedContract(contract);
                           setShowDocumentPreview(true);
                         }}
                         title="点击查看合同文档"
                       >
-                        <div className="space-y-0.5">
-                          <div>{formatContractNumberForDisplay(contract.contractNumber)}</div>
-                          <div className="text-[11px] font-normal text-blue-600">
-                            报价单编号：{contract.quotationNumber}
+                        <div className="flex flex-col">
+                          <div className="min-h-[20px] flex items-start">
+                            <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} leading-5`} title={formatContractNumberForDisplay(contract.contractNumber)}>
+                              {formatContractNumberForDisplay(contract.contractNumber)}
+                            </div>
                           </div>
+                          {relatedRefs.length > 0 ? (
+                            <div className="min-h-[16px]">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setExpandedRelatedIds((current) =>
+                                    current.includes(contract.id)
+                                      ? current.filter((id) => id !== contract.id)
+                                      : [...current, contract.id],
+                                  );
+                                }}
+                                className="text-[11px] font-medium leading-4 text-slate-500 hover:text-slate-700"
+                              >
+                                {relatedRefsExpanded ? '收起关联编号' : `展开关联编号 (${relatedRefs.length})`}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="min-h-[16px]" />
+                          )}
+                          {relatedRefsExpanded ? (
+                            <div className="space-y-0.5">
+                              {relatedRefs.map((ref) => (
+                                <button
+                                  key={ref.value}
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    const target = String(ref.value || '').trim();
+                                    if (target.startsWith('ING-')) {
+                                      onNavigateToInquiryWithHighlight?.(target);
+                                      return;
+                                    }
+                                    if (target.startsWith('QR-')) {
+                                      onNavigateToCostInquiryWithHighlight?.(target);
+                                      return;
+                                    }
+                                    if (target.startsWith('QT-')) {
+                                      onNavigateToQuotationWithHighlight?.(target);
+                                    }
+                                  }}
+                                  className={`block break-all font-mono ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} whitespace-normal leading-4 ${ref.className} ${String(ref.value || '').trim().match(/^(ING|QR|QT)-/) ? 'cursor-pointer hover:underline text-left' : 'cursor-default text-left'}`}
+                                  title={ref.value}
+                                >
+                                  {ref.value}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                           {contract.projectRevisionId && (
-                            <div className="text-[11px] font-normal text-indigo-600">
-                              执行基线：{contract.projectCode ? `${contract.projectCode} · ` : ''}{contract.projectName || 'Project'} / Rev {contract.projectRevisionCode || '-'}
+                            <div className="min-h-[16px]">
+                              <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} whitespace-normal leading-4 text-indigo-500`}>
+                                执行基线：{contract.projectCode ? `${contract.projectCode} · ` : ''}{contract.projectName || 'Project'} / Rev {contract.projectRevisionCode || '-'}
+                              </div>
                             </div>
                           )}
+                          {!contract.projectRevisionId && !relatedRefsExpanded && <div className="min-h-[16px]" />}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[11px]">
-                          {contract.region}
-                        </Badge>
+                      <TableCell className="px-2 align-top overflow-hidden" style={getSalesContractColumnStyle('country')}>
+                        {(() => {
+                          const countryLabel = String(contract.customerCountry || '').trim()
+                            || REGION_LABEL_MAP[String(contract.region || '').trim().toUpperCase()]
+                            || String(contract.region || '').trim()
+                            || '—';
+                          return (
+                            <div className="flex flex-col">
+                              <div className="min-h-[20px] flex items-start">
+                                <Badge variant="outline" className={`h-6 rounded-full px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-700`}>
+                                  {countryLabel}
+                                </Badge>
+                              </div>
+                              <div className="min-h-[16px]" />
+                            </div>
+                          );
+                        })()}
                       </TableCell>
-                      <TableCell>
-                        <div className="space-y-0.5">
-                          <div className="font-medium">{contract.customerCompany}</div>
-                          <div className="text-gray-500">{contract.customerName}</div>
-                          <div className="text-gray-400">{contract.customerEmail}</div>
+                      <TableCell className="px-2 align-top overflow-hidden" style={getSalesContractColumnStyle('customer')}>
+                        <div className="flex flex-col">
+                          <div className="min-h-[20px]">
+                            <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-800 leading-5`} title={contract.customerCompany}>
+                              {contract.customerCompany}
+                            </div>
+                          </div>
+                          <div className="min-h-[16px]">
+                            <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-600 whitespace-normal leading-4`} title={contract.customerName}>
+                              {contract.customerName}
+                            </div>
+                          </div>
+                          <div className="min-h-[16px]">
+                            <div className={`break-all ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-400 whitespace-normal leading-4`} title={contract.customerEmail}>
+                              {contract.customerEmail}
+                            </div>
+                          </div>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-2 align-top overflow-hidden" style={getSalesContractColumnStyle('product')}>
                         {(() => {
                           const products = Array.isArray(contract.products) ? contract.products : [];
                           const first = products[0];
                           const totalQty = products.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
                           const unit = first?.unit || '';
                           return (
-                            <div className="space-y-1">
-                              <div className="font-medium">{first?.productName || 'N/A'}</div>
-                              <div className="text-gray-500">
-                                共 {Math.max(products.length, 1)} 个产品 · {totalQty.toLocaleString()} {unit}
+                            <div className="flex flex-col">
+                              <div className="min-h-[20px]">
+                                <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} text-slate-800 leading-5`} title={first?.productName || 'N/A'}>
+                                  {first?.productName || 'N/A'}
+                                </div>
+                              </div>
+                              <div className="min-h-[16px]">
+                                <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-500 whitespace-normal leading-4`} title={`共 ${Math.max(products.length, 1)} 个产品`}>
+                                  共 {Math.max(products.length, 1)} 个产品 · {totalQty.toLocaleString()} {unit}
+                                </div>
                               </div>
                             </div>
                           );
                         })()}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="px-2 text-right align-top overflow-hidden" style={getSalesContractColumnStyle('unitPrice')}>
                         {(() => {
-                          const first = contract.products?.[0];
-                          const up = Number(
-                            (first as any)?.unitPrice ??
-                            (first as any)?.salesPrice ??
-                            (first as any)?.quotePrice ??
-                            0
-                          );
-                          if (!up) return <span className="text-gray-400">—</span>;
+                          const products = Array.isArray(contract.products) ? contract.products : [];
+                          const prices = products
+                            .map((product: any) => Number(
+                              product?.unitPrice ??
+                              product?.salesPrice ??
+                              product?.quotePrice ??
+                              0,
+                            ))
+                            .filter((value: number) => Number.isFinite(value) && value > 0);
+                          if (prices.length === 0) return <span className="text-gray-400">—</span>;
                           const currency = contract.currency || 'USD';
-                          const symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : currency;
-                          const formatted = up.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                          const hasMultiple = contract.products.length > 1;
+                          const minPrice = Math.min(...prices);
+                          const maxPrice = Math.max(...prices);
+                          const formatPrice = (value: number) =>
+                            value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          const hasRange = products.length > 1 && maxPrice > minPrice;
                           return (
-                            <span className="font-medium text-gray-800">
-                              {symbol}{formatted}{hasMultiple ? ' ~' : ''}
-                            </span>
+                            <div className="flex flex-col items-end">
+                              <div className="min-h-[20px]">
+                                <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-800 leading-5`}>
+                                  {hasRange
+                                    ? `${currency} ${formatPrice(minPrice)} ~ ${formatPrice(maxPrice)}`
+                                    : `${currency} ${formatPrice(maxPrice)}`}
+                                </div>
+                              </div>
+                              <div className="min-h-[16px]" />
+                            </div>
                           );
                         })()}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="space-y-0.5">
-                          <div className="font-bold text-gray-900">
+                      <TableCell className="px-2 text-right align-top overflow-hidden" style={getSalesContractColumnStyle('amount')}>
+                        <div className="flex flex-col items-end">
+                          <div className="min-h-[20px]">
+                            <div className="truncate whitespace-nowrap text-[12px] font-bold leading-5 text-slate-900">
                             {contract.currency} {contract.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
                           </div>
-                          <div className="text-gray-500 text-[10px]">
+                          <div className="min-h-[16px] text-[11px] leading-4 text-slate-500">
                             定金 {contract.depositPercentage}%: {contract.currency} {contract.depositAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
-                          <div className="text-gray-500 text-[10px]">
+                          <div className="min-h-[16px] text-[11px] leading-4 text-slate-500">
                             余款 {contract.balancePercentage}%: {contract.currency} {contract.balanceAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                          <div className="min-h-[16px] text-[11px] leading-4 flex justify-between gap-2">
+                            <span className="text-gray-500">预估利润率</span>
+                            <span
+                              className={`font-medium ${normalizedProfitRate > 0 ? 'text-emerald-600' : 'text-slate-400'}`}
+                              title="来自关联QT的预估利润率；若未存利润率字段，则按 QT总利润 / QT总成本 回算"
+                            >
+                              {normalizedProfitRate > 0 ? `${normalizedProfitRate.toFixed(1)}% (${profitLevelLabel})` : '—'}
+                            </span>
                           </div>
                           {/* Phase 6a/6b: SC profit block ───────────────────────────────────────
                               Shown from po_generated onward (procurement has started).
@@ -1221,37 +2124,42 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                           })()}
                         </div>
                       </TableCell>
-                      <TableCell className="text-center">
-                        {/* 🔥 根据订单定金状态动态显示Badge */}
-                        {(() => {
-                          const order = orders.find(o => o.orderNumber === contract.contractNumber);
-                          
-                          // 如果财务已确认定金
-                          if (order?.depositPaymentProof?.status === 'confirmed') {
-                            return (
-                              <Badge className="h-5 px-2 text-xs border bg-teal-100 text-teal-700 border-teal-300 flex items-center gap-1">
-                                <CheckCircle className="h-3 w-3" />
-                                定金已确认·可采购
-                              </Badge>
-                            );
-                          }
-                          
-                          // 如果客户已上传定金凭证，等待财务确认
-                          if (order?.depositPaymentProof && !order.depositPaymentProof.status) {
-                            return (
-                              <Badge className="h-5 px-2 text-xs border bg-purple-100 text-purple-700 border-purple-300 flex items-center gap-1">
-                                <FileCheck className="h-3 w-3" />
-                                定金已上传·待确认
-                              </Badge>
-                            );
-                          }
-                          
-                          // 否则显示默认状态
-                          return getStatusBadge(contract.status);
-                        })()}
+                      <TableCell className="px-2 text-center align-top overflow-hidden" style={getSalesContractColumnStyle('approvalStatus')}>
+                        <div className="flex w-full flex-col items-center">
+                          <div className="min-h-[20px]">
+                            {getApprovalStatusBadge(contract.status)}
+                          </div>
+                          <div className="min-h-[16px]" />
+                        </div>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
+                      <TableCell className="px-2 text-center align-top overflow-hidden" style={getSalesContractColumnStyle('procurementProgress')}>
+                        <div className="flex w-full flex-col items-center">
+                          <div className="min-h-[20px]">
+                            {procurementTracking.requestStatusLabel ? (
+                              <Badge className={`h-5 rounded-full px-2 text-[10px] font-medium ${procurementTracking.requestStatusTone}`}>
+                                {procurementTracking.requestStatusLabel}
+                              </Badge>
+                            ) : (
+                              <span className="text-[10px] leading-4 text-slate-500">{PROCUREMENT_STATUS_COPY.uncreated}</span>
+                            )}
+                          </div>
+                          <div className="block min-h-[32px] min-w-0 w-full text-center whitespace-normal break-words text-[10px] leading-4 text-slate-500">
+                            {procurementTracking.requestStatusLabel
+                              ? getProcurementCgProgressLabel(procurementTracking)
+                              : ''}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-2 text-center align-top overflow-hidden" style={getSalesContractColumnStyle('customerStatus')}>
+                        <div className="flex w-full flex-col items-center">
+                          <div className="min-h-[20px]">
+                            {getContractCustomerStatusBadge(contract.status)}
+                          </div>
+                          <div className="min-h-[16px]" />
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-2 align-top overflow-hidden" style={getSalesContractColumnStyle('actions')}>
+                        <div className="flex w-full flex-wrap items-start gap-1">
                           <Button 
                             variant="outline"
                             size="sm"
@@ -1259,10 +2167,10 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                               setSelectedContract(contract);
                               setShowDocumentPreview(true);
                             }}
-                            className="gap-1 h-7 text-[11px] px-2"
+                            className={`h-7 justify-center gap-1 rounded-full border-slate-200 bg-white px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-slate-700 hover:bg-slate-50`}
                             title="查看合同文档"
                           >
-                            <Eye className="h-3.5 w-3.5" />
+                            查看
                           </Button>
                           
                           {/* 🔥 临时修复按钮：强制更新状态为customer_confirmed */}
@@ -1288,7 +2196,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                                   });
                                 }
                               }}
-                              className="gap-1 h-7 text-[11px] px-2 bg-orange-50 hover:bg-orange-100 border-orange-300"
+                              className={`h-7 justify-center gap-1 rounded-full border-orange-300 bg-orange-50 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-orange-700 hover:bg-orange-100`}
                               title="临时修复：将状态更新为customer_confirmed"
                             >
                               🔧 修复状态
@@ -1299,11 +2207,10 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             <Button 
                               size="sm"
                               onClick={() => handleSubmitForApproval(contract)}
-                              className="gap-1 bg-blue-600 hover:bg-blue-700 h-7 text-[11px]"
+                              className={`h-7 justify-center gap-1 rounded-full bg-blue-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-blue-600`}
                               title={contract.totalAmount >= 20000 ? '金额≥$20,000，需主管+总监双重审批' : '金额<$20,000，只需主管审批'}
                             >
-                              <CheckCircle className="h-3 w-3" />
-                              提交审批
+                              提审
                             </Button>
                           )}
                           
@@ -1311,10 +2218,11 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             <Button 
                               size="sm"
                               onClick={() => handleSendToCustomer(contract)}
-                              className="gap-1 bg-green-600 hover:bg-green-700 h-7 text-[11px]"
+                              disabled={sendingContractIds.includes(contract.id)}
+                              className={`h-7 justify-center gap-1 rounded-full bg-emerald-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-emerald-600`}
+                              title={sendingContractIds.includes(contract.id) ? '正在发送合同给客户' : '发送合同给客户'}
                             >
-                              <Send className="h-3 w-3" />
-                              发送客户
+                              {sendingContractIds.includes(contract.id) ? '发送中' : '发送'}
                             </Button>
                           )}
                           
@@ -1323,10 +2231,9 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             <Button 
                               size="sm"
                               disabled
-                              className="gap-1 bg-gray-400 text-white cursor-not-allowed h-7 text-[11px]"
+                              className={`h-7 justify-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-slate-400 cursor-not-allowed hover:bg-slate-50`}
                             >
-                              <Send className="h-3 w-3" />
-                              已发客户
+                              已发送
                             </Button>
                           )}
                           
@@ -1335,7 +2242,7 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             <Button 
                               size="sm"
                               disabled
-                              className="gap-1 bg-yellow-400 text-white cursor-not-allowed h-7 text-[11px]"
+                              className={`h-7 justify-center gap-1 rounded-full bg-amber-50 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-amber-700`}
                               title="等待客户上传定金凭证，或等待财务确认收款"
                             >
                               <Clock className="h-3 w-3" />
@@ -1348,19 +2255,37 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                               deposit_plus_lc : keeps existing depositConfirmed gate (deposit stage required)
                               other modes     : keeps existing depositConfirmed gate */}
                           {procurementEligible && (
-                            <Button
-                              size="sm"
-                              onClick={() => requestProcurementFromContract(contract)}
-                              className="gap-1 bg-[#F96302] hover:bg-[#e05502] text-white h-7 text-[11px]"
-                              title={hasLiveProcurementRequest
-                                ? '已存在采购请求，点击可重新激活'
-                                : contract.paymentMode === 'lc_100'
+                            procurementFullyPushed ? (
+                              <Button
+                                size="sm"
+                                disabled
+                                className={`h-7 justify-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-slate-400 cursor-not-allowed hover:bg-slate-50`}
+                                title="采购已下推供应商，当前无需再次发起采购"
+                              >
+                                已下推
+                              </Button>
+                            ) : canReactivateProcurement ? (
+                              <Button
+                                size="sm"
+                                onClick={() => requestProcurementFromContract(contract)}
+                                variant="outline"
+                                className={`h-7 justify-center gap-1 rounded-full border-sky-200 bg-sky-50 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-sky-700 shadow-none hover:bg-sky-100`}
+                                title="已存在采购请求，点击重新激活并回到待采购分配"
+                              >
+                                重新激活
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => requestProcurementFromContract(contract)}
+                                className={`h-7 justify-center gap-1 rounded-full bg-orange-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-orange-600`}
+                                title={contract.paymentMode === 'lc_100'
                                   ? '客户已确认（LC模式无需定金），点击请求采购'
                                   : '定金已确认，点击请求采购（由采购员分配供应商）'}
-                            >
-                              <ShoppingCart className="h-3 w-3" />
-                              请求采购
-                            </Button>
+                              >
+                                采购
+                              </Button>
+                            )
                           )}
 
                           {/* 🔥 Phase 2b-ii: 确认尾款 / 确认信用证已落实
@@ -1369,13 +2294,14 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                               lc_100          : show at po_generated | production (no deposit stage)
                               deposit_plus_lc : show at deposit_confirmed | po_generated | production */}
                           {(
-                            ['deposit_confirmed', 'po_generated', 'production'].includes(contract.status) ||
-                            (isShipFirst && contract.status === 'shipped')
+                            ['in_production', 'qc_pending', 'qc_passed', 'awaiting_balance', 'balance_uploaded', 'balance_confirmed'].includes(executionStatus || contract.status) ||
+                            (isShipFirst && (executionStatus || contract.status) === 'shipped') ||
+                            (paymentStatusBalance === 'uploaded')
                           ) && (
                             <Button
                               size="sm"
                               onClick={() => confirmBalancePayment(contract.id, currentUser?.name || 'finance')}
-                              className="gap-1 bg-lime-600 hover:bg-lime-700 text-white h-7 text-[11px]"
+                              className={`h-7 justify-center gap-1 rounded-full bg-sky-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-sky-600`}
                               title={isShipFirst
                                 ? '财务确认尾款已到账（发货后收款），合同可标记完成'
                                 : isLC
@@ -1397,13 +2323,13 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             <Button
                               size="sm"
                               onClick={() => advanceSCToShipped(contract.id)}
-                              className="gap-1 bg-sky-600 hover:bg-sky-700 text-white h-7 text-[11px]"
+                              className={`h-7 justify-center gap-1 rounded-full bg-emerald-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-emerald-600`}
                               title={isShipFirst
                                 ? '尾款将在发货后结算，立即安排发货'
                                 : '尾款已确认，标记合同为已发货'}
                             >
                               <Truck className="h-3 w-3" />
-                              标记发货
+                              发货
                             </Button>
                           )}
 
@@ -1417,13 +2343,13 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
                             <Button
                               size="sm"
                               onClick={() => advanceSCToCompleted(contract.id)}
-                              className="gap-1 bg-green-600 hover:bg-green-700 text-white h-7 text-[11px]"
+                              className={`h-7 justify-center gap-1 rounded-full bg-indigo-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-indigo-600`}
                               title={isShipFirst
                                 ? '尾款已到账，货物已发出，完成合同'
                                 : '货物已发出，标记合同为已完成'}
                             >
                               <CheckCircle className="h-3 w-3" />
-                              完成合同
+                              完成
                             </Button>
                           )}
                         </div>
@@ -1439,52 +2365,141 @@ export function SalesContractManagement({ highlightScNumber }: SalesContractMana
 
       {/* 🔥 销售合同文档预览Dialog */}
       {showDocumentPreview && selectedContract && (
-        <Dialog open={showDocumentPreview} onOpenChange={setShowDocumentPreview}>
-          <DialogContent className="max-w-[95vw] h-[95vh] p-0">
-            {(() => {
-              const templateSnapshot = selectedContract.templateSnapshot || selectedContract.template_snapshot || null;
-              const templateVersion = templateSnapshot?.version || null;
-              return (
-            <DialogHeader className="px-6 py-4 border-b">
-              <DialogTitle className="flex items-center gap-3 text-lg font-semibold">
-                <span>📄 销售合同文档 - {selectedContract.contractNumber}</span>
-                <Badge variant="outline" className="text-xs font-semibold">
-                  模板版本：{templateVersion?.version || '未绑定'}
-                </Badge>
-              </DialogTitle>
-              <DialogDescription>
-                {selectedContract.projectRevisionId
-                  ? `Sales Contract Document · ${selectedContract.projectCode ? `${selectedContract.projectCode} · ` : ''}${selectedContract.projectName || 'Project'} / Rev ${selectedContract.projectRevisionCode || '-'}`
-                  : 'Sales Contract Document - 福建高盛达富建材有限公司'}
-              </DialogDescription>
-            </DialogHeader>
-              );
-            })()}
-            
-            <div className="overflow-y-auto p-6" style={{ height: 'calc(95vh - 80px)' }}>
-              {(() => {
-                const templateSnapshot = selectedContract.templateSnapshot || selectedContract.template_snapshot || null;
-                const templateVersion = templateSnapshot?.version || null;
-                const contractData = (selectedContract.documentDataSnapshot || selectedContract.document_data_snapshot) as SalesContractData | null;
-                const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
-                if (!templateVersion || !contractData) {
-                  return (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-                      该 SC 未绑定模板中心版本快照，无法预览。
-                    </div>
-                  );
-                }
-                return (
-              <SalesContractDocument
-                data={contractData}
-                layoutConfig={layoutConfig || undefined}
-              />
-                );
-              })()}
-            </div>
-          </DialogContent>
-        </Dialog>
+        (() => {
+          const templateSnapshot = selectedContract.templateSnapshot || selectedContract.template_snapshot || null;
+          const templateVersion = templateSnapshot?.version || null;
+          const procurementTracking = getProcurementTrackingSummary(selectedContract);
+          const splitFields = deriveSalesContractSplitFields(selectedContract);
+          const customerStageLabel = (() => {
+            switch (splitFields.executionStatus) {
+              case 'customer_confirmed':
+                return '已确认';
+              case 'sent_to_customer':
+                return '已发送';
+              case 'customer_requested_changes':
+                return '要求修改';
+              case 'customer_rejected':
+                return '已驳回';
+              default:
+                return '处理中';
+            }
+          })();
+          const procurementTimelineSteps = [
+            {
+              key: 'pr_created',
+              label: PROCUREMENT_STATUS_COPY.created,
+              active: procurementTracking.requestNumbers.length > 0,
+            },
+            {
+              key: 'pr_allocated',
+              label: PROCUREMENT_STATUS_COPY.fullyAllocated,
+              active: [PROCUREMENT_STATUS_COPY.partiallyAllocated, PROCUREMENT_STATUS_COPY.fullyAllocated].includes(procurementTracking.requestStatusLabel || ''),
+            },
+            {
+              key: 'cg_created',
+              label: PROCUREMENT_STATUS_COPY.cgCreated,
+              active: procurementTracking.cgCount > 0,
+            },
+            {
+              key: 'cg_pushed',
+              label: PROCUREMENT_STATUS_COPY.cgPushed,
+              active: procurementTracking.pushedCgCount > 0,
+            },
+          ];
+          const procurementCurrentAction = getProcurementCurrentActionLabel(procurementTracking);
+          const rawContractData = (selectedContract.documentDataSnapshot || selectedContract.document_data_snapshot) as SalesContractData | null;
+          const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
+          const contractData: SalesContractData | null = rawContractData
+            ? {
+                ...rawContractData,
+                buyer: resolveSalesContractBuyerData({
+                  customerCompany: selectedContract.customerCompany,
+                  customerName: selectedContract.customerName,
+                  customerAddress: selectedContract.customerAddress,
+                  customerCountry: selectedContract.customerCountry,
+                  contactPerson: selectedContract.contactPerson ?? selectedContract.customerName,
+                  contactPhone: selectedContract.contactPhone,
+                  customerEmail: selectedContract.customerEmail,
+                }, selectedContract.region === 'EA' ? 'EU' : ((selectedContract.region as 'NA' | 'SA' | 'EU' | 'EA' | undefined) || rawContractData.region || 'NA')),
+                seller: {
+                  ...rawContractData.seller,
+                  bankInfo: resolveUsdSellerBankInfo(
+                    documentAdminOrg,
+                    rawContractData.seller?.bankInfo,
+                    rawContractData.seller?.nameEn || rawContractData.seller?.name || '',
+                  ),
+                },
+              }
+            : null;
+
+          return (
+            <StandardDocumentViewerShell
+              open={showDocumentPreview}
+              onClose={() => setShowDocumentPreview(false)}
+              title="销售合同文档"
+              subtitle={selectedContract.contractNumber}
+              templateLabel={templateVersion?.version || '未绑定'}
+              icon={<FileText className="h-6 w-6" />}
+              headerBadges={
+                <>
+                  <Badge variant="outline" className="text-xs font-semibold">
+                    付款模式：{getPaymentModeLabel(selectedContract.paymentMode)}
+                  </Badge>
+                  {selectedContract.balanceTrigger ? (
+                    <Badge variant="outline" className="text-xs font-semibold">
+                      触发节点：{BALANCE_TRIGGER_OPTIONS.find((option) => option.value === selectedContract.balanceTrigger)?.label || selectedContract.balanceTrigger}
+                    </Badge>
+                  ) : null}
+                </>
+              }
+              actions={
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={async () => {
+                      if (!contractPreviewRef.current) return;
+                      const filename = generatePDFFilename('Sales_Contract', selectedContract.contractNumber || 'SC');
+                      await exportToPDF(contractPreviewRef.current, filename);
+                    }}
+                  >
+                    <FileText className="h-4 w-4" />
+                    下载PDF
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={async () => {
+                      if (!contractPreviewRef.current) return;
+                      const filename = generatePDFFilename('Sales_Contract', selectedContract.contractNumber || 'SC');
+                      await exportToPDFPrint(contractPreviewRef.current, filename);
+                    }}
+                  >
+                    <FileText className="h-4 w-4" />
+                    打印
+                  </Button>
+                </>
+              }
+            >
+              {templateVersion && contractData ? (
+                <div ref={contractPreviewRef}>
+                  <SalesContractDocument
+                    data={contractData}
+                    layoutConfig={layoutConfig || undefined}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+                  该 SC 未绑定模板中心版本快照，无法预览。
+                </div>
+              )}
+            </StandardDocumentViewerShell>
+          );
+        })()
       )}
+      </div>
     </div>
   );
 }

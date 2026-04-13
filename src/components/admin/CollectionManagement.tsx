@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -13,11 +13,151 @@ import {
 } from 'lucide-react';
 import { usePayments, PaymentRecord } from '../../contexts/PaymentContext';
 import { useFinance } from '../../contexts/FinanceContext';
+import { sharedRoleUiPreferenceService } from '../../lib/supabaseService';
+import { getColumnStyle, renderColumnResizeHandle } from './admin-organization-profile/peopleCenterVisuals';
 import { toast } from 'sonner@2.0.3';
+
+type CollectionColumnKey =
+  | 'select'
+  | 'index'
+  | 'paymentNo'
+  | 'receivableNo'
+  | 'orderNo'
+  | 'customer'
+  | 'amount'
+  | 'method'
+  | 'date'
+  | 'receiver'
+  | 'status'
+  | 'actions';
+
+const COLLECTION_TABLE_UI_PREFERENCE_PREFIX = 'collection_management_table_column_widths';
+const COLLECTION_COLUMN_ORDER: CollectionColumnKey[] = [
+  'select',
+  'index',
+  'paymentNo',
+  'receivableNo',
+  'orderNo',
+  'customer',
+  'amount',
+  'method',
+  'date',
+  'receiver',
+  'status',
+  'actions',
+];
+
+const COLLECTION_COLUMN_MIN_WIDTHS: Record<CollectionColumnKey, number> = {
+  select: 36,
+  index: 54,
+  paymentNo: 146,
+  receivableNo: 132,
+  orderNo: 132,
+  customer: 170,
+  amount: 122,
+  method: 120,
+  date: 116,
+  receiver: 104,
+  status: 112,
+  actions: 132,
+};
+
+const COLLECTION_TABLE_DEFAULT_WIDTHS: Record<CollectionColumnKey, number> = {
+  select: 42,
+  index: 58,
+  paymentNo: 160,
+  receivableNo: 148,
+  orderNo: 144,
+  customer: 188,
+  amount: 132,
+  method: 132,
+  date: 124,
+  receiver: 116,
+  status: 120,
+  actions: 150,
+};
+
+const normalizeCollectionPreferenceRole = (role?: string | null) => {
+  const normalized = String(role || '').trim();
+  return normalized || 'Admin';
+};
+
+const getCollectionPreferenceKey = () => `${COLLECTION_TABLE_UI_PREFERENCE_PREFIX}:v1`;
+
+const mergeStoredCollectionColumnWidths = (
+  stored: Partial<Record<CollectionColumnKey, number>> | null | undefined,
+) => {
+  const next = { ...COLLECTION_TABLE_DEFAULT_WIDTHS };
+  COLLECTION_COLUMN_ORDER.forEach((key) => {
+    const candidate = Number(stored?.[key]);
+    if (Number.isFinite(candidate) && candidate > 0) {
+      next[key] = Math.max(COLLECTION_COLUMN_MIN_WIDTHS[key], Math.round(candidate));
+    }
+  });
+  return next;
+};
+
+const fitCollectionColumnWidthsToContainer = (
+  preferred: Record<CollectionColumnKey, number>,
+  containerWidth: number,
+) => {
+  if (!Number.isFinite(containerWidth) || containerWidth <= 0) return preferred;
+
+  const minimumTotal = COLLECTION_COLUMN_ORDER.reduce(
+    (sum, key) => sum + COLLECTION_COLUMN_MIN_WIDTHS[key],
+    0,
+  );
+
+  if (containerWidth <= minimumTotal) {
+    const scale = containerWidth / minimumTotal;
+    const compressed = { ...preferred };
+    COLLECTION_COLUMN_ORDER.forEach((key) => {
+      compressed[key] = Math.max(24, Math.round(COLLECTION_COLUMN_MIN_WIDTHS[key] * scale));
+    });
+    const total = COLLECTION_COLUMN_ORDER.reduce((sum, key) => sum + compressed[key], 0);
+    const remainder = Math.round(containerWidth - total);
+    if (remainder !== 0) {
+      compressed.actions = Math.max(24, compressed.actions + remainder);
+    }
+    return compressed;
+  }
+
+  const next = { ...preferred };
+  COLLECTION_COLUMN_ORDER.forEach((key) => {
+    next[key] = COLLECTION_COLUMN_MIN_WIDTHS[key];
+  });
+
+  const preferredExtra = COLLECTION_COLUMN_ORDER.reduce(
+    (sum, key) => sum + Math.max((preferred[key] || 0) - COLLECTION_COLUMN_MIN_WIDTHS[key], 0),
+    0,
+  );
+  const distributableWidth = containerWidth - minimumTotal;
+
+  if (preferredExtra > 0 && distributableWidth > 0) {
+    COLLECTION_COLUMN_ORDER.forEach((key) => {
+      const extra = Math.max((preferred[key] || 0) - COLLECTION_COLUMN_MIN_WIDTHS[key], 0);
+      next[key] += Math.round((extra / preferredExtra) * distributableWidth);
+    });
+  }
+
+  const total = COLLECTION_COLUMN_ORDER.reduce((sum, key) => sum + next[key], 0);
+  const remainder = Math.round(containerWidth - total);
+  if (remainder !== 0) {
+    next.actions = Math.max(24, next.actions + remainder);
+  }
+
+  return next;
+};
 
 export default function CollectionManagement() {
   const { payments, getPaymentsByReceivable, deletePayment } = usePayments();
   const { accountsReceivable, recordPayment } = useFinance();
+  const collectionTableContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const collectionColumnResizeRef = React.useRef<{
+    key: CollectionColumnKey;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -30,8 +170,16 @@ export default function CollectionManagement() {
   
   // 🔒 获取当前用户角色
   const [currentUserRole, setCurrentUserRole] = React.useState<string | null>(null);
+  const [collectionTableContainerWidth, setCollectionTableContainerWidth] = useState(0);
+  const [collectionColumnWidths, setCollectionColumnWidths] = useState<Record<CollectionColumnKey, number>>(COLLECTION_TABLE_DEFAULT_WIDTHS);
+  const [collectionHasCustomWidths, setCollectionHasCustomWidths] = useState(false);
+  const [collectionPreferenceHydrated, setCollectionPreferenceHydrated] = useState(false);
+  const collectionPreferenceRoleScope = useMemo(
+    () => normalizeCollectionPreferenceRole(currentUserRole),
+    [currentUserRole],
+  );
   
-  React.useEffect(() => {
+  useEffect(() => {
     const currentUserStr = localStorage.getItem('cosun_current_user');
     console.log('🔍 [CollectionManagement] localStorage中的current_user:', currentUserStr);
     if (currentUserStr) {
@@ -50,6 +198,103 @@ export default function CollectionManagement() {
     } else {
       console.error('❌ [CollectionManagement] localStorage中没有cosun_current_user');
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadRemotePreference = async () => {
+      setCollectionPreferenceHydrated(false);
+      try {
+        const value = await sharedRoleUiPreferenceService.get(
+          collectionPreferenceRoleScope,
+          getCollectionPreferenceKey(),
+        );
+        if (cancelled) return;
+        if (value) {
+          setCollectionColumnWidths(
+            mergeStoredCollectionColumnWidths(
+              value as Partial<Record<CollectionColumnKey, number>>,
+            ),
+          );
+          setCollectionHasCustomWidths(true);
+        } else {
+          setCollectionColumnWidths(COLLECTION_TABLE_DEFAULT_WIDTHS);
+          setCollectionHasCustomWidths(false);
+        }
+      } catch {
+        setCollectionColumnWidths(COLLECTION_TABLE_DEFAULT_WIDTHS);
+        setCollectionHasCustomWidths(false);
+      } finally {
+        if (!cancelled) setCollectionPreferenceHydrated(true);
+      }
+    };
+    void loadRemotePreference();
+    return () => {
+      cancelled = true;
+    };
+  }, [collectionPreferenceRoleScope]);
+
+  useEffect(() => {
+    if (!collectionHasCustomWidths || !collectionPreferenceHydrated) return;
+    const timer = window.setTimeout(() => {
+      void sharedRoleUiPreferenceService.save(
+        collectionPreferenceRoleScope,
+        getCollectionPreferenceKey(),
+        collectionColumnWidths,
+      );
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    collectionColumnWidths,
+    collectionHasCustomWidths,
+    collectionPreferenceHydrated,
+    collectionPreferenceRoleScope,
+  ]);
+
+  useEffect(() => {
+    const node = collectionTableContainerRef.current;
+    if (!node) return;
+
+    const updateWidth = () => {
+      setCollectionTableContainerWidth(node.clientWidth || 0);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth);
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+
+    const observer = new ResizeObserver(() => updateWidth());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const resizeState = collectionColumnResizeRef.current;
+      if (!resizeState) return;
+      const deltaX = event.clientX - resizeState.startX;
+      const minWidth = COLLECTION_COLUMN_MIN_WIDTHS[resizeState.key];
+      setCollectionColumnWidths((prev) => ({
+        ...prev,
+        [resizeState.key]: Math.max(minWidth, Math.round(resizeState.startWidth + deltaX)),
+      }));
+      setCollectionHasCustomWidths(true);
+    };
+
+    const handleMouseUp = () => {
+      collectionColumnResizeRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
   }, []);
 
   // 统计数据
@@ -157,53 +402,105 @@ export default function CollectionManagement() {
     setViewPayment(payment);
   };
 
+  const renderedCollectionColumnWidths = useMemo(
+    () => fitCollectionColumnWidthsToContainer(collectionColumnWidths, collectionTableContainerWidth),
+    [collectionColumnWidths, collectionTableContainerWidth],
+  );
+
+  const getCollectionColumnStyle = (key: CollectionColumnKey) =>
+    getColumnStyle(renderedCollectionColumnWidths, key);
+
+  const startCollectionColumnResize = (
+    key: CollectionColumnKey,
+    event: React.MouseEvent<HTMLSpanElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    collectionColumnResizeRef.current = {
+      key,
+      startX: event.clientX,
+      startWidth: collectionColumnWidths[key],
+    };
+    setCollectionHasCustomWidths(true);
+  };
+
+  const renderCollectionColumnResizeHandle = (key: CollectionColumnKey) =>
+    renderColumnResizeHandle(
+      `调整${key}列宽`,
+      (event) => startCollectionColumnResize(key, event),
+    );
+
+  const renderCollectionHeaderCell = (
+    key: CollectionColumnKey,
+    label: string,
+    options?: {
+      align?: 'left' | 'center' | 'right';
+      className?: string;
+    },
+  ) => {
+    const align = options?.align || 'left';
+    const justifyClass =
+      align === 'right' ? 'justify-end text-right' : align === 'center' ? 'justify-center text-center' : 'justify-start text-left';
+    return (
+      <TableHead
+        className={`group relative border-b border-slate-200 bg-slate-50/90 px-3 py-3 text-xs font-semibold tracking-[0.01em] text-slate-700 ${options?.className || ''}`}
+        style={getCollectionColumnStyle(key)}
+      >
+        <div className={`flex min-h-[20px] w-full items-start pr-5 ${justifyClass}`}>
+          <span className="block whitespace-normal break-words leading-5">{label}</span>
+        </div>
+        {renderCollectionColumnResizeHandle(key)}
+      </TableHead>
+    );
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="flex flex-1 min-h-0 flex-col space-y-4">
       {/* 统计卡片 */}
       {/* 🎨 方案A：台湾大厂原汁原味风格 - SAP/Oracle单行紧凑摘要栏 */}
       {/* 🔒 只对非业务员角色显示统计卡片 */}
       {currentUserRole !== 'Sales_Rep' && (
-        <div className="bg-white border border-gray-300 rounded">
-          <div className="px-5 py-3 border-b border-gray-200 bg-gray-50">
-            <h3 className="font-semibold text-gray-700 uppercase tracking-wide" style={{ fontSize: '14px' }}>收款统计</h3>
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-2.5">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">收款统计</h3>
           </div>
-          <div className="px-5 py-3 flex items-center gap-8" style={{ fontSize: '12px' }}>
+          <div className="flex items-center gap-6 px-4 py-3 text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-gray-600">总收款笔数:</span>
-              <span className="font-semibold text-gray-900">{stats.total}</span>
+              <span className="text-slate-500">总收款笔数:</span>
+              <span className="font-semibold text-slate-900">{stats.total}</span>
             </div>
-            <div className="w-px h-4 bg-gray-300" />
+            <div className="h-4 w-px bg-slate-200" />
             <div className="flex items-center gap-2">
-              <span className="text-gray-600">已确认:</span>
-              <span className="font-semibold text-orange-600">{stats.confirmed}</span>
+              <span className="text-slate-500">已确认:</span>
+              <span className="font-semibold text-emerald-600">{stats.confirmed}</span>
             </div>
-            <div className="w-px h-4 bg-gray-300" />
+            <div className="h-4 w-px bg-slate-200" />
             <div className="flex items-center gap-2">
-              <span className="text-gray-600">待确认:</span>
-              <span className="font-semibold text-gray-900">{stats.pending}</span>
+              <span className="text-slate-500">待确认:</span>
+              <span className="font-semibold text-slate-900">{stats.pending}</span>
             </div>
-            <div className="w-px h-4 bg-gray-300" />
+            <div className="h-4 w-px bg-slate-200" />
             <div className="flex items-center gap-2">
-              <span className="text-gray-600">已收总额:</span>
-              <span className="font-semibold text-gray-900">${(stats.totalAmount / 1000).toFixed(0)}K</span>
+              <span className="text-slate-500">已收总额:</span>
+              <span className="font-semibold text-slate-900">${(stats.totalAmount / 1000).toFixed(0)}K</span>
             </div>
           </div>
         </div>
       )}
 
       {/* 列表卡片 */}
-      <Card className="border border-gray-200">
+      <Card className="flex flex-1 min-h-0 w-full max-w-full flex-col overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm min-h-[calc(100dvh-360px)]">
         {/* 搜索和筛选栏 */}
-        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-          <div className="flex gap-3 items-center">
+        <div className="border-b border-slate-200 bg-slate-50/70 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             {/* 搜索框 */}
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 transform text-slate-400" />
               <Input
                 placeholder="搜索收款编号、客户名称、订单号..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 h-9 text-xs"
+                className="h-9 rounded-xl border-slate-200 bg-white pl-9 text-xs shadow-sm"
               />
             </div>
 
@@ -218,7 +515,7 @@ export default function CollectionManagement() {
                 setFilterCustomer('all');
               }}
               disabled={searchTerm === '' && filterStatus === 'all' && filterRegion === 'all' && filterCustomer === 'all'}
-              className="h-9 px-3 text-gray-600 hover:text-orange-600 disabled:opacity-40"
+              className="h-9 rounded-xl px-3 text-slate-600 hover:text-orange-600 disabled:opacity-40"
               style={{ fontSize: '12px' }}
             >
               <XCircle className="w-3.5 h-3.5 mr-1" />
@@ -230,7 +527,7 @@ export default function CollectionManagement() {
               size="sm"
               onClick={handleBatchDelete}
               disabled={selectedPaymentIds.length === 0}
-              className="h-9 px-3 text-xs gap-1"
+              className="h-9 rounded-xl px-3 text-xs shadow-sm gap-1"
             >
               <Trash2 className="w-3.5 h-3.5" />
               批量删除{selectedPaymentIds.length > 0 ? ` (${selectedPaymentIds.length})` : ''}
@@ -238,7 +535,7 @@ export default function CollectionManagement() {
 
             {/* 状态筛选 */}
             <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-[130px] h-9 text-xs bg-white">
+              <SelectTrigger className="h-9 w-[130px] rounded-xl border-slate-200 bg-white text-xs shadow-sm">
                 <SelectValue placeholder="全部状态" />
               </SelectTrigger>
               <SelectContent>
@@ -254,7 +551,7 @@ export default function CollectionManagement() {
               <>
                 {/* 区域筛选 */}
                 <Select value={filterRegion} onValueChange={setFilterRegion}>
-                  <SelectTrigger className="w-[120px] h-9 text-xs bg-white">
+                  <SelectTrigger className="h-9 w-[120px] rounded-xl border-slate-200 bg-white text-xs shadow-sm">
                     <SelectValue placeholder="全部区域" />
                   </SelectTrigger>
                   <SelectContent>
@@ -268,7 +565,7 @@ export default function CollectionManagement() {
 
                 {/* 客户筛选 */}
                 <Select value={filterCustomer} onValueChange={setFilterCustomer}>
-                  <SelectTrigger className="w-[140px] h-9 text-xs bg-white">
+                  <SelectTrigger className="h-9 w-[140px] rounded-xl border-slate-200 bg-white text-xs shadow-sm">
                     <SelectValue placeholder="全部客户" />
                   </SelectTrigger>
                   <SelectContent>
@@ -286,87 +583,106 @@ export default function CollectionManagement() {
         </div>
 
         {/* 表格 */}
-        <div className="overflow-x-auto">
-          <Table>
+        <div ref={collectionTableContainerRef} className="w-full max-w-full flex-1 min-h-0 overflow-x-auto overflow-y-visible bg-white rounded-[inherit]">
+          <Table className="table-fixed border-collapse" style={{ width: '100%', maxWidth: '100%' }}>
+            <colgroup>
+              {COLLECTION_COLUMN_ORDER.map((key) => (
+                <col key={key} style={getCollectionColumnStyle(key)} />
+              ))}
+            </colgroup>
             <TableHeader>
-              <TableRow className="bg-gray-50 hover:bg-gray-50">
-                <TableHead className="w-10">
-                  <Checkbox
-                    checked={allSelected}
-                    onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
-                  />
+              <TableRow className="border-b border-slate-200 bg-slate-50/90 hover:bg-slate-50/90">
+                <TableHead
+                  className="group relative border-b border-slate-200 bg-slate-50/90 px-0 py-3 text-xs font-semibold text-slate-700"
+                  style={getCollectionColumnStyle('select')}
+                >
+                  <div className="flex w-full items-center justify-center">
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
+                    />
+                  </div>
+                  {renderCollectionColumnResizeHandle('select')}
                 </TableHead>
-                <TableHead className="text-xs py-3 w-14">序号</TableHead>
-                <TableHead className="text-xs py-3">收款编号</TableHead>
-                <TableHead className="text-xs">应收账款号</TableHead>
-                <TableHead className="text-xs">订单号</TableHead>
-                <TableHead className="text-xs">客户名称</TableHead>
-                <TableHead className="text-xs">收款金额</TableHead>
-                <TableHead className="text-xs">付款方式</TableHead>
-                <TableHead className="text-xs">收款日期</TableHead>
-                <TableHead className="text-xs">收款人</TableHead>
-                <TableHead className="text-xs">状态</TableHead>
-                <TableHead className="text-xs text-right">操作</TableHead>
+                {renderCollectionHeaderCell('index', '序号', { align: 'center' })}
+                {renderCollectionHeaderCell('paymentNo', '收款编号')}
+                {renderCollectionHeaderCell('receivableNo', '应收账款号')}
+                {renderCollectionHeaderCell('orderNo', '订单号')}
+                {renderCollectionHeaderCell('customer', '客户名称')}
+                {renderCollectionHeaderCell('amount', '收款金额', { align: 'right' })}
+                {renderCollectionHeaderCell('method', '付款方式')}
+                {renderCollectionHeaderCell('date', '收款日期')}
+                {renderCollectionHeaderCell('receiver', '收款人')}
+                {renderCollectionHeaderCell('status', '状态', { align: 'center' })}
+                {renderCollectionHeaderCell('actions', '操作', { align: 'right' })}
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredPayments.map((payment, index) => {
                 const PaymentIcon = getPaymentMethodIcon(payment.paymentMethod);
                 return (
-                  <TableRow key={payment.id} className="hover:bg-emerald-50/30">
-                    <TableCell className="py-3">
-                      <Checkbox
-                        checked={selectedPaymentIds.includes(payment.id)}
-                        onCheckedChange={(checked) => handleSelectOne(payment.id, Boolean(checked))}
-                      />
+                  <TableRow key={payment.id} className="border-b border-slate-200/90 hover:bg-slate-50/70">
+                    <TableCell className="px-0 py-3 align-middle" style={getCollectionColumnStyle('select')}>
+                      <div className="flex w-full items-center justify-center">
+                        <Checkbox
+                          checked={selectedPaymentIds.includes(payment.id)}
+                          onCheckedChange={(checked) => handleSelectOne(payment.id, Boolean(checked))}
+                        />
+                      </div>
                     </TableCell>
-                    <TableCell className="text-xs text-gray-500">{index + 1}</TableCell>
-                    <TableCell className="py-3">
+                    <TableCell className="px-3 py-3 text-center text-xs text-slate-500 align-middle" style={getCollectionColumnStyle('index')}>
+                      {index + 1}
+                    </TableCell>
+                    <TableCell className="px-3 py-3 align-top" style={getCollectionColumnStyle('paymentNo')}>
                       <button
                         onClick={() => handleViewPayment(payment)}
-                        className="text-xs text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer"
+                        className="block w-full overflow-hidden break-all text-left text-sm font-semibold text-sky-600 hover:text-sky-700 hover:underline"
                       >
                         {payment.paymentNumber}
                       </button>
                     </TableCell>
-                    <TableCell className="text-xs">
-                      <span className="text-blue-600 font-mono">
+                    <TableCell className="px-3 py-3 text-xs align-top" style={getCollectionColumnStyle('receivableNo')}>
+                      <span className="block overflow-hidden break-all font-mono text-emerald-600">
                         {payment.receivableNumber}
                       </span>
                     </TableCell>
-                    <TableCell className="text-xs">
-                      <span className="text-purple-600 font-mono">
+                    <TableCell className="px-3 py-3 text-xs align-top" style={getCollectionColumnStyle('orderNo')}>
+                      <span className="block overflow-hidden break-all font-mono text-violet-600">
                         {payment.orderNumber}
                       </span>
                     </TableCell>
-                    <TableCell className="text-xs">{payment.customerName}</TableCell>
-                    <TableCell className="text-xs">
-                      <span className="font-semibold text-emerald-600">
+                    <TableCell className="px-3 py-3 text-sm text-slate-700 align-top" style={getCollectionColumnStyle('customer')}>
+                      <span className="block overflow-hidden break-words leading-5">{payment.customerName}</span>
+                    </TableCell>
+                    <TableCell className="px-3 py-3 text-right align-top" style={getCollectionColumnStyle('amount')}>
+                      <span className="block text-sm font-semibold text-emerald-600">
                         {payment.currency} {payment.amount.toLocaleString()}
                       </span>
                     </TableCell>
-                    <TableCell className="text-xs">
-                      <div className="flex items-center gap-1">
-                        <PaymentIcon className="w-3.5 h-3.5 text-gray-500" />
-                        <span>{payment.paymentMethod}</span>
+                    <TableCell className="px-3 py-3 text-xs text-slate-600 align-top" style={getCollectionColumnStyle('method')}>
+                      <div className="flex items-center gap-1.5">
+                        <PaymentIcon className="h-3.5 w-3.5 text-slate-400" />
+                        <span className="leading-5">{payment.paymentMethod}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs text-gray-600">
+                    <TableCell className="px-3 py-3 text-xs text-slate-500 align-top" style={getCollectionColumnStyle('date')}>
                       {payment.paymentDate}
                     </TableCell>
-                    <TableCell className="text-xs text-gray-600">
+                    <TableCell className="px-3 py-3 text-xs text-slate-500 align-top" style={getCollectionColumnStyle('receiver')}>
                       {payment.receivedBy}
                     </TableCell>
-                    <TableCell className="py-3">
-                      <Badge className={`h-5 px-2 text-[10px] border ${getStatusConfig(payment.status).color}`}>
-                        {getStatusConfig(payment.status).label}
-                      </Badge>
+                    <TableCell className="px-3 py-3 align-middle" style={getCollectionColumnStyle('status')}>
+                      <div className="flex w-full justify-center">
+                        <Badge className={`h-7 rounded-full border px-3 text-[11px] font-medium ${getStatusConfig(payment.status).color}`}>
+                          {getStatusConfig(payment.status).label}
+                        </Badge>
+                      </div>
                     </TableCell>
-                    <TableCell className="py-3 text-right">
+                    <TableCell className="px-3 py-3 text-right align-middle" style={getCollectionColumnStyle('actions')}>
                       <Button 
-                        variant="ghost" 
+                        variant="outline" 
                         size="sm" 
-                        className="h-7 px-3 text-xs"
+                        className="h-9 rounded-xl border-slate-200 px-4 text-xs font-medium text-slate-700 shadow-sm"
                         onClick={() => handleViewPayment(payment)}
                       >
                         <Eye className="w-3.5 h-3.5 mr-1" />
