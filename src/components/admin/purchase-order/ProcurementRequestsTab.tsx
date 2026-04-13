@@ -1,10 +1,16 @@
-import React from 'react';
-import { Eye, Search, Trash2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Eye, Trash2 } from 'lucide-react';
 import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOrderContext';
 import { Button } from '../../ui/button';
-import { Input } from '../../ui/input';
+import { Badge } from '../../ui/badge';
 import { TabsContent } from '../../ui/tabs';
+import { FinanceFilterBar } from '../../finance-v2/components/FinanceFilterBar';
+import {
+  getErpListFilterPillClass,
+  getErpListFilterPillStyle,
+} from '../../shared/erpListUiSpec';
 import { extractProjectExecutionBaseline } from './purchaseOrderUtils';
+import { sortDocumentFlowRefs } from '../../../utils/documentFlowRefOrder';
 
 type ProcurementRequestsTabProps = {
   procurementRequestSearchTerm: string;
@@ -26,6 +32,61 @@ type ProcurementRequestsTabProps = {
   handleDeleteProcurementRequest: (po: PurchaseOrderType) => void;
 };
 
+type RequestFilterKey = 'all' | 'pending_assignment' | 'partially_allocated' | 'fully_allocated';
+
+const FILTER_LABELS: Record<RequestFilterKey, string> = {
+  all: '全部',
+  pending_assignment: '待分配',
+  partially_allocated: '部分分配',
+  fully_allocated: '已分配完成',
+};
+
+const FILTER_ORDER: RequestFilterKey[] = ['all', 'pending_assignment', 'partially_allocated', 'fully_allocated'];
+const CAPSULE_BUTTON_STYLE = { borderRadius: '9999px' } as const;
+
+const normalizeProcurementRequestRuntimeStatus = (rawStatus: string): RequestFilterKey => {
+  const status = String(rawStatus || '').trim();
+  if (status === 'allocated_completed' || status === 'fully_allocated') return 'fully_allocated';
+  if (status === 'partial_allocated' || status === 'partially_allocated') return 'partially_allocated';
+  return 'pending_assignment';
+};
+
+const getRequestToneClasses = (status: RequestFilterKey) => {
+  switch (status) {
+    case 'fully_allocated':
+      return 'border-emerald-300 bg-emerald-50 text-emerald-700';
+    case 'partially_allocated':
+      return 'border-blue-300 bg-blue-50 text-blue-700';
+    default:
+      return 'border-amber-300 bg-amber-50 text-amber-700';
+  }
+};
+
+const resolveSourceContractNo = (po: PurchaseOrderType) => {
+  return String(po.salesContractNumber || po.sourceSONumber || po.sourceRef || '').trim();
+};
+
+function buildProcurementSourceRefs(
+  po: PurchaseOrderType,
+  resolveInquirySourceRef: (po: PurchaseOrderType) => string,
+  getRequirementNoFromPO: (po: PurchaseOrderType) => string,
+) {
+  const refs: Array<{ value: string; className: string }> = [];
+  const seen = new Set<string>();
+  const pushRef = (value: string, className: string) => {
+    const normalized = String(value || '').trim();
+    if (!normalized || normalized === '-' || seen.has(normalized)) return;
+    seen.add(normalized);
+    refs.push({ value: normalized, className });
+  };
+
+  pushRef(resolveSourceContractNo(po), 'text-blue-600');
+  pushRef(resolveInquirySourceRef(po), 'text-purple-500');
+  pushRef(getRequirementNoFromPO(po), 'text-slate-500');
+
+  return sortDocumentFlowRefs(refs);
+}
+
 export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
   procurementRequestSearchTerm,
   setProcurementRequestSearchTerm,
@@ -45,145 +106,265 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
   hasDownstreamPOForProcurementRequest,
   handleDeleteProcurementRequest,
 }) => {
+  const [statusFilter, setStatusFilter] = useState<RequestFilterKey>('all');
+  const [expandedSourceIds, setExpandedSourceIds] = useState<string[]>([]);
+
+  const counts = useMemo(() => {
+    return filteredProcurementRequests.reduce<Record<RequestFilterKey, number>>((acc, po) => {
+      const bucket = normalizeProcurementRequestRuntimeStatus(getProcurementRequestRuntimeStatus(po));
+      acc.all += 1;
+      acc[bucket] += 1;
+      return acc;
+    }, {
+      all: 0,
+      pending_assignment: 0,
+      partially_allocated: 0,
+      fully_allocated: 0,
+    });
+  }, [filteredProcurementRequests, getProcurementRequestRuntimeStatus]);
+
+  const displayProcurementRequests = useMemo(() => {
+    if (statusFilter === 'all') return filteredProcurementRequests;
+    return filteredProcurementRequests.filter(
+      (po) => normalizeProcurementRequestRuntimeStatus(getProcurementRequestRuntimeStatus(po)) === statusFilter,
+    );
+  }, [filteredProcurementRequests, getProcurementRequestRuntimeStatus, statusFilter]);
+
+  const formatDateOnly = (value?: string | null) => {
+    const text = String(value || '').trim();
+    if (!text) return '-';
+    return text.includes('T') ? text.slice(0, 10) : text;
+  };
+
   return (
-    <TabsContent value="procurement-requests" className="m-0">
-      <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-        <div className="flex gap-2 items-center">
-          <div className="relative flex-1">
-            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
-            <Input
-              placeholder="搜索采购请求号、来源询价、需求编号..."
-              value={procurementRequestSearchTerm}
-              onChange={(e) => setProcurementRequestSearchTerm(e.target.value)}
-              className="pl-7 h-8 text-xs border-gray-300"
-            />
-          </div>
-          {selectedProcurementRequestIds.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleBatchDeleteProcurementRequests}
-              className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
-            >
-              <Trash2 className="w-3.5 h-3.5 mr-1" />
-              批量删除 ({selectedProcurementRequestIds.length})
-            </Button>
+    <TabsContent value="procurement-requests" className="m-0 flex flex-1 min-h-0 flex-col">
+      <div className="px-3 py-2">
+        <FinanceFilterBar
+          placeholder="搜索采购请求号、来源询价、需求编号..."
+          value={procurementRequestSearchTerm}
+          onChange={setProcurementRequestSearchTerm}
+          onReset={() => setProcurementRequestSearchTerm('')}
+          containerClassName="border-0 bg-transparent px-0 py-0"
+          hideDefaultActions
+          extra={(
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                {FILTER_ORDER.map((value) => {
+                  return (
+                    <Button
+                      key={value}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setStatusFilter(value)}
+                      style={{
+                        ...getErpListFilterPillStyle(statusFilter === value),
+                        ...CAPSULE_BUTTON_STYLE,
+                      }}
+                      className={getErpListFilterPillClass(statusFilter === value)
+                        .replace('h-9', 'h-8')
+                        .replace('px-4', 'px-3')
+                        .replace('rounded-xl', '!rounded-full')}
+                    >
+                      {FILTER_LABELS[value]} ({counts[value]})
+                    </Button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleBatchDeleteProcurementRequests}
+                  disabled={selectedProcurementRequestIds.length === 0}
+                  style={CAPSULE_BUTTON_STYLE}
+                  className="h-8 !rounded-full border-red-200 px-3 text-[12px] font-semibold leading-[1.35] text-red-600 hover:bg-red-50"
+                >
+                  批量删除{selectedProcurementRequestIds.length > 0 ? ` (${selectedProcurementRequestIds.length})` : ''}
+                </Button>
+              </div>
+            </>
           )}
-        </div>
+        />
       </div>
 
-      <div className="px-3 py-3">
-        <p className="text-[14px] text-gray-600 mb-2">共 {filteredProcurementRequests.length} 条采购请求</p>
-        {filteredProcurementRequests.length === 0 && purchaseOrders.filter((po) => isProcurementRequestRecord(po)).length > 0 && (
-          <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            当前筛选条件下无数据，已保留采购请求。请清空搜索后查看全部。
-          </div>
-        )}
-        <div className="border border-gray-200 rounded overflow-hidden bg-white">
-          <table className="w-full text-[14px]">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                    checked={selectedProcurementRequestIds.length === filteredProcurementRequests.length && filteredProcurementRequests.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedProcurementRequestIds(filteredProcurementRequests.map((o) => o.id));
-                      } else {
-                        setSelectedProcurementRequestIds([]);
-                      }
-                    }}
-                  />
-                </th>
-                <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">采购请求号</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">来源</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">产品数量</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">状态</th>
-                <th className="text-center py-2 px-3 font-medium text-gray-600">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProcurementRequests.map((po, idx) => {
-                const runtimeStatus = getProcurementRequestRuntimeStatus(po);
-                const lockedByDownstream = hasDownstreamPOForProcurementRequest(po);
-                const projectBaseline = extractProjectExecutionBaseline(po);
-                return (
-                  <tr key={po.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                    <td className="py-2 px-2 text-center">
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                        checked={selectedProcurementRequestIds.includes(po.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedProcurementRequestIds([...selectedProcurementRequestIds, po.id]);
-                          } else {
-                            setSelectedProcurementRequestIds(selectedProcurementRequestIds.filter((id) => id !== po.id));
-                          }
-                        }}
-                      />
+      <div className="px-3 pb-2 flex flex-1 min-h-0 flex-col">
+        <div className="border border-gray-200 rounded bg-white min-h-[calc(100dvh-360px)] flex flex-1 min-h-0 flex-col overflow-visible">
+          {displayProcurementRequests.length === 0 && purchaseOrders.filter((po) => isProcurementRequestRecord(po)).length > 0 ? (
+            <div className="border-t border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-[1.35] text-amber-700">
+              当前筛选条件下无数据，已保留采购请求记录。可清空搜索或切换筛选查看全部。
+            </div>
+          ) : null}
+          <div className="overflow-x-auto overflow-y-visible bg-white flex-1 rounded-[inherit]">
+            <table className="w-full min-w-[1160px] text-[13px]">
+              <thead className="bg-gray-50 border-b border-gray-200 text-slate-600">
+                <tr>
+                  <th className="w-10 px-2 py-3 text-center font-semibold">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer rounded border border-slate-400"
+                      checked={selectedProcurementRequestIds.length === displayProcurementRequests.length && displayProcurementRequests.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedProcurementRequestIds(displayProcurementRequests.map((o) => o.id));
+                        } else {
+                          setSelectedProcurementRequestIds([]);
+                        }
+                      }}
+                    />
+                  </th>
+                  <th className="w-12 px-2 py-3 text-center font-semibold">#</th>
+                  <th className="px-3 py-3 text-left font-semibold">日期</th>
+                  <th className="px-3 py-3 text-left font-semibold">编号</th>
+                  <th className="px-3 py-3 text-left font-semibold">产品摘要</th>
+                  <th className="px-3 py-3 text-left font-semibold">分配状态</th>
+                  <th className="px-3 py-3 text-center font-semibold">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayProcurementRequests.map((po, idx) => {
+                  const runtimeStatus = normalizeProcurementRequestRuntimeStatus(getProcurementRequestRuntimeStatus(po));
+                  const lockedByDownstream = hasDownstreamPOForProcurementRequest(po);
+                  const projectBaseline = extractProjectExecutionBaseline(po);
+                  const rawRuntimeStatus = getProcurementRequestRuntimeStatus(po);
+                  const sourceRefs = buildProcurementSourceRefs(po, resolveInquirySourceRef, getRequirementNoFromPO);
+                  const expanded = expandedSourceIds.includes(po.id);
+
+                  return (
+                    <tr key={po.id} className="border-b border-slate-200 align-top hover:bg-slate-50/70">
+                      <td className="px-2 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 cursor-pointer rounded border border-slate-400"
+                          checked={selectedProcurementRequestIds.includes(po.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedProcurementRequestIds([...selectedProcurementRequestIds, po.id]);
+                            } else {
+                              setSelectedProcurementRequestIds(selectedProcurementRequestIds.filter((id) => id !== po.id));
+                            }
+                          }}
+                        />
                     </td>
-                    <td className="py-2 px-2 text-center text-gray-500">{idx + 1}</td>
-                    <td className="py-2 px-2">
-                      <div className="font-semibold text-purple-600">{normalizeCGNumberForDisplay(po.poNumber || '')}</div>
-                      <div className="text-xs text-gray-500">申请时间: {new Date(po.orderDate || po.createdDate || Date.now()).toLocaleString()}</div>
-                    </td>
-                    <td className="py-2 px-2">
-                      <div className="text-sm text-gray-700">询价: {resolveInquirySourceRef(po) || ''}</div>
-                      <div className="text-xs text-gray-500">需求: {getRequirementNoFromPO(po) || ''}</div>
-                      {projectBaseline && (
-                        <div className="text-xs text-indigo-600 mt-0.5">
-                          基线: {projectBaseline.projectCode ? `${projectBaseline.projectCode} · ` : ''}{projectBaseline.projectName || 'Project'} / Rev {projectBaseline.projectRevisionCode || '-'} / QT {projectBaseline.finalQuotationNumber || '-'}
+                    <td className="px-2 py-3 text-center text-slate-500">{idx + 1}</td>
+                    <td className="px-3 py-3">
+                      <div className="space-y-1 text-slate-900">
+                        <div>
+                          <span className="mr-1 text-[12px] text-slate-500">申请日期</span>
+                          {formatDateOnly(
+                            po.orderDate ||
+                            po.createdDate ||
+                            (po as any).createdAt ||
+                            (po as any).updatedAt,
+                          )}
                         </div>
-                      )}
-                    </td>
-                    <td className="py-2 px-2">
-                      <span className="font-semibold">{po.items?.length || 0} 个产品</span>
-                      <div className="text-xs text-gray-500">共 {(po.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0).toLocaleString()} 件</div>
-                    </td>
-                    <td className="py-2 px-2">
-                      {runtimeStatus === 'allocated_completed' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-green-50 text-green-700 border-green-200">{getProcurementRequestStatusText(runtimeStatus)}</span>
-                      ) : runtimeStatus === 'partial_allocated' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-blue-50 text-blue-700 border-blue-200">{getProcurementRequestStatusText(runtimeStatus)}</span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs border bg-amber-50 text-amber-700 border-amber-200">{getProcurementRequestStatusText(runtimeStatus)}</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-2 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <Button size="sm" variant="outline" onClick={() => handleViewPODocument(po)} className="h-7 px-2 text-xs" title="查看采购请求详情">
-                          <Eye className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => openSupplierAllocationDialog(po)}
-                          disabled={runtimeStatus === 'allocated_completed'}
-                          className="h-7 px-2 text-xs bg-[#F96302] hover:bg-[#E05502] disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="按产品行分配供应商并生成采购订单草稿"
-                        >
-                          {runtimeStatus === 'allocated_completed' ? '已分配完成' : runtimeStatus === 'partial_allocated' ? '继续分配' : '分配供应商'}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleDeleteProcurementRequest(po)}
-                          disabled={lockedByDownstream}
-                          className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={lockedByDownstream ? '已存在下游采购单(PO)，不可删除上游采购请求' : '删除采购请求'}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
+                        <div>
+                          <span className="mr-1 text-[12px] text-slate-500">要求交期</span>
+                          {formatDateOnly(
+                            po.requiredDate ||
+                            po.expectedDate ||
+                            po.expectedDeliveryDate ||
+                            (po as any).expectedQuoteDate ||
+                            (po as any).deliveryDate,
+                          )}
+                        </div>
                       </div>
                     </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    <td className="px-3 py-3">
+                      <div className="relative inline-block">
+                          <button onClick={() => handleViewPODocument(po)} className="font-semibold text-slate-900 hover:text-slate-700 hover:underline">
+                            {normalizeCGNumberForDisplay(po.poNumber || '')}
+                          </button>
+                        {sourceRefs.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedSourceIds((current) => (
+                                current.includes(po.id)
+                                  ? current.filter((id) => id !== po.id)
+                                  : [...current, po.id]
+                              ));
+                            }}
+                            className="mt-1 block text-[12px] font-semibold leading-[1.35] text-slate-500 hover:text-slate-700"
+                          >
+                            {expanded ? '收起关联编号' : `展开关联编号 (${sourceRefs.length})`}
+                          </button>
+                        ) : (
+                          <div className="mt-1 text-[12px] leading-[1.35] text-slate-400">-</div>
+                        )}
+                        {expanded ? (
+                          <div className="absolute left-0 top-full z-20 mt-2 min-w-[280px] space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+                            {sourceRefs.map((ref) => (
+                              <div key={ref.value} className={`whitespace-nowrap font-medium leading-[1.35] ${ref.className}`}>
+                                {ref.value}
+                              </div>
+                            ))}
+                            {projectBaseline ? (
+                              <div className="border-t border-slate-100 pt-2 text-[11px] leading-[1.35] text-indigo-600">
+                                {projectBaseline.projectCode ? `${projectBaseline.projectCode} · ` : ''}
+                                {projectBaseline.projectName || 'Project'} / Rev {projectBaseline.projectRevisionCode || '-'}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                      <td className="px-3 py-3">
+                        <div className="font-medium text-slate-900">{po.items?.length || 0} 个产品</div>
+                        <div className="mt-1 text-[12px] leading-[1.35] text-slate-500">
+                          共 {(po.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0).toLocaleString()} 件
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-col gap-1.5">
+                          <Badge className={getRequestToneClasses(runtimeStatus)}>
+                            {getProcurementRequestStatusText(rawRuntimeStatus)}
+                          </Badge>
+                          <div className="text-[12px] leading-[1.35] text-slate-500">
+                            {runtimeStatus === 'fully_allocated' ? '已满足生成CG前置条件' : runtimeStatus === 'partially_allocated' ? '仍有产品待补齐供应商' : '等待采购承接分配'}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap justify-center gap-1.5">
+                          <Button variant="outline" size="sm" onClick={() => handleViewPODocument(po)} style={CAPSULE_BUTTON_STYLE} className="h-8 !rounded-full border-slate-300 px-3 text-[12px] font-semibold">
+                            <Eye className="mr-1 h-3 w-3" />
+                            查看
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => openSupplierAllocationDialog(po)}
+                            disabled={runtimeStatus === 'fully_allocated'}
+                            style={CAPSULE_BUTTON_STYLE}
+                            className={`h-8 !rounded-full px-3 text-[12px] font-semibold ${
+                              runtimeStatus === 'fully_allocated'
+                                ? 'bg-slate-200 text-slate-500 hover:bg-slate-200'
+                                : 'bg-slate-900 text-white hover:bg-slate-800'
+                            }`}
+                            title="按产品行分配供应商并生成采购合同草稿"
+                          >
+                            {runtimeStatus === 'fully_allocated' ? '已分配完成' : runtimeStatus === 'partially_allocated' ? '继续分配' : '分配供应商'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteProcurementRequest(po)}
+                            disabled={lockedByDownstream}
+                            style={CAPSULE_BUTTON_STYLE}
+                            className="h-8 !rounded-full border-red-200 px-3 text-[12px] font-semibold text-red-600 hover:bg-red-50 disabled:border-slate-200 disabled:text-slate-400"
+                            title={lockedByDownstream ? '已存在下游CG，不可删除上游采购请求' : '删除采购请求'}
+                          >
+                            <Trash2 className="mr-1 h-3 w-3" />
+                            删除
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </TabsContent>

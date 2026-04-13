@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Search, Trash2, FileText, Eye, Edit, Send } from 'lucide-react';
 import { XJ } from '../../../contexts/XJContext';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { TabsContent } from '../../ui/tabs';
-import { formatCompactUtcMinute } from './purchaseOrderUtils';
+import {
+  ERP_LIST_UI_SPEC_V1,
+  getErpListFilterPillClass,
+  getErpListFilterPillStyle,
+} from '../../shared/erpListUiSpec';
 
 type XJManagementTabProps = {
   xjs: XJ[];
@@ -33,36 +37,26 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
   handleEditXJ,
   handleSubmitXJToSupplier,
 }) => {
-  return (
-    <TabsContent value="xj-management" className="m-0">
-      {/* 询价统计 */}
-      <div className="px-3 py-3 bg-gray-50 border-b border-gray-200">
-        <div className="grid grid-cols-5 gap-2">
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">总询价</p>
-            <p className="text-base font-bold text-gray-900">{xjs.length}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">草稿</p>
-            <p className="text-base font-bold text-gray-600">{xjs.filter(r => (r.status as any) === 'draft').length}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">已发送</p>
-            <p className="text-base font-bold text-blue-600">{xjs.filter(r => (r.status as any) === 'sent').length}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">等待报价</p>
-            <p className="text-base font-bold text-orange-600">{xjs.filter(r => r.status === 'pending').length}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">已回复</p>
-            <p className="text-base font-bold text-green-600">{xjs.filter(r => r.status === 'quoted').length}</p>
-          </div>
-        </div>
-      </div>
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'sent' | 'pending' | 'quoted'>('all');
+  const [expandedRelatedIds, setExpandedRelatedIds] = useState<string[]>([]);
+  const displayXJs = useMemo(() => {
+    if (statusFilter === 'all') return filteredXJs;
+    return filteredXJs.filter((xj) => String((xj.status as any) || '').trim() === statusFilter);
+  }, [filteredXJs, statusFilter]);
+  const formatDateOnly = (value: unknown) => {
+    const text = String(value || '').trim();
+    if (!text) return '-';
+    if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+    if (/^\d{8}\b/.test(text)) {
+      return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+    }
+    return text;
+  };
 
+  return (
+    <TabsContent value="xj-management" className="m-0 flex flex-1 min-h-0 flex-col">
       {/* 询价列表 */}
-      <div className="px-3 py-2">
+      <div className="px-3 py-2 flex flex-1 min-h-0 flex-col">
         {/* 🔥 搜索框和批量操作 */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
@@ -72,32 +66,56 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                 placeholder="搜索询价单号、供应商、QR编号..."
                 value={xjSearchTerm}
                 onChange={(e) => setXJSearchTerm(e.target.value)}
-                className="pl-8 h-8 text-xs w-80"
+                className={`pl-8 h-8 w-80 ${ERP_LIST_UI_SPEC_V1.buttonTextClass}`}
               />
             </div>
-            {selectedXJIds.length > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleBatchDeleteXJs}
-                className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
-              >
-                <Trash2 className="w-3.5 h-3.5 mr-1" />
-                批量删除 ({selectedXJIds.length})
-              </Button>
-            )}
           </div>
-          <p className="text-[14px] text-gray-600">共 {filteredXJs.length} 条询价单</p>
+          <div className="flex items-center gap-2">
+            {[
+              ['all', '全部', xjs.length],
+              ['draft', '草稿', xjs.filter(r => (r.status as any) === 'draft').length],
+              ['sent', '已发送', xjs.filter(r => (r.status as any) === 'sent').length],
+              ['pending', '等待报价', xjs.filter(r => r.status === 'pending').length],
+              ['quoted', '已回复', xjs.filter(r => r.status === 'quoted').length],
+            ].map(([value, label, count]) => (
+              <Button
+                key={String(value)}
+                variant="outline"
+                size="sm"
+                onClick={() => setStatusFilter(value as any)}
+                style={getErpListFilterPillStyle(statusFilter === value)}
+                className={getErpListFilterPillClass(statusFilter === value).replace('h-9', 'h-8').replace('px-4', 'px-3')}
+              >
+                {label} ({count})
+              </Button>
+            ))}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleBatchDeleteXJs}
+              disabled={selectedXJIds.length === 0}
+              style={selectedXJIds.length > 0 ? getErpListFilterPillStyle(true) : undefined}
+              className={(selectedXJIds.length > 0
+                ? getErpListFilterPillClass(true)
+                : getErpListFilterPillClass(false))
+                .replace('h-9', 'h-8')
+                .replace('px-4', 'px-3')
+                .replace('text-slate-700', 'text-slate-900') + ' disabled:opacity-100 disabled:text-slate-900 disabled:bg-white disabled:border-slate-200'}
+            >
+              批量删除{selectedXJIds.length > 0 ? ` (${selectedXJIds.length})` : ''}
+            </Button>
+          </div>
         </div>
 
-        {filteredXJs.length === 0 ? (
+        {displayXJs.length === 0 ? (
           <div className="text-center py-12 border border-gray-200 rounded">
             <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500">暂无询价单</p>
             <p className="text-sm text-gray-400 mt-1">从报价请求池创建询价单后将显示在这里</p>
           </div>
         ) : (
-          <div className="border border-gray-200 rounded overflow-x-auto">
+          <div className="border border-gray-200 rounded bg-white flex flex-1 min-h-0 flex-col overflow-visible min-h-[calc(100dvh-360px)]">
+            <div className="overflow-x-auto overflow-y-visible bg-white flex-1 rounded-[inherit] min-h-0">
             <table className="min-w-max w-full text-[14px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -105,10 +123,10 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                     <input
                       type="checkbox"
                       className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                      checked={selectedXJIds.length === filteredXJs.length && filteredXJs.length > 0}
+                      checked={selectedXJIds.length === displayXJs.length && displayXJs.length > 0}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedXJIds(filteredXJs.map(r => r.id));
+                          setSelectedXJIds(displayXJs.map(r => r.id));
                         } else {
                           setSelectedXJIds([]);
                         }
@@ -116,22 +134,28 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                     />
                   </th>
                   <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">序号</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-36">询价单号</th>
+                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-32">日期</th>
+                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-44">询价单号</th>
                   <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-40">供应商</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-32">关联需求</th>
                   <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-16">产品数</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-28">发送日期</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-24">截止日期</th>
                   <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-20">状态</th>
                   <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-40">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredXJs.map((xj, idx) => {
+                {displayXJs.map((xj, idx) => {
                   const xjStatus = (xj.status as any);
                   const isDraft = xjStatus === 'draft';
                   const isSent = xjStatus === 'sent';
                   const lockedByQuotation = hasDownstreamQuotationForXJ(xj);
+                  const relatedRefs = Array.from(
+                    new Set(
+                      [xj.requirementNo, xj.sourceRef]
+                        .map((value) => String(value || '').trim())
+                        .filter(Boolean),
+                    ),
+                  );
+                  const relatedRefsExpanded = expandedRelatedIds.includes(xj.id);
 
                   return (
                     <tr key={xj.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
@@ -153,6 +177,17 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                         {idx + 1}
                       </td>
                       <td className="py-2 px-2">
+                        <div className="text-gray-900">
+                          <span className="mr-1 text-[12px] text-gray-500">发送日期</span>
+                          {formatDateOnly((xj as any).sentDate || xj.createdDate)}
+                        </div>
+                        <div className="mt-1 text-gray-900">
+                          <span className="mr-1 text-[12px] text-gray-500">截止日期</span>
+                          {xj.quotationDeadline}
+                        </div>
+                      </td>
+                      <td className="py-2 px-2">
+                        <div className="relative inline-block">
                         <button
                           type="button"
                           onClick={() => openXJPreview(xj)}
@@ -160,25 +195,40 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                         >
                           {xj.supplierXjNo}
                         </button>
+                        {relatedRefs.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedRelatedIds((current) =>
+                                current.includes(xj.id)
+                                  ? current.filter((id) => id !== xj.id)
+                                  : [...current, xj.id],
+                              );
+                            }}
+                            className="mt-1 block text-[12px] font-semibold leading-[1.35] text-slate-500 hover:text-slate-700"
+                          >
+                            {relatedRefsExpanded ? '收起关联编号' : `展开关联编号 (${relatedRefs.length})`}
+                          </button>
+                        ) : null}
+                        {relatedRefsExpanded ? (
+                          <div className="absolute left-0 top-full z-20 mt-2 min-w-[280px] space-y-1 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+                            {relatedRefs.map((ref) => (
+                              <div key={`${xj.id}-${ref}`} className="whitespace-nowrap text-left text-[12px] font-mono text-blue-600">
+                                {ref}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        </div>
                       </td>
                       <td className="py-2 px-2 whitespace-nowrap">
                         <div className="text-gray-900">{xj.supplierName}</div>
                         <div className="text-[12px] text-gray-500">{xj.supplierCode}</div>
                       </td>
-                      <td className="py-2 px-2 whitespace-nowrap">
-                        <div className="text-gray-900 font-mono">{xj.requirementNo}</div>
-                        {xj.sourceRef && <div className="text-[12px] text-gray-500">{xj.sourceRef}</div>}
-                      </td>
                       <td className="py-2 px-2 text-center">
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
                           {xj.products?.length || 1}
                         </span>
-                      </td>
-                      <td className="py-2 px-2">
-                        <div className="text-gray-900">{formatCompactUtcMinute((xj as any).sentDate || xj.createdDate)}</div>
-                      </td>
-                      <td className="py-2 px-2">
-                        <div className="text-gray-900">{xj.quotationDeadline}</div>
                       </td>
                       <td className="py-2 px-2">
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${
@@ -250,6 +300,7 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

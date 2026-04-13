@@ -9,10 +9,13 @@ import { Textarea } from '../ui/textarea';
 import { A4DocumentContainer } from '../documents/A4PageContainer';
 import type { CustomerInquiryData } from '../documents/templates/CustomerInquiryDocument';
 import { CustomerInquiryDocumentA4Pages } from '../documents/templates/paginated/CustomerInquiryDocumentA4';
+import { prepareCustomerInquiryDocumentData } from '../documents/templates/CustomerInquiryDocument';
 import { OemInquirySummary } from './OemInquirySummary';
 import { adaptInquiryToDocumentData } from '../../utils/documentDataAdapters';
+import { resolveCustomerInquiryDisplayNo } from '../../utils/documentDataAdapters';
 import { exportToPDF } from '../../utils/pdfExport';
 import { templateCenterService } from '../../lib/supabaseService';
+import { peekPublishedTemplateSettingsCache, TEMPLATE_CENTER_PUBLISH_EVENT } from '../../lib/services/templateCenterService';
 import {
   aggregateInquiryOemFromProducts,
   normalizeOemData,
@@ -21,6 +24,35 @@ import {
   type OemFileProcessingState,
   type OemFileSensitivityLevel,
 } from '../../types/oem';
+
+const resolveInquiryPreviewNumber = (
+  inquiry: Record<string, any> | null | undefined,
+  mergedData?: CustomerInquiryData | null,
+) => {
+  if (!inquiry) return '';
+
+  const companyId = String(inquiry.companyId || inquiry.company_id || '').trim() || undefined;
+  const resolvedDisplayNo = resolveCustomerInquiryDisplayNo(inquiry, companyId);
+  if (String(resolvedDisplayNo || '').trim()) {
+    return String(resolvedDisplayNo).trim();
+  }
+
+  const fallbackCandidates = [
+    mergedData?.inquiryNo,
+    inquiry.inquiryNumber,
+    inquiry.inquiry_number,
+    inquiry.inquiryNo,
+    inquiry.documentDataSnapshot?.inquiryNo,
+    inquiry.document_data_snapshot?.inquiryNo,
+  ];
+
+  for (const candidate of fallbackCandidates) {
+    const value = String(candidate || '').trim();
+    if (value) return value;
+  }
+
+  return '';
+};
 
 /**
  * 📋 客户端询价单视图 - 使用文档中心的专业模板
@@ -1113,21 +1145,64 @@ function InternalProductPackagePanel({ inquiry }: { inquiry: any }) {
 
 export const CustomerInquiryView = forwardRef<HTMLDivElement, CustomerInquiryViewProps>(
   ({ inquiry, audience = 'customer', onUpdateInquiry }, ref) => {
+    const cachedPublishedTemplateSettings = peekPublishedTemplateSettingsCache('ing');
     // Load the currently published ING template settings (e.g. column config) from Supabase.
     // This ensures that admin template publishes (column labels, widths, order) propagate
     // to all customer inquiry previews — both existing and newly created ones.
     // The result is cached at module level (5-min TTL) so repeated opens don't hit Supabase.
-    const [publishedTemplateSettings, setPublishedTemplateSettings] = useState<CustomerInquiryData['templateSettings'] | null>(null);
+    const [publishedTemplateSettings, setPublishedTemplateSettings] = useState<CustomerInquiryData['templateSettings'] | null>(
+      cachedPublishedTemplateSettings.settings as CustomerInquiryData['templateSettings'] | null,
+    );
+    const [publishedTemplateSettingsResolved, setPublishedTemplateSettingsResolved] = useState(
+      cachedPublishedTemplateSettings.hasFreshCache,
+    );
     useEffect(() => {
       let cancelled = false;
-      templateCenterService.getPublishedTemplateSettings('ing')
-        .then((settings) => {
-          if (!cancelled && settings) {
-            setPublishedTemplateSettings(settings as CustomerInquiryData['templateSettings']);
-          }
-        })
-        .catch(() => { /* Supabase unreachable — silently fall back to defaults */ });
-      return () => { cancelled = true; };
+      const loadPublishedSettings = (forceRefresh: boolean) => {
+        if (forceRefresh) {
+          setPublishedTemplateSettingsResolved(false);
+        }
+        templateCenterService.getPublishedTemplateSettings('ing', { forceRefresh })
+          .then((settings) => {
+            if (!cancelled && settings) {
+              setPublishedTemplateSettings(settings as CustomerInquiryData['templateSettings']);
+            }
+          })
+          .catch(() => { /* Supabase unreachable — silently fall back to defaults */ })
+          .finally(() => {
+            if (!cancelled) {
+              setPublishedTemplateSettingsResolved(true);
+            }
+          });
+      };
+
+      const handleTemplatePublished = (event: Event) => {
+        const detail = (event as CustomEvent<{ templateKey?: string }>).detail;
+        if (String(detail?.templateKey || '').trim().toLowerCase() !== 'ing') return;
+        loadPublishedSettings(true);
+      };
+
+      const handleStorage = (event: StorageEvent) => {
+        if (event.key !== 'template-center:last-published' || !event.newValue) return;
+        try {
+          const payload = JSON.parse(event.newValue);
+          if (String(payload?.templateKey || '').trim().toLowerCase() !== 'ing') return;
+          loadPublishedSettings(true);
+        } catch {
+          // ignore malformed payload
+        }
+      };
+
+      // Inquiry list view already preloads the published ING template settings.
+      // On first open, use that cache immediately instead of forcing a network round-trip.
+      loadPublishedSettings(false);
+      window.addEventListener(TEMPLATE_CENTER_PUBLISH_EVENT, handleTemplatePublished as EventListener);
+      window.addEventListener('storage', handleStorage);
+      return () => {
+        cancelled = true;
+        window.removeEventListener(TEMPLATE_CENTER_PUBLISH_EVENT, handleTemplatePublished as EventListener);
+        window.removeEventListener('storage', handleStorage);
+      };
     }, []);
 
     const templateSnapshot = inquiry?.templateSnapshot || inquiry?.template_snapshot || null;
@@ -1166,23 +1241,38 @@ export const CustomerInquiryView = forwardRef<HTMLDivElement, CustomerInquiryVie
     // Apply published template settings on top of merged business data.
     // publishedTemplateSettings comes from the latest published version in Supabase;
     // it reflects whatever column/layout config the admin saved in DocumentCenter.
-    const documentData: CustomerInquiryData | null = mergedData
-      ? {
-          ...mergedData,
-          templateSettings: publishedTemplateSettings ?? mergedData.templateSettings,
-        }
-      : null;
+    const resolvedInquiryNo = resolveInquiryPreviewNumber(
+      inquiry as Record<string, any>,
+      mergedData,
+    );
+
+    const documentData = prepareCustomerInquiryDocumentData(
+      mergedData
+        ? {
+            ...mergedData,
+            inquiryNo: mergedData.inquiryNo || resolvedInquiryNo,
+          }
+        : null,
+      {
+      templateSettings: publishedTemplateSettings ?? mergedData?.templateSettings,
+      },
+    );
 
     if (!documentData) {
       return (
         <div className="flex min-h-[240px] items-center justify-center bg-white text-sm text-gray-500">
-          该 ING 缺少可用文档数据，暂时无法预览
+          This inquiry does not have enough document data to preview yet.
         </div>
       );
     }
 
     return (
       <div ref={ref} data-rfq-preview className="bg-white">
+        {!publishedTemplateSettingsResolved ? (
+          <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            正在后台同步最新 ING 模板设置，当前先展示可用预览内容。
+          </div>
+        ) : null}
         <CustomerInquiryDocumentA4Pages data={documentData} />
         {audience === 'internal' ? <InternalProductPackagePanel inquiry={inquiry} /> : null}
         {audience === 'internal' ? <InternalAttachmentBundlePanel inquiry={inquiry} onUpdateInquiry={onUpdateInquiry} /> : null}

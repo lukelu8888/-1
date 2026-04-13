@@ -1,10 +1,18 @@
-import React from 'react';
-import { CheckCircle2, Edit, Eye, Plus, Search, Send, Trash2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { CheckCircle2, Edit, Eye, Plus, Send, Trash2 } from 'lucide-react';
 import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOrderContext';
 import { Button } from '../../ui/button';
-import { Input } from '../../ui/input';
+import { Badge } from '../../ui/badge';
 import { TabsContent } from '../../ui/tabs';
+import { FinanceFilterBar } from '../../finance-v2/components/FinanceFilterBar';
+import {
+  getErpListFilterPillClass,
+  getErpListFilterPillStyle,
+} from '../../shared/erpListUiSpec';
 import { extractProjectExecutionBaseline, getPOStatusConfig } from './purchaseOrderUtils';
+import { derivePurchaseOrderWorkflowFields } from '../../../lib/services/purchaseOrderQuoteRequirementServices';
+import { sortDocumentFlowRefs } from '../../../utils/documentFlowRefOrder';
+import { renderColumnResizeHandle } from '../admin-organization-profile/peopleCenterVisuals';
 
 type PurchaseOrdersTabProps = {
   orderSearchTerm: string;
@@ -18,11 +26,351 @@ type PurchaseOrdersTabProps = {
   handleOpenEditPO: (po: PurchaseOrderType) => void;
   handlePushPurchaseToSupplier: (po: PurchaseOrderType) => void;
   handleApplyBossApproval: (po: PurchaseOrderType) => void;
+  handleValidateProcurementRequest: (po: PurchaseOrderType) => void;
   handleDeletePurchaseOrder: (po: PurchaseOrderType) => void;
   normalizeCGNumberForDisplay: (value: string) => string;
   resolveInquirySourceRef: (po: PurchaseOrderType) => string;
+  resolveQuotationSourceRef: (po: PurchaseOrderType) => string;
+  resolveSupplierInquiryRef: (po: PurchaseOrderType) => string;
   getRequirementNoFromPO: (po: PurchaseOrderType) => string;
 };
+
+type FilterKey =
+  | 'all'
+  | 'pr'
+  | 'cg_draft'
+  | 'cg_approval'
+  | 'cg_ready'
+  | 'cg_supplier';
+
+type PurchaseOrderColumnKey =
+  | 'date'
+  | 'document'
+  | 'supplier'
+  | 'region'
+  | 'summary'
+  | 'approval'
+  | 'execution'
+  | 'actions';
+
+const FILTER_LABELS: Record<FilterKey, string> = {
+  all: '全部',
+  pr: 'PR处理中',
+  cg_draft: 'CG草稿',
+  cg_approval: 'CG待审批',
+  cg_ready: 'CG可下推',
+  cg_supplier: 'CG执行中',
+};
+
+const FILTER_ORDER: FilterKey[] = ['all', 'pr', 'cg_draft', 'cg_approval', 'cg_ready', 'cg_supplier'];
+const CAPSULE_BUTTON_STYLE = { borderRadius: '9999px' } as const;
+
+const PURCHASE_ORDER_TABLE_UI_PREFERENCE_KEY = 'purchase_orders_table_column_widths_v1';
+const PURCHASE_ORDER_COLUMN_ORDER: PurchaseOrderColumnKey[] = [
+  'date',
+  'document',
+  'supplier',
+  'region',
+  'summary',
+  'approval',
+  'execution',
+  'actions',
+];
+
+const PURCHASE_ORDER_COLUMN_MIN_WIDTHS: Record<PurchaseOrderColumnKey, number> = {
+  date: 1,
+  document: 1,
+  supplier: 1,
+  region: 1,
+  summary: 1,
+  approval: 1,
+  execution: 1,
+  actions: 1,
+};
+
+const PURCHASE_ORDER_TABLE_DEFAULT_WIDTHS: Record<PurchaseOrderColumnKey, number> = {
+  date: 240,
+  document: 320,
+  supplier: 360,
+  region: 96,
+  summary: 170,
+  approval: 180,
+  execution: 280,
+  actions: 340,
+};
+
+const mergeStoredPurchaseOrderColumnWidths = (
+  stored: Partial<Record<PurchaseOrderColumnKey, number>> | null | undefined,
+) => {
+  const next = { ...PURCHASE_ORDER_TABLE_DEFAULT_WIDTHS };
+  PURCHASE_ORDER_COLUMN_ORDER.forEach((key) => {
+    const candidate = Number(stored?.[key]);
+    if (Number.isFinite(candidate) && candidate > 0) {
+      next[key] = Math.max(PURCHASE_ORDER_COLUMN_MIN_WIDTHS[key], Math.round(candidate));
+    }
+  });
+  return next;
+};
+
+function classifyOrder(po: PurchaseOrderType): Exclude<FilterKey, 'all'> {
+  const workflow = derivePurchaseOrderWorkflowFields(po);
+  if (workflow.documentType === 'PR') return 'pr';
+  if (workflow.approvalStatus === 'draft') return 'cg_draft';
+  if (['pending_l1', 'pending_l2'].includes(String(workflow.approvalStatus || ''))) return 'cg_approval';
+  if (workflow.executionStatus === 'approved') return 'cg_ready';
+  return 'cg_supplier';
+}
+
+function getFinanceToneBadgeClasses(tone: 'default' | 'ok' | 'warn' | 'danger') {
+  switch (tone) {
+    case 'ok':
+      return 'border-emerald-300 bg-emerald-50 text-emerald-700';
+    case 'warn':
+      return 'border-amber-300 bg-amber-50 text-amber-700';
+    case 'danger':
+      return 'border-red-300 bg-red-50 text-red-700';
+    default:
+      return 'border-slate-300 bg-slate-50 text-slate-700';
+  }
+}
+
+function getStatusPresentation(po: PurchaseOrderType): {
+  label: string;
+  tone: 'default' | 'ok' | 'warn' | 'danger';
+  stage: string;
+} {
+  const workflow = derivePurchaseOrderWorkflowFields(po);
+  const reqStatus = String(po.procurementRequestStatus || '').trim();
+  const executionStatus = String(po.executionStatus || workflow.executionStatus || '').trim();
+  const prValidationStatus = String(po.prValidationStatus || '').trim();
+
+  if (workflow.documentType === 'PR') {
+    switch (workflow.executionStatus) {
+      case 'pending_assignment':
+        return { label: '待分配供应商', tone: 'warn', stage: 'PR阶段' };
+      case 'partially_allocated':
+        return { label: '部分已分配', tone: 'warn', stage: 'PR阶段' };
+      case 'fully_allocated':
+        return { label: '已分配完成', tone: 'ok', stage: 'PR阶段' };
+      default:
+        return { label: '采购请求处理中', tone: 'default', stage: 'PR阶段' };
+    }
+  }
+
+  if (['pending_l1', 'pending_l2'].includes(String(workflow.approvalStatus || ''))) {
+    return {
+      label: workflow.approvalStatus === 'pending_l2' ? '待 CEO 二审' : '待采购主管审核',
+      tone: 'warn',
+      stage: 'CG审批',
+    };
+  }
+
+  if (workflow.approvalStatus === 'rejected') {
+    return { label: '审核驳回', tone: 'danger', stage: 'CG审批' };
+  }
+
+  if (workflow.approvalStatus === 'draft') {
+    return {
+      label: 'CG草稿·待提交审核',
+      tone: 'default',
+      stage: 'CG草稿',
+    };
+  }
+
+  if (reqStatus === 'pushed_supplier' && executionStatus) {
+    switch (executionStatus) {
+      case 'supplier_pending_confirmation':
+        return { label: '待供应商确认', tone: 'warn', stage: 'CG执行' };
+      case 'supplier_confirmed':
+        return { label: '供应商已确认', tone: 'ok', stage: 'CG执行' };
+      case 'pre_production_sample_pending':
+        return { label: '待产前样', tone: 'default', stage: '产前样' };
+      case 'pre_production_sample_sent':
+        return { label: '样品已寄出', tone: 'default', stage: '产前样' };
+      case 'production_in_progress':
+        return { label: '生产中', tone: 'ok', stage: '生产执行' };
+      case 'supplier_self_inspection_submitted':
+        return { label: '已提交自检', tone: 'default', stage: '质检准备' };
+      case 'qc_pending':
+        return { label: '待QC验货', tone: 'warn', stage: 'QC阶段' };
+      case 'qc_passed':
+        return { label: 'QC通过', tone: 'ok', stage: 'QC阶段' };
+      case 'qc_failed':
+        return { label: 'QC不通过', tone: 'danger', stage: 'QC阶段' };
+      case 'finished_goods_ready':
+        return { label: '完货待出运', tone: 'ok', stage: '发运准备' };
+      case 'awaiting_loading':
+        return { label: '待装柜', tone: 'warn', stage: '发运准备' };
+      case 'loaded':
+        return { label: '已装柜', tone: 'ok', stage: '发运准备' };
+      default:
+        break;
+    }
+  }
+
+  if (workflow.executionStatus === 'approved' || reqStatus === 'approved_boss') {
+    return { label: '审核通过·可下推', tone: 'ok', stage: 'CG审批' };
+  }
+
+  return getPOStatusConfig(po.status as any) ?? { label: '待确认', tone: 'default', stage: 'CG状态' } as any;
+}
+
+function getApprovalPresentation(po: PurchaseOrderType): {
+  label: string;
+  tone: 'default' | 'ok' | 'warn' | 'danger';
+} {
+  const workflow = derivePurchaseOrderWorkflowFields(po);
+
+  if (workflow.documentType === 'PR') {
+    return { label: 'PR无需审批', tone: 'default' };
+  }
+
+  switch (String(workflow.approvalStatus || '').trim()) {
+    case 'pending_l1':
+      return { label: '待采购主管审核', tone: 'warn' };
+    case 'pending_l2':
+      return { label: '待 CEO 二审', tone: 'warn' };
+    case 'approved':
+      return { label: '审批通过', tone: 'ok' };
+    case 'rejected':
+      return { label: '审核驳回', tone: 'danger' };
+    case 'draft':
+    default:
+      return { label: 'CG草稿', tone: 'default' };
+  }
+}
+
+function getExecutionPresentation(po: PurchaseOrderType): {
+  label: string;
+  detail: string;
+  tone: 'default' | 'ok' | 'warn' | 'danger';
+} {
+  const workflow = derivePurchaseOrderWorkflowFields(po);
+  const reqStatus = String(po.procurementRequestStatus || '').trim();
+  const executionStatus = String(po.executionStatus || workflow.executionStatus || '').trim();
+
+  if (workflow.documentType === 'PR') {
+    switch (workflow.executionStatus) {
+      case 'pending_assignment':
+        return { label: '待分配供应商', detail: 'PR阶段', tone: 'warn' };
+      case 'partially_allocated':
+        return { label: '部分已分配', detail: 'PR阶段', tone: 'warn' };
+      case 'fully_allocated':
+        return { label: '已分配完成', detail: 'PR阶段', tone: 'ok' };
+      default:
+        return { label: '采购请求处理中', detail: 'PR阶段', tone: 'default' };
+    }
+  }
+
+  if (workflow.approvalStatus === 'approved' && reqStatus !== 'pushed_supplier') {
+    return { label: '待下推供应商', detail: 'CG审批后', tone: 'ok' };
+  }
+
+  if (reqStatus === 'pushed_supplier' && executionStatus) {
+    switch (executionStatus) {
+      case 'supplier_pending_confirmation':
+        return { label: '待供应商确认', detail: 'CG执行', tone: 'warn' };
+      case 'supplier_confirmed':
+        return { label: '供应商已确认', detail: 'CG执行', tone: 'ok' };
+      case 'pre_production_sample_pending':
+      case 'pre_production_sample_sent':
+        return { label: '产前样处理中', detail: '产前样', tone: 'default' };
+      case 'production_in_progress':
+        return { label: '生产中', detail: '生产执行', tone: 'ok' };
+      case 'supplier_self_inspection_submitted':
+        return { label: '已提交自检', detail: '质检准备', tone: 'default' };
+      case 'qc_pending':
+        return { label: '待QC验货', detail: 'QC阶段', tone: 'warn' };
+      case 'qc_passed':
+        return { label: 'QC通过', detail: 'QC阶段', tone: 'ok' };
+      case 'qc_failed':
+        return { label: 'QC不通过', detail: 'QC阶段', tone: 'danger' };
+      case 'finished_goods_ready':
+        return { label: '完货待出运', detail: '发运准备', tone: 'ok' };
+      case 'awaiting_loading':
+        return { label: '待装柜', detail: '发运准备', tone: 'warn' };
+      case 'loaded':
+        return { label: '已装柜', detail: '发运准备', tone: 'ok' };
+      default:
+        break;
+    }
+  }
+
+  const fallback = getStatusPresentation(po);
+  return {
+    label: fallback.label,
+    detail: fallback.stage,
+    tone: fallback.tone,
+  };
+}
+
+function resolveParentRequestNo(po: PurchaseOrderType): string {
+  return String(po.parentRequestPoNumber || (po as any).parent_request_po_number || '').trim();
+}
+
+function resolveSourceContractNo(po: PurchaseOrderType): string {
+  return String(po.salesContractNumber || po.sourceSONumber || po.sourceRef || '').trim();
+}
+
+function resolveSourceXJNo(
+  po: PurchaseOrderType,
+  resolveSupplierInquiryRef: (po: PurchaseOrderType) => string,
+): string {
+  return String(
+    resolveSupplierInquiryRef(po) ||
+    po.xjNumber ||
+    (po as any).xj_number ||
+    '',
+  ).trim();
+}
+
+function resolveSourceBJNo(
+  po: PurchaseOrderType,
+  resolveQuotationSourceRef: (po: PurchaseOrderType) => string,
+): string {
+  const poAny = po as any;
+  return String(
+    resolveQuotationSourceRef(po) ||
+    po.quotationNumber ||
+    poAny.quotation_number ||
+    poAny.selectedQuote?.quotationNumber ||
+    poAny.selectedQuote?.quotationNo ||
+    poAny.selectedQuote?.quoteNo ||
+    poAny.selectedQuote?.bjNumber ||
+    po.selectedBjId ||
+    poAny.selected_bj_id ||
+    '',
+  ).trim();
+}
+
+function buildSourceDocumentRefs(
+  po: PurchaseOrderType,
+  resolveInquirySourceRef: (po: PurchaseOrderType) => string,
+  resolveQuotationSourceRef: (po: PurchaseOrderType) => string,
+  resolveSupplierInquiryRef: (po: PurchaseOrderType) => string,
+  getRequirementNoFromPO: (po: PurchaseOrderType) => string,
+) {
+  const workflow = derivePurchaseOrderWorkflowFields(po);
+  const refs: Array<{ value: string; className: string }> = [];
+  const seen = new Set<string>();
+  const pushRef = (value: string, className: string) => {
+    const normalized = String(value || '').trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    refs.push({ value: normalized, className });
+  };
+
+  if (workflow.documentType === 'CG') {
+    pushRef(resolveParentRequestNo(po), 'text-cyan-600');
+  }
+  pushRef(resolveSourceXJNo(po, resolveSupplierInquiryRef), 'text-emerald-600');
+  pushRef(resolveSourceBJNo(po, resolveQuotationSourceRef), 'text-amber-600');
+  pushRef(resolveSourceContractNo(po), 'text-blue-600');
+  pushRef(resolveInquirySourceRef(po), 'text-purple-500');
+  pushRef(getRequirementNoFromPO(po), 'text-slate-500');
+
+  return sortDocumentFlowRefs(refs);
+}
 
 export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   orderSearchTerm,
@@ -36,127 +384,301 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   handleOpenEditPO,
   handlePushPurchaseToSupplier,
   handleApplyBossApproval,
+  handleValidateProcurementRequest,
   handleDeletePurchaseOrder,
   normalizeCGNumberForDisplay,
   resolveInquirySourceRef,
+  resolveQuotationSourceRef,
+  resolveSupplierInquiryRef,
   getRequirementNoFromPO,
 }) => {
-  return (
-    <TabsContent value="orders" className="m-0">
-      <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-        <div className="flex gap-2 items-center">
-          <div className="relative flex-1">
-            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
-            <Input
-              placeholder="搜索采购单号、供应商、需求编号..."
-              value={orderSearchTerm}
-              onChange={(e) => setOrderSearchTerm(e.target.value)}
-              className="pl-7 h-8 text-xs border-gray-300"
-            />
-          </div>
-          {selectedOrderIds.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleBatchDeleteOrders}
-              className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
-            >
-              <Trash2 className="w-3.5 h-3.5 mr-1" />
-              批量删除 ({selectedOrderIds.length})
-            </Button>
-          )}
-          <Button variant="default" size="sm" className="h-8 text-xs px-3 bg-purple-600 hover:bg-purple-700" onClick={handleCreateOrder}>
-            <Plus className="w-3 h-3 mr-1" />
-            新建采购单
-          </Button>
+  const [statusFilter, setStatusFilter] = useState<FilterKey>('all');
+  const [expandedSourceIds, setExpandedSourceIds] = useState<string[]>([]);
+  const purchaseOrderColumnResizeRef = React.useRef<{
+    key: PurchaseOrderColumnKey;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+  const [purchaseOrderColumnWidths, setPurchaseOrderColumnWidths] = useState<Record<PurchaseOrderColumnKey, number>>(() => {
+    if (typeof window === 'undefined') return { ...PURCHASE_ORDER_TABLE_DEFAULT_WIDTHS };
+    try {
+      const raw = window.localStorage.getItem(PURCHASE_ORDER_TABLE_UI_PREFERENCE_KEY);
+      return mergeStoredPurchaseOrderColumnWidths(raw ? JSON.parse(raw) : null);
+    } catch {
+      return { ...PURCHASE_ORDER_TABLE_DEFAULT_WIDTHS };
+    }
+  });
+
+  const counts = useMemo(() => {
+    return filteredOrders.reduce<Record<FilterKey, number>>((acc, po) => {
+      const bucket = classifyOrder(po);
+      acc.all += 1;
+      acc[bucket] += 1;
+      return acc;
+    }, {
+      all: 0,
+      pr: 0,
+      cg_draft: 0,
+      cg_approval: 0,
+      cg_ready: 0,
+      cg_supplier: 0,
+    });
+  }, [filteredOrders]);
+
+  const displayOrders = useMemo(() => {
+    if (statusFilter === 'all') return filteredOrders;
+    return filteredOrders.filter((po) => classifyOrder(po) === statusFilter);
+  }, [filteredOrders, statusFilter]);
+
+  const formatDateOnly = (value?: string | null) => {
+    const text = String(value || '').trim();
+    if (!text) return '-';
+    return text.includes('T') ? text.slice(0, 10) : text;
+  };
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        PURCHASE_ORDER_TABLE_UI_PREFERENCE_KEY,
+        JSON.stringify(purchaseOrderColumnWidths),
+      );
+    } catch {}
+  }, [purchaseOrderColumnWidths]);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!purchaseOrderColumnResizeRef.current) return;
+      const { key, startX, startWidth } = purchaseOrderColumnResizeRef.current;
+      const nextWidth = Math.max(
+        PURCHASE_ORDER_COLUMN_MIN_WIDTHS[key],
+        Math.round(startWidth + (event.clientX - startX)),
+      );
+      setPurchaseOrderColumnWidths((current) => (
+        current[key] === nextWidth ? current : { ...current, [key]: nextWidth }
+      ));
+    };
+
+    const stopResize = () => {
+      purchaseOrderColumnResizeRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', stopResize);
+    window.addEventListener('blur', stopResize);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', stopResize);
+      window.removeEventListener('blur', stopResize);
+    };
+  }, []);
+
+  const purchaseOrderColumnWidthTotal = useMemo(
+    () => PURCHASE_ORDER_COLUMN_ORDER.reduce((sum, key) => sum + purchaseOrderColumnWidths[key], 0),
+    [purchaseOrderColumnWidths],
+  );
+
+  const getPurchaseOrderColumnStyle = (key: PurchaseOrderColumnKey) => {
+    const ratio = purchaseOrderColumnWidthTotal > 0
+      ? purchaseOrderColumnWidths[key] / purchaseOrderColumnWidthTotal
+      : 1 / PURCHASE_ORDER_COLUMN_ORDER.length;
+    const width = `${(ratio * 100).toFixed(4)}%`;
+    return {
+      width,
+      minWidth: 0,
+      maxWidth: width,
+    } as const;
+  };
+
+  const startPurchaseOrderColumnResize = (
+    key: PurchaseOrderColumnKey,
+    event: React.MouseEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    purchaseOrderColumnResizeRef.current = {
+      key,
+      startX: event.clientX,
+      startWidth: purchaseOrderColumnWidths[key],
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const shrinkPurchaseOrderColumnToMinimum = (
+    key: PurchaseOrderColumnKey,
+    event: React.MouseEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPurchaseOrderColumnWidths((current) => (
+      current[key] === PURCHASE_ORDER_COLUMN_MIN_WIDTHS[key]
+        ? current
+        : { ...current, [key]: PURCHASE_ORDER_COLUMN_MIN_WIDTHS[key] }
+    ));
+  };
+
+  const renderPurchaseOrderColumnResizeHandle = (key: PurchaseOrderColumnKey) =>
+    renderColumnResizeHandle(
+      key,
+      startPurchaseOrderColumnResize,
+      shrinkPurchaseOrderColumnToMinimum,
+      { lineHoverClassName: 'group-hover:bg-slate-400' },
+    );
+
+  const renderPurchaseOrderHeaderCell = (
+    key: PurchaseOrderColumnKey,
+    label: string,
+    className = '',
+  ) => {
+    const alignClass = className.includes('text-center')
+      ? 'justify-center text-center'
+      : className.includes('text-right')
+        ? 'justify-end text-right'
+        : 'justify-start text-left';
+
+    return (
+      <th
+        className={`group relative overflow-hidden px-3 py-3 font-semibold ${className}`.trim()}
+        style={getPurchaseOrderColumnStyle(key)}
+      >
+        <div className={`flex min-h-5 w-full items-center pr-4 ${alignClass}`}>
+          <span className="block whitespace-nowrap text-[13px] font-semibold leading-4">
+            {label}
+          </span>
         </div>
+        {renderPurchaseOrderColumnResizeHandle(key)}
+      </th>
+    );
+  };
+
+  return (
+    <TabsContent value="orders" className="m-0 flex flex-1 min-h-0 flex-col">
+      <div className="px-3 py-2">
+        <FinanceFilterBar
+          placeholder="搜索采购单号、供应商、需求编号..."
+          value={orderSearchTerm}
+          onChange={setOrderSearchTerm}
+          onReset={() => setOrderSearchTerm('')}
+          containerClassName="border-0 bg-transparent px-0 py-0"
+          hideDefaultActions
+          extra={(
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                {FILTER_ORDER.map((value) => {
+                  return (
+                    <Button
+                      key={value}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setStatusFilter(value)}
+                      style={{
+                        ...getErpListFilterPillStyle(statusFilter === value),
+                        ...CAPSULE_BUTTON_STYLE,
+                      }}
+                      className={getErpListFilterPillClass(statusFilter === value)
+                        .replace('h-9', 'h-8')
+                        .replace('px-4', 'px-3')
+                        .replace('rounded-xl', '!rounded-full')}
+                    >
+                      {FILTER_LABELS[value]} ({counts[value]})
+                    </Button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleBatchDeleteOrders}
+                  disabled={selectedOrderIds.length === 0}
+                  style={CAPSULE_BUTTON_STYLE}
+                  className="h-8 !rounded-full border-red-200 px-3 text-[12px] font-semibold leading-[1.35] text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                  批量删除{selectedOrderIds.length > 0 ? ` (${selectedOrderIds.length})` : ''}
+                </Button>
+                <Button size="sm" style={CAPSULE_BUTTON_STYLE} className="h-8 !rounded-full bg-slate-900 px-3 text-[12px] font-semibold leading-[1.35] hover:bg-slate-800" onClick={handleCreateOrder}>
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  新建采购单
+                </Button>
+              </div>
+            </>
+          )}
+        />
       </div>
 
-      <div className="px-3 py-3">
-        <p className="text-[14px] text-gray-600 mb-2">共 {filteredOrders.length} 条采购订单</p>
-        <div className="border border-gray-200 rounded overflow-hidden bg-white">
-          <table className="w-full text-[14px]">
-            <thead className="bg-gray-50 border-b border-gray-200">
+      <div className="px-3 pb-2 flex flex-1 min-h-0 flex-col">
+        <div className="border border-gray-200 rounded bg-white flex flex-1 min-h-0 flex-col overflow-visible min-h-[calc(100dvh-360px)]">
+        <div className="overflow-x-hidden overflow-y-visible bg-white flex-1 rounded-[inherit] min-h-0">
+          <table className="w-full table-fixed text-[13px]">
+            <thead className="bg-gray-50 border-b border-gray-200 text-slate-600">
               <tr>
-                <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
+                <th className="w-10 px-2 py-3 text-center font-semibold">
                   <input
                     type="checkbox"
-                    className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                    checked={selectedOrderIds.length === filteredOrders.length && filteredOrders.length > 0}
+                    className="h-4 w-4 cursor-pointer rounded border border-slate-400"
+                    checked={selectedOrderIds.length === displayOrders.length && displayOrders.length > 0}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedOrderIds(filteredOrders.map((o) => o.id));
+                        setSelectedOrderIds(displayOrders.map((o) => o.id));
                       } else {
                         setSelectedOrderIds([]);
                       }
                     }}
                   />
                 </th>
-                <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">采购单号</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">供应商</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">区域</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">产品数量</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">报价期限</th>
-                <th className="text-left py-2 px-3 font-medium text-gray-600">状态</th>
-                <th className="text-center py-2 px-3 font-medium text-gray-600">操作</th>
+                <th className="w-12 px-2 py-3 text-center font-semibold">#</th>
+                {renderPurchaseOrderHeaderCell('date', '日期')}
+                {renderPurchaseOrderHeaderCell('document', '单据')}
+                {renderPurchaseOrderHeaderCell('supplier', '供应商')}
+                {renderPurchaseOrderHeaderCell('region', '区域')}
+                {renderPurchaseOrderHeaderCell('summary', '产品摘要')}
+                {renderPurchaseOrderHeaderCell('approval', '审批状态')}
+                {renderPurchaseOrderHeaderCell('execution', '执行状态')}
+                {renderPurchaseOrderHeaderCell('actions', '操作')}
               </tr>
             </thead>
             <tbody>
-              {filteredOrders.map((po, idx) => {
+              {displayOrders.map((po, idx) => {
+                const workflow = derivePurchaseOrderWorkflowFields(po);
                 const reqStatus = String(po.procurementRequestStatus || '');
-                const executionStatus = String(po.executionStatus || '');
+                const executionStatus = String(po.executionStatus || workflow.executionStatus || '');
+                const prValidationStatus = String(po.prValidationStatus || '').trim();
                 const projectBaseline = extractProjectExecutionBaseline(po);
-                // Phase 4: complete procurementRequestStatus → display mapping.
-                // All 8 values are handled explicitly; no value silently falls back to the base POStatus label.
-                const statusConfig: { label: string; color: string } = (() => {
-                  if (reqStatus === 'pushed_supplier' && executionStatus) {
-                    switch (executionStatus) {
-                      case 'supplier_pending_confirmation': return { label: '待供应商确认', color: 'bg-violet-50 text-violet-700 border-violet-200' };
-                      case 'supplier_confirmed': return { label: '供应商已确认', color: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200' };
-                      case 'sampling': return { label: '产前样处理中', color: 'bg-sky-50 text-sky-700 border-sky-200' };
-                      case 'in_production': return { label: '生产中', color: 'bg-blue-50 text-blue-700 border-blue-200' };
-                      case 'supplier_self_inspection_pending': return { label: '待供应商自检', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' };
-                      case 'supplier_self_inspection_submitted': return { label: '已提交自检', color: 'bg-teal-50 text-teal-700 border-teal-200' };
-                      case 'qc_pending': return { label: '待QC验货', color: 'bg-amber-50 text-amber-700 border-amber-200' };
-                      case 'qc_passed': return { label: 'QC通过', color: 'bg-green-50 text-green-700 border-green-200' };
-                      case 'qc_failed': return { label: 'QC不通过', color: 'bg-red-50 text-red-700 border-red-200' };
-                      case 'finished_goods_ready': return { label: '完货待出运', color: 'bg-lime-50 text-lime-700 border-lime-200' };
-                      case 'awaiting_loading': return { label: '待装柜', color: 'bg-orange-50 text-orange-700 border-orange-200' };
-                      case 'loaded': return { label: '已装柜', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
-                      case 'shipped': return { label: '已开船', color: 'bg-purple-50 text-purple-700 border-purple-200' };
-                      case 'completed': return { label: '已完成', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-                      default: break;
-                    }
-                  }
-                  switch (reqStatus) {
-                    case 'pending_procurement_assignment': return { label: '待分配供应商',   color: 'bg-amber-50 text-amber-700 border-amber-200' };
-                    case 'partial_allocated':             return { label: '部分已分配',      color: 'bg-orange-50 text-orange-700 border-orange-200' };
-                    case 'allocated_completed':           return { label: '已分配完成',      color: 'bg-teal-50 text-teal-700 border-teal-200' };
-                    case 'draft_allocated':               return { label: '草稿·待提交审核', color: 'bg-slate-50 text-slate-600 border-slate-200' };
-                    case 'pending_boss_approval':         return { label: '待老板审核',      color: 'bg-amber-50 text-amber-700 border-amber-200' };
-                    case 'approved_boss':                 return { label: '审核通过·可下推', color: 'bg-green-50 text-green-700 border-green-200' };
-                    case 'rejected_boss':                 return { label: '审核驳回',        color: 'bg-red-50 text-red-700 border-red-200' };
-                    case 'pushed_supplier':               return { label: '已推供应商',      color: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
-                    default: return getPOStatusConfig(po.status as any) ?? { label: '待确认', color: 'bg-slate-50 text-slate-700 border-slate-200' };
-                  }
-                })();
-
-                const regionConfig =
+                const approvalPresentation = getApprovalPresentation(po);
+                const executionPresentation = getExecutionPresentation(po);
+                const sourceDocumentRefs = buildSourceDocumentRefs(
+                  po,
+                  resolveInquirySourceRef,
+                  resolveQuotationSourceRef,
+                  resolveSupplierInquiryRef,
+                  getRequirementNoFromPO,
+                );
+                const sourceRefsExpanded = expandedSourceIds.includes(po.id);
+                const regionLabel =
                   po.region === 'North America' || po.region === 'NA'
-                    ? { label: 'NA', color: 'bg-blue-100 text-blue-700' }
+                    ? 'NA'
                     : po.region === 'South America' || po.region === 'SA'
-                      ? { label: 'SA', color: 'bg-green-100 text-green-700' }
+                      ? 'SA'
                       : po.region === 'Europe & Africa' || po.region === 'EA'
-                        ? { label: 'EA', color: 'bg-purple-100 text-purple-700' }
-                        : null;
+                        ? 'EA'
+                        : '-';
+
+                const canPushToSupplier = workflow.documentType === 'CG' && workflow.approvalStatus === 'approved' && reqStatus !== 'pushed_supplier';
+                const pushedToSupplier = reqStatus === 'pushed_supplier';
+                const isPendingApproval = workflow.documentType === 'CG' && ['pending_l1', 'pending_l2'].includes(String(workflow.approvalStatus || ''));
+                const isApproved = workflow.documentType === 'CG' && workflow.approvalStatus === 'approved';
+                const isDraftCG = workflow.documentType === 'CG' && workflow.approvalStatus === 'draft';
 
                 return (
-                  <tr key={po.id} className="border-b border-gray-100 hover:bg-gray-50/50">
-                    <td className="py-2 px-2 text-center">
+                  <tr key={po.id} className="border-b border-slate-200 align-top hover:bg-slate-50/70">
+                    <td className="px-2 py-3 text-center">
                       <input
                         type="checkbox"
-                        className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
+                        className="h-4 w-4 cursor-pointer rounded border border-slate-400"
                         checked={selectedOrderIds.includes(po.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -167,138 +689,173 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                         }}
                       />
                     </td>
-                    <td className="py-2 px-2 text-center text-gray-500">{idx + 1}</td>
-                    <td className="py-3 px-3">
-                      {/* Phase 4: PR / CG / CQ record-type chip — lets operators distinguish rows without parsing the number prefix */}
-                      <div className="flex items-center gap-1.5">
-                        {String(po.poNumber || '').startsWith('PR-') && (
-                          <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-cyan-100 text-cyan-700 border border-cyan-300 leading-4" title="采购请求（PR）">PR</span>
-                        )}
-                        {String(po.poNumber || '').startsWith('CG-') && (
-                          <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-green-100 text-green-700 border border-green-300 leading-4" title="供应商订单（CG）">CG</span>
-                        )}
-                        {String(po.poNumber || '').startsWith('CQ-') && (
-                          <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-gray-100 text-gray-500 border border-gray-300 leading-4" title="旧单（历史记录）">CQ</span>
-                        )}
-                        <button onClick={() => handleViewPODocument(po)} className="text-purple-600 hover:text-purple-700 font-medium hover:underline text-xs">
+                    <td className="px-2 py-3 text-center text-slate-500">{idx + 1}</td>
+                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('date')}>
+                      <div className="space-y-1 text-slate-900">
+                        <div className="whitespace-nowrap">
+                          <span className="mr-1 text-[12px] text-slate-500">单据日期</span>
+                          {formatDateOnly(
+                            po.orderDate ||
+                            po.createdDate ||
+                            (po as any).createdAt ||
+                            (po as any).updatedAt,
+                          )}
+                        </div>
+                        <div className="whitespace-nowrap">
+                          <span className="mr-1 text-[12px] text-slate-500">要求交期</span>
+                          {formatDateOnly(
+                            po.expectedDate ||
+                            po.expectedDeliveryDate ||
+                            (po as any).documentDataSnapshot?.requiredDeliveryDate,
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('document')}>
+                      <div className="relative inline-block">
+                        <button
+                          onClick={() => handleViewPODocument(po)}
+                          className="block whitespace-nowrap font-semibold text-slate-900 hover:text-slate-700 hover:underline"
+                        >
                           {normalizeCGNumberForDisplay(po.poNumber)}
                         </button>
+                        {sourceDocumentRefs.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedSourceIds((current) =>
+                                current.includes(po.id)
+                                  ? current.filter((id) => id !== po.id)
+                                  : [...current, po.id],
+                              );
+                            }}
+                            className="mt-1 block text-[12px] font-semibold leading-[1.35] text-slate-500 hover:text-slate-700"
+                          >
+                            {sourceRefsExpanded ? '收起关联编号' : `展开关联编号 (${sourceDocumentRefs.length})`}
+                          </button>
+                        ) : (
+                          <div className="mt-1 text-[12px] leading-[1.35] text-slate-400">-</div>
+                        )}
+                        {sourceRefsExpanded ? (
+                            <div className="absolute left-0 top-full z-20 mt-2 min-w-[280px] space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-lg text-[12px] leading-4">
+                              {sourceDocumentRefs.map((ref) => (
+                                <div
+                                  key={ref.value}
+                                  className={`whitespace-nowrap font-mono ${ref.className}`}
+                                  title={ref.value}
+                                >
+                                  {ref.value}
+                                </div>
+                              ))}
+                              {projectBaseline ? (
+                                <div className="border-t border-slate-100 pt-2 text-[11px] leading-[1.35] text-indigo-600">
+                                  {projectBaseline.projectCode ? `${projectBaseline.projectCode} · ` : ''}
+                                  {projectBaseline.projectName || 'Project'} / Rev {projectBaseline.projectRevisionCode || '-'}
+                                </div>
+                              ) : null}
+                            </div>
+                        ) : null}
                       </div>
-                      <div className="text-[11px] text-gray-500 mt-0.5">
-                        来源: {resolveInquirySourceRef(po)}
-                        {getRequirementNoFromPO(po) ? ` · ${getRequirementNoFromPO(po)}` : ''}
-                      </div>
-                      {projectBaseline && (
-                        <div className="text-[11px] text-indigo-600 mt-0.5">
-                          基线: {projectBaseline.projectCode ? `${projectBaseline.projectCode} · ` : ''}{projectBaseline.projectName || 'Project'} / Rev {projectBaseline.projectRevisionCode || '-'} / QT {projectBaseline.finalQuotationNumber || '-'}
-                        </div>
-                      )}
                     </td>
-
-                    <td className="py-3 px-3">
-                      <div className="text-gray-900">{po.supplierName}</div>
-                      {po.supplierCode && <div className="text-[11px] text-gray-500 mt-0.5">{po.supplierCode}</div>}
+                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('supplier')}>
+                      <div className="whitespace-nowrap font-medium text-slate-900">{po.supplierName || '待定供应商'}</div>
                     </td>
-
-                    <td className="py-3 px-3">
-                      {regionConfig ? (
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-medium ${regionConfig.color}`}>{regionConfig.label}</span>
-                      ) : (
-                        <span className="text-gray-400 text-[12px]">-</span>
-                      )}
+                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('region')}>
+                      <Badge className="border-slate-300 bg-slate-50 text-slate-700">{regionLabel}</Badge>
                     </td>
-
-                    <td className="py-3 px-3">
+                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('summary')}>
                       {po.items && po.items.length > 0 ? (
                         <>
-                          <div className="text-gray-900">{po.items.length}个产品</div>
-                          <div className="text-[12px] text-gray-500">共 {po.items.reduce((sum, item) => sum + item.quantity, 0).toLocaleString()} 件</div>
+                          <div className="font-medium text-slate-900">{po.items.length} 个产品</div>
+                          <div className="mt-1 text-[12px] leading-[1.35] text-slate-500">
+                            共 {po.items.reduce((sum, item) => sum + item.quantity, 0).toLocaleString()} 件
+                          </div>
                         </>
                       ) : (
-                        <div className="text-gray-400">-</div>
+                        <div className="text-slate-400">待补充明细</div>
                       )}
                     </td>
-
-                    <td className="py-3 px-3">
-                      <div className="text-gray-900">{po.expectedDate}</div>
-                      {po.actualDate && <div className="text-[12px] text-green-600">实: {po.actualDate}</div>}
+                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('approval')}>
+                      <Badge className={getFinanceToneBadgeClasses(approvalPresentation.tone)}>
+                        {approvalPresentation.label}
+                      </Badge>
+                      {prValidationStatus === 'passed' ? (
+                        <div className="mt-1 text-[12px] leading-[1.35] text-emerald-600">比价检查已通过</div>
+                      ) : null}
                     </td>
-
-                    <td className="py-3 px-3">
-                      <span className={`inline-flex items-center px-2 py-1 rounded text-[12px] font-medium border ${statusConfig.color}`}>{statusConfig.label}</span>
+                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('execution')}>
+                      <div className="flex flex-col gap-1.5">
+                        <Badge className={getFinanceToneBadgeClasses(executionPresentation.tone)}>
+                          {executionPresentation.label}
+                        </Badge>
+                        <div className="text-[12px] leading-[1.35] text-slate-500">{executionPresentation.detail}</div>
+                      </div>
                     </td>
-
-                    <td className="py-3 px-3">
-                      <div className="flex gap-1 justify-center">
-                        <button onClick={() => handleViewPODocument(po)} className="p-1 hover:bg-gray-100 rounded transition-colors" title="查看采购订单文档">
-                          <Eye className="w-4 h-4 text-gray-600" />
-                        </button>
-                        <button onClick={() => handleOpenEditPO(po)} className="px-2 py-1 rounded border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors inline-flex items-center gap-1 text-[11px]" title="编辑采购订单">
-                          <Edit className="w-3 h-3" />编辑
-                        </button>
-                        {(() => {
-                          const canPushToSupplier = reqStatus === 'approved_boss';
-                          const pushedToSupplier = reqStatus === 'pushed_supplier';
-                          const pushTitle =
-                            reqStatus === 'pending_procurement_assignment'
-                              ? '请先完成供应商分配'
-                              : reqStatus === 'draft_allocated' || reqStatus === ''
-                                ? '请先申请审核，审核通过后才能下推供应商'
-                                : reqStatus === 'pending_boss_approval'
-                                  ? '待上级审核通过后可下推供应商'
-                                  : reqStatus === 'rejected_boss'
-                                    ? '审核驳回，请调整后重新申请'
-                                    : pushedToSupplier
-                                      ? '已下推给供应商'
-                                      : '下推供应商';
-                          return (
-                            <button
-                              onClick={() => handlePushPurchaseToSupplier(po)}
-                              disabled={!canPushToSupplier}
-                              className={`px-2 py-1 rounded border transition-colors inline-flex items-center gap-1 text-[11px] disabled:cursor-not-allowed ${
-                                pushedToSupplier
-                                  ? 'border-gray-200 bg-gray-100 text-gray-500'
-                                  : canPushToSupplier
-                                    ? 'border-blue-200 text-blue-600 hover:bg-blue-50'
-                                    : 'border-gray-200 text-gray-400 bg-gray-50'
-                              }`}
-                              title={pushTitle}
-                            >
-                              <Send className="w-3 h-3" />
-                              {pushedToSupplier ? '已下推供应商' : '下推供应商'}
-                            </button>
-                          );
-                        })()}
-                        {(() => {
-                          const pushedToSupplier = reqStatus === 'pushed_supplier';
-                          if (pushedToSupplier) return null;
-
-                          const isPendingApproval = reqStatus === 'pending_boss_approval';
-                          const isApproved = reqStatus === 'approved_boss';
-                          const buttonText = isPendingApproval ? '审核中' : isApproved ? '已审核' : '申请审核';
-                          const buttonTitle = isPendingApproval ? '该采购单正在等待上级审核' : isApproved ? '该采购单已审核通过' : '提交老板审核';
-
-                          return (
-                            <button
-                              onClick={() => handleApplyBossApproval(po)}
-                              disabled={isPendingApproval}
-                              className={`px-2 py-1 rounded border transition-colors inline-flex items-center gap-1 text-[11px] ${
-                                isPendingApproval
-                                  ? 'border-amber-200 text-amber-500 bg-amber-50 cursor-not-allowed'
-                                  : isApproved
-                                    ? 'border-green-200 text-green-700 bg-green-50 hover:bg-green-100'
+                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('actions')}>
+                      <div className="flex flex-wrap justify-start gap-1.5">
+                        <Button variant="outline" size="sm" style={CAPSULE_BUTTON_STYLE} className="h-8 !rounded-full border-slate-300 px-3 text-[12px] font-semibold" onClick={() => handleViewPODocument(po)}>
+                          <Eye className="mr-1 h-3 w-3" />
+                          查看
+                        </Button>
+                        <Button variant="outline" size="sm" style={CAPSULE_BUTTON_STYLE} className="h-8 !rounded-full border-slate-300 px-3 text-[12px] font-semibold" onClick={() => handleOpenEditPO(po)}>
+                          <Edit className="mr-1 h-3 w-3" />
+                          编辑
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handlePushPurchaseToSupplier(po)}
+                          disabled={!canPushToSupplier}
+                          style={CAPSULE_BUTTON_STYLE}
+                          className={`h-8 !rounded-full px-3 text-[12px] font-semibold ${
+                            pushedToSupplier
+                              ? 'border-slate-200 bg-slate-100 text-slate-500'
+                              : canPushToSupplier
+                                ? 'border-blue-200 text-blue-700 hover:bg-blue-50'
+                                : 'border-slate-200 text-slate-400'
+                          }`}
+                          title={
+                            pushedToSupplier
+                              ? '已下推给供应商'
+                              : canPushToSupplier
+                                ? '下推供应商'
+                                : '需先完成审批后才可下推'
+                          }
+                        >
+                          <Send className="mr-1 h-3 w-3" />
+                          {pushedToSupplier ? '已下推' : '下推供应商'}
+                        </Button>
+                        {!pushedToSupplier ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              handleApplyBossApproval(po);
+                            }}
+                            disabled={isPendingApproval}
+                            style={CAPSULE_BUTTON_STYLE}
+                            className={`h-8 !rounded-full px-3 text-[12px] font-semibold ${
+                              isPendingApproval
+                                ? 'border-amber-200 bg-amber-50 text-amber-600'
+                                : isApproved
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                                     : 'border-amber-200 text-amber-700 hover:bg-amber-50'
-                              }`}
-                              title={buttonTitle}
-                            >
-                              <CheckCircle2 className="w-3 h-3" />
-                              {buttonText}
-                            </button>
-                          );
-                        })()}
-                        <button onClick={() => handleDeletePurchaseOrder(po)} className="p-1 hover:bg-red-50 rounded transition-colors border border-red-300 text-red-600" title="删除采购订单">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                            }`}
+                          >
+                            <CheckCircle2 className="mr-1 h-3 w-3" />
+                            {isPendingApproval ? '审核中' : isApproved ? '已审核' : isDraftCG ? '申请审核' : '申请审核'}
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeletePurchaseOrder(po)}
+                          style={CAPSULE_BUTTON_STYLE}
+                          className="h-8 !rounded-full border-red-200 px-3 text-[12px] font-semibold text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 className="mr-1 h-3 w-3" />
+                          删除
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -306,6 +863,7 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
               })}
             </tbody>
           </table>
+        </div>
         </div>
       </div>
     </TabsContent>

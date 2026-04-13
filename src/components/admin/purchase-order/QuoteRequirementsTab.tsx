@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Search, Trash2, Eye, Edit, Calculator } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { QuoteRequirement } from '../../../contexts/QuoteRequirementContext';
@@ -6,7 +6,15 @@ import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { Input } from '../../ui/input';
 import { TabsContent } from '../../ui/tabs';
-import { calculateRequirementStatus, getUrgencyConfig } from './purchaseOrderUtils';
+import { calculateRequirementStatus } from './purchaseOrderUtils';
+import {
+  ERP_LIST_DELETE_BUTTON_CLASS,
+  ERP_LIST_DELETE_BUTTON_STYLE,
+  ERP_LIST_UI_SPEC_V1,
+  getErpListFilterPillClass,
+  getErpListFilterPillStyle,
+} from '../../shared/erpListUiSpec';
+import { normalizeLegacyQrNumber } from '../../../utils/quoteRequirementNumber';
 
 type RequirementStats = {
   total: number;
@@ -51,64 +59,92 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
   handlePushToSalesInquiry,
   deleteRequirement,
 }) => {
-  return (
-    <TabsContent value="requirements" className="m-0">
-      {/* 需求统计 */}
-      <div className="px-3 py-3 bg-gray-50 border-b border-gray-200">
-        <div className="grid grid-cols-5 gap-2">
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">总 QR</p>
-            <p className="text-base font-bold text-gray-900">{requirementStats.total}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">待处理</p>
-            <p className="text-base font-bold text-amber-600">{requirementStats.pending}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">部分提交</p>
-            <p className="text-base font-bold text-orange-600">{requirementStats.partial}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">已发供应商</p>
-            <p className="text-base font-bold text-blue-600">{requirementStats.processing}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[14px] text-gray-500">紧急 QR</p>
-            <p className="text-base font-bold text-red-600">{requirementStats.highUrgency}</p>
-          </div>
-        </div>
-      </div>
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'partial' | 'processing'>('all');
+  const [expandedRelatedIds, setExpandedRelatedIds] = useState<string[]>([]);
+  const hasPositivePricingPayload = (req: QuoteRequirement) => {
+    const feedbackProducts = Array.isArray(req.purchaserFeedback?.products)
+      ? req.purchaserFeedback.products
+      : [];
+    return feedbackProducts.some((product: any) => {
+      const unitPrice = Number(product?.sourcePricing?.unitPrice ?? product?.costPrice ?? 0);
+      const amount = Number(product?.amount ?? 0);
+      return (Number.isFinite(unitPrice) && unitPrice > 0) || (Number.isFinite(amount) && amount > 0);
+    });
+  };
 
+  const hasActualSalesInquiryPush = (req: QuoteRequirement) =>
+    Boolean(
+      req.pushedToQuotation &&
+      (
+        String(req.pushedToQuotationDate || '').trim() ||
+        String(req.pushedBy || '').trim() ||
+        String((req as any).quotationNumber || '').trim()
+      ) &&
+      hasPositivePricingPayload(req)
+    );
+
+  const displayRequirements = useMemo(() => {
+    if (statusFilter === 'all') return filteredRequirements;
+    return filteredRequirements.filter((req) => calculateRequirementStatus(req) === statusFilter);
+  }, [filteredRequirements, statusFilter]);
+
+  const formatDateOnly = (value?: string | null) => {
+    const text = String(value || '').trim();
+    if (!text) return '-';
+    return text.includes('T') ? text.slice(0, 10) : text;
+  };
+
+  return (
+    <TabsContent value="requirements" className="m-0 flex flex-1 min-h-0 flex-col">
       {/* 需求列表 */}
-      <div className="px-3 py-2">
+      <div className="px-3 py-2 flex flex-1 min-h-0 flex-col">
         {/* 🔥 搜索框和批量操作 */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
               <Input
-                placeholder="搜索 QR 编号、来源单号、区域..."
+                placeholder="搜索编号、关联编号、区域..."
                 value={requirementSearchTerm}
                 onChange={(e) => setRequirementSearchTerm(e.target.value)}
-                className="pl-8 h-8 text-xs w-80"
+                className={`pl-8 h-8 w-80 ${ERP_LIST_UI_SPEC_V1.buttonTextClass}`}
               />
             </div>
-            {selectedRequirementIds.length > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleBatchDeleteRequirements}
-                className="h-8 text-xs px-3 border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
-              >
-                <Trash2 className="w-3.5 h-3.5 mr-1" />
-                批量删除 ({selectedRequirementIds.length})
-              </Button>
-            )}
           </div>
-          <p className="text-[14px] text-gray-600">共 {filteredRequirements.length} 条 QR</p>
+          <div className="flex items-center gap-2">
+            {[
+              ['all', '全部', requirementStats.total],
+              ['pending', '待处理', requirementStats.pending],
+              ['partial', '部分提交', requirementStats.partial],
+              ['processing', '已发供应商', requirementStats.processing],
+            ].map(([value, label, count]) => (
+              <Button
+                key={String(value)}
+                variant="outline"
+                size="sm"
+                onClick={() => setStatusFilter(value as any)}
+                style={getErpListFilterPillStyle(statusFilter === value)}
+                className={getErpListFilterPillClass(statusFilter === value).replace('h-9', 'h-8').replace('px-4', 'px-3')}
+              >
+                {label} ({count})
+              </Button>
+            ))}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleBatchDeleteRequirements}
+              disabled={selectedRequirementIds.length === 0}
+              style={ERP_LIST_DELETE_BUTTON_STYLE}
+              className={ERP_LIST_DELETE_BUTTON_CLASS.replace('h-9', 'h-8').replace('text-[12px]', ERP_LIST_UI_SPEC_V1.buttonTextClass)}
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1" />
+              批量删除{selectedRequirementIds.length > 0 ? ` (${selectedRequirementIds.length})` : ''}
+            </Button>
+          </div>
         </div>
 
-        <div className="border border-gray-200 rounded overflow-hidden">
+        <div className="border border-gray-200 rounded bg-white flex flex-1 min-h-0 flex-col overflow-visible min-h-[calc(100dvh-360px)]">
+          <div className="overflow-x-auto overflow-y-visible bg-white flex-1 rounded-[inherit] min-h-0">
           <table className="w-full text-[14px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -116,10 +152,10 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                   <input
                     type="checkbox"
                     className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                    checked={selectedRequirementIds.length === filteredRequirements.length && filteredRequirements.length > 0}
+                    checked={selectedRequirementIds.length === displayRequirements.length && displayRequirements.length > 0}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedRequirementIds(filteredRequirements.map(r => r.id));
+                        setSelectedRequirementIds(displayRequirements.map(r => r.id));
                       } else {
                         setSelectedRequirementIds([]);
                       }
@@ -127,24 +163,29 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                   />
                 </th>
                 <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                <th className="text-left py-1.5 px-2 font-medium text-gray-700">QR编号</th>
-                <th className="text-left py-1.5 px-2 font-medium text-gray-700">来源单号</th>
+                <th className="text-left py-1.5 px-2 font-medium text-gray-700">日期</th>
+                <th className="text-left py-1.5 px-2 font-medium text-gray-700">编号</th>
                 <th className="text-left py-1.5 px-2 font-medium text-gray-700">区域</th>
                 <th className="text-center py-1.5 px-2 font-medium text-gray-700">产品数</th>
-                <th className="text-left py-1.5 px-2 font-medium text-gray-700">要求日期</th>
-                <th className="text-left py-1.5 px-2 font-medium text-gray-700">紧急程度</th>
                 <th className="text-left py-1.5 px-2 font-medium text-gray-700">状态</th>
                 <th className="text-center py-1.5 px-2 font-medium text-gray-700">操作</th>
               </tr>
             </thead>
             <tbody>
-              {filteredRequirements.map((req, idx) => {
-                const urgencyConfig = getUrgencyConfig(req.urgency);
+              {displayRequirements.map((req, idx) => {
                 const itemCount = req.items?.length || 0;
 
                 // 🔥 动态计算状态
                 const dynamicStatus = calculateRequirementStatus(req);
                 const hasLinkedXJ = hasDownstreamXJForRequirement(req);
+                const disableEdit = false;
+                const relatedRefs = [
+                  String(req.sourceRef || '').trim(),
+                  String(req.sourceInquiryNumber || '').trim(),
+                  String((req as any).quotationNumber || '').trim(),
+                  String((req as any).xjNumber || '').trim(),
+                ].filter((value, index, array) => value && array.indexOf(value) === index);
+                const relatedRefsExpanded = expandedRelatedIds.includes(req.id);
 
                 // 🔥 区域标签配置
                 // region 统一用 Supabase 存储的 code（NA/SA/EA）
@@ -174,6 +215,19 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                       {idx + 1}
                     </td>
                     <td className="py-2 px-2">
+                      <div className="space-y-1 text-gray-900">
+                        <div>
+                          <span className="mr-1 text-[12px] text-gray-500">提交日期</span>
+                          {formatDateOnly(req.createdDate)}
+                        </div>
+                        <div>
+                          <span className="mr-1 text-[12px] text-gray-500">截止日期</span>
+                          {formatDateOnly(req.requiredDate)}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-2 px-2">
+                      <div className="relative inline-block">
                       <button
                         onClick={() => {
                           setViewRequirement(req);
@@ -181,13 +235,33 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                         }}
                         className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
                       >
-                        {req.requirementNo}
+                        {normalizeLegacyQrNumber(req.requirementNo) || '-'}
                       </button>
-                      <div className="text-[12px] text-gray-500">{req.createdDate}</div>
-                    </td>
-                    <td className="py-2 px-2">
-                      <div className="text-gray-900">{req.source}</div>
-                      {req.sourceRef && <div className="text-[12px] text-blue-600 font-mono">{req.sourceRef}</div>}
+                      {relatedRefs.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedRelatedIds((current) =>
+                              current.includes(req.id)
+                                ? current.filter((id) => id !== req.id)
+                                : [...current, req.id],
+                            );
+                          }}
+                          className="mt-1 block text-[12px] font-semibold leading-[1.35] text-slate-500 hover:text-slate-700"
+                        >
+                          {relatedRefsExpanded ? '收起关联编号' : `展开关联编号 (${relatedRefs.length})`}
+                        </button>
+                      ) : null}
+                      {relatedRefsExpanded ? (
+                        <div className="absolute left-0 top-full z-20 mt-2 min-w-[280px] space-y-1 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+                          {relatedRefs.map((ref) => (
+                            <div key={`${req.id}-${ref}`} className="whitespace-nowrap text-left text-[12px] font-mono text-blue-600">
+                              {ref}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      </div>
                     </td>
                     <td className="py-2 px-2">
                       {regionConfig ? (
@@ -201,14 +275,6 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                     <td className="py-2 px-2 text-center">
                       <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
                         {itemCount}
-                      </span>
-                    </td>
-                    <td className="py-2 px-2">
-                      <div className="text-gray-900">{req.requiredDate}</div>
-                    </td>
-                    <td className="py-2 px-2">
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${urgencyConfig.color}`}>
-                        {urgencyConfig.label}
                       </span>
                     </td>
                     <td className="py-2 px-2">
@@ -251,9 +317,9 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                               duration: 2000
                             });
                           }}
-                          disabled={hasLinkedXJ}
+                          disabled={disableEdit}
                           className={`h-6 text-[12px] px-2 gap-1 ${
-                            hasLinkedXJ
+                            disableEdit
                               ? 'border-gray-200 text-gray-300 cursor-not-allowed'
                               : 'border-blue-300 text-blue-600 hover:bg-blue-50'
                           }`}
@@ -263,15 +329,18 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                           <span>编辑</span>
                         </Button>
 
+                        {(dynamicStatus === 'pending' || dynamicStatus === 'partial') && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleCreateXJFromRequirement(req)}
+                            className="h-6 text-[12px] bg-blue-600 hover:bg-blue-700 px-2"
+                            title={dynamicStatus === 'partial' ? '继续为剩余未提交产品创建询价单' : '创建询价单'}
+                          >
+                            创建询价单
+                          </Button>
+                        )}
                         {!hasLinkedXJ && (dynamicStatus === 'pending' || dynamicStatus === 'partial') && (
                           <>
-                            <Button
-                              size="sm"
-                              onClick={() => handleCreateXJFromRequirement(req)}
-                              className="h-6 text-[12px] bg-blue-600 hover:bg-blue-700 px-2"
-                            >
-                              创建询价单
-                            </Button>
                             {/* Phase 3d: legacy path — visually downgraded to signal non-standard use.
                                 Standard path is PR → admin allocation → CG (via 创建询价单 → 供应商分配).
                                 This button bypasses PR and creates a CG directly (no parentRequestPoNumber). */}
@@ -303,26 +372,23 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
                           </Badge>
                         )}
 
-                        {/* 采购侧只保留下推业务员询报，不再显示"创建报价" */}
+                        {/* 采购侧只保留反馈业务员询报，不再显示"创建报价" */}
                         <Button
                           size="sm"
                           onClick={() => handlePushToSalesInquiry(req)}
-                          disabled={!req.purchaserFeedback || !!req.pushedToQuotation}
                           className={`h-6 text-[12px] px-2 gap-1 ${
-                            !req.purchaserFeedback || req.pushedToQuotation
-                              ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                            hasActualSalesInquiryPush(req)
+                              ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-300'
                               : 'bg-orange-500 hover:bg-orange-600 text-white'
                           }`}
                           title={
-                            !req.purchaserFeedback
-                              ? '请先完成智能对比建议并保存采购反馈'
-                              : req.pushedToQuotation
-                                ? '已下推业务员询报'
-                                : '下推业务员询报'
+                            hasActualSalesInquiryPush(req)
+                              ? '重新反馈业务员询报'
+                              : '反馈业务员询报'
                           }
                         >
                           <Calculator className="w-3 h-3" />
-                          <span>{req.pushedToQuotation ? '已下推业务员询报' : '下推业务员询报'}</span>
+                          <span>{hasActualSalesInquiryPush(req) ? '重新反馈业务员询报' : '反馈业务员询报'}</span>
                         </Button>
                         <Button
                           size="sm"
@@ -361,6 +427,7 @@ export const QuoteRequirementsTab: React.FC<QuoteRequirementsTabProps> = ({
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     </TabsContent>

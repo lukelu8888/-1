@@ -23,6 +23,7 @@ import {
 import { suppliersDatabase, type Supplier } from '../../data/suppliersData'; // fallback only，已废弃，以 Supabase companies 表为准
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 import { Input } from '../ui/input';
 import { 
   Select, 
@@ -33,7 +34,7 @@ import {
 } from '../ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { toast } from 'sonner@2.0.3';
-import { PurchaseOrderDocument, PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument'; // 🔥 文档中心采购订单模板
+import { PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument'; // 🔥 文档中心采购订单模板
 import { XJData } from '../documents/templates/XJDocument'; // 🔥 采购询价单(XJ)模板
 import QuoteCreationIntelligent from './QuoteCreationIntelligent'; // 🔥 智能报价创建页面
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport'; // 🔥 PDF导出工具
@@ -52,7 +53,7 @@ import { useUser } from '../../contexts/UserContext'; // 🔥 用户Context
 import { useApproval } from '../../contexts/ApprovalContext';
 import { generateXJNumber, nextXJNumber } from '../../utils/xjNumberGenerator'; // 🔥 XJ编号生成器
 import { generateCGNumber, nextCGNumberAsync, normalizeCGNumberForDisplay } from '../../utils/purchaseOrderNumberGenerator';
-import { contractService, supplierQuotationService, companyService } from '../../lib/supabaseService';
+import { contractService, supplierQuotationService, companyService, toUUID } from '../../lib/supabaseService';
 import { TERMS_OPTIONS } from './purchase-order/purchaseOrderConstants'; // 🔥 从常量文件导入
 import { PurchaseOrderEditDialog } from './purchase-order/PurchaseOrderEditDialog';
 import { PurchaseOrderCreateDialogs } from './purchase-order/PurchaseOrderCreateDialogs';
@@ -106,6 +107,9 @@ import { adaptLegacyQuotationToDocumentData } from '../../utils/documentDataAdap
 import { saveSupplierQuotation } from '../../utils/createQuotationFromXJ';
 import { addTombstones, filterNotDeleted, listTombstones, removeTombstones } from '../../lib/erp-core/deletion-tombstone';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { resolveQuoteRequirementOwner } from '../../utils/quotationOwnership';
+import { buildSourcePricingBasis, normalizePriceType } from '../../types/pricingBasis';
+import { derivePurchaseOrderWorkflowFields } from '../../lib/services/purchaseOrderQuoteRequirementServices';
 
 /**
  * 🔥 采购订单管理 - 台湾大厂风格
@@ -118,6 +122,12 @@ import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 // 此 localStorage 仅用于减少切页空窗，可安全删除（不影响 Supabase 中的审批数据）
 
 const PurchaseOrderManagementEnhanced: React.FC = () => {
+  const toLegacyProcurementRequestStatus = React.useCallback((status: string) => {
+    if (status === 'pending_assignment') return 'pending_procurement_assignment';
+    if (status === 'partially_allocated') return 'partial_allocated';
+    if (status === 'fully_allocated') return 'allocated_completed';
+    return status;
+  }, []);
   
   // 🔥 使用 QR Context - 底层仍复用当前主承载表
   const { requirements, updateRequirement, deleteRequirement, refreshQuoteRequirementsFromApi } = useQuoteRequirements();
@@ -134,13 +144,279 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const { user } = useUser();
   const { requests: approvalRequests, addApprovalRequest, updateApprovalRequest } = useApproval();
   const isProcurementRequestRecord = React.useCallback((po: PurchaseOrderType) => {
+    const workflow = derivePurchaseOrderWorkflowFields(po);
     const reqStatus = String(po.procurementRequestStatus || '').trim();
     const poNo = String(po.poNumber || '').trim().toUpperCase();
-    return reqStatus === 'pending_procurement_assignment' || poNo.startsWith('CQ-');
+    return workflow.documentType === 'PR' || reqStatus === 'pending_procurement_assignment' || poNo.startsWith('CQ-') || poNo.startsWith('PR-');
   }, []);
   const requestPurchaseOrders = React.useCallback(() => {
     window.dispatchEvent(new CustomEvent('purchaseOrdersUpdated'));
   }, []);
+  const enrichPurchaserFeedbackWithSupplierQuoteData = React.useCallback(
+    async (req: QuoteRequirement): Promise<PurchaserFeedback | undefined> => {
+      const feedback = req.purchaserFeedback;
+      const normalizeComparable = (value: unknown) =>
+        String(value || '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .toLowerCase();
+      const toPositiveNumberOrNull = (value: unknown) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      };
+
+      const allQuotations = await supplierQuotationService.getAll();
+      const allRows = Array.isArray(allQuotations) ? allQuotations : [];
+      const linkedBJList = String(feedback?.linkedBJ || '')
+        .split(/[\n,，、;；]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const requirementNo = String(req.requirementNo || '').trim();
+      const sourceInquiryNo = String(req.sourceInquiryNumber || req.sourceRef || '').trim();
+      const linkedRows = allRows.filter((quotation: any) =>
+        linkedBJList.includes(String(quotation?.quotationNo || quotation?.bjNumber || '').trim()),
+      );
+      const relatedRows = linkedRows.length > 0
+        ? linkedRows
+        : allRows.filter((quotation: any) => {
+            const quotationNo = String(quotation?.quotationNo || quotation?.bjNumber || '').trim();
+            const qrNo = String(quotation?.sourceQR || quotation?.requirementNo || '').trim();
+            const xjNo = String(quotation?.sourceXJ || quotation?.xjNumber || '').trim();
+            return Boolean(
+              (requirementNo && qrNo === requirementNo) ||
+              (linkedBJList.length > 0 && linkedBJList.includes(quotationNo)) ||
+              (sourceInquiryNo && xjNo === sourceInquiryNo)
+            );
+          });
+
+      if (relatedRows.length === 0) {
+        return feedback;
+      }
+
+      const bjItems = relatedRows.flatMap((quotation: any) => {
+        const snapshotProducts = Array.isArray(quotation?.documentDataSnapshot?.products)
+          ? quotation.documentDataSnapshot.products
+          : Array.isArray(quotation?.document_data_snapshot?.products)
+            ? quotation.document_data_snapshot.products
+            : [];
+        const rowItems = Array.isArray(quotation?.items) ? quotation.items : [];
+        const sourceItems = snapshotProducts.length > 0 ? snapshotProducts : rowItems;
+        return sourceItems.map((item: any, index: number) => {
+          const fallbackRowItem = rowItems[index] || null;
+          return {
+            ...fallbackRowItem,
+            ...item,
+            productId: item?.productId || item?.id || fallbackRowItem?.productId || fallbackRowItem?.id,
+            productName:
+              item?.productName ||
+              item?.name ||
+              item?.description ||
+              item?.product ||
+              fallbackRowItem?.productName ||
+              fallbackRowItem?.name ||
+              fallbackRowItem?.description,
+            modelNo:
+              item?.modelNo ||
+              item?.model ||
+              item?.sku ||
+              fallbackRowItem?.modelNo ||
+              fallbackRowItem?.model ||
+              fallbackRowItem?.sku,
+            quantity: item?.quantity ?? fallbackRowItem?.quantity,
+            unitPrice:
+              item?.unitPrice ??
+              item?.price ??
+              item?.quotedPrice ??
+              item?.supplierPrice ??
+              fallbackRowItem?.unitPrice ??
+              fallbackRowItem?.price,
+            amount:
+              item?.amount ??
+              item?.totalPrice ??
+              item?.lineAmount ??
+              item?.totalAmount ??
+              fallbackRowItem?.amount ??
+              fallbackRowItem?.totalPrice ??
+              fallbackRowItem?.lineAmount,
+            currency:
+              item?.currency ||
+              item?.quoteCurrency ||
+              fallbackRowItem?.currency ||
+              fallbackRowItem?.quoteCurrency ||
+              quotation?.currency ||
+              'CNY',
+            quoteMode: item?.quoteMode || fallbackRowItem?.quoteMode || quotation?.quoteMode,
+            taxSettings: item?.taxSettings || fallbackRowItem?.taxSettings || quotation?.taxSettings || null,
+          };
+        });
+      });
+
+      const buildFallbackRemarks = (products: Array<{ amount?: number; currency?: string; leadTime?: string }>) => {
+        const totalCost = products.reduce((sum, product) => sum + Number(product.amount || 0), 0);
+        const avgLeadDays = products
+          .map((product) => Number(String(product.leadTime || '').replace(/[^\d.]/g, '')))
+          .filter((value) => Number.isFinite(value) && value > 0);
+        const avgLeadTime = avgLeadDays.length > 0
+          ? Math.round(avgLeadDays.reduce((sum, value) => sum + value, 0) / avgLeadDays.length)
+          : null;
+        const fallbackCurrency = products[0]?.currency || 'CNY';
+
+        return [
+          `已根据关联供应商报价自动汇总 ${products.length} 个产品的采购成本。`,
+          `当前汇总成本：${fallbackCurrency} ${totalCost.toLocaleString()}`,
+          avgLeadTime ? `平均交期约 ${avgLeadTime} 天。` : null,
+          '本次为系统自动回填采购反馈，如需补充议价判断、风险说明或报价策略，请由采购员进一步完善。',
+        ].filter(Boolean).join('\n');
+      };
+
+      if (!feedback || !Array.isArray(feedback.products) || feedback.products.length === 0) {
+        const fallbackProducts = (Array.isArray(req.items) ? req.items : []).map((item: any, index: number) => {
+          const matched = bjItems.find((bjItem: any, bjIndex: number) => {
+            if (bjIndex === index) return true;
+            const sameId =
+              normalizeComparable(bjItem?.productId) &&
+              normalizeComparable(bjItem?.productId) === normalizeComparable(item?.id);
+            const sameModel =
+              normalizeComparable(bjItem?.modelNo) &&
+              normalizeComparable(bjItem?.modelNo) === normalizeComparable(item?.modelNo);
+            const sameName =
+              normalizeComparable(bjItem?.productName) &&
+              normalizeComparable(bjItem?.productName) === normalizeComparable(item?.productName);
+            return Boolean(sameId || sameModel || sameName);
+          }) || bjItems[index] || null;
+
+          const quantity = Number(matched?.quantity ?? item?.quantity ?? 0);
+          const unitPrice = toPositiveNumberOrNull(matched?.unitPrice);
+          const amount =
+            toPositiveNumberOrNull(matched?.amount) ??
+            (unitPrice != null && quantity > 0 ? unitPrice * quantity : 0);
+          const currency = String(matched?.currency || 'CNY').toUpperCase();
+
+          return {
+            productId: String(item?.id || matched?.productId || `qr-item-${index + 1}`),
+            productName: String(matched?.productName || item?.productName || item?.name || item?.description || ''),
+            specification: String(item?.specification || item?.spec || ''),
+            quantity,
+            unit: String(item?.unit || item?.uom || 'pcs'),
+            costPrice: unitPrice ?? 0,
+            currency,
+            sourcePricing: unitPrice != null
+              ? buildSourcePricingBasis({
+                  unitPrice,
+                  currency,
+                  priceType: normalizePriceType(undefined, currency),
+                  deliveryTerms: relatedRows[0]?.deliveryTerms,
+                  quoteMode: matched?.quoteMode || relatedRows[0]?.quoteMode,
+                  sourceDocumentNo: relatedRows[0]?.quotationNo || relatedRows[0]?.bjNumber,
+                  supplierQuotationNo: relatedRows[0]?.quotationNo || relatedRows[0]?.bjNumber,
+                  taxSettings: matched?.taxSettings || relatedRows[0]?.taxSettings || null,
+                })
+              : undefined,
+            amount,
+            moq: matched?.moq,
+            leadTime: matched?.leadTime != null ? `${matched.leadTime}天` : undefined,
+            remarks: String(item?.remarks || ''),
+          };
+        });
+        const fallbackRemarks = buildFallbackRemarks(fallbackProducts);
+
+        return {
+          status: 'quoted',
+          feedbackDate: new Date().toISOString().split('T')[0],
+          feedbackBy: '采购部',
+          linkedBJ: relatedRows
+            .map((quotation: any) => String(quotation?.quotationNo || quotation?.bjNumber || '').trim())
+            .filter(Boolean)
+            .join(', '),
+          linkedSupplier: relatedRows
+            .map((quotation: any) => String(quotation?.supplierName || quotation?.supplierCompany || '').trim())
+            .filter(Boolean)
+            .filter((value: string, index: number, arr: string[]) => arr.indexOf(value) === index)
+            .join(', '),
+          linkedXJ: relatedRows
+            .map((quotation: any) => String(quotation?.sourceXJ || quotation?.xjNumber || '').trim())
+            .filter(Boolean)
+            .filter((value: string, index: number, arr: string[]) => arr.indexOf(value) === index)
+            .join(', '),
+          products: fallbackProducts,
+          paymentTerms: relatedRows[0]?.paymentTerms || undefined,
+          deliveryTerms: relatedRows[0]?.deliveryTerms || undefined,
+          packaging: undefined,
+          warranty: relatedRows[0]?.warrantyTerms || undefined,
+          purchaserRemarks: fallbackRemarks,
+          suggestedMargin: 30,
+          riskLevel: 'medium',
+        };
+      }
+
+      const enrichedProducts = feedback.products.map((product: any, index: number) => {
+        const sourceItem = Array.isArray(req.items) ? req.items[index] : null;
+        const matched = bjItems.find((item: any, bjIndex: number) => {
+          if (bjIndex === index) return true;
+          const sameId =
+            normalizeComparable(item?.productId) &&
+            (
+              normalizeComparable(item?.productId) === normalizeComparable(product?.productId) ||
+              normalizeComparable(item?.productId) === normalizeComparable(sourceItem?.id)
+            );
+          const sameModel =
+            normalizeComparable(item?.modelNo) &&
+            (
+              normalizeComparable(item?.modelNo) === normalizeComparable((product as any)?.modelNo || (product as any)?.productModelNo) ||
+              normalizeComparable(item?.modelNo) === normalizeComparable(sourceItem?.modelNo)
+            );
+          const sameName =
+            normalizeComparable(item?.productName) &&
+            (
+              normalizeComparable(item?.productName) === normalizeComparable(product?.productName) ||
+              normalizeComparable(item?.productName) === normalizeComparable(sourceItem?.productName)
+            );
+          return Boolean(sameId || sameModel || sameName);
+        }) || bjItems[index] || null;
+
+        if (!matched) return product;
+
+        const quantity = Number(product?.quantity || matched?.quantity || sourceItem?.quantity || 0);
+        const unitPrice = toPositiveNumberOrNull(matched?.unitPrice) ?? toPositiveNumberOrNull(product?.costPrice);
+        const amount =
+          toPositiveNumberOrNull(matched?.amount) ??
+          (unitPrice != null && quantity > 0 ? unitPrice * quantity : product?.amount);
+
+        return {
+          ...product,
+          costPrice: unitPrice ?? product.costPrice,
+          amount: amount ?? product.amount,
+          currency: String(
+            matched?.currency ||
+            product?.sourcePricing?.currency ||
+            product?.currency ||
+            'CNY',
+          ).toUpperCase(),
+          sourcePricing: {
+            ...(product?.sourcePricing || {}),
+            unitPrice: unitPrice ?? product?.sourcePricing?.unitPrice,
+            currency: String(
+              matched?.currency ||
+              product?.sourcePricing?.currency ||
+              product?.currency ||
+              'CNY',
+            ).toUpperCase(),
+          },
+        };
+      });
+
+      const fallbackRemarks = buildFallbackRemarks(enrichedProducts);
+
+      return {
+        ...feedback,
+        products: enrichedProducts,
+        purchaserRemarks: String(feedback.purchaserRemarks || '').trim() || fallbackRemarks,
+        suggestedMargin: Number.isFinite(Number(feedback.suggestedMargin)) ? Number(feedback.suggestedMargin) : 30,
+        riskLevel: feedback.riskLevel || 'medium',
+      };
+    },
+    [],
+  );
   useEffect(() => {
     // 进入采购订单页时主动请求一次
     requestPurchaseOrders();
@@ -169,6 +445,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [editingPO, setEditingPO] = useState<PurchaseOrderType | null>(null);
   const [editPOForm, setEditPOForm] = useState<EditPOFormState>(createInitialEditPOForm);
   const [editPOItems, setEditPOItems] = useState<PurchaseOrderItem[]>([]);
+  const editPOFormRef = React.useRef<EditPOFormState>(createInitialEditPOForm());
+  const editPOItemsRef = React.useRef<PurchaseOrderItem[]>([]);
   const [editPOOrderDate, setEditPOOrderDate] = useState<Date | undefined>(undefined);
   const [editPOExpectedDate, setEditPOExpectedDate] = useState<Date | undefined>(undefined);
   const [editPOActualDate, setEditPOActualDate] = useState<Date | undefined>(undefined);
@@ -185,7 +463,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [currentPOData, setCurrentPOData] = useState<PurchaseOrderData | null>(null);
   const [exportingPDF, setExportingPDF] = useState(false);
   const poPDFRef = React.useRef<HTMLDivElement>(null);
-  const hiddenPDFRef = React.useRef<HTMLDivElement>(null); // 🔥 隐藏的PDF导出专用ref
   
   // 🔥 创建XJ对话框状态
   const [showCreateXJDialog, setShowCreateXJDialog] = useState(false);
@@ -193,6 +470,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const [selectedSuppliers, setSelectedSuppliers] = useState<Supplier[]>([]);
   const [xjDeadline, setXJDeadline] = useState<Date | undefined>(undefined);
   const [xjRemarks, setXJRemarks] = useState('');
+
+  useEffect(() => {
+    editPOFormRef.current = editPOForm;
+  }, [editPOForm]);
+
+  useEffect(() => {
+    editPOItemsRef.current = editPOItems;
+  }, [editPOItems]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]); // 🔥 选中的产品ID（统一用 string）
   const [submittingXJ, setSubmittingXJ] = useState(false);
   
@@ -248,6 +533,47 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       }),
     [requirements, inquiries],
   );
+
+  useEffect(() => {
+    const staleRequirements = purchaseRequirements.filter((req) => {
+      if (!req.pushedToQuotation) return false;
+      const hasPushEvidence = Boolean(
+        String(req.pushedToQuotationDate || '').trim() ||
+        String(req.pushedBy || '').trim() ||
+        String((req as any).quotationNumber || '').trim(),
+      );
+      const feedbackProducts = Array.isArray(req.purchaserFeedback?.products)
+        ? req.purchaserFeedback.products
+        : [];
+      const hasFeedbackPricing = feedbackProducts.some((product: any) => {
+        const unitPrice = Number(product?.sourcePricing?.unitPrice ?? product?.costPrice ?? 0);
+        const amount = Number(product?.amount ?? 0);
+        return (Number.isFinite(unitPrice) && unitPrice > 0) || (Number.isFinite(amount) && amount > 0);
+      });
+      return !hasPushEvidence || !hasFeedbackPricing;
+    });
+    if (!staleRequirements.length) return;
+
+    let cancelled = false;
+    const reconcileStalePushFlags = async () => {
+      for (const req of staleRequirements) {
+        if (cancelled) return;
+        await updateRequirement(req.id, {
+          pushedToQuotation: false,
+          pushedToQuotationDate: null,
+          pushedBy: null,
+          quotationNumber: null,
+        } as any).catch((error: any) => {
+          console.warn('⚠️ [PurchaseOrderMgmt] clear stale pushedToQuotation failed:', error?.message || error);
+        });
+      }
+    };
+
+    void reconcileStalePushFlags();
+    return () => {
+      cancelled = true;
+    };
+  }, [purchaseRequirements, updateRequirement]);
 
   // 🔥 供应商报价数据 - Supabase-first
   const [supplierQuotations, setSupplierQuotations] = useState<any[]>([]);
@@ -466,11 +792,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   }, [selectedSupplierQuotation, applyLocalQuotationStatus, loadSupplierQuotationsFromApi]);
 
   React.useEffect(() => {
-    if (activeTab === 'supplier-quotations') {
-      loadSupplierQuotationsFromApi();
-      const interval = setInterval(loadSupplierQuotationsFromApi, 10000);
-      return () => clearInterval(interval);
-    }
+    void loadSupplierQuotationsFromApi();
+    const interval = setInterval(loadSupplierQuotationsFromApi, activeTab === 'supplier-quotations' ? 10000 : 30000);
+    return () => clearInterval(interval);
   }, [activeTab, loadSupplierQuotationsFromApi]);
 
   // 统计数据
@@ -554,8 +878,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   }, [purchaseOrders, procurementRequestSearchTerm, isProcurementRequestRecord]);
 
   const getProcurementChildOrders = React.useCallback((po: PurchaseOrderType) => {
+    const workflow = derivePurchaseOrderWorkflowFields(po);
     const parentNo = String(po.poNumber || '').trim().toUpperCase();
-    if (!parentNo.startsWith('CQ-')) return [] as PurchaseOrderType[];
+    if (workflow.documentType !== 'PR' && !parentNo.startsWith('CQ-') && !parentNo.startsWith('PR-')) {
+      return [] as PurchaseOrderType[];
+    }
     return purchaseOrders.filter((child) => {
       const childNo = String(child.poNumber || '').trim().toUpperCase();
       const parent = String(child.parentRequestPoNumber || '').trim().toUpperCase();
@@ -569,10 +896,17 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   }, [getProcurementChildOrders, isProcurementRequestRecord]);
 
   const getProcurementRequestRuntimeStatus = React.useCallback((po: PurchaseOrderType) => {
+    const workflow = derivePurchaseOrderWorkflowFields(po);
+    if (workflow.documentType === 'PR') {
+      if (workflow.executionStatus === 'fully_allocated') return 'fully_allocated';
+      if (workflow.executionStatus === 'partially_allocated') return 'partially_allocated';
+      if (workflow.executionStatus === 'pending_assignment') return 'pending_assignment';
+    }
+
     const requestItems = po.items || [];
     const children = getProcurementChildOrders(po);
-    if (children.length === 0) return 'pending_procurement_assignment';
-    if (requestItems.length === 0) return 'partial_allocated';
+    if (children.length === 0) return 'pending_assignment';
+    if (requestItems.length === 0) return 'partially_allocated';
 
     const isMatched = (reqItem: any) => {
       const reqId = String(reqItem?.id || '').trim();
@@ -589,16 +923,16 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     };
 
     const matchedCount = requestItems.filter((item) => isMatched(item)).length;
-    if (matchedCount >= requestItems.length) return 'allocated_completed';
-    if (matchedCount > 0) return 'partial_allocated';
-    return 'pending_procurement_assignment';
+    if (matchedCount >= requestItems.length) return 'fully_allocated';
+    if (matchedCount > 0) return 'partially_allocated';
+    return 'pending_assignment';
   }, [getProcurementChildOrders]);
 
   // getProcurementRequestStatusText → purchaseOrderUtils (Pass A)
 
   const pendingProcurementRequestCount = useMemo(() => {
     const requests = purchaseOrders.filter((po) => isProcurementRequestRecord(po));
-    return requests.filter((po) => getProcurementRequestRuntimeStatus(po) !== 'allocated_completed').length;
+    return requests.filter((po) => getProcurementRequestRuntimeStatus(po) !== 'fully_allocated').length;
   }, [purchaseOrders, isProcurementRequestRecord, getProcurementRequestRuntimeStatus]);
 
   // 采购请求状态自动随分配结果变化（包括下游CG被删除后自动恢复可分配）
@@ -608,16 +942,17 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       for (const po of requests) {
         const runtimeStatus = getProcurementRequestRuntimeStatus(po);
         const persisted = String(po.procurementRequestStatus || '').trim();
-        if (persisted === runtimeStatus) continue;
+        const legacyRuntimeStatus = toLegacyProcurementRequestStatus(runtimeStatus);
+        if (persisted === legacyRuntimeStatus) continue;
         try {
-          await updatePurchaseOrder(po.id, { procurementRequestStatus: runtimeStatus } as any);
+          await updatePurchaseOrder(po.id, { procurementRequestStatus: legacyRuntimeStatus } as any);
         } catch (error: any) {
           console.warn('⚠️ [PurchaseOrderMgmt] procurementRequestStatus sync failed:', error?.message || error);
         }
       }
     };
     void syncStatuses();
-  }, [purchaseOrders, isProcurementRequestRecord, getProcurementRequestRuntimeStatus, updatePurchaseOrder]);
+  }, [purchaseOrders, isProcurementRequestRecord, getProcurementRequestRuntimeStatus, toLegacyProcurementRequestStatus, updatePurchaseOrder]);
 
   // 🔥 筛选采购订单 - 根据订单号、供应商、需求编号（不含“待分配”的采购请求）
   const filteredOrders = useMemo(() => {
@@ -676,6 +1011,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const recoveredOrder = {
           id: `recovered-${cqNo.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           poNumber: cqNo,
+          documentType: 'PR',
+          executionStatus: 'pending_assignment',
+          approvalStatus: 'not_required',
           requirementNo,
         sourceRef: inferredRfq || String(req.sourceRef || '').trim(),
         sourceSONumber: String(req.salesOrderNo || req.sourceRef || '').trim(),
@@ -864,6 +1202,29 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     [getPOTraceRefs, supplierQuotations]
   );
 
+  const resolveQuotationSourceRef = React.useCallback((po: PurchaseOrderType): string => {
+    const candidate = getPOQuoteCandidates(po)[0];
+    return String(
+      candidate?.bjNumber ||
+      candidate?.quotationNo ||
+      candidate?.quotationNumber ||
+      po.quotationNumber ||
+      po.selectedBjId ||
+      '',
+    ).trim();
+  }, [getPOQuoteCandidates]);
+
+  const resolveSupplierInquiryRef = React.useCallback((po: PurchaseOrderType): string => {
+    const candidate = getPOQuoteCandidates(po)[0];
+    return String(
+      candidate?.sourceXJ ||
+      candidate?.sourceXJNumber ||
+      candidate?.xjNumber ||
+      po.xjNumber ||
+      '',
+    ).trim();
+  }, [getPOQuoteCandidates]);
+
   const resolveQuotedItemPricing = React.useCallback(
     (po: PurchaseOrderType, item: PurchaseOrderItem, supplierCode?: string) => {
       const itemId = String(item?.id || '').trim();
@@ -899,10 +1260,44 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   const buildPOWithTracedQuoteCurrency = React.useCallback(
     (po: PurchaseOrderType) => {
+      const sourceContract = salesContractsLite.find((contract: any) => {
+        const contractNo = String(contract?.contractNumber || '').trim();
+        return contractNo !== '' && [
+          String(po.salesContractNumber || '').trim(),
+          String(po.sourceRef || '').trim(),
+          String(po.sourceSONumber || '').trim(),
+        ].includes(contractNo);
+      });
+      const sourceContractProducts = Array.isArray(sourceContract?.products) ? sourceContract.products : [];
       const tracedItems = (po.items || []).map((item) => {
         const traced = resolveQuotedItemPricing(po, item);
-        const unitPrice = traced && traced.unitPrice > 0 ? traced.unitPrice : toNumericAmount(item.unitPrice);
-        const currency = normalizeCurrencyCode(traced?.currency || item.currency || po.currency || '');
+        const itemId = String(item?.id || item?.productId || '').trim();
+        const itemModel = String(getFormalBusinessModelNo(item) || '').trim().toLowerCase();
+        const itemName = String(item?.productName || '').trim().toLowerCase();
+        const contractProduct = sourceContractProducts.find((product: any) => {
+          const productId = String(product?.id || product?.productId || '').trim();
+          const productModel = String(getFormalBusinessModelNo(product) || '').trim().toLowerCase();
+          const productName = String(product?.productName || '').trim().toLowerCase();
+          return (
+            (itemId !== '' && productId !== '' && itemId === productId) ||
+            (itemModel !== '' && productModel !== '' && itemModel === productModel) ||
+            (itemName !== '' && productName !== '' && itemName === productName)
+          );
+        });
+        const contractUnitPrice = toNumericAmount(
+          contractProduct?.unitPrice ?? contractProduct?.price ?? contractProduct?.targetPrice ?? 0
+        );
+        const unitPrice = traced && traced.unitPrice > 0
+          ? traced.unitPrice
+          : (toNumericAmount(item.unitPrice) > 0 ? toNumericAmount(item.unitPrice) : contractUnitPrice);
+        const currency = normalizeCurrencyCode(
+          traced?.currency ||
+          item.currency ||
+          contractProduct?.currency ||
+          sourceContract?.currency ||
+          po.currency ||
+          ''
+        );
         return {
           ...item,
           unitPrice,
@@ -927,8 +1322,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         totalAmount,
       };
     },
-    [resolveQuotedItemPricing]
+    [resolveQuotedItemPricing, salesContractsLite]
   );
+
+  const supplierPortalLinkageBackfillAttemptedRef = React.useRef<Set<string>>(new Set());
 
   // 自动反查回填：为缺失来源的采购单回填 ING（持久化到 purchase order）
   useEffect(() => {
@@ -950,13 +1347,99 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [purchaseOrders, salesContractsLite, xjs, purchaseRequirements]);
 
-  // 审批联动：老板审批采购请求后，自动更新采购单可下推状态
+  // 自动反查回填：为历史 CG 固化 supplier XJ/BJ（持久化到 purchase order）
+  useEffect(() => {
+    if (!purchaseOrders.length) return;
+    const backfillSupplierPortalLinkage = async () => {
+      for (const po of purchaseOrders) {
+        const poNo = String(po.poNumber || '').trim().toUpperCase();
+        if (!poNo.startsWith('CG-')) continue;
+
+        const backfillKey = String(po.id || po.poNumber || '').trim();
+        if (!backfillKey || supplierPortalLinkageBackfillAttemptedRef.current.has(backfillKey)) continue;
+
+        const renderMeta = po.documentRenderMeta || {};
+        const supplierPortalLinkage = renderMeta?.supplierPortalLinkage || {};
+        const snapshot = po.documentDataSnapshot || {};
+        const editForm = (snapshot as any)?.editForm || {};
+
+        const existingSupplierXjNo = String(
+          supplierPortalLinkage?.supplierXjNo ||
+          editForm?.xjNumber ||
+          ''
+        ).trim();
+        const existingSupplierBjNo = String(
+          supplierPortalLinkage?.supplierBjNo ||
+          editForm?.supplierQuotationNo ||
+          ''
+        ).trim();
+
+        if (/^XJ-/i.test(existingSupplierXjNo) && /^BJ-/i.test(existingSupplierBjNo)) {
+          supplierPortalLinkageBackfillAttemptedRef.current.add(backfillKey);
+          continue;
+        }
+
+        const matchedQuotation = getPOQuoteCandidates(po)[0] || null;
+        const inferredSupplierXjNo = String(resolveSupplierInquiryRef(po) || '').trim();
+        const inferredSupplierBjNo = String(resolveQuotationSourceRef(po) || '').trim();
+
+        if (!/^XJ-/i.test(inferredSupplierXjNo) && !/^BJ-/i.test(inferredSupplierBjNo)) {
+          continue;
+        }
+
+        supplierPortalLinkageBackfillAttemptedRef.current.add(backfillKey);
+
+        try {
+          await updatePurchaseOrder(po.id, {
+            documentRenderMeta: {
+              ...renderMeta,
+              supplierPortalLinkage: {
+                ...supplierPortalLinkage,
+                supplierXjNo: /^XJ-/i.test(inferredSupplierXjNo)
+                  ? inferredSupplierXjNo
+                  : (supplierPortalLinkage?.supplierXjNo || null),
+                supplierBjNo: /^BJ-/i.test(inferredSupplierBjNo)
+                  ? inferredSupplierBjNo
+                  : (supplierPortalLinkage?.supplierBjNo || null),
+                supplierQuotationId: matchedQuotation?.id || supplierPortalLinkage?.supplierQuotationId || null,
+                supplierCode: po.supplierCode || matchedQuotation?.supplierCode || supplierPortalLinkage?.supplierCode || null,
+              },
+            } as any,
+            documentDataSnapshot: {
+              ...snapshot,
+              editForm: {
+                ...editForm,
+                xjNumber: /^XJ-/i.test(inferredSupplierXjNo)
+                  ? inferredSupplierXjNo
+                  : (editForm?.xjNumber || ''),
+                supplierQuotationNo: /^BJ-/i.test(inferredSupplierBjNo)
+                  ? inferredSupplierBjNo
+                  : (editForm?.supplierQuotationNo || ''),
+              },
+            } as any,
+          } as any);
+        } catch (error: any) {
+          supplierPortalLinkageBackfillAttemptedRef.current.delete(backfillKey);
+          console.warn('⚠️ [PurchaseOrderMgmt] supplierPortalLinkage backfill failed:', po.poNumber, error?.message || error);
+        }
+      }
+    };
+    void backfillSupplierPortalLinkage();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseOrders, supplierQuotations, xjs, purchaseRequirements]);
+
+  // 审批联动：采购主管 / CEO 审批采购请求后，自动更新采购单可下推状态
   useEffect(() => {
     if (!purchaseOrders.length || !approvalRequests.length) return;
     const syncApprovalStatuses = async () => {
       for (const po of purchaseOrders) {
-        const reqStatus = String(po.procurementRequestStatus || '');
-        if (reqStatus !== 'pending_boss_approval') continue;
+        const workflow = derivePurchaseOrderWorkflowFields(po);
+        const reqStatus = String(po.procurementRequestStatus || '').trim();
+        const approvalStatus = String(workflow.approvalStatus || '').trim();
+        const isPendingApproval =
+          ['pending_l1', 'pending_l2'].includes(approvalStatus) ||
+          ['pending_manager_approval', 'pending_ceo_approval'].includes(reqStatus);
+        if (!isPendingApproval) continue;
         const poNo = String(po.poNumber || '').trim();
         const parentNo = String(po.parentRequestPoNumber || '').trim();
         const requestIds = [
@@ -969,10 +1452,21 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           if (matched.status === 'approved') {
             await updatePurchaseOrder(po.id, {
               status: 'confirmed',
+              approvalStatus: 'approved',
+              executionStatus: String(workflow.executionStatus || '').trim() || 'approved',
               ...( { procurementRequestStatus: 'approved_boss' } as any ),
+            } as any);
+          } else if (
+            matched.status === 'forwarded' &&
+            (approvalStatus === 'pending_l1' || reqStatus === 'pending_manager_approval')
+          ) {
+            await updatePurchaseOrder(po.id, {
+              approvalStatus: 'pending_l2',
+              ...( { procurementRequestStatus: 'pending_ceo_approval' } as any ),
             } as any);
           } else if (matched.status === 'rejected') {
             await updatePurchaseOrder(po.id, {
+              approvalStatus: 'rejected',
               ...( { procurementRequestStatus: 'rejected_boss' } as any ),
             } as any);
           }
@@ -994,6 +1488,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       ...po,
       ...tracedPatch,
     };
+    const nextDocumentSnapshot = buildPurchaseOrderDocumentSnapshot(poForDoc as any, {
+      preferLiveData: true,
+    });
     const hasCurrencyDelta =
       String(po.currency || '').toUpperCase() !== String(tracedPatch.currency || '').toUpperCase();
     const hasAmountDelta = Math.abs(Number(po.totalAmount || 0) - Number(tracedPatch.totalAmount || 0)) > 0.0001;
@@ -1003,25 +1500,24 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         Number(item.unitPrice || 0) !== Number(next.unitPrice || 0) ||
         String(item.currency || '').toUpperCase() !== String(next.currency || '').toUpperCase();
     });
-    if (hasCurrencyDelta || hasAmountDelta || hasItemDelta) {
-      try {
-        await updatePurchaseOrder(po.id, {
-          items: tracedPatch.items as any,
-          currency: tracedPatch.currency,
-          totalAmount: tracedPatch.totalAmount,
-          updatedDate: new Date().toISOString(),
-        } as any);
-      } catch (error: any) {
-        toast.error('采购合同数据同步失败', {
+    const existingSnapshot = (po as any).documentDataSnapshot || (po as any).document_data_snapshot || null;
+    const hasSnapshotDelta = JSON.stringify(existingSnapshot || null) !== JSON.stringify(nextDocumentSnapshot);
+    setCurrentPOData(nextDocumentSnapshot);
+    setShowPOPreview(true);
+    if (hasCurrencyDelta || hasAmountDelta || hasItemDelta || hasSnapshotDelta) {
+      void updatePurchaseOrder(po.id, {
+        items: tracedPatch.items as any,
+        currency: tracedPatch.currency,
+        totalAmount: tracedPatch.totalAmount,
+        documentDataSnapshot: nextDocumentSnapshot,
+        updatedDate: new Date().toISOString(),
+      } as any).catch((error: any) => {
+        toast.error('采购合同数据后台同步失败', {
           description: error?.message || 'Supabase 写入失败',
           duration: 5000,
         });
-        return;
-      }
+      });
     }
-    const poData = buildPurchaseOrderDocumentSnapshot(poForDoc as any);
-    setCurrentPOData(poData);
-    setShowPOPreview(true);
   };
 
   // 🔥 处理采购需求单号点击 - 打开文档预览
@@ -1041,19 +1537,22 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       }));
     };
 
+    const workflow = derivePurchaseOrderWorkflowFields(po);
     const reqStatus = String(po.procurementRequestStatus || '');
-    if (reqStatus === 'pending_boss_approval') {
+    const approvalStatus = String(workflow.approvalStatus || '').trim();
+    const executionStatus = String(workflow.executionStatus || '').trim();
+    if (['pending_l1', 'pending_l2'].includes(approvalStatus) || reqStatus === 'pending_manager_approval' || reqStatus === 'pending_ceo_approval') {
       toast.info('该采购单已提交审核');
       navigateToBossApproval();
       return;
     }
-    if (reqStatus === 'approved_boss') {
+    if (approvalStatus === 'approved' || reqStatus === 'approved_boss') {
       toast.info('该采购单已审核通过');
       navigateToBossApproval();
       return;
     }
-    const isRejectedAndResubmit = reqStatus === 'rejected_boss';
-    if (reqStatus === 'pushed_supplier') {
+    const isRejectedAndResubmit = approvalStatus === 'rejected' || reqStatus === 'rejected_boss';
+    if (executionStatus === 'pushed_to_supplier' || reqStatus === 'pushed_supplier') {
       toast.info('该采购单已发送供应商');
       return;
     }
@@ -1078,12 +1577,39 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           const parentNo = String(p.parentRequestPoNumber || '').trim();
           return pNo === mainPoNo || parentNo === mainPoNo;
         });
-    const managerByRegion: Record<string, string> = {
-      NA: 'ceo@cosun.com',
-      SA: 'ceo@cosun.com',
-      EA: 'ceo@cosun.com',
-    };
-    const currentApproverEmail = managerByRegion[po.region || 'NA'] || 'ceo@cosun.com';
+    const needsValidation = groupPOs.some((p) => String(p.prValidationStatus || '').trim() !== 'passed');
+    if (needsValidation) {
+      const hasComparisonEvidence = groupPOs.every((p) => {
+        const selectedQuote = p.selectedQuote;
+        const selectedBjId = String(p.selectedBjId || '').trim();
+        const xjNo = String(p.xjNumber || '').trim();
+        return Boolean(selectedQuote || selectedBjId || xjNo);
+      });
+      if (!hasComparisonEvidence) {
+        const shouldContinue = window.confirm(
+          '部分采购单缺少 XJ/BJ 比价依据（xjNumber / selectedQuote / selectedBjId）。\n\n建议先补齐比价结论再提交审核。\n\n是否仍继续提交审核？'
+        );
+        if (!shouldContinue) return;
+      }
+      const validationTimestamp = new Date().toISOString();
+      const validatedBy = user?.email || user?.name || 'procurement';
+      try {
+        await Promise.all(groupPOs.map((p) => updatePurchaseOrder(p.id, {
+          prValidationStatus: 'passed',
+          prValidatedAt: validationTimestamp,
+          prValidatedBy: validatedBy,
+        } as any)));
+      } catch (error: any) {
+        toast.error('自动检查采购草稿失败', {
+          description: error?.message || 'Supabase 写入失败',
+          duration: 5000,
+        });
+        return;
+      }
+    }
+    const procurementManagerEmail = 'procurement.manager@cosunchina.com';
+    const ceoEmail = 'ceo@cosunchina.com';
+    const requiresCeoSecondReview = Number(po.totalAmount || 0) > 100000;
     const requestId = `PRQ-${mainPoNo || currentPoNo}`;
     const existingRequest = approvalRequests.find((r) => String(r.relatedDocumentId || '') === requestId);
     if (existingRequest && (existingRequest.status === 'pending' || existingRequest.status === 'forwarded')) {
@@ -1099,17 +1625,17 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         submittedBy: user?.email || existingRequest.submittedBy,
         submittedByName: user?.name || user?.email || existingRequest.submittedByName,
         submittedByRole: user?.role || existingRequest.submittedByRole,
-        currentApprover: currentApproverEmail,
-        currentApproverRole: 'CEO',
-        nextApprover: null,
-        nextApproverRole: null,
+        currentApprover: procurementManagerEmail,
+        currentApproverRole: 'Procurement_Manager',
+        nextApprover: requiresCeoSecondReview ? ceoEmail : null,
+        nextApproverRole: requiresCeoSecondReview ? 'CEO' : null,
         expiresIn: 24,
         deadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       } as any);
     } else if (!existingRequest) {
       const linkedRequirement = findRequirementForPO(po);
       await addApprovalRequest({
-        type: 'contract',
+        type: 'cg_approval',
         relatedDocumentId: requestId,
         relatedDocumentType: '采购请求审批',
         relatedDocument: {
@@ -1123,21 +1649,28 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         submittedByRole: user?.role || 'Purchaser',
         submittedAt: new Date().toISOString(),
         region: po.region || 'NA',
-        currentApprover: currentApproverEmail,
-        currentApproverRole: 'CEO',
+        currentApprover: procurementManagerEmail,
+        currentApproverRole: 'Procurement_Manager',
+        nextApprover: requiresCeoSecondReview ? ceoEmail : null,
+        nextApproverRole: requiresCeoSecondReview ? 'CEO' : null,
         status: 'pending',
         urgency: Number(po.totalAmount || 0) >= 50000 ? 'high' : 'normal',
         amount: Number(po.totalAmount || 0),
         currency: po.currency || 'USD',
         customerName: linkedRequirement?.customer?.companyName || '',
         customerEmail: linkedRequirement?.customer?.email || '',
-        productSummary: `${groupPOs.length}张采购单草稿，待老板审核`,
+        productSummary: requiresCeoSecondReview
+          ? `${groupPOs.length}张采购单草稿，待采购主管审核，通过后进入 CEO 二审`
+          : `${groupPOs.length}张采购单草稿，待采购主管审核`,
         deadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         expiresIn: 24
       } as any);
     }
     try {
-      await Promise.all(groupPOs.map((p) => updatePurchaseOrder(p.id, { procurementRequestStatus: 'pending_boss_approval' } as any)));
+      await Promise.all(groupPOs.map((p) => updatePurchaseOrder(p.id, {
+        approvalStatus: 'pending_l1',
+        procurementRequestStatus: 'pending_manager_approval',
+      } as any)));
     } catch (error: any) {
       toast.error('同步采购单审批状态失败', {
         description: error?.message || 'Supabase 写入失败',
@@ -1149,26 +1682,98 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     navigateToBossApproval();
   };
 
+  const handleValidateProcurementRequest = async (po: PurchaseOrderType) => {
+    const workflow = derivePurchaseOrderWorkflowFields(po);
+    const reqStatus = String(po.procurementRequestStatus || '').trim();
+    const approvalStatus = String(workflow.approvalStatus || '').trim();
+    const executionStatus = String(workflow.executionStatus || '').trim();
+    if (['pending_l1', 'pending_l2'].includes(approvalStatus) || reqStatus === 'pending_manager_approval' || reqStatus === 'pending_ceo_approval') {
+      toast.info('该采购单已进入审批阶段，无需重复检查');
+      return;
+    }
+    if (approvalStatus === 'approved' || executionStatus === 'pushed_to_supplier' || reqStatus === 'approved_boss' || reqStatus === 'pushed_supplier') {
+      toast.info('该采购单已通过审批，无需重复检查');
+      return;
+    }
+
+    const currentPoNo = String(po.poNumber || '').trim();
+    const parentPoNo = String(po.parentRequestPoNumber || '').trim();
+    const mainPoNo = parentPoNo.startsWith('PR-')
+      ? parentPoNo
+      : parentPoNo.startsWith('CG-')
+        ? parentPoNo
+        : currentPoNo;
+    const groupPOs = parentPoNo.startsWith('PR-')
+      ? purchaseOrders.filter((p) => String(p.parentRequestPoNumber || '').trim() === mainPoNo)
+      : purchaseOrders.filter((p) => {
+          const pNo = String(p.poNumber || '').trim();
+          const parentNo = String(p.parentRequestPoNumber || '').trim();
+          return pNo === mainPoNo || parentNo === mainPoNo;
+        });
+
+    const hasComparisonEvidence = groupPOs.every((p) => {
+      const selectedQuote = p.selectedQuote;
+      const selectedBjId = String(p.selectedBjId || '').trim();
+      const xjNo = String(p.xjNumber || '').trim();
+      return Boolean(selectedQuote || selectedBjId || xjNo);
+    });
+
+    if (!hasComparisonEvidence) {
+      const shouldContinue = window.confirm(
+        '部分采购单缺少 XJ/BJ 比价依据（xjNumber / selectedQuote / selectedBjId）。\n\n建议先补齐比价结论后再继续。\n\n是否仍继续？'
+      );
+      if (!shouldContinue) return;
+    }
+
+    if (groupPOs.length === 0) {
+      toast.error('未找到可校验的采购单草稿');
+      return;
+    }
+
+    const validationTimestamp = new Date().toISOString();
+    const validatedBy = user?.email || user?.name || 'procurement';
+    try {
+      await Promise.all(groupPOs.map((p) => updatePurchaseOrder(p.id, {
+        prValidationStatus: 'passed',
+        prValidatedAt: validationTimestamp,
+        prValidatedBy: validatedBy,
+      } as any)));
+      toast.success(`检查已通过（${groupPOs.length}张采购单）`);
+    } catch (error: any) {
+      toast.error('同步检查状态失败', {
+        description: error?.message || 'Supabase 写入失败',
+        duration: 5000,
+      });
+    }
+  };
+
   const handlePushPurchaseToSupplier = async (po: PurchaseOrderType) => {
+    const workflow = derivePurchaseOrderWorkflowFields(po);
     const reqStatus = String(po.procurementRequestStatus || '');
+    const approvalStatus = String(workflow.approvalStatus || '').trim();
+    const executionStatus = String(workflow.executionStatus || '').trim();
     const isUnassigned = !po.supplierCode || po.supplierCode === 'TBD' || String(po.supplierName || '').includes('待');
-    if (reqStatus === 'pending_procurement_assignment' || isUnassigned) {
+    if (workflow.documentType === 'PR' || executionStatus === 'pending_assignment' || reqStatus === 'pending_procurement_assignment' || isUnassigned) {
       openSupplierAllocationDialog(po);
       return;
     }
-    if (!reqStatus || reqStatus === 'draft_allocated') {
+    if (approvalStatus === 'draft' || (!approvalStatus && (!reqStatus || reqStatus === 'draft_allocated'))) {
       toast.error('请先点击“申请审核”，审核通过后才能下推采购');
       return;
     }
-    if (reqStatus === 'pending_boss_approval') {
-      toast.error('该采购请求待老板审核，通过后才能下推采购');
+    if (approvalStatus === 'pending_l1' || reqStatus === 'pending_manager_approval') {
+      toast.error('该采购请求待采购主管审核，通过后才能下推采购');
       return;
     }
-    if (reqStatus === 'rejected_boss') {
+    if (approvalStatus === 'pending_l2' || reqStatus === 'pending_ceo_approval') {
+      toast.error('该采购请求待 CEO 二审，通过后才能下推采购');
+      return;
+    }
+    if (approvalStatus === 'rejected' || reqStatus === 'rejected_boss') {
       toast.error('该采购请求已被老板驳回，请业务员重新发起请求采购');
       return;
     }
-    if (reqStatus === 'approved_boss') {
+    if (approvalStatus === 'approved' || reqStatus === 'approved_boss') {
       const currentPoNo = String(po.poNumber || '').trim();
       const parentPoNo = String(po.parentRequestPoNumber || '').trim();
       // Phase 3d: corrected sibling-selection for standard PR → CG path.
@@ -1191,6 +1796,8 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           });
       try {
         await Promise.all(targetPOs.map((p) => updatePurchaseOrder(p.id, {
+          approvalStatus: 'approved',
+          executionStatus: 'pushed_to_supplier',
           procurementRequestStatus: 'pushed_supplier',
           status: 'confirmed',
           updatedDate: new Date().toISOString(),
@@ -1227,7 +1834,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const allPushed =
           allCGsForPR.length > 0 &&
           allCGsForPR.every(
-            cg => cg.procurementRequestStatus === 'pushed_supplier' || justPushedIds.has(cg.id)
+            cg => {
+              const cgWorkflow = derivePurchaseOrderWorkflowFields(cg);
+              return cgWorkflow.executionStatus === 'pushed_to_supplier' || cg.procurementRequestStatus === 'pushed_supplier' || justPushedIds.has(cg.id);
+            }
           );
         if (allPushed) {
           // Resolve SC contract number from the parent PR record
@@ -1248,7 +1858,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       toast.success(`已向供应商发送 ${targetPOs.length || 1} 张采购单`);
       return;
     }
-    if (reqStatus === 'pushed_supplier') {
+    if (executionStatus === 'pushed_to_supplier' || reqStatus === 'pushed_supplier') {
       toast.info('该采购单已完成下推采购');
       return;
     }
@@ -1256,9 +1866,187 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   const handleOpenEditPO = (po: PurchaseOrderType) => {
+    const existingSnapshot = ((po as any).documentDataSnapshot || (po as any).document_data_snapshot || null) as PurchaseOrderData | null;
+    const existingEditForm = (existingSnapshot?.editForm || {}) as Record<string, any>;
+    const resolvedOrderDate = String(
+      (po as any).orderDate ||
+      (po as any).order_date ||
+      existingEditForm.orderDate ||
+      existingSnapshot?.poDate ||
+      ''
+    ).trim();
+    const resolvedExpectedDate = String(
+      (po as any).expectedDate ||
+      (po as any).expectedDeliveryDate ||
+      (po as any).expected_delivery_date ||
+      existingEditForm.expectedDate ||
+      existingSnapshot?.requiredDeliveryDate ||
+      ''
+    ).trim();
+    const resolvedPaymentTerms = String(
+      (po as any).paymentTerms ||
+      existingEditForm.paymentTerms ||
+      existingSnapshot?.terms?.paymentTerms ||
+      ''
+    );
+    const resolvedSupplierBankInfo =
+      (po as any).supplierBankInfo ||
+      (po as any).supplier_bank_info ||
+      existingSnapshot?.supplier?.bankInfo ||
+      null;
+    const resolvedDeliveryTerms = String(
+      (po as any).deliveryTerms ||
+      existingEditForm.deliveryTerms ||
+      existingSnapshot?.terms?.deliveryTerms ||
+      ''
+    );
+    const resolvedDeliveryAddress = String(
+      (po as any).deliveryAddress ||
+      existingEditForm.deliveryAddress ||
+      existingSnapshot?.terms?.deliveryAddress ||
+      ''
+    );
+    const resolvedQualityStandard = String(
+      (po as any).qualityStandard ||
+      (po as any).qualityTerms ||
+      existingEditForm.qualityStandard ||
+      existingSnapshot?.terms?.qualityStandard ||
+      ''
+    );
+    const resolvedInspectionMethod = String(
+      (po as any).inspectionMethod ||
+      (po as any).inspectionTerms ||
+      existingEditForm.inspectionMethod ||
+      existingSnapshot?.terms?.inspectionMethod ||
+      ''
+    );
+    const resolvedPackaging = String(
+      (po as any).packaging ||
+      (po as any).packagingTerms ||
+      existingEditForm.packaging ||
+      existingSnapshot?.terms?.packaging ||
+      ''
+    );
+    const resolvedShippingMarks = String(
+      (po as any).shippingMarks ||
+      existingEditForm.shippingMarks ||
+      existingSnapshot?.terms?.shippingMarks ||
+      ''
+    );
+    const resolvedDeliveryPenalty = String(
+      (po as any).deliveryPenalty ||
+      existingEditForm.deliveryPenalty ||
+      existingSnapshot?.terms?.deliveryPenalty ||
+      ''
+    );
+    const resolvedQualityPenalty = String(
+      (po as any).qualityPenalty ||
+      (po as any).penaltyTerms ||
+      existingEditForm.qualityPenalty ||
+      existingSnapshot?.terms?.qualityPenalty ||
+      ''
+    );
+    const resolvedWarrantyPeriod = String(
+      (po as any).warrantyPeriod ||
+      existingEditForm.warrantyPeriod ||
+      existingSnapshot?.terms?.warrantyPeriod ||
+      ''
+    );
+    const resolvedWarrantyTerms = String(
+      (po as any).warrantyTerms ||
+      existingEditForm.warrantyTerms ||
+      existingSnapshot?.terms?.warrantyTerms ||
+      ''
+    );
+    const resolvedApplicableLaw = String(
+      (po as any).applicableLaw ||
+      existingEditForm.applicableLaw ||
+      existingSnapshot?.terms?.applicableLaw ||
+      ''
+    );
+    const resolvedContractValidity = String(
+      (po as any).contractValidity ||
+      existingEditForm.contractValidity ||
+      existingSnapshot?.terms?.contractValidity ||
+      ''
+    );
+    const resolvedReturnPolicy = String(
+      (po as any).returnPolicy ||
+      existingEditForm.returnPolicy ||
+      existingSnapshot?.terms?.returnPolicy ||
+      ''
+    );
+    const resolvedConfidentiality = String(
+      (po as any).confidentiality ||
+      existingEditForm.confidentiality ||
+      existingSnapshot?.terms?.confidentiality ||
+      ''
+    );
+    const resolvedIpRights = String(
+      (po as any).ipRights ||
+      existingEditForm.ipRights ||
+      existingSnapshot?.terms?.ipRights ||
+      ''
+    );
+    const resolvedForceMajeure = String(
+      (po as any).forceMajeure ||
+      existingEditForm.forceMajeure ||
+      existingSnapshot?.terms?.forceMajeure ||
+      ''
+    );
+    const resolvedDisputeResolution = String(
+      (po as any).disputeResolution ||
+      (po as any).disputeResolutionTerms ||
+      existingEditForm.disputeResolution ||
+      existingSnapshot?.terms?.disputeResolution ||
+      ''
+    );
+    const resolvedModification = String(
+      (po as any).modification ||
+      existingEditForm.modification ||
+      existingSnapshot?.terms?.modification ||
+      ''
+    );
+    const resolvedTermination = String(
+      (po as any).termination ||
+      existingEditForm.termination ||
+      existingSnapshot?.terms?.termination ||
+      ''
+    );
+    const resolvedIncoterm = String(
+      (po as any).incoterm ||
+      existingEditForm.incoterm ||
+      existingSnapshot?.terms?.incoterm ||
+      ''
+    );
+    const resolvedPortOfLoading = String(
+      (po as any).portOfLoading ||
+      existingEditForm.portOfLoading ||
+      existingSnapshot?.terms?.portOfLoading ||
+      ''
+    );
+    const resolvedPortOfDestination = String(
+      (po as any).portOfDestination ||
+      existingEditForm.portOfDestination ||
+      existingSnapshot?.terms?.portOfDestination ||
+      ''
+    );
+    const resolvedTaxTerms = String(
+      (po as any).taxTerms ||
+      existingEditForm.taxTerms ||
+      existingSnapshot?.terms?.taxTerms ||
+      ''
+    );
+    const resolvedBankTerms = String(
+      (po as any).bankTerms ||
+      existingEditForm.bankTerms ||
+      existingSnapshot?.terms?.bankTerms ||
+      ''
+    );
     const normalizedSourceRef = normalizeRegionalDocNo(
       String(
         po.sourceRef ||
+        existingEditForm.sourceRef ||
         po.salesContractNumber ||
         po.sourceSONumber ||
         ''
@@ -1276,54 +2064,60 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     setEditingPO(po);
     setEditPOForm({
       poNumber: String(po.poNumber || ''),
-      requirementNo: String(po.requirementNo || ''),
-      xjNumber: String(po.xjNumber || ''),
+      requirementNo: String(po.requirementNo || existingEditForm.requirementNo || ''),
+      xjNumber: String(po.xjNumber || existingEditForm.xjNumber || ''),
       sourceRef: normalizedSourceRef,
-      supplierName: String(po.supplierName || ''),
-      supplierCode: String(po.supplierCode || ''),
-      supplierContact: String((po as any).supplierContact || ''),
-      supplierPhone: String((po as any).supplierPhone || ''),
-      supplierAddress: String((po as any).supplierAddress || ''),
+      supplierName: String(po.supplierName || existingEditForm.supplierName || ''),
+      supplierCode: String(po.supplierCode || existingEditForm.supplierCode || ''),
+      supplierContact: String((po as any).supplierContact || existingEditForm.supplierContact || ''),
+      supplierPhone: String((po as any).supplierPhone || existingEditForm.supplierPhone || ''),
+      supplierAddress: String((po as any).supplierAddress || existingEditForm.supplierAddress || ''),
+      supplierBankName: String(resolvedSupplierBankInfo?.bankName || ''),
+      supplierBankAccountName: String(resolvedSupplierBankInfo?.accountName || ''),
+      supplierBankAccountNumber: String(resolvedSupplierBankInfo?.accountNumber || ''),
+      supplierBankSwiftCode: String(resolvedSupplierBankInfo?.swiftCode || resolvedSupplierBankInfo?.swift || ''),
+      supplierBankAddress: String(resolvedSupplierBankInfo?.bankAddress || ''),
+      supplierBankCurrency: String(resolvedSupplierBankInfo?.currency || ''),
       currency: effectivePOCurrency,
-      paymentTerms: String((po as any).paymentTerms || ''),
-      deliveryTerms: String((po as any).deliveryTerms || ''),
-      deliveryAddress: String((po as any).deliveryAddress || ''),
-      qualityStandard: String((po as any).qualityStandard || (po as any).qualityTerms || ''),
-      inspectionMethod: String((po as any).inspectionMethod || (po as any).inspectionTerms || ''),
-      packaging: String((po as any).packaging || (po as any).packagingTerms || ''),
-      shippingMarks: String((po as any).shippingMarks || ''),
-      deliveryPenalty: String((po as any).deliveryPenalty || ''),
-      qualityPenalty: String((po as any).qualityPenalty || (po as any).penaltyTerms || ''),
-      warrantyPeriod: String((po as any).warrantyPeriod || ''),
-      returnPolicy: String((po as any).returnPolicy || ''),
-      confidentiality: String((po as any).confidentiality || ''),
-      ipRights: String((po as any).ipRights || ''),
-      forceMajeure: String((po as any).forceMajeure || ''),
-      disputeResolution: String((po as any).disputeResolution || (po as any).disputeResolutionTerms || ''),
-      applicableLaw: String((po as any).applicableLaw || ''),
-      contractValidity: String((po as any).contractValidity || ''),
-      modification: String((po as any).modification || ''),
-      termination: String((po as any).termination || ''),
-      incoterm: String((po as any).incoterm || ''),
-      portOfLoading: String((po as any).portOfLoading || ''),
-      portOfDestination: String((po as any).portOfDestination || ''),
+      paymentTerms: resolvedPaymentTerms,
+      deliveryTerms: resolvedDeliveryTerms,
+      deliveryAddress: resolvedDeliveryAddress,
+      qualityStandard: resolvedQualityStandard,
+      inspectionMethod: resolvedInspectionMethod,
+      packaging: resolvedPackaging,
+      shippingMarks: resolvedShippingMarks,
+      deliveryPenalty: resolvedDeliveryPenalty,
+      qualityPenalty: resolvedQualityPenalty,
+      warrantyPeriod: resolvedWarrantyPeriod,
+      returnPolicy: resolvedReturnPolicy,
+      confidentiality: resolvedConfidentiality,
+      ipRights: resolvedIpRights,
+      forceMajeure: resolvedForceMajeure,
+      disputeResolution: resolvedDisputeResolution,
+      applicableLaw: resolvedApplicableLaw,
+      contractValidity: resolvedContractValidity,
+      modification: resolvedModification,
+      termination: resolvedTermination,
+      incoterm: resolvedIncoterm,
+      portOfLoading: resolvedPortOfLoading,
+      portOfDestination: resolvedPortOfDestination,
       qualityTerms: String((po as any).qualityTerms || ''),
       inspectionTerms: String((po as any).inspectionTerms || ''),
       packagingTerms: String((po as any).packagingTerms || ''),
-      warrantyTerms: String((po as any).warrantyTerms || ''),
+      warrantyTerms: resolvedWarrantyTerms,
       penaltyTerms: String((po as any).penaltyTerms || ''),
       disputeResolutionTerms: String((po as any).disputeResolutionTerms || ''),
-      taxTerms: String((po as any).taxTerms || ''),
-      bankTerms: String((po as any).bankTerms || ''),
-      orderDate: String((po as any).orderDate || ''),
-      expectedDate: String((po as any).expectedDate || ''),
-      actualDate: String((po as any).actualDate || ''),
-      status: String((po as any).status || 'pending'),
-      paymentStatus: String((po as any).paymentStatus || 'unpaid'),
-      remarks: String((po as any).remarks || ''),
+      taxTerms: resolvedTaxTerms,
+      bankTerms: resolvedBankTerms,
+      orderDate: resolvedOrderDate,
+      expectedDate: resolvedExpectedDate,
+      actualDate: String((po as any).actualDate || existingEditForm.actualDate || ''),
+      status: String((po as any).status || existingEditForm.status || 'pending'),
+      paymentStatus: String((po as any).paymentStatus || existingEditForm.paymentStatus || 'unpaid'),
+      remarks: String((po as any).remarks || existingEditForm.remarks || ''),
     });
-    setEditPOOrderDate(parseDateLike((po as any).orderDate));
-    setEditPOExpectedDate(parseDateLike((po as any).expectedDate));
+    setEditPOOrderDate(parseDateLike(resolvedOrderDate));
+    setEditPOExpectedDate(parseDateLike(resolvedExpectedDate));
     setEditPOActualDate(parseDateLike((po as any).actualDate));
     setEditPOItems(
       (po.items || []).map((item) => ({
@@ -1425,62 +2219,90 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   const handleSaveEditPO = async () => {
     if (!editingPO) return;
-    const totalAmount = editPOItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
-    const normalizedSourceRef = normalizeRegionalDocNo(editPOForm.sourceRef);
-    try {
-      await updatePurchaseOrder(editingPO.id, {
-      poNumber: String(editPOForm.poNumber || '').trim(),
-      requirementNo: String(editPOForm.requirementNo || '').trim(),
-      xjNumber: String(editPOForm.xjNumber || '').trim(),
+    const latestEditPOForm = editPOFormRef.current;
+    const latestEditPOItems = editPOItemsRef.current;
+    const totalAmount = latestEditPOItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+    const normalizedSourceRef = normalizeRegionalDocNo(latestEditPOForm.sourceRef);
+    const normalizedOrderDate = formatDateForStorage(editPOOrderDate) || String(latestEditPOForm.orderDate || '').trim();
+    const normalizedExpectedDate = formatDateForStorage(editPOExpectedDate) || String(latestEditPOForm.expectedDate || '').trim();
+    const normalizedActualDate = formatDateForStorage(editPOActualDate) || String(latestEditPOForm.actualDate || '').trim() || undefined;
+    const normalizedUpdates = {
+      ...editingPO,
+      poNumber: String(latestEditPOForm.poNumber || '').trim(),
+      requirementNo: String(latestEditPOForm.requirementNo || '').trim(),
+      xjNumber: String(latestEditPOForm.xjNumber || '').trim(),
       sourceRef: normalizedSourceRef,
       sourceSONumber: normalizedSourceRef,
       salesContractNumber: normalizedSourceRef,
-      supplierName: String(editPOForm.supplierName || '').trim(),
-      supplierCode: String(editPOForm.supplierCode || '').trim(),
-      supplierContact: String(editPOForm.supplierContact || '').trim(),
-      supplierPhone: String(editPOForm.supplierPhone || '').trim(),
-      supplierAddress: String(editPOForm.supplierAddress || '').trim(),
-      currency: normalizeCurrencyCode(editPOForm.currency) || 'CNY',
-      paymentTerms: String(editPOForm.paymentTerms || '').trim(),
-      deliveryTerms: String(editPOForm.deliveryTerms || '').trim(),
-      deliveryAddress: String(editPOForm.deliveryAddress || '').trim(),
-      qualityStandard: String(editPOForm.qualityStandard || '').trim(),
-      inspectionMethod: String(editPOForm.inspectionMethod || '').trim(),
-      packaging: String(editPOForm.packaging || '').trim(),
-      shippingMarks: String(editPOForm.shippingMarks || '').trim(),
-      deliveryPenalty: String(editPOForm.deliveryPenalty || '').trim(),
-      qualityPenalty: String(editPOForm.qualityPenalty || '').trim(),
-      warrantyPeriod: String(editPOForm.warrantyPeriod || '').trim(),
-      returnPolicy: String(editPOForm.returnPolicy || '').trim(),
-      confidentiality: String(editPOForm.confidentiality || '').trim(),
-      ipRights: String(editPOForm.ipRights || '').trim(),
-      forceMajeure: String(editPOForm.forceMajeure || '').trim(),
-      disputeResolution: String(editPOForm.disputeResolution || '').trim(),
-      applicableLaw: String(editPOForm.applicableLaw || '').trim(),
-      contractValidity: String(editPOForm.contractValidity || '').trim(),
-      modification: String(editPOForm.modification || '').trim(),
-      termination: String(editPOForm.termination || '').trim(),
-      incoterm: String(editPOForm.incoterm || '').trim(),
-      portOfLoading: String(editPOForm.portOfLoading || '').trim(),
-      portOfDestination: String(editPOForm.portOfDestination || '').trim(),
-      qualityTerms: String(editPOForm.qualityStandard || editPOForm.qualityTerms || '').trim(),
-      inspectionTerms: String(editPOForm.inspectionMethod || editPOForm.inspectionTerms || '').trim(),
-      packagingTerms: String(editPOForm.packaging || editPOForm.packagingTerms || '').trim(),
-      warrantyTerms: String(editPOForm.warrantyTerms || '').trim(),
-      penaltyTerms: String(editPOForm.qualityPenalty || editPOForm.penaltyTerms || '').trim(),
-      disputeResolutionTerms: String(editPOForm.disputeResolution || editPOForm.disputeResolutionTerms || '').trim(),
-      taxTerms: String(editPOForm.taxTerms || '').trim(),
-      bankTerms: String(editPOForm.bankTerms || '').trim(),
-      orderDate: formatDateForStorage(editPOOrderDate) || String(editPOForm.orderDate || '').trim(),
-      expectedDate: formatDateForStorage(editPOExpectedDate) || String(editPOForm.expectedDate || '').trim(),
-      actualDate: formatDateForStorage(editPOActualDate) || String(editPOForm.actualDate || '').trim() || undefined,
-      status: String(editPOForm.status || 'pending') as any,
-      paymentStatus: String(editPOForm.paymentStatus || 'unpaid') as any,
-      remarks: String(editPOForm.remarks || '').trim(),      
-      items: editPOItems,
+      supplierName: String(latestEditPOForm.supplierName || '').trim(),
+      supplierCode: String(latestEditPOForm.supplierCode || '').trim(),
+      supplierContact: String(latestEditPOForm.supplierContact || '').trim(),
+      supplierPhone: String(latestEditPOForm.supplierPhone || '').trim(),
+      supplierAddress: String(latestEditPOForm.supplierAddress || '').trim(),
+      supplierBankInfo: {
+        bankName: String(latestEditPOForm.supplierBankName || '').trim(),
+        accountName: String(latestEditPOForm.supplierBankAccountName || '').trim(),
+        accountNumber: String(latestEditPOForm.supplierBankAccountNumber || '').trim(),
+        swiftCode: String(latestEditPOForm.supplierBankSwiftCode || '').trim(),
+        bankAddress: String(latestEditPOForm.supplierBankAddress || '').trim(),
+        currency: normalizeCurrencyCode(latestEditPOForm.supplierBankCurrency) || '',
+      },
+      supplier_bank_info: {
+        bankName: String(latestEditPOForm.supplierBankName || '').trim(),
+        accountName: String(latestEditPOForm.supplierBankAccountName || '').trim(),
+        accountNumber: String(latestEditPOForm.supplierBankAccountNumber || '').trim(),
+        swiftCode: String(latestEditPOForm.supplierBankSwiftCode || '').trim(),
+        bankAddress: String(latestEditPOForm.supplierBankAddress || '').trim(),
+        currency: normalizeCurrencyCode(latestEditPOForm.supplierBankCurrency) || '',
+      },
+      currency: normalizeCurrencyCode(latestEditPOForm.currency) || 'CNY',
+      paymentTerms: String(latestEditPOForm.paymentTerms || '').trim(),
+      deliveryTerms: String(latestEditPOForm.deliveryTerms || '').trim(),
+      deliveryAddress: String(latestEditPOForm.deliveryAddress || '').trim(),
+      qualityStandard: String(latestEditPOForm.qualityStandard || '').trim(),
+      inspectionMethod: String(latestEditPOForm.inspectionMethod || '').trim(),
+      packaging: String(latestEditPOForm.packaging || '').trim(),
+      shippingMarks: String(latestEditPOForm.shippingMarks || '').trim(),
+      deliveryPenalty: String(latestEditPOForm.deliveryPenalty || '').trim(),
+      qualityPenalty: String(latestEditPOForm.qualityPenalty || '').trim(),
+      warrantyPeriod: String(latestEditPOForm.warrantyPeriod || '').trim(),
+      returnPolicy: String(latestEditPOForm.returnPolicy || '').trim(),
+      confidentiality: String(latestEditPOForm.confidentiality || '').trim(),
+      ipRights: String(latestEditPOForm.ipRights || '').trim(),
+      forceMajeure: String(latestEditPOForm.forceMajeure || '').trim(),
+      disputeResolution: String(latestEditPOForm.disputeResolution || '').trim(),
+      applicableLaw: String(latestEditPOForm.applicableLaw || '').trim(),
+      contractValidity: String(latestEditPOForm.contractValidity || '').trim(),
+      modification: String(latestEditPOForm.modification || '').trim(),
+      termination: String(latestEditPOForm.termination || '').trim(),
+      incoterm: String(latestEditPOForm.incoterm || '').trim(),
+      portOfLoading: String(latestEditPOForm.portOfLoading || '').trim(),
+      portOfDestination: String(latestEditPOForm.portOfDestination || '').trim(),
+      qualityTerms: String(latestEditPOForm.qualityStandard || latestEditPOForm.qualityTerms || '').trim(),
+      inspectionTerms: String(latestEditPOForm.inspectionMethod || latestEditPOForm.inspectionTerms || '').trim(),
+      packagingTerms: String(latestEditPOForm.packaging || latestEditPOForm.packagingTerms || '').trim(),
+      warrantyTerms: String(latestEditPOForm.warrantyTerms || '').trim(),
+      penaltyTerms: String(latestEditPOForm.qualityPenalty || latestEditPOForm.penaltyTerms || '').trim(),
+      disputeResolutionTerms: String(latestEditPOForm.disputeResolution || latestEditPOForm.disputeResolutionTerms || '').trim(),
+      taxTerms: String(latestEditPOForm.taxTerms || '').trim(),
+      bankTerms: String(latestEditPOForm.bankTerms || '').trim(),
+      orderDate: normalizedOrderDate,
+      expectedDate: normalizedExpectedDate,
+      expectedDeliveryDate: normalizedExpectedDate,
+      actualDate: normalizedActualDate,
+      status: String(latestEditPOForm.status || 'pending') as any,
+      paymentStatus: String(latestEditPOForm.paymentStatus || 'unpaid') as any,
+      remarks: String(latestEditPOForm.remarks || '').trim(),
+      items: latestEditPOItems,
       totalAmount,
       updatedDate: new Date().toISOString(),
-      } as any);
+    } as any;
+    normalizedUpdates.documentDataSnapshot = buildPurchaseOrderDocumentSnapshot(normalizedUpdates, {
+      preferLiveData: true,
+    });
+    try {
+      await updatePurchaseOrder(editingPO.id, normalizedUpdates as any);
+      setCurrentPOData(normalizedUpdates.documentDataSnapshot);
       toast.success(`采购订单 ${editingPO.poNumber} 已更新`);
       setShowEditPODialog(false);
       setEditingPO(null);
@@ -1647,7 +2469,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const mainProduct = selectedProducts[0];
 
         const xj: XJ = {
-          id: crypto.randomUUID(),                          // 合法 UUID，toXJRow 无需再生成
+          id: toUUID(null),                                 // 兼容缺少 crypto.randomUUID 的运行环境
           xjNumber: supplierXjNo,                          // XJ-xxx（RPC 生成的询价单号，唯一约束键）
           supplierXjNo,                                    // 同上，冗余保留兼容旧字段
           requirementNo: selectedRequirementForXJ.requirementNo, // QR-xxx（关联采购需求）
@@ -2179,6 +3001,19 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         if (!supplier) {
           throw new Error(`供应商不存在: ${supplierCode}`);
         }
+        const linkedQuotation = getPOQuoteCandidates(po, supplierCode)[0] || null;
+        const supplierInquiryNo = String(
+          linkedQuotation?.sourceXJ ||
+          linkedQuotation?.sourceXJNumber ||
+          linkedQuotation?.xjNumber ||
+          '',
+        ).trim();
+        const supplierQuotationNo = String(
+          linkedQuotation?.quotationNo ||
+          linkedQuotation?.bjNumber ||
+          linkedQuotation?.quotationNumber ||
+          '',
+        ).trim();
         const tracedItems = supplierItems.map((item) => {
           const traced = resolveQuotedItemPricing(po, item, supplierCode);
           const unitPrice = traced && traced.unitPrice > 0 ? traced.unitPrice : Number(item.unitPrice || 0);
@@ -2200,6 +3035,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           ...po,
           id: `po-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           poNumber: newPoNumber,
+          documentType: 'CG',
+          approvalStatus: 'draft',
+          executionStatus: 'draft',
           supplierName: supplier.name || '待选择供应商',
           supplierCode: supplier.code || 'TBD',
           supplierContact: supplier.contact || '',
@@ -2210,17 +3048,44 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           currency: draftCurrency,
           createdDate: new Date().toISOString(),
           updatedDate: new Date().toISOString(),
+          createdBy: user?.id || user?.email || user?.name || po.createdBy || 'procurement',
+          operatorUserId: user?.id || null,
+          operatorEmail: user?.email || null,
+          operatorRole: user?.role || user?.userRole || null,
+          authenticatedUserId: user?.id || null,
+          authenticatedUserEmail: user?.email || null,
+          authenticatedUserRole: user?.role || user?.userRole || null,
           procurementRequestStatus: 'draft_allocated',
+          prValidationStatus: 'pending',
           // Phase 3b: explicit PR → CG linkage — written overtly, not just inherited via ...po spread.
           // These three fields are the structural contract that makes the CG traceable back through
           // the PR tier to its originating SC. Do not remove these explicit assignments.
           parentRequestPoNumber: po.poNumber,        // typed backlink to parent PR
           sourceRef: po.sourceRef,                   // SC number — explicit SC traceability on CG
           salesContractNumber: po.salesContractNumber, // SC number — explicit SC traceability on CG
+          xjNumber: supplierInquiryNo || po.xjNumber || '',
+          selectedBjId: linkedQuotation?.id || po.selectedBjId || null,
+          bjLockedAt: po.bjLockedAt || null,
         } as any;
         allocatedOrder.templateSnapshot = { pendingResolution: true };
-        allocatedOrder.documentRenderMeta = null;
+        allocatedOrder.documentRenderMeta = {
+          ...(po.documentRenderMeta || po.document_render_meta || {}),
+          supplierPortalLinkage: {
+            supplierXjNo: supplierInquiryNo || null,
+            supplierBjNo: supplierQuotationNo || null,
+            supplierQuotationId: linkedQuotation?.id || null,
+            supplierCode: supplier.code || null,
+          },
+        };
         allocatedOrder.documentDataSnapshot = buildPurchaseOrderDocumentSnapshot(allocatedOrder);
+        allocatedOrder.documentDataSnapshot = {
+          ...allocatedOrder.documentDataSnapshot,
+          editForm: {
+            ...(allocatedOrder.documentDataSnapshot?.editForm || {}),
+            xjNumber: supplierInquiryNo || allocatedOrder.documentDataSnapshot?.editForm?.xjNumber || '',
+            supplierQuotationNo: supplierQuotationNo || allocatedOrder.documentDataSnapshot?.editForm?.supplierQuotationNo || '',
+          },
+        };
         await addPurchaseOrder(allocatedOrder);
         createdPONumbers.push(newPoNumber);
       }
@@ -2250,6 +3115,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           items: tracedRemainingItems,
           totalAmount: remainingAmount,
           currency: remainingCurrencies[0] || normalizeCurrencyCode(po.currency || 'USD') || 'USD',
+          documentType: 'PR',
+          executionStatus: 'partially_allocated',
+          approvalStatus: 'not_required',
           procurementRequestStatus: 'partial_allocated',
           status: 'pending',
           supplierAllocationReady: true,
@@ -2260,6 +3128,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       } else {
         // 全部分配完成：保留采购请求记录，仅更新状态（不消失）
         await updatePurchaseOrder(po.id, {
+          documentType: 'PR',
+          executionStatus: 'fully_allocated',
+          approvalStatus: 'not_required',
           procurementRequestStatus: 'allocated_completed',
           supplierAllocationReady: true,
           allocatedSupplierCount: distribution.length,
@@ -2492,8 +3363,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       
       // 其他信息
       remarks: createOrderForm.remarks,
-      createdBy: '采购部-刘明', // TODO: 从用户Context获取
-      createdDate: today.toISOString()
+      createdBy: user?.id || user?.email || user?.name || 'procurement',
+      createdDate: today.toISOString(),
+      operatorUserId: user?.id || null,
+      operatorEmail: user?.email || null,
+      operatorRole: user?.role || user?.userRole || null,
+      authenticatedUserId: user?.id || null,
+      authenticatedUserEmail: user?.email || null,
+      authenticatedUserRole: user?.role || user?.userRole || null,
     };
     (newPurchaseOrder as any).templateSnapshot = { pendingResolution: true };
     (newPurchaseOrder as any).documentRenderMeta = null;
@@ -2566,6 +3443,17 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     return true;
   };
 
+  const hasPositiveQrPricingPayload = React.useCallback((req: QuoteRequirement) => {
+    const feedbackProducts = Array.isArray(req.purchaserFeedback?.products)
+      ? req.purchaserFeedback.products
+      : [];
+    return feedbackProducts.some((product: any) => {
+      const unitPrice = Number(product?.sourcePricing?.unitPrice ?? product?.costPrice ?? 0);
+      const amount = Number(product?.amount ?? 0);
+      return (Number.isFinite(unitPrice) && unitPrice > 0) || (Number.isFinite(amount) && amount > 0);
+    });
+  }, []);
+
   // 🔥 处理智能采购反馈 - 一键流转
   const handleSmartFeedback = (req: QuoteRequirement) => {
     if (!ensureBoundQuoteRequirementSnapshot(req)) return;
@@ -2575,25 +3463,70 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   // 🔥 下推业务员询报（采购侧仅做下推动作，不创建业务员报价）
   const handlePushToSalesInquiry = async (req: QuoteRequirement) => {
-    if (!ensureBoundQuoteRequirementSnapshot(req)) return;
-    if (!req.purchaserFeedback) {
-      toast.error('请先完成智能对比建议并保存采购反馈');
-      return;
-    }
-    if (req.pushedToQuotation) {
-      toast.info('该需求已下推业务员询报');
-      return;
-    }
+    const hasActualPush = Boolean(
+      req.pushedToQuotation &&
+      (
+        String(req.pushedToQuotationDate || '').trim() ||
+        String(req.pushedBy || '').trim() ||
+        String((req as any).quotationNumber || '').trim()
+      ) &&
+      hasPositiveQrPricingPayload(req)
+    );
 
     const pushTimestamp = new Date().toISOString();
     try {
-      await updateRequirement(req.id, {
+      const pushedWithoutFeedback = !req.purchaserFeedback;
+      const enrichedPurchaserFeedback = await enrichPurchaserFeedbackWithSupplierQuoteData(req);
+      const resolvedOwner = resolveQuoteRequirementOwner(req, inquiries, {
+        email: user?.email || '',
+        name: user?.name || '',
+      });
+      const existingTemplateSnapshot =
+        (req as any).templateSnapshot ||
+        (req as any).template_snapshot ||
+        null;
+      const nextRequirement = {
+        ...req,
+        templateSnapshot: existingTemplateSnapshot || { pendingResolution: true },
+        template_snapshot: existingTemplateSnapshot || { pendingResolution: true },
+        purchaserFeedback: enrichedPurchaserFeedback || req.purchaserFeedback,
+        requestedBy: resolvedOwner.email || req.requestedBy || null,
+        requestedByName: resolvedOwner.name || req.requestedByName || null,
+        ownerEmail: resolvedOwner.email || req.ownerEmail || null,
+        ownerName: resolvedOwner.name || req.ownerName || null,
+        ownerRole: req.ownerRole || 'Sales_Rep',
         pushedToQuotation: true,
         pushedToQuotationDate: pushTimestamp,
         pushedBy: user?.email || user?.name || 'procurement',
+      } as QuoteRequirement;
+      const nextDocumentSnapshot = buildQuoteRequirementDocumentSnapshot(
+        nextRequirement,
+        user?.type || user?.role,
+        { forceRebuild: true },
+      );
+      await updateRequirement(req.id, {
+        templateSnapshot: existingTemplateSnapshot || { pendingResolution: true },
+        template_snapshot: existingTemplateSnapshot || { pendingResolution: true },
+        purchaserFeedback: enrichedPurchaserFeedback || req.purchaserFeedback,
+        requestedBy: resolvedOwner.email || req.requestedBy || null,
+        requestedByName: resolvedOwner.name || req.requestedByName || null,
+        ownerEmail: resolvedOwner.email || req.ownerEmail || null,
+        ownerName: resolvedOwner.name || req.ownerName || null,
+        ownerRole: req.ownerRole || 'Sales_Rep',
+        pushedToQuotation: true,
+        pushedToQuotationDate: pushTimestamp,
+        pushedBy: user?.email || user?.name || 'procurement',
+        documentDataSnapshot: nextDocumentSnapshot,
+        document_data_snapshot: nextDocumentSnapshot as any,
       });
       await refreshQuoteRequirementsFromApi();
-      toast.success('已下推业务员询报');
+      toast.success(
+        hasActualPush
+          ? '已重新反馈业务员询报'
+          : pushedWithoutFeedback
+            ? '已反馈业务员询报（未附采购反馈）'
+            : '已反馈业务员询报'
+      );
     } catch (error: any) {
       toast.error(`同步 QR 状态失败：${error?.message || '未知错误'}`);
     }
@@ -2666,7 +3599,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       {/* 🔥 标题栏 - 与供应商管理保持一致 */}
       <div className="flex items-center justify-between">
         <div>
@@ -2698,7 +3631,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             <ShoppingCart className="w-3 h-3 text-purple-600" />
           </div>
           <p className="text-lg font-bold text-gray-900">{stats.total}</p>
-          <p className="text-[14px] text-gray-500 mt-0.5">Total Orders</p>
         </div>
 
         <div className="bg-white border border-gray-200 rounded p-2.5">
@@ -2707,7 +3639,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             <Clock className="w-3 h-3 text-amber-600" />
           </div>
           <p className="text-lg font-bold text-gray-900">{stats.pending}</p>
-          <p className="text-[14px] text-gray-500 mt-0.5">Pending Approval</p>
         </div>
 
         <div className="bg-white border border-gray-200 rounded p-2.5">
@@ -2716,7 +3647,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             <Truck className="w-3 h-3 text-blue-600" />
           </div>
           <p className="text-lg font-bold text-gray-900">{stats.producing}</p>
-          <p className="text-[14px] text-gray-500 mt-0.5">In Progress</p>
         </div>
 
         <div className="bg-white border border-gray-200 rounded p-2.5">
@@ -2725,7 +3655,6 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             <CheckCircle2 className="w-3 h-3 text-emerald-600" />
           </div>
           <p className="text-lg font-bold text-gray-900">{stats.completed}</p>
-          <p className="text-[14px] text-gray-500 mt-0.5">Completed</p>
         </div>
 
         <div className="bg-white border border-gray-200 rounded p-2.5">
@@ -2734,12 +3663,11 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             <DollarSign className="w-3 h-3 text-[#F96302]" />
           </div>
           <p className="text-lg font-bold text-gray-900">${(stats.totalValue / 1000).toFixed(0)}K</p>
-          <p className="text-[14px] text-gray-500 mt-0.5">Total Value</p>
         </div>
       </div>
 
       {/* 主内容区 */}
-      <div className="bg-white border border-gray-200 rounded">
+      <div className="bg-white border border-gray-200 rounded flex flex-1 min-h-0 flex-col">
         <Tabs value={activeTab} onValueChange={(v) => {
           setActiveTab(v as any);
           if (v === 'orders') {
@@ -2748,15 +3676,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           if (v === 'procurement-requests') {
             setProcurementRequestSearchTerm('');
           }
-        }} className="w-full">
+        }} className="w-full flex-1 min-h-0">
           <div className="border-b border-gray-200 px-3">
             <TabsList className="bg-transparent h-auto p-0 gap-4">
               <TabsTrigger 
                 value="requirements" 
                 className="bg-transparent border-b-2 border-transparent data-[state=active]:border-rose-600 data-[state=active]:bg-transparent data-[state=active]:text-rose-700 rounded-none px-0 pb-2 pt-2 text-[14px] font-medium relative"
               >
-                <AlertCircle className="w-3 h-3 mr-1" />
-                报价请求池
+                报价请求池（QR）
                 {(requirementStats.pending + requirementStats.partial) > 0 && (
                   <span className="absolute -top-1 -right-3 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">
                     {requirementStats.pending + requirementStats.partial}
@@ -2768,16 +3695,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                 value="xj-management" 
                 className="bg-transparent border-b-2 border-transparent data-[state=active]:border-purple-600 data-[state=active]:bg-transparent data-[state=active]:text-purple-700 rounded-none px-0 pb-2 pt-2 text-[14px] font-medium relative"
               >
-                <FileText className="w-3 h-3 mr-1" />
-                询价管理
+                询价管理（XJ）
               </TabsTrigger>
 
               <TabsTrigger 
                 value="supplier-quotations" 
                 className="bg-transparent border-b-2 border-transparent data-[state=active]:border-green-600 data-[state=active]:bg-transparent data-[state=active]:text-green-700 rounded-none px-0 pb-2 pt-2 text-[14px] font-medium relative"
               >
-                <FileText className="w-3 h-3 mr-1" />
-                供应商报价
+                供应商报价（BJ）
                 {supplierQuotations.filter(q => q.status === 'submitted').length > 0 && (
                   <span className="absolute -top-1 -right-3 bg-green-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">
                     {supplierQuotations.filter(q => q.status === 'submitted').length}
@@ -2789,8 +3714,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                 value="procurement-requests"
                 className="bg-transparent border border-transparent data-[state=active]:border-[#F96302] data-[state=active]:bg-[#FFF7ED] data-[state=active]:text-[#F96302] rounded px-2 py-1 text-[14px] font-medium relative"
               >
-                <Send className="w-3 h-3 mr-1" />
-                采购请求
+                采购请求池（PR）
                 {pendingProcurementRequestCount > 0 && (
                   <span className="absolute -top-1 -right-3 bg-sky-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">
                     {pendingProcurementRequestCount}
@@ -2805,8 +3729,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
                 }}
                 className="bg-transparent border-b-2 border-transparent data-[state=active]:border-[#F96302] data-[state=active]:bg-transparent data-[state=active]:text-[#F96302] rounded-none px-0 pb-2 pt-2 text-[14px] font-medium"
               >
-                <ShoppingCart className="w-3 h-3 mr-1" />
-                采购订单
+                采购订单（CG）
               </TabsTrigger>
             </TabsList>
           </div>
@@ -2894,9 +3817,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             handleOpenEditPO={handleOpenEditPO}
             handlePushPurchaseToSupplier={handlePushPurchaseToSupplier}
             handleApplyBossApproval={handleApplyBossApproval}
+            handleValidateProcurementRequest={handleValidateProcurementRequest}
             handleDeletePurchaseOrder={handleDeletePurchaseOrder}
             normalizeCGNumberForDisplay={normalizeCGNumberForDisplay}
             resolveInquirySourceRef={resolveInquirySourceRef}
+            resolveQuotationSourceRef={resolveQuotationSourceRef}
+            resolveSupplierInquiryRef={resolveSupplierInquiryRef}
             getRequirementNoFromPO={getRequirementNoFromPO}
           />
         </Tabs>
@@ -2942,20 +3868,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         setExportingPDF={setExportingPDF}
       />
 
-      {/* 🔥 隐藏的PDF导出专用渲染区域 */}
-      <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
-        {currentPOData && (
-          <div ref={hiddenPDFRef}>
-            <PurchaseOrderDocument data={currentPOData} />
-          </div>
-        )}
-      </div>
-
       <QuoteRequirementPreviewDialog
         showRequirementDialog={showRequirementDialog}
         setShowRequirementDialog={setShowRequirementDialog}
         viewRequirement={viewRequirement}
         userRole={user?.role || user?.userRole}
+        supplierQuotations={supplierQuotations}
       />
 
       {/* 🔥 编辑采购订单对话框 */}
@@ -3102,7 +4020,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
               discount: 0,
               tax: 0,
               deliveryTerms: 'FOB Xiamen',
-              paymentTerms: '30% T/T deposit, 70% before shipment',
+              paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
               notes: quoteData.approvalNotes || '',
               // 🔥 审批流程信息（待提交审核时使用）
               approvalNotes: quoteData.approvalNotes,
