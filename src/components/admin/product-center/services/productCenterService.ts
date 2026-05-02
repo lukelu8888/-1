@@ -25,15 +25,20 @@ import type {
   CampaignProduct,
   ModelMapping,
   Product,
+  ProductAttribute,
   ProductAttributeValue,
   ProductAuditLog,
+  ProductCategory,
+  ProductMedia,
   ProductPriceHistory,
   ProductPublishChannel,
   ProductRegionPrice,
+  ProductSupplierLink,
   RegionCode,
   ReviewHistoryEntry,
   SupplierQuote,
 } from '../context/types';
+import { supabaseProductCenterService } from './supabaseProductCenterService';
 
 /** Feature flag for swapping in the Supabase impl. Defaults to mock. */
 export type ProductCenterBackend = 'mock' | 'supabase';
@@ -42,7 +47,36 @@ export const PRODUCT_CENTER_BACKEND: ProductCenterBackend =
   (import.meta as { env?: { VITE_PC_BACKEND?: ProductCenterBackend } }).env?.VITE_PC_BACKEND ??
   'mock';
 
+/**
+ * Bulk snapshot returned by `loadAll()`. Used by `ProductCenterContext`
+ * to seed React state on startup when the Supabase backend is active.
+ */
+export interface ProductCenterSnapshot {
+  products: Product[];
+  categories: ProductCategory[];
+  attributes: ProductAttribute[];
+  attributeValues: ProductAttributeValue[];
+  media: ProductMedia[];
+  suppliers: ProductSupplierLink[];
+  regionPrices: ProductRegionPrice[];
+  publishChannels: ProductPublishChannel[];
+  campaigns: Campaign[];
+  campaignProducts: CampaignProduct[];
+  mappings: ModelMapping[];
+  auditLogs: ProductAuditLog[];
+  priceHistory: ProductPriceHistory[];
+  supplierQuotes: SupplierQuote[];
+  reviewHistory: ReviewHistoryEntry[];
+}
+
 export interface ProductCenterService {
+  // ── Bootstrap ────────────────────────────────────────────────────────────
+  /**
+   * Returns a full snapshot of every entity scoped to the current tenant.
+   * Mock impl returns empty arrays — consumers fall back to seeded data.
+   */
+  loadAll?(): Promise<ProductCenterSnapshot>;
+
   // ── Product CRUD ─────────────────────────────────────────────────────────
   upsertProduct(input: Product): Promise<Product>;
   removeProduct(id: string): Promise<void>;
@@ -111,6 +145,25 @@ export interface ProductCenterService {
  * once we wire up Supabase.
  */
 export const mockProductCenterService: ProductCenterService = {
+  async loadAll() {
+    return {
+      products: [],
+      categories: [],
+      attributes: [],
+      attributeValues: [],
+      media: [],
+      suppliers: [],
+      regionPrices: [],
+      publishChannels: [],
+      campaigns: [],
+      campaignProducts: [],
+      mappings: [],
+      auditLogs: [],
+      priceHistory: [],
+      supplierQuotes: [],
+      reviewHistory: [],
+    };
+  },
   async upsertProduct(input) {
     return input;
   },
@@ -241,15 +294,12 @@ function synthReview(
 }
 
 /**
- * The active service. Today returns the mock impl; Phase 4 will return a
- * Supabase-backed implementation when `VITE_PC_BACKEND=supabase`.
+ * The active service. Returns the Supabase-backed implementation when
+ * `VITE_PC_BACKEND=supabase`, otherwise the in-memory mock impl.
  */
 export function getProductCenterService(): ProductCenterService {
   if (PRODUCT_CENTER_BACKEND === 'supabase') {
-    // intentional: not yet implemented; fall through to mock until Phase 4.
-    // eslint-disable-next-line no-console
-    console.warn('[product-center] Supabase backend not yet implemented; using mock');
-    return mockProductCenterService;
+    return supabaseProductCenterService;
   }
   return mockProductCenterService;
 }
