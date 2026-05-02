@@ -322,7 +322,7 @@ export function PimDetailPage({ productId, onBack }: Props) {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left TOC */}
-        <aside className="w-52 shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
+        <aside className="w-48 shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
           <div className="sticky top-0 border-b border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             产品详情目录
           </div>
@@ -358,7 +358,7 @@ export function PimDetailPage({ productId, onBack }: Props) {
         </aside>
 
         {/* Right content */}
-        <section className="flex-1 overflow-y-auto bg-slate-50">
+        <section className="min-w-0 flex-1 overflow-y-auto bg-slate-50">
           <div className="space-y-3 p-3">
             <div ref={(el) => (refs.current.basic = el)}>
               <BasicInfoSection product={draft} update={update} />
@@ -439,8 +439,8 @@ function BasicInfoSection({
 }) {
   return (
     <SectionShell title="1. 基础信息" subtitle="产品名称 / SKU / 描述 / 标签 / 状态">
-      <div className="grid grid-cols-2 gap-x-6">
-        <div>
+      <div className="grid grid-cols-1 gap-x-6 lg:grid-cols-2">
+        <div className="min-w-0">
           <FieldRow label="产品名称" required>
             <Input
               value={product.name}
@@ -517,7 +517,7 @@ function BasicInfoSection({
           </FieldRow>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <FieldRow label="简短描述">
             <Textarea
               value={product.shortDescription ?? ''}
@@ -600,8 +600,8 @@ function CategoryAttrsSection({
 
   return (
     <SectionShell title="2. 分类与属性" subtitle="官网分类 / 内部分类 / 属性模板（失焦自动保存）">
-      <div className="grid grid-cols-2 gap-x-6">
-        <div>
+      <div className="grid grid-cols-1 gap-x-6 lg:grid-cols-2">
+        <div className="min-w-0">
           <FieldRow label="官网分类" required>
             <Select
               value={product.primaryCategoryId ?? ''}
@@ -628,7 +628,7 @@ function CategoryAttrsSection({
             />
           </FieldRow>
         </div>
-        <div>
+        <div className="min-w-0">
           <FieldGroup title="属性模板（按官网分类绑定）">
             <div className="space-y-1.5">
               {attrs.map((a) => {
@@ -744,8 +744,8 @@ function SpecsSection({
 }) {
   return (
     <SectionShell title="3. 规格参数" subtitle="尺寸 / 重量 / 单位 / MOQ">
-      <div className="grid grid-cols-3 gap-x-6">
-        <div>
+      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="min-w-0">
           <FieldRow label="长 (cm)">
             <Input
               type="number"
@@ -771,7 +771,7 @@ function SpecsSection({
             />
           </FieldRow>
         </div>
-        <div>
+        <div className="min-w-0">
           <FieldRow label="净重 (kg)">
             <Input
               type="number"
@@ -796,7 +796,7 @@ function SpecsSection({
             />
           </FieldRow>
         </div>
-        <div>
+        <div className="min-w-0">
           <FieldRow label="MOQ">
             <Input
               type="number"
@@ -837,8 +837,8 @@ function PackagingSection({
 }) {
   return (
     <SectionShell title="4. 包装与物流" subtitle="CBM / 装柜量 / 港口 / 交期">
-      <div className="grid grid-cols-3 gap-x-6">
-        <div>
+      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="min-w-0">
           <FieldRow label="CBM (m³)">
             <Input
               type="number"
@@ -864,7 +864,7 @@ function PackagingSection({
             />
           </FieldRow>
         </div>
-        <div>
+        <div className="min-w-0">
           <FieldRow label="出货港口">
             <Input
               value={product.port ?? ''}

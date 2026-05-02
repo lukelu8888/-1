@@ -47,20 +47,68 @@ interface FieldRowProps {
   required?: boolean;
   children: ReactNode;
   className?: string;
+  /**
+   * `horizontal` (default): label on the left with fixed width, control on
+   *  the right filling remaining space. Robust under nested grid layouts.
+   * `vertical`: label above the control. Use when the section is very narrow
+   *  or stacked into a single thin column.
+   */
+  layout?: 'horizontal' | 'vertical';
+  /** Override the fixed label column width (Tailwind class). Default `w-28`. */
+  labelWidth?: string;
 }
 
-/** ERP-style left-label + right-control row. */
-export function FieldRow({ label, hint, required, children, className }: FieldRowProps) {
+/**
+ * ERP-style label + control row.
+ *
+ * Implementation note: we use flex (not grid) because `grid-cols-12 col-span-3`
+ * collapses Chinese labels to single-character vertical text when the section
+ * is nested inside another grid (deals/category right panes). Flex with a
+ * fixed-width `whitespace-nowrap` label keeps labels horizontal regardless of
+ * outer width.
+ */
+export function FieldRow({
+  label,
+  hint,
+  required,
+  children,
+  className,
+  layout = 'horizontal',
+  labelWidth,
+}: FieldRowProps) {
+  if (layout === 'vertical') {
+    return (
+      <div className={cn('py-1.5', className)}>
+        <div className="mb-1 flex items-center text-[12px] font-medium text-slate-600">
+          <span className="whitespace-nowrap">{label}</span>
+          {required && <span className="ml-0.5 text-rose-500">*</span>}
+          {hint && (
+            <span className="ml-1 whitespace-nowrap text-[11px] font-normal text-slate-400">
+              {hint}
+            </span>
+          )}
+        </div>
+        <div className="min-w-0">{children}</div>
+      </div>
+    );
+  }
   return (
-    <div className={cn('grid grid-cols-12 gap-2 py-1.5', className)}>
-      <div className="col-span-3 flex items-center text-[12px] font-medium text-slate-600">
-        {label}
+    <div className={cn('flex items-start gap-3 py-1.5', className)}>
+      <div
+        className={cn(
+          'flex shrink-0 items-center pt-1.5 text-[12px] font-medium text-slate-600',
+          labelWidth ?? 'w-28',
+        )}
+      >
+        <span className="whitespace-nowrap">{label}</span>
         {required && <span className="ml-0.5 text-rose-500">*</span>}
         {hint && (
-          <span className="ml-1 text-[11px] font-normal text-slate-400">{hint}</span>
+          <span className="ml-1 whitespace-nowrap text-[11px] font-normal text-slate-400">
+            {hint}
+          </span>
         )}
       </div>
-      <div className="col-span-9">{children}</div>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }

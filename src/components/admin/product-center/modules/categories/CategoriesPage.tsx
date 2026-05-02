@@ -70,9 +70,9 @@ export function CategoriesPage() {
         }
       />
 
-      <div className="grid flex-1 grid-cols-12 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden">
         {/* Tree */}
-        <aside className="col-span-4 overflow-y-auto border-r border-slate-200 bg-white">
+        <aside className="w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
           <div className="sticky top-0 border-b border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             分类树
           </div>
@@ -92,7 +92,7 @@ export function CategoriesPage() {
         </aside>
 
         {/* Editor */}
-        <main className="col-span-8 overflow-y-auto bg-slate-50">
+        <main className="min-w-0 flex-1 overflow-y-auto bg-slate-50">
           {active ? (
             <div className="space-y-3 p-3">
               <SectionShell

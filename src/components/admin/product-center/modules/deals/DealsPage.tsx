@@ -93,9 +93,9 @@ export function DealsPage() {
         }
       />
 
-      <div className="grid flex-1 grid-cols-12 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden">
         {/* Campaign list */}
-        <aside className="col-span-4 overflow-y-auto border-r border-slate-200 bg-white">
+        <aside className="w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
           <div className="sticky top-0 border-b border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             活动列表 ({ctx.campaigns.length})
           </div>
@@ -144,7 +144,7 @@ export function DealsPage() {
         </aside>
 
         {/* Campaign detail */}
-        <main className="col-span-8 overflow-y-auto bg-slate-50">
+        <main className="min-w-0 flex-1 overflow-y-auto bg-slate-50">
           {active ? (
             <div className="space-y-3 p-3">
               <SectionShell
@@ -182,8 +182,8 @@ export function DealsPage() {
                   </div>
                 }
               >
-                <div className="grid grid-cols-2 gap-x-6">
-                  <div>
+                <div className="grid grid-cols-1 gap-x-6 lg:grid-cols-2">
+                  <div className="min-w-0">
                     <FieldRow label="活动名称" required>
                       <Input
                         value={active.name}
@@ -218,7 +218,7 @@ export function DealsPage() {
                       </Select>
                     </FieldRow>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <FieldRow label="开始时间">
                       <Input
                         type="datetime-local"
