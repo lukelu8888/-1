@@ -1,28 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 // 🔥 Import all required icons including Sparkles for Pro features
-import { LayoutDashboard, Users, Package, BarChart3, Bell, Mail, LogOut, ChevronLeft, ChevronRight, Building2, Box, Share2, GripVertical, Ship, Activity, Wallet, Factory, Truck, ChevronDown, ChevronUp, Database, Shield, Target, Radio, HeartPulse, Workflow, FileText, Globe, Navigation, DollarSign, TrendingUp, Settings, Terminal, GitBranch, Sparkles, Wand2, UserCheck, Waves, UserPlus, Megaphone, ClipboardCheck, Edit } from 'lucide-react';
+import { LayoutDashboard, LayoutGrid, Users, Package, BarChart3, Bell, Mail, LogOut, ChevronLeft, ChevronRight, Building2, Box, Share2, GripVertical, Ship, Activity, Wallet, Factory, Truck, ChevronDown, ChevronUp, Database, Shield, Target, Radio, HeartPulse, Workflow, FileText, FolderOpen, Globe, Navigation, DollarSign, TrendingUp, Settings, Terminal, GitBranch, Sparkles, Wand2, UserCheck, Waves, UserPlus, Megaphone, ClipboardCheck, Edit, Hash } from 'lucide-react';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import AdminOverview from './admin/AdminOverview';
-import CustomerManagementEnhanced from './admin/CustomerManagementEnhanced';
-import AdminDataAnalyticsNew from './admin/AdminDataAnalyticsNew'; // 🔥 使用新的角色专属数据分析
-import ProductPush from './admin/ProductPush';
-import AdminMessaging from './admin/AdminMessaging';
-import ProductManagement from './admin/ProductManagement';
-import SocialMediaMarketing from './admin/SocialMediaMarketing';
-import { SocialMediaAISystem } from './dashboards/SocialMediaAISystem'; // 🔥 AI驱动的社媒客户开发系统
-import { SocialMediaMarketingUnified } from './dashboards/SocialMediaMarketingUnified'; // 🔥 社交媒体营销 - 终极统一版
-import { LiveStreamManagement } from './dashboards/LiveStreamManagement'; // 🔥 直播管理系统
 import { AIContentStudioPro } from './ai-content/AIContentStudioPro'; // 🔥 AI内容生成工作台 Pro版
-import GlobalBIDashboardCompact from './admin/GlobalBIDashboardCompact'; // 🔥 全局BI决策仪表盘 - 紧凑优化版
-import CustomerHealthMonitor from './admin/CustomerHealthMonitor'; // 🔥 客户健康度监控系统
 // 🔥 已删除：SmartWorkflowEngine - 智能流程引擎模块
-import SupplierCollaborationWorkbench from './admin/SupplierCollaborationWorkbench'; // 🔥 供应商协同工作台
 import MultiLanguageCurrencyCenter from './admin/MultiLanguageCurrencyCenter'; // 🔥 多语言/多货币管理中心
-// 🔥 移除销售预测与目标模块（已废弃）
-import SalesForecastingTargetsProMax from './admin/SalesForecastingTargetsProMax'; // 🔥 销售预测与目标管理 Pro Max
-import SalesForecastingTargetsProMaxEditable from './admin/SalesForecastingTargetsProMaxEditable'; // 🔥 销售预测与目标管理 Pro Max（可编辑版）
 import SalesDataManagementCenter from './admin/SalesDataManagementCenter'; // 🔥 销售数据管理与计算中心
 // 🔥 移除：业务流程编辑器Pro V2版
 // import { WorkflowEditorProV2 } from './workflow/WorkflowEditorProV2'; // 🔥 业务流程编辑Pro V2版
@@ -31,58 +15,132 @@ import FormManagementHub from './workflow/FormManagementHub'; // 🔥 表单管�
 // import { FormLibraryManagementPro } from './workflow/FormLibraryManagementPro'; // 🔥 表单库管理中心Pro
 import { UltimateFormDesigner } from './workflow/UltimateFormDesigner'; // 🔥 终极表单DIY工作台
 // import CustomerRelationshipManager from './crm/CustomerRelationshipManager'; // 🔥 客户关系管理（CRM）
-import CustomerRelationshipManagerPro from './crm/CustomerRelationshipManagerPro'; // 🔥 客户关系管理（CRM Pro - 社媒打通）
 // import { AdminFloatingToolbar } from './AdminFloatingToolbar'; // 🔧 Admin浮动工具栏 - 已禁用
 import { useAuth } from '../hooks/useAuth'; // 🔥 导入认证钩子
 import { hasPermission, type Permission } from '../lib/rbac-config'; // 🔥 导入权限检查函数
 import { useAdminOrganization } from '../contexts/AdminOrganizationContext';
-import AdminOrganizationProfile from './admin/AdminOrganizationProfile';
 import AdminUserProfile, { AdminUserAvatar } from './admin/AdminUserProfile';
-import FinanceDashboard from './dashboards/FinanceDashboardPro'; // 🔥 财务专员作台（Pro版 - 大厂级专业财务看板）
-import ProcurementDashboard from './dashboards/ProcurementDashboard'; // 🔥 采购专员工作台
-import MarketingOpsDashboard from './dashboards/MarketingOpsDashboard'; // 🔥 运营专员工作台
-import MenuPermissionMatrix from './admin/MenuPermissionMatrix'; // 🔥 菜单权限配置矩阵
-import PublicPoolManagementPro from './admin/PublicPoolManagementPro'; //  公海客户池管理（Pro增版）
-import CustomerIntakeSystem from './admin/CustomerIntakeSystem'; // 🔥 客户录入与评估系统
-import InspectionManagement from './admin/InspectionManagementComplete'; // 🔥 验货管理系统（完全版 - 全功能实现：报告编辑器/模板编辑器/数据导出）
 import UserRoleSwitcher from './admin/UserRoleSwitcher'; // 🔥 用户角色切换器
-import { CEOWorkbench } from './admin/workbenches/CEOWorkbench'; // 🔥 CEO工作台
-import { CFODashboardCompactWithHelp } from './dashboards/CFODashboardCompactWithHelp'; // 🔥 CFO工作台紧凑版
-import { SalesDirectorDashboard } from './dashboards/SalesDirectorDashboard'; // 🔥 销售总监工作台
-import { RegionalManagerDashboard } from './dashboards/RegionalManagerDashboard'; // 🔥 区域主管工作台
-import { SalesRepDashboardExpert } from './dashboards/SalesRepDashboardExpert'; // 🔥 业务员工作台专家版
-import { AdminSystemDashboardPro } from './dashboards/AdminSystemDashboardPro'; // 🔥 系统管理员工作台Pro
-import ShippingDocumentManagement from './admin/ShippingDocumentManagement'; // 🔥 发货管理
-import AdminDocumentCenter from './admin/DocumentCenter'; // 🔥 模板中心工作台 / 文档中心源头
 // ❌ 已删除：ShipmentManagementCenterV2 - 组件不存在
 // 🔥 已删除：OrderFlowCenter - 业务流程中心模块
-import FinanceManagement from './admin/FinanceManagement'; // 🔥 财务管理
-import RolePermissionCenterProMax from './admin/RolePermissionCenterProMax'; // 🔥 角色权限管理Pro Max
-import PermissionCenterV1 from './admin/PermissionCenterV1';
-import RealEnterpriseBackupCenter from './admin/RealEnterpriseBackupCenter'; // 🔥 企业级备份中心
-import SupabaseDiagnosticPanel from './admin/SupabaseDiagnosticPanel'; // 🔥 Supabase诊断面板
-import SupplierManagement from './admin/SupplierManagement'; // 🔥 供应商管理
-import PurchaseOrderManagement from './admin/PurchaseOrderManagementEnhanced'; // 🔥 采购订单管理（Enhanced版 - 台湾大厂风格）
-import AccountsPayableManagement from './admin/AccountsPayableManagement'; // 🔥 应付账款管理（供应商付款）
-import ServiceProviderManagement from './admin/ServiceProviderManagement'; // 🔥 服务商管理
-import OrderManagementCenterPro from './admin/OrderManagementCenterPro'; // 🔥 订单管理中心 Pro版（含订单全盘）
 // ❌ 已禁用：文件不存在
 // import LeadConversionWorkbench from './admin/LeadConversionWorkbench'; // 🔥 潜客转化工作台
 // ❌ 已禁用：文件不存在
 // import FullProcessDemo from './admin/FullProcessDemo'; // 🔥 全流程演示
 // [SANDBOX] Mock workflow visualization — not a real ERP module
-import FullProcessSandboxV5 from '../sandbox/demo/FullProcessSandboxV5';
-import { DocumentTestPage } from './documents/DocumentTestPage'; // 📄 文档测试页面
-import { DocumentationOfficerWorkbench } from './admin/workbenches/DocumentationOfficerWorkbench'; // 🔥 单证员工作台
-import { DocumentationOfficerWorkbenchPro } from './admin/workbenches/DocumentationOfficerWorkbenchPro'; // 🔥 单证员工作台 Pro版
-import { DocumentationWorkbenchUltimate } from './admin/workbenches/DocumentationWorkbenchUltimate'; // 🔥 单证管理系统 Ultimate 终极版
-import { BusinessProcessCenter } from './salesperson/BusinessProcessCenter'; // 🔥 业务流程中心（业务员端）
-import { SalesTodoCenter } from './salesperson/SalesTodoCenter'; // 🔥 业务员待办中心
 import { permissionCenterService } from '../lib/services/permissionCenterService';
+import { canUseRoleSwitcherForUser } from '../config/adminPortalPolicy';
+import { subscribeErpEvent } from '../lib/erp-core/event-bus';
+import {
+  EMPTY_SALES_WORKFLOW_SOURCE_SNAPSHOT,
+  loadSalesWorkflowSourceSnapshot,
+  readCachedSalesWorkflowSourceSnapshot,
+} from '../lib/services/salesWorkflowSourceService';
+import { computeOrderManagementRuleSummary } from '../lib/services/orderManagementCountService';
 
 interface AdminDashboardProps {
   onLogout: () => void | Promise<void>;
 }
+
+const scheduleBrowserIdleTask = (callback: () => void, timeout = 1500) => {
+  if (typeof window === 'undefined') {
+    callback();
+    return () => {};
+  }
+
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (cb: () => void, options?: { timeout?: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+
+  if (typeof idleWindow.requestIdleCallback === 'function') {
+    const idleId = idleWindow.requestIdleCallback(() => {
+      callback();
+    }, { timeout });
+
+    return () => {
+      idleWindow.cancelIdleCallback?.(idleId);
+    };
+  }
+
+  const timerId = window.setTimeout(callback, 0);
+  return () => {
+    window.clearTimeout(timerId);
+  };
+};
+
+const AdminDashboardContentFallback = () => (
+  <div className="flex min-h-[240px] items-center justify-center rounded-3xl border border-slate-200 bg-white/90 text-sm text-slate-500 shadow-sm">
+    正在加载模块...
+  </div>
+);
+
+const LazyAdminOverview = React.lazy(() => import('./admin/AdminOverview'));
+const LazyCustomerManagementEnhanced = React.lazy(() => import('./admin/CustomerManagementEnhanced'));
+const LazyAdminDataAnalyticsNew = React.lazy(() => import('./admin/AdminDataAnalyticsNew'));
+const LazyProductPush = React.lazy(() => import('./admin/ProductPush'));
+const LazyAdminMessaging = React.lazy(() => import('./admin/AdminMessaging'));
+const LazyMailWorkbench = React.lazy(() => import('./admin/mail-workbench/MailWorkbench'));
+// 🔥 重构：产品管理中心 — 全新 ERP 风格 PIM / 发布 / 价格 / 活动 / 审核 / 映射
+const LazyProductManagement = React.lazy(() => import('./admin/product-center'));
+const LazyGlobalBIDashboardCompact = React.lazy(() => import('./admin/GlobalBIDashboardCompact'));
+const LazySocialMediaMarketingUnified = React.lazy(() =>
+  import('./dashboards/SocialMediaMarketingUnified').then((m) => ({ default: m.SocialMediaMarketingUnified }))
+);
+const LazyCustomerRelationshipManagerPro = React.lazy(() => import('./crm/CustomerRelationshipManagerPro'));
+const LazyFinanceDashboard = React.lazy(() => import('./dashboards/FinanceDashboardPro'));
+const LazyProcurementDashboard = React.lazy(() => import('./dashboards/ProcurementDashboard'));
+const LazyMarketingOpsDashboard = React.lazy(() => import('./dashboards/MarketingOpsDashboard'));
+const LazyMenuPermissionMatrix = React.lazy(() => import('./admin/MenuPermissionMatrix'));
+const LazyInspectionManagement = React.lazy(() => import('./admin/InspectionManagementComplete'));
+const LazyCEOWorkbench = React.lazy(() =>
+  import('./admin/workbenches/CEOWorkbench').then((m) => ({ default: m.CEOWorkbench }))
+);
+const LazyCFODashboardCompactWithHelp = React.lazy(() =>
+  import('./dashboards/CFODashboardCompactWithHelp').then((m) => ({ default: m.CFODashboardCompactWithHelp }))
+);
+const LazySalesDirectorDashboard = React.lazy(() =>
+  import('./dashboards/SalesDirectorDashboard').then((m) => ({ default: m.SalesDirectorDashboard }))
+);
+const LazyRegionalManagerDashboard = React.lazy(() =>
+  import('./dashboards/RegionalManagerDashboard').then((m) => ({ default: m.RegionalManagerDashboard }))
+);
+const LazySalesRepDashboardExpert = React.lazy(() =>
+  import('./dashboards/SalesRepDashboardExpert').then((m) => ({ default: m.SalesRepDashboardExpert }))
+);
+const LazyAdminSystemDashboardPro = React.lazy(() =>
+  import('./dashboards/AdminSystemDashboardPro').then((m) => ({ default: m.AdminSystemDashboardPro }))
+);
+const LazyShippingDocumentManagement = React.lazy(() => import('./admin/ShippingDocumentManagement'));
+const LazyAdminDocumentCenter = React.lazy(() => import('./admin/DocumentCenter'));
+const LazyFinanceManagement = React.lazy(() => import('./admin/FinanceManagement'));
+const LazyInvoiceManagement = React.lazy(() => import('./admin/InvoiceManagement'));
+const LazyZhaoMinFinanceWorkbench = React.lazy(() => import('./finance-v2/ZhaoMinFinanceWorkbench'));
+const LazyZhaoMinFinanceTodoCenter = React.lazy(() => import('./finance-v2/ZhaoMinFinanceTodoCenter'));
+const LazyZhaoMinFinanceManagementCenter = React.lazy(() => import('./finance-v2/ZhaoMinFinanceManagementCenter'));
+const LazyRolePermissionCenterProMax = React.lazy(() => import('./admin/RolePermissionCenterProMax'));
+const LazyPermissionCenterV1 = React.lazy(() => import('./admin/PermissionCenterV1'));
+const LazyRealEnterpriseBackupCenter = React.lazy(() => import('./admin/RealEnterpriseBackupCenter'));
+const LazySupabaseDiagnosticPanel = React.lazy(() => import('./admin/SupabaseDiagnosticPanel'));
+const LazyDocumentNumberingCenter = React.lazy(() => import('./admin/DocumentNumberingCenter'));
+const LazySupplierManagement = React.lazy(() => import('./admin/SupplierManagement'));
+const LazyPurchaseOrderManagement = React.lazy(() => import('./admin/PurchaseOrderManagementEnhanced'));
+const LazyAccountsPayableManagement = React.lazy(() => import('./admin/AccountsPayableManagement'));
+const LazyServiceProviderManagement = React.lazy(() => import('./admin/ServiceProviderManagement'));
+const LazyOrderManagementCenterPro = React.lazy(() => import('./admin/OrderManagementCenterPro'));
+const LazyFullProcessSandboxV5 = React.lazy(() => import('../sandbox/demo/FullProcessSandboxV5'));
+const LazyDocumentTestPage = React.lazy(() =>
+  import('./documents/DocumentTestPage').then((m) => ({ default: m.DocumentTestPage }))
+);
+const LazyDocumentationWorkbenchUltimate = React.lazy(() =>
+  import('./admin/workbenches/DocumentationWorkbenchUltimate').then((m) => ({ default: m.DocumentationWorkbenchUltimate }))
+);
+const LazySalesTodoCenter = React.lazy(() =>
+  import('./salesperson/SalesTodoCenter').then((m) => ({ default: m.SalesTodoCenter }))
+);
+const LazySalesManagerTodoCenter = React.lazy(() => import('./admin/SalesManagerTodoCenter'));
+const LazyAdminOrganizationProfile = React.lazy(() => import('./admin/AdminOrganizationProfile'));
+const LazySalesForecastingTargetsProMaxEditable = React.lazy(() => import('./admin/SalesForecastingTargetsProMaxEditable'));
 
 function PeopleAdminCenter({ role, onNavigate }: { role?: string; onNavigate: (tab: string) => void }) {
   const title = '人事中心';
@@ -224,9 +282,9 @@ function getDefaultTabForRole(user: { role?: string; region?: string } | null | 
   if (user.role === 'External_Accountant') return 'finance-management';
   if (user.role === 'Procurement_Manager') return 'purchase-order-management';
   if (user.role === 'Procurement') return 'purchase-order-management';
-  if (user.role === 'Sales_Assistant') return 'business-process-center';
+  if (user.role === 'Sales_Assistant') return 'order-management-center';
   if (user.role === 'Marketing_Assistant') return 'crm';
-  if (user.role === 'Documentation_Officer') return 'documentation-workbench-ultimate';
+  if (user.role === 'Documentation_Officer') return 'documentation-center';
   if (user.role === 'QC') return 'inspection-management';
   if (user.role === 'Warehouse_Ops') return 'shipping-document-management';
   if (user.role === 'HR_Admin') return 'people-admin-center';
@@ -239,6 +297,12 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   // 🔥 获取当前登录用户
   const { currentUser } = useAuth();
   const { adminOrg, adminUserProfile } = useAdminOrganization();
+  const [salesWorkflowSnapshot, setSalesWorkflowSnapshot] = useState(() => readCachedSalesWorkflowSourceSnapshot({
+    email: currentUser?.email,
+    name: currentUser?.name,
+    role: currentUser?.role || currentUser?.userRole,
+    region: currentUser?.region,
+  }));
 
   // user menu dropdown state
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -272,17 +336,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     return savedWidth ? parseInt(savedWidth) : 224; // 默认 w-56 = 224px
   });
   const [isResizing, setIsResizing] = useState(false);
-  
-  // 🔥 新增：供应链管理分组折叠状态
-  const [supplyChainCollapsed, setSupplyChainCollapsed] = useState(() => {
-    const saved = localStorage.getItem('supplyChainMenuCollapsed');
-    return saved ? JSON.parse(saved) : false;
-  });
-
-  // 保存供应链分组折叠状态
-  useEffect(() => {
-    localStorage.setItem('supplyChainMenuCollapsed', JSON.stringify(supplyChainCollapsed));
-  }, [supplyChainCollapsed]);
 
   // 保存侧边栏宽度到localStorage
   useEffect(() => {
@@ -320,25 +373,88 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     let mounted = true;
 
     const hydratePermissionCenter = async () => {
-      await permissionCenterService.hydrateFromSupabase();
-      if (!mounted) return;
-      setPermissionCenterRevision((value) => value + 1);
+      try {
+        await permissionCenterService.hydrateFromSupabase();
+        if (!mounted) return;
+        setPermissionCenterRevision((value) => value + 1);
+      } catch (error) {
+        console.warn('[AdminDashboard] permission center hydrate failed:', error);
+      }
     };
 
     const handlePermissionRefresh = () => {
       setPermissionCenterRevision((value) => value + 1);
     };
 
-    void hydratePermissionCenter();
+    const cancelIdleHydration = scheduleBrowserIdleTask(() => {
+      void hydratePermissionCenter();
+    }, 2500);
     window.addEventListener('menuPermissionsUpdated', handlePermissionRefresh);
     window.addEventListener('app_publish_permissions', handlePermissionRefresh);
 
     return () => {
       mounted = false;
+      cancelIdleHydration();
       window.removeEventListener('menuPermissionsUpdated', handlePermissionRefresh);
       window.removeEventListener('app_publish_permissions', handlePermissionRefresh);
     };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    const syncSalesWorkflowSnapshot = async () => {
+      const nextSnapshot = await loadSalesWorkflowSourceSnapshot({
+        email: currentUser?.email,
+        name: currentUser?.name,
+        role: currentUser?.role || currentUser?.userRole,
+        region: currentUser?.region,
+      });
+      if (alive) setSalesWorkflowSnapshot(nextSnapshot);
+    };
+
+    void syncSalesWorkflowSnapshot();
+    window.addEventListener('userChanged', syncSalesWorkflowSnapshot as EventListener);
+    const unsubscribe = subscribeErpEvent(() => {
+      void syncSalesWorkflowSnapshot();
+    });
+    return () => {
+      alive = false;
+      window.removeEventListener('userChanged', syncSalesWorkflowSnapshot as EventListener);
+      unsubscribe();
+    };
+  }, [currentUser?.email, currentUser?.role, currentUser?.region]);
+
+  const cachedApprovalPendingCount = React.useMemo(() => {
+    const email = String(currentUser?.email || '').trim();
+    if (!email) return 0;
+    try {
+      const raw = localStorage.getItem(`approval_center_cache_v1:${email}`);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed?.pending) ? parsed.pending.length : 0;
+    } catch {
+      return 0;
+    }
+  }, [currentUser?.email]);
+
+  const workflowRuleSummary = React.useMemo(() => {
+    if (!currentUser) return null;
+    return computeOrderManagementRuleSummary({
+      actor: {
+        email: currentUser.email,
+        name: currentUser.name,
+        role: currentUser.role || currentUser.userRole,
+        rawRole: currentUser.userRole || currentUser.role,
+        region: currentUser.region,
+      },
+      snapshot: salesWorkflowSnapshot,
+      approvalPendingCount: cachedApprovalPendingCount,
+    });
+  }, [currentUser, salesWorkflowSnapshot, cachedApprovalPendingCount]);
+  const orderManagementBadge = workflowRuleSummary?.counts.overview || 0;
+  const salesTodoBadge = ['Sales_Rep', 'Regional_Manager', 'Sales_Manager', 'Sales_Director', 'CEO'].includes(String(currentUser?.role || currentUser?.userRole || ''))
+    ? (workflowRuleSummary?.salesTodoOpenCount || 0)
+    : 0;
 
   // 🔥 监听角色切换事件，自动跳转到该角色的默认工作台
   useEffect(() => {
@@ -395,6 +511,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       // 🔥 移除：order-flow-center 应该允许Admin访问（用于流程监控）
       // 'order-flow-center',
       'finance-management',
+      // finance-v2：赵敏 mock 骨架，允许 Admin 进入便于联调（旧「财务管理」仍排除）
       'lead-conversion',
       'global-bi-dashboard',
       'customer-health-monitor',
@@ -460,10 +577,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     // },
     { 
       id: 'crm', 
-      label: '客户关系管理（CRM）', 
+      label: '客户关系管理', 
       enLabel: 'CRM System', 
       icon: UserCheck, 
-      badge: 'CRM' as any,
+      badge: '' as any,
       requiredPermission: 'access:customer_management' as Permission
     },
     // 🔥 已整合到CRM模块中，不再独立显示
@@ -489,22 +606,23 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       label: '订单管理中心', 
       enLabel: 'Order Management', 
       icon: Package, 
-      badge: 28,
+      badge: orderManagementBadge > 0 ? orderManagementBadge : undefined,
       requiredPermission: 'access:order_management' as Permission
     },
-    { 
-      id: 'business-process-center', 
-      label: '业务流程中心', 
-      enLabel: 'Business Process Center', 
-      icon: Workflow, 
+    {
+      id: 'mail-workbench',
+      label: '业务邮件工作台',
+      enLabel: 'Mail Workbench',
+      icon: Mail,
       badge: 'NEW' as any,
-      requiredPermission: 'access:inquiry_management' as Permission // 🔥 业务员、区域主管权限
+      requiredPermission: 'access:dashboard' as Permission
     },
     {
       id: 'sales-todo-center',
       label: '待办中心',
       enLabel: 'My Todo Center',
       icon: ClipboardCheck,
+      badge: salesTodoBadge > 0 ? salesTodoBadge : undefined,
       requiredPermission: 'access:inquiry_management' as Permission // 业务员、区域主管、销售总监
     },
     {
@@ -565,6 +683,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       requiredPermission: 'access:data_management' as Permission
     },
     // 🔥 删除：文档编辑器模块
+    { 
+      id: 'documentation-center',
+      label: '单证管理中心',
+      enLabel: 'Documentation Management Center',
+      icon: FolderOpen,
+      requiredPermission: 'access:shipping' as Permission
+    },
     { 
       id: 'documentation-workbench-ultimate', 
       label: '单证管理', 
@@ -684,6 +809,30 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       requiredPermission: 'access:finance_management' as Permission // 🔥 财务专员权限
     },
     { 
+      id: 'finance-v2-workbench', 
+      label: '赵敏财务工作台（新）', 
+      enLabel: 'Finance Workbench (New)', 
+      icon: Sparkles,
+      badge: 'V2' as any,
+      requiredPermission: 'access:finance_management' as Permission
+    },
+    { 
+      id: 'finance-v2-todo-center', 
+      label: '财务待办中心（新）', 
+      enLabel: 'Finance Todo Center (New)', 
+      icon: ClipboardCheck,
+      badge: 'V2' as any,
+      requiredPermission: 'access:finance_management' as Permission
+    },
+    { 
+      id: 'finance-v2-management-center', 
+      label: '财务管理中心（新）', 
+      enLabel: 'Finance Management Center (New)', 
+      icon: LayoutGrid,
+      badge: 'V2' as any,
+      requiredPermission: 'access:finance_management' as Permission
+    },
+    { 
       id: 'permission-center', 
       label: '权限中心', 
       enLabel: 'Permission Center', 
@@ -705,6 +854,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       icon: Settings,
       badge: '配置' as any,
       requiredPermission: 'access:data_management' as Permission // 🔒 仅系统管理员（Admin）可见
+    },
+    {
+      id: 'document-numbering-center',
+      label: '编号管理中心',
+      enLabel: 'Document Numbering Center',
+      icon: Hash,
+      badge: 'NEW' as any,
+      requiredPermission: 'access:data_management' as Permission
     },
     // 🔥 数据备份中心 - 已移除
     // 🔥 数据备份中心 Pro - 已移除
@@ -800,6 +957,23 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           order.push('service-provider-management');
           localStorage.setItem('adminDashboardMenuOrder', JSON.stringify(order));
         }
+
+        // ✅ 赵敏 finance-v2：旧 localStorage 顺序里没有时插入到「消息中心」后，避免沉在列表最底不好找
+        const financeV2Ids = [
+          'finance-v2-workbench',
+          'finance-v2-todo-center',
+          'finance-v2-management-center',
+        ] as const;
+        const missingV2 = financeV2Ids.filter((id) => !order.includes(id));
+        if (missingV2.length > 0) {
+          const msgIdx = order.indexOf('messaging');
+          if (msgIdx >= 0) {
+            order.splice(msgIdx + 1, 0, ...missingV2);
+          } else {
+            order.push(...missingV2);
+          }
+          localStorage.setItem('adminDashboardMenuOrder', JSON.stringify(order));
+        }
         
         // Restore the order based on saved IDs, and add any new items that aren't in saved order
         const restoredItems = order
@@ -841,7 +1015,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         if (currentUser.role === 'Documentation_Officer') {
           const allowedModules = [
             'overview',                         // ✅ 工作台（单证管理系统）
-            'documentation-workbench-ultimate', // ✅ 单证管理
+            'documentation-center',            // ✅ 单证管理中心
             'document-test',                    // ✅ 文档中心
             'messaging',                        // ✅ 消息中心
           ];
@@ -880,6 +1054,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'overview',              // ✅ 工作台
             'order-management-center', // ✅ 订单管理中心（财务视角）
             'finance-management',    // ✅ 财务管理
+            'finance-v2-workbench',
+            'finance-v2-todo-center',
+            'finance-v2-management-center',
             'messaging',             // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
@@ -904,7 +1081,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'sales-todo-center',                // ✅ 待办中心
             'crm',                              // ✅ CRM
             'order-management-center',          // ✅ 订单管理中心
-            'business-process-center',          // ✅ 业务流程中心
             'shipping-document-management',     // ✅ 发货管理
             'messaging',                        // ✅ 消息中心
             // ❌ 禁止：采购订单管理、供应商管理、财务管理、系统设置
@@ -919,7 +1095,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'sales-todo-center',                // ✅ 待办中心
             'crm',                              // ✅ CRM
             'order-management-center',          // ✅ 订单管理中心
-            'business-process-center',          // ✅ 业务流程中心
             'shipping-document-management',     // ✅ 发货管理
             'messaging',                        // ✅ 消息中心
           ];
@@ -933,7 +1108,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'sales-todo-center',                // ✅ 待办中心
             'crm',                              // ✅ CRM
             'order-management-center',          // ✅ 订单管理中心
-            'business-process-center',          // ✅ 业务流程中心
             'shipping-document-management',     // ✅ 发货管理
             'global-bi-dashboard',              // ✅ 全局BI仪表盘
             'messaging',                        // ✅ 消息中心
@@ -948,6 +1122,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'order-management-center', // ✅ 订单管理中心（财务视角）
             'global-bi-dashboard',     // ✅ 全局BI仪表盘
             'finance-management',      // ✅ 财务管理
+            'finance-v2-workbench',
+            'finance-v2-todo-center',
+            'finance-v2-management-center',
+            'document-numbering-center',
             'messaging',               // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
@@ -963,6 +1141,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'analytics',                     // ✅ 数据分析（CEO战略驾驶舱）
             'global-bi-dashboard',           // ✅ 全局BI仪表盘
             'finance-management',            // ✅ 财务管理（查看）
+            'finance-v2-workbench',
+            'finance-v2-todo-center',
+            'finance-v2-management-center',
+            'document-numbering-center',
             'messaging',                     // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
@@ -971,17 +1153,21 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         // ⚙️ 系统管理员 (Admin) - 系统配置、流程管理、技术管理
         if (currentUser.role === 'Admin') {
           const allowedModules = [
-            'overview',                      // ��� 工作台
+            'overview',                      // ✅ 工作台
             'document-test',                 // ✅ 文档中心（仅Admin）
             'template-workbench',           // ✅ 模板中心工作台
             'admin-company-profile',        // ✅ 企业主数据中心
             'form-manager',                  // ✅ 表单管理中心
             'role-permission',               // ✅ 角色权限管理
             'menu-permission-matrix',        // ✅ 菜单权限配置矩阵
+            'document-numbering-center',     // ✅ 编号管理中心
             'enterprise-backup-center',      // ✅ 企业级备份中心
             'supabase-diagnostic',           // ✅ Supabase诊断面板
             'multi-language-currency',       // ✅ 多语言/多货币
             'full-process-demo-v5',          // 🧪 全流程演示沙盘 V5（Mock Only）
+            'finance-v2-workbench',
+            'finance-v2-todo-center',
+            'finance-v2-management-center',
             'messaging',                     // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
@@ -1009,11 +1195,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     return item;
   });
   
-  // 🔥 检查供应链管理菜单是否可见
-  const hasSupplierAccess = currentUser 
-    ? hasPermission(currentUser, 'access:supplier_management' as Permission)
-    : false;
-
   useEffect(() => {
     if (!currentUser) return;
     if (activeTab === 'overview') return;
@@ -1079,63 +1260,63 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       case 'overview':
         // 🔥 根据角色显示不同的工作台
         if (currentUser?.role === 'CEO') {
-          return <CEOWorkbench user={currentUser} onNavigate={setActiveTab} />;
+          return <LazyCEOWorkbench user={currentUser} onNavigate={setActiveTab} />;
         }
         // CFO显示财务总监工作台（紧凑版 + 完整帮助提示）
         if (currentUser?.role === 'CFO') {
-          return <CFODashboardCompactWithHelp />;
+          return <LazyCFODashboardCompactWithHelp />;
         }
         // 销售总监显示销售管理工作台
         if (currentUser?.role === 'Sales_Director' || (currentUser?.role === 'Sales_Manager' && currentUser?.region === 'all')) {
-          return <SalesDirectorDashboard />;
+          return <LazySalesDirectorDashboard />;
         }
         // 区域主管显示区域管理工作台
         if (currentUser?.role === 'Regional_Manager' || (currentUser?.role === 'Sales_Manager' && currentUser?.region !== 'all')) {
-          return <RegionalManagerDashboard user={currentUser} />;
+          return <LazyRegionalManagerDashboard user={currentUser} />;
         }
         // 业务员显示业务员工作台（专家版 - 背调系统）
         if (currentUser?.role === 'Sales_Rep') {
-          return <SalesRepDashboardExpert user={currentUser} />;
+          return <LazySalesRepDashboardExpert user={currentUser} />;
         }
         // 财务专员显示财务专员工作台
         if (currentUser?.role === 'Finance') {
-          return <FinanceDashboard user={currentUser} />;
+          return <LazyFinanceDashboard user={currentUser} />;
         }
         // 代理记账财务默认进入财务管理执行页，而不是内部财务工作台
         if (currentUser?.role === 'External_Accountant') {
-          return <FinanceManagement />;
+          return <LazyFinanceManagement />;
         }
         // 采购主管默认进入采购订单管理，以体现主管视角
         if (currentUser?.role === 'Procurement_Manager') {
-          return <PurchaseOrderManagement />;
+          return <LazyPurchaseOrderManagement />;
         }
         // 采购员显示采购执行工作台
         if (currentUser?.role === 'Procurement') {
-          return <ProcurementDashboard user={currentUser} />;
+          return <LazyProcurementDashboard user={currentUser} />;
         }
-        // 业务助理默认进入流程协同入口，避免与业务员首页混同
+        // 业务助理默认进入订单管理中心，统一销售侧主入口
         if (currentUser?.role === 'Sales_Assistant') {
-          return <BusinessProcessCenter />;
+          return <LazyOrderManagementCenterPro currentUser={currentUser} />;
         }
         // 运营专员显示运营专员工作台
         if (currentUser?.role === 'Marketing_Ops') {
-          return <MarketingOpsDashboard user={currentUser} />;
+          return <LazyMarketingOpsDashboard user={currentUser} />;
         }
         // 运营助理进入客户录入/营销执行入口，避免与运营专员同页
         if (currentUser?.role === 'Marketing_Assistant') {
-          return <CustomerRelationshipManagerPro />;
+          return <LazyCustomerRelationshipManagerPro />;
         }
         // 系统管理员显示系统管理仪表盘
         if (currentUser?.role === 'Admin') {
-          return <AdminSystemDashboardPro user={currentUser} onNavigate={setActiveTab} />;
+          return <LazyAdminSystemDashboardPro user={currentUser} onNavigate={setActiveTab} />;
         }
         // 单证员显示单证管理系统
         if (currentUser?.role === 'Documentation_Officer') {
-          return <DocumentationWorkbenchUltimate />;
+          return <LazyDocumentationWorkbenchUltimate />;
         }
         // QC / 人事 / 行政用各自最贴近的正式入口
         if (currentUser?.role === 'QC') {
-          return <InspectionManagement />;
+          return <LazyInspectionManagement />;
         }
         if (currentUser?.role === 'HR_Admin') {
           return <PeopleAdminCenter role={currentUser?.role} onNavigate={setActiveTab} />;
@@ -1144,11 +1325,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           return <AdminOpsCenter onNavigate={setActiveTab} />;
         }
         // 其他角色暂时显示原工作台
-        return <AdminOverview onNavigateToAPIDemo={() => setActiveTab('social-media-marketing')} />;
+        return <LazyAdminOverview onNavigateToAPIDemo={() => setActiveTab('social-media-marketing')} />;
       case 'customers':
-        return <CustomerManagementEnhanced />;
+        return <LazyCustomerManagementEnhanced />;
       case 'crm': // 🔥 新增：客户关系管理（CRM Pro - 社媒打通 + 公海客户池）
-        return <CustomerRelationshipManagerPro />;
+        return <LazyCustomerRelationshipManagerPro />;
       case 'people-admin-center':
         return <PeopleAdminCenter role={currentUser?.role} onNavigate={setActiveTab} />;
       case 'admin-ops-center':
@@ -1160,9 +1341,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       // case 'customer-intake': // 🔥 新增：客户录入与评估系统（多渠道客户采集、智能评分）
       //   return currentUser ? <CustomerIntakeSystem userRole={currentUser.role} /> : null;
       case 'analytics':
-        return <AdminDataAnalyticsNew />; // 🔥 使用新的角色专属数据分析
+        return <LazyAdminDataAnalyticsNew />; // 🔥 使用新的角色专属数据分析
       case 'global-bi-dashboard': // 🔥 新增：全局BI决策仪表盘 - 紧凑优化版
-        return currentUser ? <GlobalBIDashboardCompact userRole={currentUser.role} userRegion={currentUser.region} /> : null;
+        return currentUser ? <LazyGlobalBIDashboardCompact userRole={currentUser.role} userRegion={currentUser.region} /> : null;
       // 🔥 移除客户健康度监控模块
       // case 'customer-health-monitor': // 🔥 新增：客户健康度监控
       //   return currentUser ? <CustomerHealthMonitor user={currentUser} /> : null;
@@ -1183,15 +1364,19 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       case 'status-flow-simulator': // 🔥 新增：状态流转模拟器 - ⚠️ 组件文件不存在，已禁用
         return <div className="p-8 text-center text-gray-500">状态流转模拟器组件暂不可用</div>;
       case 'product-management':
-        return <ProductManagement />;
+        return <LazyProductManagement />;
       case 'product-push':
-        return <ProductPush />;
+        return <LazyProductPush />;
       case 'messaging':
-        return <AdminMessaging />;
+        return <LazyAdminMessaging />;
+      case 'mail-workbench':
+        return <LazyMailWorkbench />;
       case 'social-media-marketing':
-        return currentUser ? <SocialMediaMarketingUnified user={currentUser} /> : null;
+        return currentUser ? <LazySocialMediaMarketingUnified user={currentUser} /> : null;
+      case 'documentation-center':
+        return <LazyInvoiceManagement />;
       case 'shipping-document-management':
-        return <ShippingDocumentManagement />;
+        return <LazyShippingDocumentManagement />;
       // ❌ 已删除：ShipmentManagementCenterV2 - 组件不存在
       // { 
       //   id: 'shipment-management-center-v2', 
@@ -1202,42 +1387,50 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       //   requiredPermission: 'access:shipping' as Permission
       // },
       case 'document-test': // 📄 文档中心
-        return <DocumentTestPage />;
+        return <LazyDocumentTestPage />;
       case 'template-workbench': // 🔥 模板中心工作台
-        return <AdminDocumentCenter userRole="admin" />;
+        return <LazyAdminDocumentCenter userRole="admin" />;
       case 'documentation-workbench-ultimate': // 🔥 新增：单证管理系统 Ultimate 终极版
-        return <DocumentationWorkbenchUltimate />;
+        return <LazyDocumentationWorkbenchUltimate />;
       // 🔥 已删除：OrderFlowCenter - 业务流程中心模块
       // case 'order-flow-center':
       //   return <OrderFlowCenter />;
       case 'finance-management':
-        return <FinanceManagement />;
+        return <LazyFinanceManagement />;
+      case 'finance-v2-workbench':
+        return <LazyZhaoMinFinanceWorkbench onNavigateTo={(target) => setActiveTab(target as any)} />;
+      case 'finance-v2-todo-center':
+        return <LazyZhaoMinFinanceTodoCenter />;
+      case 'finance-v2-management-center':
+        return <LazyZhaoMinFinanceManagementCenter />;
       case 'permission-center':
-        return <PermissionCenterV1 />;
+        return <LazyPermissionCenterV1 />;
       case 'role-permission': // 🔥 新增：角色权限管理中心 Pro Max版
-        return <RolePermissionCenterProMax />;
+        return <LazyRolePermissionCenterProMax />;
       case 'menu-permission-matrix': // 🔥 新增：菜单权限配置矩阵
-        return <MenuPermissionMatrix />;
+        return <LazyMenuPermissionMatrix />;
+      case 'document-numbering-center':
+        return <LazyDocumentNumberingCenter />;
       case 'enterprise-backup-center':
-        return <RealEnterpriseBackupCenter />;
+        return <LazyRealEnterpriseBackupCenter />;
       case 'supabase-diagnostic':
-        return <SupabaseDiagnosticPanel />;
+        return <LazySupabaseDiagnosticPanel />;
       case 'supplier-management':
-        return <SupplierManagement />;
+        return <LazySupplierManagement />;
       case 'purchase-order-management':
-        return <PurchaseOrderManagement />;
+        return <LazyPurchaseOrderManagement />;
       case 'accounts-payable-management':
-        return <AccountsPayableManagement />;
+        return <LazyAccountsPayableManagement />;
       case 'service-provider-management':
-        return <ServiceProviderManagement />;
+        return <LazyServiceProviderManagement />;
       case 'inspection-management': // 🔥 新增：验货管理系统
-        return <InspectionManagement />;
+        return <LazyInspectionManagement />;
       case 'order-management-center':
-        return <OrderManagementCenterPro currentUser={currentUser} />;
+        return <LazyOrderManagementCenterPro currentUser={currentUser} />;
       case 'full-process-demo': // 🔥 新增：全流程演示
         return <div className="p-8 text-center text-gray-500">全流程演示组件暂不可用</div>;
       case 'full-process-demo-v5': // [SANDBOX] 全流程演示沙盘 V5 — Mock Only, not connected to real ERP data
-        return <FullProcessSandboxV5 />;
+        return <LazyFullProcessSandboxV5 />;
       case 'lead-conversion': // 🔥 新增：潜在客户转化工作台 - 已禁用（文件不存在）
         return <div className="p-8 text-center text-gray-500">潜客转化工作台组件暂不可用</div>;
       case 'ai-content-studio': // 🔥 新：AI内容生成工作台
@@ -1248,19 +1441,20 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
       // 🔥 移除"销售预测与目标"模块（已废弃）
       case 'sales-forecasting-targets-pro-max': // 销售预测与目标管理 Pro Max（可编辑版）
-        return <SalesForecastingTargetsProMaxEditable />;
+        return <LazySalesForecastingTargetsProMaxEditable />;
       case 'sales-data-management': // 销售数据管理与计算中心
         return <SalesDataManagementCenter />;
       case 'sales-todo-center': // 🔥 业务员待办中心
-        return <SalesTodoCenter />;
-      case 'business-process-center':
-        return <BusinessProcessCenter />;
+        if (currentUser?.role === 'Sales_Rep') {
+          return <LazySalesTodoCenter />;
+        }
+        return <LazySalesManagerTodoCenter currentUser={currentUser} onNavigateToModule={setActiveTab} />;
       case 'admin-company-profile':
-        return <AdminOrganizationProfile onBack={goBack} />;
+        return <LazyAdminOrganizationProfile onBack={goBack} />;
       case 'admin-user-profile':
         return <AdminUserProfile onBack={goBack} />;
       default:
-        return <AdminOverview onNavigateToAPIDemo={() => setActiveTab('social-media-marketing')} />;
+        return <LazyAdminOverview onNavigateToAPIDemo={() => setActiveTab('social-media-marketing')} />;
     }
   };
 
@@ -1318,7 +1512,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         <nav className="flex-1 overflow-y-auto py-4 px-2">
           <ul className="space-y-1">
             {displayMenuItems
-              .filter(item => item.id !== 'supplier-management' && item.id !== 'service-provider-management') // 排除供应链项
               .map((item, index) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -1359,14 +1552,18 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                       {!sidebarCollapsed && (
                         <>
                           <div className="flex-1 text-left min-w-0">
-                            <p className="truncate" style={{ fontSize: '13px', fontWeight: 500 }}>{item.label}</p>
-                            <p className="text-xs opacity-75 truncate">{item.enLabel}</p>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <p className="truncate" style={{ fontSize: '13px', fontWeight: 500 }}>{item.label}</p>
+                              {item.badge ? (
+                                <Badge variant="destructive" className="h-5 min-w-5 px-1.5 text-xs shrink-0">
+                                  {item.badge}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            {item.enLabel ? (
+                              <p className="text-xs opacity-75 truncate">{item.enLabel}</p>
+                            ) : null}
                           </div>
-                          {item.badge && (
-                            <Badge variant="destructive" className="h-5 min-w-5 px-1.5 text-xs">
-                              {item.badge}
-                            </Badge>
-                          )}
                         </>
                       )}
                       {sidebarCollapsed && item.badge && (
@@ -1379,156 +1576,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 </li>
               );
             })}
-            
-            {/* 🔥 新增：供应链管理分组 - 根据权限显示 */}
-            {hasSupplierAccess && !sidebarCollapsed && (
-              <li className="mt-4">
-                <button
-                  onClick={() => setSupplyChainCollapsed(!supplyChainCollapsed)}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
-                >
-                  <Package className="w-4 h-4 flex-shrink-0" />
-                  <span className="flex-1 text-left truncate" style={{ fontSize: '12px', fontWeight: 600 }}>
-                    供应链管理
-                  </span>
-                  {supplyChainCollapsed ? (
-                    <ChevronDown className="w-4 h-4 flex-shrink-0" />
-                  ) : (
-                    <ChevronUp className="w-4 h-4 flex-shrink-0" />
-                  )}
-                </button>
-                
-                {/* 子菜单 */}
-                {!supplyChainCollapsed && (
-                  <ul className="mt-1 ml-6 space-y-1">
-                    {/* 供应商管理 */}
-                    <li>
-                      <button
-                        onClick={() => setActiveTab('supplier-management')}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-                          activeTab === 'supplier-management'
-                            ? 'bg-red-600 text-white shadow-md'
-                            : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                        }`}
-                      >
-                        <Factory className="w-3.5 h-3.5 flex-shrink-0" />
-                        <div className="flex-1 text-left min-w-0">
-                          <p className="truncate" style={{ fontSize: '12px', fontWeight: 500 }}>供应商管理</p>
-                          <p className="text-xs opacity-75 truncate">Suppliers</p>
-                        </div>
-                      </button>
-                    </li>
-                    
-                    {/* 服务商管理 */}
-                    <li>
-                      <button
-                        onClick={() => setActiveTab('service-provider-management')}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-                          activeTab === 'service-provider-management'
-                            ? 'bg-red-600 text-white shadow-md'
-                            : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                        }`}
-                      >
-                        <Truck className="w-3.5 h-3.5 flex-shrink-0" />
-                        <div className="flex-1 text-left min-w-0">
-                          <p className="truncate" style={{ fontSize: '12px', fontWeight: 500 }}>服务商管理</p>
-                          <p className="text-xs opacity-75 truncate">Service Providers</p>
-                        </div>
-                      </button>
-                    </li>
-                    
-                    {/* 🔥 新增：验货管理 */}
-                    <li>
-                      <button
-                        onClick={() => setActiveTab('inspection-management')}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-                          activeTab === 'inspection-management'
-                            ? 'bg-red-600 text-white shadow-md'
-                            : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                        }`}
-                      >
-                        <ClipboardCheck className="w-3.5 h-3.5 flex-shrink-0" />
-                        <div className="flex-1 text-left min-w-0">
-                          <p className="truncate" style={{ fontSize: '12px', fontWeight: 500 }}>验货管理</p>
-                          <p className="text-xs opacity-75 truncate">Inspection</p>
-                        </div>
-                        <Badge variant="destructive" className="h-4 px-1.5 text-xs">12</Badge>
-                      </button>
-                    </li>
-                    
-                    {/* 🔥 新增：采购订单管理 */}
-                    <li>
-                      <button
-                        onClick={() => setActiveTab('purchase-order-management')}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-                          activeTab === 'purchase-order-management'
-                            ? 'bg-red-600 text-white shadow-md'
-                            : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                        }`}
-                      >
-                        <Truck className="w-3.5 h-3.5 flex-shrink-0" />
-                        <div className="flex-1 text-left min-w-0">
-                          <p className="truncate" style={{ fontSize: '12px', fontWeight: 500 }}>采购订单管理</p>
-                          <p className="text-xs opacity-75 truncate">Purchase Orders</p>
-                        </div>
-                        <Badge variant="destructive" className="h-4 px-1.5 text-xs">5</Badge>
-                      </button>
-                    </li>
-                    
-                    {/* 🔥 新增：应付账款管理 */}
-                    <li>
-                      <button
-                        onClick={() => setActiveTab('accounts-payable-management')}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded transition-colors ${
-                          activeTab === 'accounts-payable-management'
-                            ? 'bg-red-600 text-white shadow-md'
-                            : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                        }`}
-                      >
-                        <Wallet className="w-3.5 h-3.5 flex-shrink-0" />
-                        <div className="flex-1 text-left min-w-0">
-                          <p className="truncate" style={{ fontSize: '12px', fontWeight: 500 }}>应付账款管理</p>
-                          <p className="text-xs opacity-75 truncate">Accounts Payable</p>
-                        </div>
-                        <Badge variant="destructive" className="h-4 px-1.5 text-xs">3</Badge>
-                      </button>
-                    </li>
-                  </ul>
-                )}
-              </li>
-            )}
-            
-            {/* 折叠状态下的供应链管理图标 */}
-            {hasSupplierAccess && sidebarCollapsed && (
-              <>
-                <li>
-                  <button
-                    onClick={() => setActiveTab('supplier-management')}
-                    className={`w-full flex items-center justify-center py-2.5 rounded transition-colors relative ${
-                      activeTab === 'supplier-management'
-                        ? 'bg-red-600 text-white shadow-md'
-                        : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                    }`}
-                    title="供应商管理"
-                  >
-                    <Factory className="w-5 h-5" />
-                  </button>
-                </li>
-                <li>
-                  <button
-                    onClick={() => setActiveTab('service-provider-management')}
-                    className={`w-full flex items-center justify-center py-2.5 rounded transition-colors relative ${
-                      activeTab === 'service-provider-management'
-                        ? 'bg-red-600 text-white shadow-md'
-                        : 'text-slate-300 hover:bg-slate-700 hover:text-white'
-                    }`}
-                    title="服务商管理"
-                  >
-                    <Truck className="w-5 h-5" />
-                  </button>
-                </li>
-              </>
-            )}
           </ul>
         </nav>
 
@@ -1584,7 +1631,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           {/* 右：操作按钮 */}
           <div className="flex items-center gap-3">
             {/* 🔥 用户角色切换器 */}
-            <UserRoleSwitcher />
+            {canUseRoleSwitcherForUser(currentUser?.email) && <UserRoleSwitcher />}
 
             {/* 用户头像 + 下拉菜单 */}
             <div className="relative">
@@ -1666,16 +1713,19 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
         {/* 主内容区 - 可滚动 */}
         <main
-          className={`flex-1 overflow-x-hidden bg-gray-50 ${
-            activeTab === 'template-workbench' || activeTab === 'permission-center' ? 'overflow-hidden' : 'overflow-y-auto'
-          }`}
+          translate="no"
+          className={`flex-1 min-h-0 overflow-x-hidden bg-gray-50 ${
+            activeTab === 'template-workbench' || activeTab === 'permission-center' || activeTab === 'purchase-order-management' ? 'overflow-hidden' : 'overflow-y-auto'
+          } notranslate`}
           style={{ maxWidth: '100%', width: '100%' }}
         >
           <div
-            className={activeTab === 'template-workbench' || activeTab === 'permission-center' ? 'h-full min-h-0 p-6' : 'p-6'}
+            className={activeTab === 'template-workbench' || activeTab === 'permission-center' || activeTab === 'order-management-center' || activeTab === 'purchase-order-management' ? 'flex h-full min-h-0 flex-col p-6' : 'p-6'}
             style={{ maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}
           >
-            {renderContent()}
+            <Suspense fallback={<AdminDashboardContentFallback />}>
+              {renderContent()}
+            </Suspense>
           </div>
         </main>
       </div>
