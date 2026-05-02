@@ -17,10 +17,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { toast } from 'sonner';
 
 import type {
   Campaign,
@@ -68,6 +71,11 @@ import {
   mockSupplierLinks,
   mockSupplierQuotes,
 } from './mockData';
+
+import {
+  PRODUCT_CENTER_BACKEND,
+  getProductCenterService,
+} from '../services/productCenterService';
 
 // ─── Role / identity model (Phase 3) ────────────────────────────────────────
 //
@@ -302,6 +310,83 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   const [filters, setFiltersRaw] = useState<ProductListFilters>({ region: 'ALL' });
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
 
+  // ── Phase 4c: backend wiring ──────────────────────────────────────────────
+  //
+  // The store keeps the same React-state shape, but in `supabase` mode each
+  // mutation also fires an async write through the service layer (with a
+  // toast on failure). On mount we replace the seeded mock state with a
+  // fresh `loadAll()` snapshot so the UI is consistent with the database.
+  // `usingSupabase` is computed once at module load — switching backend
+  // requires a page refresh.
+
+  const usingSupabase = PRODUCT_CENTER_BACKEND === 'supabase';
+  const serviceRef = useRef(getProductCenterService());
+  const [bootstrapLoading, setBootstrapLoading] = useState<boolean>(usingSupabase);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!usingSupabase) return;
+    let cancelled = false;
+    const svc = serviceRef.current;
+    if (!svc.loadAll) {
+      setBootstrapLoading(false);
+      return;
+    }
+    svc
+      .loadAll()
+      .then((snap) => {
+        if (cancelled) return;
+        setProducts(snap.products);
+        setCategories(snap.categories);
+        setAttributeValues(snap.attributeValues);
+        setMedia(snap.media);
+        setRegionPrices(snap.regionPrices);
+        setPublishChannels(snap.publishChannels);
+        setCampaigns(snap.campaigns);
+        setCampaignProducts(snap.campaignProducts);
+        setModelMappings(snap.mappings);
+        setAuditLogs(snap.auditLogs);
+        setPriceHistory(snap.priceHistory);
+        setSupplierQuotes(snap.supplierQuotes);
+        setReviewHistory(snap.reviewHistory);
+        setBootstrapLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const msg = (err as Error)?.message ?? 'unknown error';
+        // eslint-disable-next-line no-console
+        console.error('[product-center] loadAll failed', err);
+        setBootstrapError(msg);
+        setBootstrapLoading(false);
+        toast.error(`数据加载失败：${msg}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [usingSupabase]);
+
+  /**
+   * Fire a write through the service layer in supabase mode, no-op in mock
+   * mode. We deliberately do NOT await this from the mutation callbacks —
+   * the React state update is the source of truth for the UI; the service
+   * call is the durable persistence step. If it fails we surface a toast
+   * but DO NOT roll back local state, because doing so for every mutation
+   * would require keeping snapshots and is rarely the desired UX (users
+   * usually want to keep typing and retry).
+   */
+  const persist = useCallback(
+    <T,>(label: string, fn: () => Promise<T>): void => {
+      if (!usingSupabase) return;
+      void fn().catch((err: unknown) => {
+        const msg = (err as Error)?.message ?? 'unknown error';
+        // eslint-disable-next-line no-console
+        console.error(`[product-center] persist ${label}`, err);
+        toast.error(`${label} 同步失败：${msg}`);
+      });
+    },
+    [usingSupabase],
+  );
+
   // ── helpers ────────────────────────────────────────────────────────────────
 
   const appendAudit = useCallback(
@@ -413,8 +498,14 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         toValue: next,
         actorName: 'You',
       });
+      persist(`发布状态 → ${next}`, () =>
+        serviceRef.current.patchPublishChannel(productId, region, {
+          publishStatus: next,
+          ...extra,
+        }),
+      );
     },
-    [appendAudit],
+    [appendAudit, persist],
   );
 
   // ── actions ────────────────────────────────────────────────────────────────
@@ -429,20 +520,30 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   const setSelected = useCallback((ids: string[]) => setSelectedProductIds(ids), []);
   const clearSelected = useCallback(() => setSelectedProductIds([]), []);
 
-  const upsertProduct = useCallback((input: Product) => {
-    setProducts((prev) => {
-      const idx = prev.findIndex((p) => p.id === input.id);
-      const stamped = { ...input, updatedAt: nowIso() };
-      if (idx === -1) return [...prev, { ...stamped, createdAt: nowIso() }];
-      const next = [...prev];
-      next[idx] = stamped;
-      return next;
-    });
-  }, []);
+  const upsertProduct = useCallback(
+    (input: Product) => {
+      const stamped: Product = { ...input, updatedAt: nowIso() };
+      setProducts((prev) => {
+        const idx = prev.findIndex((p) => p.id === input.id);
+        if (idx === -1) {
+          return [...prev, { ...stamped, createdAt: stamped.createdAt ?? nowIso() }];
+        }
+        const next = [...prev];
+        next[idx] = stamped;
+        return next;
+      });
+      persist('保存产品', () => serviceRef.current.upsertProduct(stamped));
+    },
+    [persist],
+  );
 
-  const removeProduct = useCallback((id: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-  }, []);
+  const removeProduct = useCallback(
+    (id: string) => {
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+      persist('删除产品', () => serviceRef.current.removeProduct(id));
+    },
+    [persist],
+  );
 
   const publishProduct = useCallback(
     (id: string, region: RegionCode) => {
@@ -480,8 +581,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         ),
       );
       appendAudit({ productId: id, action: 'archive', actorName: 'You' });
+      persist('归档产品', () => serviceRef.current.archiveProduct(id));
     },
-    [appendAudit],
+    [appendAudit, persist],
   );
 
   const reactivateProduct = useCallback(
@@ -631,8 +733,28 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         actorName: currentUser.name,
         note: opts?.reason ?? opts?.note,
       });
+      // route through RPC: each transition is its own service method so the
+      // server can enforce permissions and atomically write history.
+      const note = opts?.note ?? opts?.reason;
+      const reason = opts?.reason ?? '';
+      switch (status) {
+        case 'pending_review':
+          persist('提交审核', () => serviceRef.current.submitForReview(id, note));
+          break;
+        case 'approved':
+          persist('批准产品', () => serviceRef.current.approveProduct(id, note));
+          break;
+        case 'rejected':
+          persist('驳回产品', () => serviceRef.current.rejectProduct(id, reason));
+          break;
+        case 'not_submitted':
+          persist('退回草稿', () => serviceRef.current.returnToDraft(id, reason));
+          break;
+        default:
+          break;
+      }
     },
-    [appendAudit, currentUser, computeMissingFlags],
+    [appendAudit, currentUser, computeMissingFlags, persist],
   );
 
   const canReview = useCallback(
@@ -698,12 +820,18 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   );
 
   const recordPriceChange = useCallback(
-    (entry: Omit<ProductPriceHistory, 'id' | 'changedAt'>) => pushPriceHistory(entry),
-    [pushPriceHistory],
+    (entry: Omit<ProductPriceHistory, 'id' | 'changedAt'>) => {
+      pushPriceHistory(entry);
+      persist('价格历史', () => serviceRef.current.appendPriceHistory(entry));
+    },
+    [persist, pushPriceHistory],
   );
 
   const updateRegionPrice = useCallback(
     (price: ProductRegionPrice, opts?: { reason?: string }) => {
+      persist('保存区域价格', () =>
+        serviceRef.current.upsertRegionPrice(price, opts),
+      );
       setRegionPrices((prev) => {
         const idx = prev.findIndex(
           (r) => r.productId === price.productId && r.regionCode === price.regionCode,
@@ -769,7 +897,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         return next;
       });
     },
-    [currentUser.name, pushPriceHistory],
+    [currentUser.name, persist, pushPriceHistory],
   );
 
   const bulkUpdatePrices = useCallback(
@@ -785,6 +913,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       const fieldTag: 'base' | 'sale' | 'campaign' =
         field === 'basePrice' ? 'base' : field === 'salePrice' ? 'sale' : 'campaign';
       let touched = 0;
+      // route to the RPC; the server returns the touched count which the
+      // client doesn't currently surface (we trust optimistic local count).
+      persist('批量改价', () => serviceRef.current.bulkUpdatePrices(params));
       setRegionPrices((prev) => {
         const next = prev.map((rp) => {
           if (!productIds.includes(rp.productId) || rp.regionCode !== region) return rp;
@@ -856,7 +987,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       });
       return touched;
     },
-    [appendAudit, currentUser.name, pushPriceHistory],
+    [appendAudit, currentUser.name, persist, pushPriceHistory],
   );
 
   // ── supplier quotes (Phase 3) ─────────────────────────────────────────────
@@ -885,9 +1016,10 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         actorName: currentUser.name,
         note: input.notes,
       });
+      persist('供应商报价', () => serviceRef.current.addSupplierQuote(input));
       return created;
     },
-    [appendAudit, currentUser.name],
+    [appendAudit, currentUser.name, persist],
   );
 
   const updateSupplierQuote = useCallback(
@@ -907,24 +1039,33 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
           return { ...q, isCurrent: q.id === id };
         });
       });
+      persist('当前报价', () => serviceRef.current.setCurrentSupplierQuote(id));
     },
-    [],
+    [persist],
   );
 
-  const removeSupplierQuote = useCallback((id: string) => {
-    setSupplierQuotes((prev) => prev.filter((q) => q.id !== id));
-  }, []);
+  const removeSupplierQuote = useCallback(
+    (id: string) => {
+      setSupplierQuotes((prev) => prev.filter((q) => q.id !== id));
+      persist('删除报价', () => serviceRef.current.removeSupplierQuote(id));
+    },
+    [persist],
+  );
 
-  const upsertPublishChannel = useCallback((channel: ProductPublishChannel) => {
-    setPublishChannels((prev) => {
-      const idx = prev.findIndex((c) => c.id === channel.id);
-      const stamped = { ...channel, updatedAt: nowIso() };
-      if (idx === -1) return [...prev, { ...stamped, createdAt: stamped.createdAt ?? nowIso() }];
-      const next = [...prev];
-      next[idx] = stamped;
-      return next;
-    });
-  }, []);
+  const upsertPublishChannel = useCallback(
+    (channel: ProductPublishChannel) => {
+      setPublishChannels((prev) => {
+        const idx = prev.findIndex((c) => c.id === channel.id);
+        const stamped = { ...channel, updatedAt: nowIso() };
+        if (idx === -1) return [...prev, { ...stamped, createdAt: stamped.createdAt ?? nowIso() }];
+        const next = [...prev];
+        next[idx] = stamped;
+        return next;
+      });
+      persist('保存发布渠道', () => serviceRef.current.upsertPublishChannel(channel));
+    },
+    [persist],
+  );
 
   /**
    * Phase-2 helper: patch a publish channel by (productId, region).
@@ -970,29 +1111,40 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         return next;
       });
       // result is guaranteed non-null after the set call (sync in React)
+      persist('更新发布渠道', () =>
+        serviceRef.current.patchPublishChannel(productId, region, patch),
+      );
       return result as unknown as ProductPublishChannel;
     },
-    [],
+    [persist],
   );
 
-  const upsertAttributeValue = useCallback((input: ProductAttributeValue) => {
-    setAttributeValues((prev) => {
-      const idx = prev.findIndex(
-        (v) => v.productId === input.productId && v.attributeId === input.attributeId,
-      );
-      const stamped = { ...input, updatedAt: nowIso() };
-      if (idx === -1) {
-        return [...prev, { ...stamped, id: stamped.id || newId('av'), createdAt: nowIso() }];
-      }
-      const next = [...prev];
-      next[idx] = { ...next[idx], ...stamped };
-      return next;
-    });
-  }, []);
+  const upsertAttributeValue = useCallback(
+    (input: ProductAttributeValue) => {
+      setAttributeValues((prev) => {
+        const idx = prev.findIndex(
+          (v) => v.productId === input.productId && v.attributeId === input.attributeId,
+        );
+        const stamped = { ...input, updatedAt: nowIso() };
+        if (idx === -1) {
+          return [...prev, { ...stamped, id: stamped.id || newId('av'), createdAt: nowIso() }];
+        }
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...stamped };
+        return next;
+      });
+      persist('保存属性值', () => serviceRef.current.upsertAttributeValue(input));
+    },
+    [persist],
+  );
 
-  const removeAttributeValue = useCallback((id: string) => {
-    setAttributeValues((prev) => prev.filter((v) => v.id !== id));
-  }, []);
+  const removeAttributeValue = useCallback(
+    (id: string) => {
+      setAttributeValues((prev) => prev.filter((v) => v.id !== id));
+      persist('删除属性值', () => serviceRef.current.removeAttributeValue(id));
+    },
+    [persist],
+  );
 
   const addProductsToCampaign = useCallback(
     (
@@ -1000,6 +1152,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       productIds: string[],
       opts?: { discountPercent?: number },
     ) => {
+      persist('加入活动', () =>
+        serviceRef.current.addProductsToCampaign(campaignId, productIds, opts),
+      );
       setCampaignProducts((prev) => {
         const have = new Set(
           prev.filter((cp) => cp.campaignId === campaignId).map((cp) => cp.productId),
@@ -1033,7 +1188,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         ),
       );
     },
-    [regionPrices],
+    [persist, regionPrices],
   );
 
   const removeProductFromCampaign = useCallback(
@@ -1041,17 +1196,27 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       setCampaignProducts((prev) =>
         prev.filter((cp) => !(cp.campaignId === campaignId && cp.productId === productId)),
       );
+      persist('移出活动', () =>
+        serviceRef.current.removeProductFromCampaign(campaignId, productId),
+      );
     },
-    [],
+    [persist],
   );
 
-  const updateCampaignProduct = useCallback((input: CampaignProduct) => {
-    setCampaignProducts((prev) => prev.map((cp) => (cp.id === input.id ? input : cp)));
-  }, []);
+  const updateCampaignProduct = useCallback(
+    (input: CampaignProduct) => {
+      setCampaignProducts((prev) => prev.map((cp) => (cp.id === input.id ? input : cp)));
+      persist('更新活动商品', () => serviceRef.current.updateCampaignProduct(input));
+    },
+    [persist],
+  );
 
   const logAudit = useCallback(
-    (entry: Omit<ProductAuditLog, 'id' | 'occurredAt'>) => appendAudit(entry),
-    [appendAudit],
+    (entry: Omit<ProductAuditLog, 'id' | 'occurredAt'>) => {
+      appendAudit(entry);
+      persist('审计日志', () => serviceRef.current.logAudit(entry));
+    },
+    [appendAudit, persist],
   );
 
   const addMedia = useCallback((m: ProductMedia) => {
@@ -1077,37 +1242,53 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     setCategories((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
-  const upsertCampaign = useCallback((cmp: Campaign) => {
-    setCampaigns((prev) => {
-      const idx = prev.findIndex((c) => c.id === cmp.id);
-      const stamped = { ...cmp, updatedAt: nowIso() };
-      if (idx === -1) return [...prev, { ...stamped, createdAt: nowIso() }];
-      const next = [...prev];
-      next[idx] = stamped;
-      return next;
-    });
-  }, []);
+  const upsertCampaign = useCallback(
+    (cmp: Campaign) => {
+      setCampaigns((prev) => {
+        const idx = prev.findIndex((c) => c.id === cmp.id);
+        const stamped = { ...cmp, updatedAt: nowIso() };
+        if (idx === -1) return [...prev, { ...stamped, createdAt: nowIso() }];
+        const next = [...prev];
+        next[idx] = stamped;
+        return next;
+      });
+      persist('保存活动', () => serviceRef.current.upsertCampaign(cmp));
+    },
+    [persist],
+  );
 
-  const setCampaignStatus = useCallback((id: string, status: Campaign['status']) => {
-    setCampaigns((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status, updatedAt: nowIso() } : c)),
-    );
-  }, []);
+  const setCampaignStatus = useCallback(
+    (id: string, status: Campaign['status']) => {
+      setCampaigns((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, status, updatedAt: nowIso() } : c)),
+      );
+      persist('活动状态', () => serviceRef.current.setCampaignStatus(id, status));
+    },
+    [persist],
+  );
 
-  const upsertMapping = useCallback((m: ModelMapping) => {
-    setModelMappings((prev) => {
-      const idx = prev.findIndex((x) => x.id === m.id);
-      const stamped = { ...m, updatedAt: nowIso() };
-      if (idx === -1) return [...prev, { ...stamped, createdAt: nowIso() }];
-      const next = [...prev];
-      next[idx] = stamped;
-      return next;
-    });
-  }, []);
+  const upsertMapping = useCallback(
+    (m: ModelMapping) => {
+      setModelMappings((prev) => {
+        const idx = prev.findIndex((x) => x.id === m.id);
+        const stamped = { ...m, updatedAt: nowIso() };
+        if (idx === -1) return [...prev, { ...stamped, createdAt: nowIso() }];
+        const next = [...prev];
+        next[idx] = stamped;
+        return next;
+      });
+      persist('保存映射', () => serviceRef.current.upsertMapping(m));
+    },
+    [persist],
+  );
 
-  const removeMapping = useCallback((id: string) => {
-    setModelMappings((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+  const removeMapping = useCallback(
+    (id: string) => {
+      setModelMappings((prev) => prev.filter((m) => m.id !== id));
+      persist('删除映射', () => serviceRef.current.removeMapping(id));
+    },
+    [persist],
+  );
 
   // ── selectors ──────────────────────────────────────────────────────────────
 
@@ -1482,7 +1663,26 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <ProductCenterCtx.Provider value={value}>{children}</ProductCenterCtx.Provider>;
+  return (
+    <ProductCenterCtx.Provider value={value}>
+      {bootstrapLoading ? (
+        <div className="flex h-[60vh] flex-col items-center justify-center gap-3 text-slate-500">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+          <div className="text-sm">正在从 Supabase 加载产品中心数据…</div>
+        </div>
+      ) : bootstrapError ? (
+        <div className="m-6 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          <div className="mb-1 font-semibold">数据加载失败</div>
+          <div className="font-mono text-[12px]">{bootstrapError}</div>
+          <div className="mt-2 text-rose-500">
+            请检查 Supabase 连接、RLS 策略和 <code>VITE_PC_BACKEND</code> 配置后刷新。
+          </div>
+        </div>
+      ) : (
+        children
+      )}
+    </ProductCenterCtx.Provider>
+  );
 }
 
 export function useProductCenter(): Ctx {
