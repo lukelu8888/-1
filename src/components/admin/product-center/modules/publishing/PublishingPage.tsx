@@ -100,7 +100,7 @@ export function PublishingPage({ onOpenProduct }: Props) {
               key={b.id}
               type="button"
               onClick={() => setActiveBucket(b.id)}
-              className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-[12px] transition-colors ${
+              className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-[12px] transition-colors ${
                 active
                   ? 'border-slate-900 text-slate-900'
                   : 'border-transparent text-slate-500 hover:text-slate-800'

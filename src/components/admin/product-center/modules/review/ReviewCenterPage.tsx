@@ -140,7 +140,7 @@ export function ReviewCenterPage({ onOpenProduct }: Props) {
                 setActive(q.id);
                 setSelected([]);
               }}
-              className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-[12px] transition-colors ${
+              className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-[12px] transition-colors ${
                 isActive
                   ? 'border-slate-900 text-slate-900'
                   : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -159,10 +159,10 @@ export function ReviewCenterPage({ onOpenProduct }: Props) {
       <Toolbar
         bordered
         left={
-          <div className="flex items-center gap-3 text-[12px]">
-            <span className="inline-flex items-center gap-1.5 rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-700">
-              <Shield className="h-3.5 w-3.5" />
-              当前身份：
+          <div className="flex flex-wrap items-center gap-2 text-[12px]">
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-700">
+              <Shield className="h-3.5 w-3.5 shrink-0" />
+              <span>当前身份：</span>
               <strong>{ctx.currentUser.name}</strong>
               <span className="text-slate-400">·</span>
               <span className={canReview ? 'text-emerald-600' : 'text-rose-600'}>
@@ -170,11 +170,11 @@ export function ReviewCenterPage({ onOpenProduct }: Props) {
               </span>
             </span>
             {!canReview && (
-              <span className="text-[11px] text-rose-500">
+              <span className="whitespace-nowrap text-[11px] text-rose-500">
                 请切换到审核员/管理员身份后操作
               </span>
             )}
-            <span className="text-slate-500">
+            <span className="whitespace-nowrap text-slate-500">
               已选 {selected.length} 项
             </span>
           </div>

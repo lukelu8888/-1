@@ -269,11 +269,11 @@ function RegionBar({
   onChangeUser: (u: CurrentUser) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-200 bg-white px-3 py-1.5">
+      <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wide text-slate-500">
         当前操作区域 · Operating Region
       </span>
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         {REGIONS.map((r) => {
           const isActive = r.code === active;
           return (
@@ -282,7 +282,7 @@ function RegionBar({
               type="button"
               onClick={() => onChange(r.code)}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[12px] transition-colors',
+                'inline-flex items-center gap-1.5 whitespace-nowrap rounded border px-2 py-1 text-[12px] transition-colors',
                 isActive
                   ? 'border-slate-900 bg-slate-900 text-white'
                   : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',

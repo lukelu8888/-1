@@ -103,18 +103,18 @@ export function MappingPage() {
       />
 
       <div className="flex-1 overflow-auto">
-        <Table className="text-[12px]">
+        <Table className="min-w-[1100px] text-[12px]">
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead className="w-44">主产品</TableHead>
-              <TableHead>我方 SKU</TableHead>
-              <TableHead>供应商 SKU</TableHead>
-              <TableHead>客户型号</TableHead>
-              <TableHead>工厂型号</TableHead>
-              <TableHead>替代型号</TableHead>
-              <TableHead>包装变体</TableHead>
-              <TableHead>历史型号</TableHead>
-              <TableHead className="text-right">操作</TableHead>
+              <TableHead className="w-44 whitespace-nowrap">主产品</TableHead>
+              <TableHead className="whitespace-nowrap">我方 SKU</TableHead>
+              <TableHead className="whitespace-nowrap">供应商 SKU</TableHead>
+              <TableHead className="whitespace-nowrap">客户型号</TableHead>
+              <TableHead className="whitespace-nowrap">工厂型号</TableHead>
+              <TableHead className="whitespace-nowrap">替代型号</TableHead>
+              <TableHead className="whitespace-nowrap">包装变体</TableHead>
+              <TableHead className="whitespace-nowrap">历史型号</TableHead>
+              <TableHead className="whitespace-nowrap text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

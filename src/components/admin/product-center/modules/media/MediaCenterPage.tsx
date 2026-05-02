@@ -125,23 +125,26 @@ export function MediaCenterPage({ onOpenProduct }: Props) {
               </div>
 
               {g.media.length > 0 ? (
-                <div className="grid grid-cols-8 gap-2 p-3">
+                <div className="grid grid-cols-3 gap-2 p-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
                   {g.media.map((m) => (
                     <div key={m.id} className="rounded border border-slate-200 bg-white p-1">
                       <img
                         src={m.url}
                         alt={m.altText ?? m.kind}
-                        className="h-24 w-full rounded object-cover"
+                        className="aspect-square w-full rounded object-cover"
                         loading="lazy"
                       />
-                      <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
-                        <span className="rounded bg-slate-100 px-1">{KIND_LABEL[m.kind]}</span>
+                      <div className="mt-1 flex items-center justify-between gap-1 text-[10px] text-slate-500">
+                        <span className="truncate whitespace-nowrap rounded bg-slate-100 px-1">
+                          {KIND_LABEL[m.kind]}
+                        </span>
                         <button
                           onClick={() => {
                             ctx.removeMedia(m.id);
                             toast.success('已移除');
                           }}
-                          className="rounded p-0.5 text-rose-600 hover:bg-rose-50"
+                          className="shrink-0 rounded p-0.5 text-rose-600 hover:bg-rose-50"
+                          title="移除"
                         >
                           <Trash2 className="h-3 w-3" />
                         </button>
