@@ -795,22 +795,28 @@ function StatStrip({ stats, onSelectFilter }: StatStripProps) {
   ];
 
   return (
-    <div className="flex flex-wrap items-stretch border-b border-slate-200 bg-white">
-      {tiles.map((t) => (
-        <button
-          key={t.key}
-          type="button"
-          onClick={t.onClick}
-          className="group flex min-w-[120px] flex-1 items-center justify-between gap-2 border-r border-slate-200 px-3 py-2 text-left last:border-r-0 hover:bg-slate-50"
-          disabled={!t.onClick}
-        >
-          <span className="text-[11px] uppercase tracking-wide text-slate-500">{t.label}</span>
-          <span className={`text-base font-semibold tabular-nums ${t.tone}`}>{t.value}</span>
-        </button>
-      ))}
-      <div className="flex items-center gap-1.5 border-l border-slate-200 px-3 py-2 text-[11px] text-slate-500">
-        <PackagePlus className="h-3.5 w-3.5 text-slate-400" />
-        <span>点击数字可一键过滤</span>
+    <div className="border-b border-slate-200 bg-white">
+      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7">
+        {tiles.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={t.onClick}
+            className="group flex min-w-0 items-center justify-between gap-2 border-b border-r border-slate-200 px-3 py-2 text-left last:border-r-0 hover:bg-slate-50 lg:border-b-0"
+            disabled={!t.onClick}
+          >
+            <span className="truncate whitespace-nowrap text-[11px] uppercase tracking-wide text-slate-500">
+              {t.label}
+            </span>
+            <span className={`shrink-0 text-base font-semibold tabular-nums ${t.tone}`}>
+              {t.value}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-1.5 border-t border-slate-200 px-3 py-1 text-[11px] text-slate-500">
+        <PackagePlus className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <span className="whitespace-nowrap">点击数字可一键过滤</span>
       </div>
     </div>
   );

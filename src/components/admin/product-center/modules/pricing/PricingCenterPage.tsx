@@ -122,7 +122,8 @@ export function PricingCenterPage({ onOpenProduct }: Props) {
         }
       />
 
-      <div className="flex flex-wrap items-stretch border-b border-slate-200 bg-white">
+      {/* Row 1: stat cards — full-width, equal-size, never clipped. */}
+      <div className="grid grid-cols-2 border-b border-slate-200 bg-white sm:grid-cols-4">
         <Stat label="参与定价产品" value={totals.products} />
         <Stat
           label="平均实际毛利率"
@@ -131,26 +132,29 @@ export function PricingCenterPage({ onOpenProduct }: Props) {
         />
         <Stat label="低于目标毛利" value={totals.underTarget} tone="text-amber-700" />
         <Stat label="无任何区域售价" value={totals.missingPriceCount} tone="text-rose-700" />
-        <div className="flex flex-1 items-center gap-3 border-l border-slate-200 px-3 py-2 text-[11px] text-slate-500">
-          <Calculator className="h-3.5 w-3.5 text-slate-400" />
-          <span>
-            落地价 = 工厂成本 × 汇率 + 单件运费 + (上方两项 × 关税%) + 本地杂费
+      </div>
+
+      {/* Row 2: cost formula + target-margin slider — single line, formula
+          truncates with overflow rather than wrapping per character. */}
+      <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50/60 px-3 py-1.5 text-[11px] text-slate-500">
+        <Calculator className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <span className="min-w-0 flex-1 truncate whitespace-nowrap" title="落地价 = 工厂成本 × 汇率 + 单件运费 + (上方两项 × 关税%) + 本地杂费">
+          落地价 = 工厂成本 × 汇率 + 单件运费 + (上方两项 × 关税%) + 本地杂费
+        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="whitespace-nowrap text-slate-700">目标毛利率</span>
+          <input
+            type="range"
+            min={0.05}
+            max={0.7}
+            step={0.01}
+            value={targetMargin}
+            onChange={(e) => setTargetMargin(Number(e.target.value))}
+            className="w-28 accent-slate-700"
+          />
+          <span className="w-10 text-right font-mono tabular-nums text-slate-700">
+            {(targetMargin * 100).toFixed(0)}%
           </span>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-slate-700">目标毛利率</span>
-            <input
-              type="range"
-              min={0.05}
-              max={0.7}
-              step={0.01}
-              value={targetMargin}
-              onChange={(e) => setTargetMargin(Number(e.target.value))}
-              className="w-32"
-            />
-            <span className="w-12 text-right font-mono text-slate-700">
-              {(targetMargin * 100).toFixed(0)}%
-            </span>
-          </div>
         </div>
       </div>
 
@@ -318,9 +322,13 @@ export function PricingCenterPage({ onOpenProduct }: Props) {
 
 function Stat({ label, value, tone }: { label: string; value: number | string; tone?: string }) {
   return (
-    <div className="flex min-w-[160px] flex-1 items-center justify-between gap-3 border-r border-slate-200 px-3 py-2 last:border-r-0">
-      <span className="text-[11px] uppercase tracking-wide text-slate-500">{label}</span>
-      <span className={`text-base font-semibold tabular-nums ${tone ?? 'text-slate-800'}`}>{value}</span>
+    <div className="flex min-w-0 items-center justify-between gap-2 border-r border-slate-200 px-3 py-2 last:border-r-0">
+      <span className="truncate whitespace-nowrap text-[11px] uppercase tracking-wide text-slate-500">
+        {label}
+      </span>
+      <span className={`shrink-0 text-base font-semibold tabular-nums ${tone ?? 'text-slate-800'}`}>
+        {value}
+      </span>
     </div>
   );
 }
