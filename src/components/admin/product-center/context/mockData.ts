@@ -6,6 +6,9 @@
 import type {
   Campaign,
   CampaignProduct,
+  Customer,
+  CustomerSpecificPrice,
+  CustomerTier,
   ModelMapping,
   Product,
   ProductAttribute,
@@ -432,6 +435,136 @@ export const mockTierPrices: ProductTierPrice[] = [
   tier('p_004', 'SA', 5000, 20000, 1.18, 'USD', 20.81, 'CIF'),
   tier('p_004', 'SA', 20000, 100000, 0.95, 'USD', 36.24, 'CIF'),
   tier('p_004', 'SA', 100000, null, 0.78, 'USD', 47.65, 'CIF'),
+];
+
+// ─── Customer tiers / customers / specific prices (Phase 5c) ────────────────
+//
+// 让 demo 一目了然：
+//   • 三个等级 — 青铜 0% / 白银 5% / 黄金 10% 默认折扣（相对公共阶梯/基准价）
+//   • 三个客户 — Bronze / Silver / Gold 各一，分布到 NA / EA / SA
+//   • 给 Gold 客户的 LED Panel 加一条 NA 区域 1500+ 的「客户专属价」，
+//     演示「专属价完全覆盖任何阶梯/折扣」的最高优先级路径
+
+export const mockCustomerTiers: CustomerTier[] = [
+  {
+    id: 'ct_bronze',
+    tenantId: TENANT,
+    code: 'BRONZE',
+    name: '青铜',
+    defaultDiscountPercent: 0,
+    badgeColor: 'amber',
+    sortOrder: 1,
+    isActive: true,
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  },
+  {
+    id: 'ct_silver',
+    tenantId: TENANT,
+    code: 'SILVER',
+    name: '白银',
+    defaultDiscountPercent: 5,
+    badgeColor: 'slate',
+    sortOrder: 2,
+    isActive: true,
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  },
+  {
+    id: 'ct_gold',
+    tenantId: TENANT,
+    code: 'GOLD',
+    name: '黄金',
+    defaultDiscountPercent: 10,
+    badgeColor: 'yellow',
+    sortOrder: 3,
+    isActive: true,
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  },
+];
+
+export const mockCustomers: Customer[] = [
+  {
+    id: 'cust_us_001',
+    tenantId: TENANT,
+    code: 'C-NA-0001',
+    name: 'BrightHome Distribution LLC',
+    shortName: 'BrightHome',
+    regionCode: 'NA',
+    tierId: 'ct_gold',
+    defaultIncoterm: 'FOB',
+    defaultPaymentTerms: 'TT 30% / 70% bal LC 60d',
+    isActive: true,
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  },
+  {
+    id: 'cust_eu_001',
+    tenantId: TENANT,
+    code: 'C-EA-0001',
+    name: 'EuroLight Trading GmbH',
+    shortName: 'EuroLight',
+    regionCode: 'EA',
+    tierId: 'ct_silver',
+    defaultIncoterm: 'CIF',
+    defaultPaymentTerms: 'LC 90d',
+    isActive: true,
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  },
+  {
+    id: 'cust_sa_001',
+    tenantId: TENANT,
+    code: 'C-SA-0001',
+    name: 'Casa Iluminação Brasil Ltda',
+    shortName: 'Casa Brasil',
+    regionCode: 'SA',
+    tierId: 'ct_bronze',
+    defaultIncoterm: 'CIF',
+    defaultPaymentTerms: 'TT 50% / 50% before BL',
+    isActive: true,
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  },
+];
+
+export const mockCustomerSpecificPrices: CustomerSpecificPrice[] = [
+  // BrightHome (Gold) NA — LED Panel: 1500+ 锁定专属价 USD 14.50（比公共阶梯 15.50 + 10% 折扣后还低，
+  // 演示「专属价完全覆盖 tier 折扣」的优先级路径）
+  {
+    id: 'csp_brighthome_p001_1500',
+    customerId: 'cust_us_001',
+    productId: 'p_001',
+    regionCode: 'NA',
+    minQty: 1500,
+    maxQty: null,
+    unitPrice: 14.5,
+    currency: 'USD',
+    incoterm: 'FOB',
+    effectiveFrom: '2026-01-01',
+    effectiveTo: '2026-12-31',
+    isActive: true,
+    notes: '2026 年度框架协议价（BrightHome）',
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  },
+  // EuroLight (Silver) EA — LED Panel: 锁定全量 EUR 14.00 (覆盖 EA 阶梯)
+  {
+    id: 'csp_eurolight_p001_100',
+    customerId: 'cust_eu_001',
+    productId: 'p_001',
+    regionCode: 'EA',
+    minQty: 100,
+    maxQty: null,
+    unitPrice: 14.0,
+    currency: 'EUR',
+    incoterm: 'CIF',
+    isActive: true,
+    notes: 'EuroLight 战略价（不分量阶）',
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  },
 ];
 
 function tier(

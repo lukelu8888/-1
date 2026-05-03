@@ -423,3 +423,121 @@ describe('Phase 5b — validateTierPrices (mock)', () => {
     expect(issues).toEqual([]);
   });
 });
+
+// ─── Phase 5c: customer-tier pricing (3-layer stack) ───────────────────────
+
+describe('Phase 5c — getEffectiveCustomerPrice (mock)', () => {
+  // Seed reminder:
+  //   p_001 NA tiers: 100/19.99 · 500/17.50 · 1500/15.50 · 5000/13.80
+  //   Customers: BrightHome (Gold/10%), EuroLight (Silver/5%), Casa Brasil (Bronze/0%)
+  //   BrightHome NA-specific: 1500+ unit_price 14.50 (overrides everything)
+  //   EuroLight EA-specific:  100+  unit_price 14.00 (covers all qty)
+
+  it("layer A — 'customer-specific' wins over public tiers + tier discount", async () => {
+    const r = await mockProductCenterService.getEffectiveCustomerPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 2000,                     // would land in 1500-tier (15.50) public
+      customerId: 'cust_us_001',     // BrightHome — Gold (10%) — has specific @ 1500+ → 14.50
+    });
+    expect(r.source).toBe('customer-specific');
+    expect(r.unitPrice).toBe(14.5);
+    expect(r.discountPercent).toBe(0); // specific price already settled
+    expect(r.specificId).toBe('csp_brighthome_p001_1500');
+  });
+
+  it("layer B — 'tier-with-discount' applies tier % off the matched public tier", async () => {
+    const r = await mockProductCenterService.getEffectiveCustomerPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 500,                      // public tier 17.50
+      customerId: 'cust_us_001',     // Gold = 10% off
+    });
+    expect(r.source).toBe('tier-with-discount');
+    expect(r.listPrice).toBe(17.5);
+    expect(r.discountPercent).toBe(10);
+    expect(r.unitPrice).toBeCloseTo(15.75, 4);
+    expect(r.customerTierCode).toBe('GOLD');
+  });
+
+  it("Bronze customer (0% discount) → source stays 'tier'", async () => {
+    const r = await mockProductCenterService.getEffectiveCustomerPrice({
+      productId: 'p_004',
+      region: 'SA',
+      qty: 5000,                     // public tier 1.18
+      customerId: 'cust_sa_001',     // Casa Brasil — Bronze = 0%
+    });
+    expect(r.source).toBe('tier');
+    expect(r.unitPrice).toBe(1.18);
+    expect(r.discountPercent).toBe(0);
+    expect(r.customerTierCode).toBe('BRONZE');
+  });
+
+  it("layer B — 'base-with-discount' applies tier % off region.base when no tier matches", async () => {
+    // p_003 NA has region price (base 299) but no tier prices; MOQ = 20.
+    // Customer with Silver tier → 5% off.
+    const r = await mockProductCenterService.getEffectiveCustomerPrice({
+      productId: 'p_003',
+      region: 'NA',
+      qty: 100,
+      customerId: 'cust_eu_001',     // Silver — 5%
+    });
+    expect(r.source).toBe('base-with-discount');
+    expect(r.listPrice).toBe(299);
+    expect(r.discountPercent).toBe(5);
+    expect(r.unitPrice).toBeCloseTo(284.05, 2);
+  });
+
+  it("no customer / public quote → behaves identically to Phase 5b's getEffectiveTierPrice", async () => {
+    const r = await mockProductCenterService.getEffectiveCustomerPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 500,
+      customerId: null,
+    });
+    expect(r.source).toBe('tier');
+    expect(r.unitPrice).toBe(17.5);
+    expect(r.discountPercent).toBe(0);
+  });
+
+  it('below-MOQ propagates from the underlying tier RPC unchanged', async () => {
+    // p_001 MOQ = 100, qty = 50 → below MOQ
+    const r = await mockProductCenterService.getEffectiveCustomerPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 50,
+      customerId: 'cust_us_001',
+    });
+    expect(r.source).toBe('none');
+    expect(r.reason).toBe('below-moq');
+    expect(r.moq).toBe(100);
+  });
+
+  it("EuroLight EA specific@100+ wins even at qty straddling EA tier band", async () => {
+    // EuroLight (Silver) has EA-specific @ 14.00 covering all qty.
+    // Public EA tier @ 100-499 = 18.00, @ 2000+ = 13.50.
+    // Without specific, qty=3000 would hit the 13.50 tier; specific must still win.
+    const r = await mockProductCenterService.getEffectiveCustomerPrice({
+      productId: 'p_001',
+      region: 'EA',
+      qty: 3000,
+      customerId: 'cust_eu_001',
+    });
+    expect(r.source).toBe('customer-specific');
+    expect(r.unitPrice).toBe(14.0);
+    expect(r.currency).toBe('EUR');
+  });
+
+  it('customer with no tier_id falls back to no-discount selection', async () => {
+    // Bronze tier defaults to 0%. Verify that even if a customer is set
+    // but their tier has 0%, source stays 'tier' (no -with-discount suffix).
+    const r = await mockProductCenterService.getEffectiveCustomerPrice({
+      productId: 'p_002',
+      region: 'NA',
+      qty: 200,                       // public tier 52.00
+      customerId: 'cust_sa_001',      // Bronze 0%
+    });
+    expect(r.source).toBe('tier');
+    expect(r.discountPercent).toBe(0);
+  });
+});

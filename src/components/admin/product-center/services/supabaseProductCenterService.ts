@@ -17,6 +17,10 @@ import { supabase } from '../../../../lib/supabase';
 import type {
   Campaign,
   CampaignProduct,
+  Customer,
+  CustomerSpecificPrice,
+  CustomerTier,
+  EffectiveCustomerPriceResult,
   EffectiveTierPriceResult,
   ModelMapping,
   Product,
@@ -403,6 +407,59 @@ function rowToMedia(row: Record<string, unknown>): ProductMedia {
   };
 }
 
+function rowToCustomerTier(row: Record<string, unknown>): CustomerTier {
+  return {
+    id: row.id as string,
+    tenantId: row.tenant_id as string,
+    code: row.code as string,
+    name: row.name as string,
+    defaultDiscountPercent: Number(row.default_discount_percent ?? 0),
+    badgeColor: (row.badge_color as string) ?? undefined,
+    sortOrder: Number(row.sort_order ?? 0),
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+function rowToCustomer(row: Record<string, unknown>): Customer {
+  return {
+    id: row.id as string,
+    tenantId: row.tenant_id as string,
+    code: row.code as string,
+    name: row.name as string,
+    shortName: (row.short_name as string) ?? undefined,
+    regionCode: (row.region_code as RegionCode | null) ?? null,
+    tierId: (row.tier_id as string | null) ?? null,
+    defaultIncoterm: (row.default_incoterm as Customer['defaultIncoterm']) ?? undefined,
+    defaultPaymentTerms: (row.default_payment_terms as string) ?? undefined,
+    notes: (row.notes as string) ?? undefined,
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
+function rowToCustomerSpecificPrice(row: Record<string, unknown>): CustomerSpecificPrice {
+  return {
+    id: row.id as string,
+    customerId: row.customer_id as string,
+    productId: row.product_id as string,
+    regionCode: row.region_code as RegionCode,
+    minQty: Number(row.min_qty),
+    maxQty: row.max_qty == null ? null : Number(row.max_qty),
+    unitPrice: Number(row.unit_price),
+    currency: row.currency as string,
+    incoterm: (row.incoterm as CustomerSpecificPrice['incoterm']) ?? undefined,
+    effectiveFrom: (row.effective_from as string | null) ?? null,
+    effectiveTo: (row.effective_to as string | null) ?? null,
+    isActive: Boolean(row.is_active),
+    notes: (row.notes as string) ?? undefined,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
 function rowToTierPrice(row: Record<string, unknown>): ProductTierPrice {
   return {
     id: row.id as string,
@@ -458,6 +515,9 @@ export const supabaseProductCenterService: ProductCenterService = {
       suppliers,
       regionPrices,
       tierPrices,
+      customerTiers,
+      customers,
+      customerSpecificPrices,
       publishChannels,
       campaigns,
       campaignProducts,
@@ -476,6 +536,20 @@ export const supabaseProductCenterService: ProductCenterService = {
       supabase.from('pc_product_region_prices').select('*'),
       supabase
         .from('pc_product_tier_prices')
+        .select('*')
+        .order('product_id', { ascending: true })
+        .order('region_code', { ascending: true })
+        .order('min_qty', { ascending: true }),
+      supabase
+        .from('pc_customer_tiers')
+        .select('*')
+        .order('sort_order', { ascending: true }),
+      supabase
+        .from('pc_customers')
+        .select('*')
+        .order('name', { ascending: true }),
+      supabase
+        .from('pc_customer_specific_prices')
         .select('*')
         .order('product_id', { ascending: true })
         .order('region_code', { ascending: true })
@@ -511,6 +585,9 @@ export const supabaseProductCenterService: ProductCenterService = {
       suppliers.error,
       regionPrices.error,
       tierPrices.error,
+      customerTiers.error,
+      customers.error,
+      customerSpecificPrices.error,
       publishChannels.error,
       campaigns.error,
       campaignProducts.error,
@@ -539,6 +616,13 @@ export const supabaseProductCenterService: ProductCenterService = {
       tierPrices: ((tierPrices.data as Array<Record<string, unknown>>) ?? []).map(
         rowToTierPrice,
       ),
+      customerTiers: ((customerTiers.data as Array<Record<string, unknown>>) ?? []).map(
+        rowToCustomerTier,
+      ),
+      customers: ((customers.data as Array<Record<string, unknown>>) ?? []).map(rowToCustomer),
+      customerSpecificPrices: (
+        (customerSpecificPrices.data as Array<Record<string, unknown>>) ?? []
+      ).map(rowToCustomerSpecificPrice),
       publishChannels: ((publishChannels.data as Array<Record<string, unknown>>) ?? []).map(
         rowToPublishChannel,
       ),
@@ -1168,6 +1252,75 @@ export const supabaseProductCenterService: ProductCenterService = {
       message: (r.message as string) ?? 'unknown issue',
       severity: (r.severity as TierIssue['severity']) ?? 'warning',
     }));
+  },
+
+  // ── Phase 5c: customer tier pricing + specific prices ────────────────────
+  async upsertCustomerSpecificPrice(
+    input: CustomerSpecificPrice,
+  ): Promise<CustomerSpecificPrice> {
+    const payload = stripUndefined({
+      id: input.id || undefined,
+      customer_id: input.customerId,
+      product_id: input.productId,
+      region_code: input.regionCode,
+      min_qty: input.minQty,
+      max_qty: input.maxQty,
+      unit_price: input.unitPrice,
+      currency: input.currency,
+      incoterm: input.incoterm,
+      effective_from: input.effectiveFrom,
+      effective_to: input.effectiveTo,
+      is_active: input.isActive,
+      notes: input.notes,
+    });
+    const res = await supabase
+      .from('pc_customer_specific_prices')
+      .upsert(payload, { onConflict: 'customer_id,product_id,region_code,min_qty' })
+      .select('*')
+      .single();
+    return rowToCustomerSpecificPrice(
+      unwrap(res, 'upsertCustomerSpecificPrice') as Record<string, unknown>,
+    );
+  },
+
+  async removeCustomerSpecificPrice(id: string): Promise<void> {
+    const res = await supabase.from('pc_customer_specific_prices').delete().eq('id', id);
+    if (res.error) throw new PcSupabaseError('removeCustomerSpecificPrice', res.error);
+  },
+
+  async getEffectiveCustomerPrice({
+    productId,
+    region,
+    qty,
+    customerId,
+    asOfDate,
+  }): Promise<EffectiveCustomerPriceResult> {
+    const res = await supabase.rpc('pc_get_effective_price_for_customer', {
+      p_product_id: productId,
+      p_region: region,
+      p_qty: qty,
+      p_customer_id: customerId,
+      p_as_of: asOfDate ?? null,
+    });
+    if (res.error) throw new PcSupabaseError('getEffectiveCustomerPrice', res.error);
+    const row = (res.data ?? {}) as Record<string, unknown>;
+    return {
+      source: (row.source as EffectiveCustomerPriceResult['source']) ?? 'none',
+      unitPrice: row.unit_price == null ? undefined : Number(row.unit_price),
+      listPrice: row.list_price == null ? undefined : Number(row.list_price),
+      discountPercent:
+        row.discount_percent == null ? undefined : Number(row.discount_percent),
+      currency: (row.currency as string) ?? undefined,
+      minQty: row.min_qty == null ? undefined : Number(row.min_qty),
+      maxQty: row.max_qty == null ? null : Number(row.max_qty),
+      incoterm: (row.incoterm as CustomerSpecificPrice['incoterm']) ?? undefined,
+      tierId: (row.tier_id as string) ?? undefined,
+      specificId: (row.specific_id as string) ?? undefined,
+      customerTierCode: (row.customer_tier_code as string) ?? undefined,
+      customerTierName: (row.customer_tier_name as string) ?? undefined,
+      reason: (row.reason as string) ?? undefined,
+      moq: row.moq == null ? undefined : Number(row.moq),
+    };
   },
 
   // ── Phase 5a: media upload (Supabase Storage) ────────────────────────────

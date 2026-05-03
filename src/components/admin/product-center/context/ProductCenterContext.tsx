@@ -28,6 +28,10 @@ import { toast } from 'sonner';
 import type {
   Campaign,
   CampaignProduct,
+  Customer,
+  CustomerSpecificPrice,
+  CustomerTier,
+  EffectiveCustomerPriceResult,
   EffectiveTierPriceResult,
   ModelMapping,
   Product,
@@ -74,6 +78,9 @@ import {
   mockSupplierLinks,
   mockSupplierQuotes,
   mockTierPrices,
+  mockCustomerTiers,
+  mockCustomers,
+  mockCustomerSpecificPrices,
 } from './mockData';
 
 import {
@@ -125,6 +132,10 @@ interface State {
   regionPrices: ProductRegionPrice[];
   /** Phase 5b — B2B 阶梯报价 */
   tierPrices: ProductTierPrice[];
+  /** Phase 5c — 客户分层 / 专属价 */
+  customerTiers: CustomerTier[];
+  customers: Customer[];
+  customerSpecificPrices: CustomerSpecificPrice[];
   publishChannels: ProductPublishChannel[];
   publishLogs: ProductPublishLog[];
   campaigns: Campaign[];
@@ -251,6 +262,18 @@ interface Actions {
     asOfDate?: string;
   }) => Promise<EffectiveTierPriceResult>;
 
+  // customer pricing (Phase 5c — 三层叠加)
+  upsertCustomerSpecificPrice: (input: CustomerSpecificPrice) => void;
+  removeCustomerSpecificPrice: (id: string) => void;
+  /** Async — three-layer price selection (specific > tier+discount > base+discount). */
+  getEffectiveCustomerPrice: (opts: {
+    productId: string;
+    region: RegionCode;
+    qty: number;
+    customerId: string | null;
+    asOfDate?: string;
+  }) => Promise<EffectiveCustomerPriceResult>;
+
   // media
   addMedia: (media: ProductMedia) => void;
   removeMedia: (id: string) => void;
@@ -293,6 +316,21 @@ interface Selectors {
   getTierPricesForProduct: (id: string, region?: RegionCode) => ProductTierPrice[];
   /** Phase 5b — synchronous in-memory consistency check (UI uses this on save). */
   validateTierPrices: (productId: string, region: RegionCode) => TierIssue[];
+
+  /** Phase 5c — list customer-specific prices for a product (optional region filter). */
+  getCustomerSpecificPricesForProduct: (
+    productId: string,
+    region?: RegionCode,
+  ) => CustomerSpecificPrice[];
+  /** Phase 5c — list specific prices for a customer (across products). */
+  getCustomerSpecificPricesForCustomer: (customerId: string) => CustomerSpecificPrice[];
+  /** Phase 5c — list active customers (optional region filter). */
+  listCustomers: (opts?: { region?: RegionCode; activeOnly?: boolean }) => Customer[];
+  /** Phase 5c — list active customer tiers. */
+  listCustomerTiers: () => CustomerTier[];
+  /** Phase 5c — convenience lookup. */
+  getCustomerById: (id: string | null | undefined) => Customer | undefined;
+  getCustomerTierById: (id: string | null | undefined) => CustomerTier | undefined;
   getPublishChannelsForProduct: (id: string) => ProductPublishChannel[];
   getAttributeValuesForProduct: (id: string) => ProductAttributeValue[];
   getAuditLogsForProduct: (id: string) => ProductAuditLog[];
@@ -343,6 +381,11 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   const [supplierLinks] = useState<ProductSupplierLink[]>(mockSupplierLinks);
   const [regionPrices, setRegionPrices] = useState<ProductRegionPrice[]>(mockRegionPrices);
   const [tierPrices, setTierPrices] = useState<ProductTierPrice[]>(mockTierPrices);
+  const [customerTiers, setCustomerTiers] = useState<CustomerTier[]>(mockCustomerTiers);
+  const [customers, setCustomers] = useState<Customer[]>(mockCustomers);
+  const [customerSpecificPrices, setCustomerSpecificPrices] = useState<CustomerSpecificPrice[]>(
+    mockCustomerSpecificPrices,
+  );
   const [publishChannels, setPublishChannels] = useState<ProductPublishChannel[]>(mockPublishChannels);
   const [publishLogs, setPublishLogs] = useState<ProductPublishLog[]>(mockPublishLogs);
   const [campaigns, setCampaigns] = useState<Campaign[]>(mockCampaigns);
@@ -392,6 +435,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     setMedia(snap.media);
     setRegionPrices(snap.regionPrices);
     setTierPrices(snap.tierPrices);
+    setCustomerTiers(snap.customerTiers);
+    setCustomers(snap.customers);
+    setCustomerSpecificPrices(snap.customerSpecificPrices);
     setPublishChannels(snap.publishChannels);
     setCampaigns(snap.campaigns);
     setCampaignProducts(snap.campaignProducts);
@@ -1518,6 +1564,46 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // ── Phase 5c: customer pricing (3-layer stack) ─────────────────────────────
+
+  const upsertCustomerSpecificPrice = useCallback(
+    (input: CustomerSpecificPrice) => {
+      setCustomerSpecificPrices((prev) => {
+        const idx = prev.findIndex((p) => p.id === input.id);
+        const stamped = { ...input, updatedAt: nowIso() };
+        if (idx === -1) {
+          return [...prev, { ...stamped, createdAt: nowIso() }];
+        }
+        const next = [...prev];
+        next[idx] = stamped;
+        return next;
+      });
+      persist('保存客户专属价', () => serviceRef.current.upsertCustomerSpecificPrice(input));
+    },
+    [persist],
+  );
+
+  const removeCustomerSpecificPrice = useCallback(
+    (id: string) => {
+      setCustomerSpecificPrices((prev) => prev.filter((p) => p.id !== id));
+      persist('删除客户专属价', () => serviceRef.current.removeCustomerSpecificPrice(id));
+    },
+    [persist],
+  );
+
+  const getEffectiveCustomerPrice = useCallback(
+    async (opts: {
+      productId: string;
+      region: RegionCode;
+      qty: number;
+      customerId: string | null;
+      asOfDate?: string;
+    }): Promise<EffectiveCustomerPriceResult> => {
+      return serviceRef.current.getEffectiveCustomerPrice(opts);
+    },
+    [],
+  );
+
   const attachMedia = useCallback(
     async (input: {
       productId: string;
@@ -1613,6 +1699,18 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     categories.forEach((c) => m.set(c.id, c));
     return m;
   }, [categories]);
+
+  const customerById = useMemo(() => {
+    const m = new Map<string, Customer>();
+    customers.forEach((c) => m.set(c.id, c));
+    return m;
+  }, [customers]);
+
+  const customerTierById = useMemo(() => {
+    const m = new Map<string, CustomerTier>();
+    customerTiers.forEach((t) => m.set(t.id, t));
+    return m;
+  }, [customerTiers]);
 
   const supplierByProduct = useMemo(() => {
     const m = new Map<string, ProductSupplierLink>();
@@ -1768,6 +1866,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       supplierLinks,
       regionPrices,
       tierPrices,
+      customerTiers,
+      customers,
+      customerSpecificPrices,
       publishChannels,
       publishLogs,
       campaigns,
@@ -1820,6 +1921,10 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       upsertTierPrice,
       removeTierPrice,
       getEffectiveTierPrice,
+
+      upsertCustomerSpecificPrice,
+      removeCustomerSpecificPrice,
+      getEffectiveCustomerPrice,
 
       bulkUpsertProducts,
       refreshAll,
@@ -1877,6 +1982,33 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
           .sort((a, b) => a.minQty - b.minQty);
         return computeTierIssues(sorted, product?.moq ?? null);
       },
+
+      getCustomerSpecificPricesForProduct: (productId, region) =>
+        customerSpecificPrices
+          .filter(
+            (p) =>
+              p.productId === productId && (region == null || p.regionCode === region),
+          )
+          .sort((a, b) =>
+            a.customerId === b.customerId
+              ? a.minQty - b.minQty
+              : a.customerId.localeCompare(b.customerId),
+          ),
+      getCustomerSpecificPricesForCustomer: (customerId) =>
+        customerSpecificPrices.filter((p) => p.customerId === customerId),
+      listCustomers: (opts) => {
+        let list = customers;
+        if (opts?.activeOnly !== false) list = list.filter((c) => c.isActive);
+        if (opts?.region) list = list.filter((c) => c.regionCode === opts.region);
+        return list.slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans'));
+      },
+      listCustomerTiers: () =>
+        customerTiers
+          .filter((t) => t.isActive)
+          .slice()
+          .sort((a, b) => a.sortOrder - b.sortOrder),
+      getCustomerById: (id) => (id ? customerById.get(id) : undefined),
+      getCustomerTierById: (id) => (id ? customerTierById.get(id) : undefined),
       getPublishChannelsForProduct: (id) =>
         publishChannels.filter((pc) => pc.productId === id),
       getAttributeValuesForProduct: (id) =>
@@ -1914,6 +2046,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       supplierLinks,
       regionPrices,
       tierPrices,
+      customerTiers,
+      customers,
+      customerSpecificPrices,
       publishChannels,
       publishLogs,
       campaigns,
@@ -1965,6 +2100,10 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       removeTierPrice,
       getEffectiveTierPrice,
 
+      upsertCustomerSpecificPrice,
+      removeCustomerSpecificPrice,
+      getEffectiveCustomerPrice,
+
       bulkUpsertProducts,
       refreshAll,
 
@@ -2000,6 +2139,8 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
 
       productById,
       categoryById,
+      customerById,
+      customerTierById,
       computeMissingFlags,
       buildListRows,
       getStats,

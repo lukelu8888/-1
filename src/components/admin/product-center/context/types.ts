@@ -286,6 +286,92 @@ export interface TierIssue {
   severity: TierIssueSeverity;
 }
 
+// ─── Customer pricing (Phase 5c — B2B customer-tier + specific prices) ─────
+//
+// 三层叠加：客户专属 > (公共阶梯/基准 + 客户等级默认折扣)。
+// 完整客户主数据是另一个模块的职责；这里只定义价格规则需要的最小字段。
+
+export interface CustomerTier {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  /** 该等级在公共阶梯/基准价之上的默认折扣 % (0-100)；0 = 无折扣 */
+  defaultDiscountPercent: number;
+  /** UI 徽章着色片段，e.g. 'amber','emerald','indigo' */
+  badgeColor?: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Customer {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  shortName?: string;
+  regionCode?: RegionCode | null;
+  tierId?: string | null;
+  defaultIncoterm?: TierIncoterm;
+  defaultPaymentTerms?: string;
+  notes?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerSpecificPrice {
+  id: string;
+  customerId: string;
+  productId: string;
+  regionCode: RegionCode;
+  minQty: number;
+  maxQty?: number | null;
+  unitPrice: number;
+  currency: string;
+  incoterm?: TierIncoterm;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  isActive: boolean;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EffectiveCustomerPriceSource =
+  | 'customer-specific'    // 客户专属价命中
+  | 'tier-with-discount'   // 公共阶梯 + 客户等级折扣
+  | 'base-with-discount'   // 基准价 + 客户等级折扣
+  | 'tier'                 // 公共阶梯（无客户/无等级）
+  | 'base'                 // 基准价（无客户/无等级）
+  | 'none';
+
+export interface EffectiveCustomerPriceResult {
+  source: EffectiveCustomerPriceSource;
+  /** 应用所有折扣后的最终单价 */
+  unitPrice?: number;
+  /** 折扣前的原价（透明展示用） */
+  listPrice?: number;
+  /** 实际应用了多少折扣（来自 customer.tier） */
+  discountPercent?: number;
+  currency?: string;
+  minQty?: number;
+  maxQty?: number | null;
+  incoterm?: TierIncoterm;
+  /** 命中的公共阶梯 id（若来源是 tier 或 tier-with-discount） */
+  tierId?: string;
+  /** 命中的客户专属价 id（若来源是 customer-specific） */
+  specificId?: string;
+  /** 客户等级 code/name（若客户有等级） */
+  customerTierCode?: string;
+  customerTierName?: string;
+  /** none 时填充：'below-moq' / 'no-region-price' / 'qty-required' */
+  reason?: string;
+  moq?: number;
+}
+
 export interface ProductPriceHistory {
   id: string;
   productId: string;

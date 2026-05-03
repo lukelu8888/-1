@@ -16,7 +16,15 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Calculator, Copy, Plus, Trash2, AlertTriangle, AlertCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  Calculator,
+  Copy,
+  Plus,
+  Trash2,
+  UserCircle2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '../../../ui/button';
@@ -43,12 +51,13 @@ import { cn } from '../../../ui/utils';
 import { useProductCenter } from '../context/ProductCenterContext';
 import { REGIONS, getRegion } from '../context/regionConfig';
 import type {
-  EffectiveTierPriceResult,
+  EffectiveCustomerPriceResult,
   ProductTierPrice,
   RegionCode,
   TierIssue,
 } from '../context/types';
 import { RegionPill } from './RegionPill';
+import { CustomerSpecificPricesDialog } from './CustomerSpecificPricesDialog';
 
 const INCOTERM_OPTIONS: ProductTierPrice['incoterm'][] = [
   'EXW',
@@ -66,6 +75,9 @@ export function TierPricesEditor({ productId }: Props) {
   const ctx = useProductCenter();
   const product = ctx.getProductById(productId);
   const [region, setRegion] = useState<RegionCode>(ctx.activeRegion);
+  // null = "公共报价" (no customer), 'customer-id' = a specific customer.
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [specificDialogOpen, setSpecificDialogOpen] = useState(false);
 
   const allTiers = ctx.getTierPricesForProduct(productId, region);
   const issues = ctx.validateTierPrices(productId, region);
@@ -76,6 +88,9 @@ export function TierPricesEditor({ productId }: Props) {
     () => ctx.getRegionPricesForProduct(productId).find((p) => p.regionCode === region),
     [ctx, productId, region],
   );
+
+  const specificPricesForProduct = ctx.getCustomerSpecificPricesForProduct(productId);
+  const specificCount = specificPricesForProduct.length;
 
   return (
     <div className="space-y-3">
@@ -119,7 +134,13 @@ export function TierPricesEditor({ productId }: Props) {
         </div>
       </div>
 
-      <PriceSimulator productId={productId} region={region} moq={moq} />
+      <PriceSimulator
+        productId={productId}
+        region={region}
+        moq={moq}
+        customerId={selectedCustomerId}
+        onCustomerChange={setSelectedCustomerId}
+      />
 
       <TiersTable
         productId={productId}
@@ -131,6 +152,36 @@ export function TierPricesEditor({ productId }: Props) {
       />
 
       {issues.length > 0 && <IssueList issues={issues} />}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-dashed border-slate-200 bg-white px-3 py-2">
+        <div className="flex items-center gap-2 text-[11px] text-slate-600">
+          <UserCircle2 className="h-3.5 w-3.5" />
+          <span>客户专属价</span>
+          <Badge
+            variant="outline"
+            className="h-5 border-slate-300 px-1.5 font-mono text-[10px]"
+          >
+            {specificCount}
+          </Badge>
+          <span className="text-slate-400">
+            · 完全覆盖任何阶梯/折扣，命中即用（年度框架协议、anchor 客户）
+          </span>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-[12px]"
+          onClick={() => setSpecificDialogOpen(true)}
+        >
+          管理专属价
+        </Button>
+      </div>
+
+      <CustomerSpecificPricesDialog
+        productId={productId}
+        open={specificDialogOpen}
+        onOpenChange={setSpecificDialogOpen}
+      />
     </div>
   );
 }
@@ -183,15 +234,26 @@ function PriceSimulator({
   productId,
   region,
   moq,
+  customerId,
+  onCustomerChange,
 }: {
   productId: string;
   region: RegionCode;
   moq: number | null;
+  customerId: string | null;
+  onCustomerChange: (id: string | null) => void;
 }) {
   const ctx = useProductCenter();
   const [qty, setQty] = useState<number>(moq ?? 1);
-  const [result, setResult] = useState<EffectiveTierPriceResult | null>(null);
+  const [result, setResult] = useState<EffectiveCustomerPriceResult | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // When the user picks a customer, scope the simulator to that customer's
+  // primary region by default. This matches how a sales rep thinks: pick
+  // the customer first, then quote in the region they buy from.
+  const customers = ctx.listCustomers();
+  const selectedCustomer = ctx.getCustomerById(customerId);
+  const tier = ctx.getCustomerTierById(selectedCustomer?.tierId);
 
   useEffect(() => {
     setQty(moq ?? 1);
@@ -205,7 +267,7 @@ function PriceSimulator({
     let cancelled = false;
     setLoading(true);
     ctx
-      .getEffectiveTierPrice({ productId, region, qty })
+      .getEffectiveCustomerPrice({ productId, region, qty, customerId })
       .then((r) => {
         if (!cancelled) setResult(r);
       })
@@ -218,47 +280,136 @@ function PriceSimulator({
     return () => {
       cancelled = true;
     };
-  }, [ctx, productId, region, qty]);
+  }, [ctx, productId, region, qty, customerId]);
 
-  const tone =
-    result?.source === 'tier'
-      ? 'text-emerald-700'
-      : result?.source === 'base'
-        ? 'text-slate-700'
-        : 'text-rose-700';
-
-  const message = !result
-    ? '请输入数量'
-    : result.source === 'tier'
-      ? `命中阶梯 ${result.minQty}${result.maxQty != null ? `–${result.maxQty - 1}` : '+'} · ${formatMoney(result.unitPrice, result.currency)} / 件${result.incoterm ? ` (${result.incoterm})` : ''}`
-      : result.source === 'base'
-        ? `回退至区域建议价 ${formatMoney(result.unitPrice, result.currency)}（无阶梯命中）`
-        : result.reason === 'below-moq'
-          ? `数量 ${qty} 低于 MOQ ${result.moq ?? moq}，无法报价`
-          : result.reason === 'no-region-price'
-            ? '该区域尚未设置基准价格'
-            : '无可用报价';
+  const message = renderResultMessage(result, qty, moq);
+  const tone = renderResultTone(result);
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2">
-      <Calculator className="h-4 w-4 shrink-0 text-slate-500" />
-      <div className="text-[12px] font-medium text-slate-700">报价模拟器</div>
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] text-slate-500">数量</span>
-        <Input
-          type="number"
-          min={1}
-          value={qty}
-          onChange={(e) => setQty(Number(e.target.value) || 0)}
-          className="h-7 w-24 text-[12px]"
-        />
+    <div className="space-y-2 rounded border border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <Calculator className="h-4 w-4 shrink-0 text-slate-500" />
+        <div className="text-[12px] font-medium text-slate-700">报价模拟器</div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-500">客户</span>
+          <Select
+            value={customerId ?? 'PUBLIC'}
+            onValueChange={(v) => onCustomerChange(v === 'PUBLIC' ? null : v)}
+          >
+            <SelectTrigger className="h-7 w-[200px] text-[12px]">
+              <SelectValue placeholder="公共报价" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="PUBLIC">公共报价（无客户）</SelectItem>
+              {customers.map((c) => {
+                const t = ctx.getCustomerTierById(c.tierId);
+                return (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.shortName ?? c.name}
+                    {t ? ` · ${t.name}` : ''}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-500">数量</span>
+          <Input
+            type="number"
+            min={1}
+            value={qty}
+            onChange={(e) => setQty(Number(e.target.value) || 0)}
+            className="h-7 w-24 text-[12px]"
+          />
+        </div>
+
+        <RegionPill region={region} />
       </div>
-      <div className={cn('flex-1 text-[12px] font-mono', tone)}>
+
+      <div className={cn('text-[12px] font-mono', tone)}>
         {loading ? '…计算中…' : message}
       </div>
-      <RegionPill region={region} />
+
+      {/* When a customer is selected, show a one-line breakdown to make
+          the customer-tier discount transparent (very important for B2B
+          sales — no hidden math). */}
+      {selectedCustomer && result && result.source !== 'none' && (
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+          <Badge
+            variant="outline"
+            className={cn(
+              'h-5 border-slate-300 px-1.5 font-mono text-[10px]',
+              tier?.badgeColor === 'yellow' && 'border-yellow-400 text-yellow-700',
+              tier?.badgeColor === 'amber' && 'border-amber-400 text-amber-700',
+              tier?.badgeColor === 'emerald' && 'border-emerald-400 text-emerald-700',
+            )}
+          >
+            {tier ? tier.name : '无等级'}
+          </Badge>
+          {result.source === 'customer-specific' ? (
+            <span>专属价命中 → 跳过任何 tier 折扣</span>
+          ) : (
+            <>
+              <span>原价 {formatMoney(result.listPrice, result.currency)}</span>
+              <span className="text-slate-400">×</span>
+              <span>(1 − {result.discountPercent ?? 0}%)</span>
+              <span className="text-slate-400">=</span>
+              <span className="font-medium text-slate-800">
+                {formatMoney(result.unitPrice, result.currency)}
+              </span>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+function renderResultMessage(
+  result: EffectiveCustomerPriceResult | null,
+  qty: number,
+  moq: number | null,
+): string {
+  if (!result) return '请输入数量';
+  switch (result.source) {
+    case 'customer-specific':
+      return `命中客户专属价 ${formatMoney(result.unitPrice, result.currency)} / 件${result.incoterm ? ` (${result.incoterm})` : ''}`;
+    case 'tier':
+    case 'tier-with-discount':
+      return `命中阶梯 ${result.minQty}${result.maxQty != null ? `–${result.maxQty - 1}` : '+'} · ${formatMoney(result.unitPrice, result.currency)} / 件${result.incoterm ? ` (${result.incoterm})` : ''}`;
+    case 'base':
+    case 'base-with-discount':
+      return `回退至区域建议价 ${formatMoney(result.unitPrice, result.currency)}（无阶梯命中）`;
+    case 'none':
+      if (result.reason === 'below-moq') {
+        return `数量 ${qty} 低于 MOQ ${result.moq ?? moq}，无法报价`;
+      }
+      if (result.reason === 'no-region-price') return '该区域尚未设置基准价格';
+      return '无可用报价';
+    default:
+      return '无可用报价';
+  }
+}
+
+function renderResultTone(result: EffectiveCustomerPriceResult | null): string {
+  if (!result) return 'text-slate-500';
+  switch (result.source) {
+    case 'customer-specific':
+      return 'text-indigo-700';
+    case 'tier':
+    case 'tier-with-discount':
+      return 'text-emerald-700';
+    case 'base':
+    case 'base-with-discount':
+      return 'text-slate-700';
+    case 'none':
+      return 'text-rose-700';
+    default:
+      return 'text-slate-700';
+  }
 }
 
 function formatMoney(value: number | undefined, currency: string | undefined) {

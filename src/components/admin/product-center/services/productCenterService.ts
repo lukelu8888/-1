@@ -23,6 +23,10 @@
 import type {
   Campaign,
   CampaignProduct,
+  Customer,
+  CustomerSpecificPrice,
+  CustomerTier,
+  EffectiveCustomerPriceResult,
   EffectiveTierPriceResult,
   MediaKind,
   ModelMapping,
@@ -67,6 +71,10 @@ export interface ProductCenterSnapshot {
   regionPrices: ProductRegionPrice[];
   /** Phase 5b — B2B 阶梯报价 */
   tierPrices: ProductTierPrice[];
+  /** Phase 5c — 客户分层 / 专属价 */
+  customerTiers: CustomerTier[];
+  customers: Customer[];
+  customerSpecificPrices: CustomerSpecificPrice[];
   publishChannels: ProductPublishChannel[];
   campaigns: Campaign[];
   campaignProducts: CampaignProduct[];
@@ -212,6 +220,32 @@ export interface ProductCenterService {
     productId: string;
     region: RegionCode;
   }): Promise<TierIssue[]>;
+
+  // ── Phase 5c: customer tier pricing + specific prices ────────────────────
+
+  /** Persist a customer-specific price (insert or update on conflict). */
+  upsertCustomerSpecificPrice(input: CustomerSpecificPrice): Promise<CustomerSpecificPrice>;
+
+  /** Hard-delete a customer-specific price by id. */
+  removeCustomerSpecificPrice(id: string): Promise<void>;
+
+  /**
+   * Three-layer price selection:
+   *   1. customer-specific price → `source: 'customer-specific'`
+   *   2. fallback to public tier (Phase 5b) and apply customer's tier %
+   *      → `source: 'tier-with-discount' | 'base-with-discount'`
+   *   3. no customer / no tier → `source: 'tier' | 'base'` (same as 5b)
+   *
+   * Returns `source: 'none'` with a `reason` if quantity is below MOQ
+   * or no region price exists.
+   */
+  getEffectiveCustomerPrice(opts: {
+    productId: string;
+    region: RegionCode;
+    qty: number;
+    customerId: string | null;
+    asOfDate?: string;
+  }): Promise<EffectiveCustomerPriceResult>;
 
   // ── Phase 5a: media upload ───────────────────────────────────────────────
 
@@ -376,6 +410,9 @@ export const mockProductCenterService: ProductCenterService = {
       suppliers: [],
       regionPrices: [],
       tierPrices: [],
+      customerTiers: [],
+      customers: [],
+      customerSpecificPrices: [],
       publishChannels: [],
       campaigns: [],
       campaignProducts: [],
@@ -761,6 +798,111 @@ export const mockProductCenterService: ProductCenterService = {
 
     const product = mockProducts.find((p) => p.id === productId);
     return computeTierIssues(tiers, product?.moq ?? null);
+  },
+
+  // ── Phase 5c (mock): customer tier pricing + specific prices ────────────
+  async upsertCustomerSpecificPrice(input) {
+    return input;
+  },
+  async removeCustomerSpecificPrice() {
+    /* noop */
+  },
+  async getEffectiveCustomerPrice({ productId, region, qty, customerId, asOfDate }) {
+    if (!qty || qty < 1) {
+      return { source: 'none', reason: 'qty-required' };
+    }
+    const { mockCustomers, mockCustomerTiers, mockCustomerSpecificPrices } = await import(
+      '../context/mockData'
+    );
+    const today = (asOfDate ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const within = (s?: string | null, e?: string | null) => {
+      if (s && s > today) return false;
+      if (e && e < today) return false;
+      return true;
+    };
+
+    // A. customer-specific match → highest priority
+    if (customerId) {
+      const csp = mockCustomerSpecificPrices
+        .filter(
+          (p) =>
+            p.customerId === customerId &&
+            p.productId === productId &&
+            p.regionCode === region &&
+            p.isActive &&
+            within(p.effectiveFrom, p.effectiveTo) &&
+            p.minQty <= qty &&
+            (p.maxQty == null || p.maxQty > qty),
+        )
+        .sort((a, b) => b.minQty - a.minQty)[0];
+
+      if (csp) {
+        return {
+          source: 'customer-specific',
+          unitPrice: csp.unitPrice,
+          listPrice: csp.unitPrice,
+          discountPercent: 0,
+          currency: csp.currency,
+          minQty: csp.minQty,
+          maxQty: csp.maxQty ?? null,
+          incoterm: csp.incoterm,
+          specificId: csp.id,
+        };
+      }
+    }
+
+    // Customer's tier discount
+    let tierPct = 0;
+    let tierCode: string | undefined;
+    let tierName: string | undefined;
+    if (customerId) {
+      const customer = mockCustomers.find((c) => c.id === customerId && c.isActive);
+      const tier = customer?.tierId
+        ? mockCustomerTiers.find((t) => t.id === customer.tierId && t.isActive)
+        : undefined;
+      tierPct = tier?.defaultDiscountPercent ?? 0;
+      tierCode = tier?.code;
+      tierName = tier?.name;
+    }
+
+    // B. delegate to 5b's selection
+    const tierRes = await mockProductCenterService.getEffectiveTierPrice({
+      productId,
+      region,
+      qty,
+      asOfDate,
+    });
+
+    if (tierRes.source === 'none') {
+      return {
+        source: 'none',
+        reason: tierRes.reason,
+        moq: tierRes.moq,
+      };
+    }
+
+    const list = tierRes.unitPrice ?? 0;
+    const final = Math.round(list * (1 - tierPct / 100) * 10000) / 10000;
+    const sourceOut: EffectiveCustomerPriceResult['source'] =
+      tierPct > 0
+        ? tierRes.source === 'tier'
+          ? 'tier-with-discount'
+          : 'base-with-discount'
+        : tierRes.source;
+
+    return {
+      source: sourceOut,
+      unitPrice: final,
+      listPrice: list,
+      discountPercent: tierPct,
+      currency: tierRes.currency,
+      minQty: tierRes.minQty,
+      maxQty: tierRes.maxQty ?? null,
+      incoterm: tierRes.incoterm,
+      tierId: tierRes.tierId,
+      customerTierCode: tierCode,
+      customerTierName: tierName,
+    };
   },
 
   // ── Phase 5a (mock) ──────────────────────────────────────────────────────
