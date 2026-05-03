@@ -75,6 +75,9 @@ import {
 import {
   PRODUCT_CENTER_BACKEND,
   getProductCenterService,
+  type BulkImportError,
+  type BulkImportResult,
+  type BulkImportRow,
 } from '../services/productCenterService';
 
 // ─── Role / identity model (Phase 3) ────────────────────────────────────────
@@ -188,6 +191,17 @@ interface Actions {
     value: number;
     reason?: string;
   }) => number;
+
+  // bulk import (Phase 4e)
+  /**
+   * Validates and applies a CSV-style row set. In supabase mode the
+   * service RPC owns validation and persistence, then we refetch; in mock
+   * mode we apply the rows to local state in-place and return the same
+   * `{ created, updated, errors }` shape.
+   */
+  bulkUpsertProducts: (rows: BulkImportRow[]) => Promise<BulkImportResult>;
+  /** Re-pulls a fresh snapshot from the backend (no-op in mock mode). */
+  refreshAll: () => Promise<void>;
 
   // pricing history (Phase 3)
   recordPriceChange: (entry: Omit<ProductPriceHistory, 'id' | 'changedAt'>) => void;
@@ -324,32 +338,42 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   const [bootstrapLoading, setBootstrapLoading] = useState<boolean>(usingSupabase);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
+  /**
+   * Re-pulls a tenant-scoped snapshot from the service and replaces every
+   * entity slice. Used both at mount and after bulk operations (e.g. CSV
+   * import) where a partial diff is harder than a full refetch. No-op in
+   * mock mode where the in-memory state is already authoritative.
+   */
+  const refreshAll = useCallback(async (): Promise<void> => {
+    if (!usingSupabase) return;
+    const svc = serviceRef.current;
+    if (!svc.loadAll) return;
+    const snap = await svc.loadAll();
+    setProducts(snap.products);
+    setCategories(snap.categories);
+    setAttributeValues(snap.attributeValues);
+    setMedia(snap.media);
+    setRegionPrices(snap.regionPrices);
+    setPublishChannels(snap.publishChannels);
+    setCampaigns(snap.campaigns);
+    setCampaignProducts(snap.campaignProducts);
+    setModelMappings(snap.mappings);
+    setAuditLogs(snap.auditLogs);
+    setPriceHistory(snap.priceHistory);
+    setSupplierQuotes(snap.supplierQuotes);
+    setReviewHistory(snap.reviewHistory);
+  }, [usingSupabase]);
+
   useEffect(() => {
     if (!usingSupabase) return;
     let cancelled = false;
-    const svc = serviceRef.current;
-    if (!svc.loadAll) {
+    if (!serviceRef.current.loadAll) {
       setBootstrapLoading(false);
       return;
     }
-    svc
-      .loadAll()
-      .then((snap) => {
-        if (cancelled) return;
-        setProducts(snap.products);
-        setCategories(snap.categories);
-        setAttributeValues(snap.attributeValues);
-        setMedia(snap.media);
-        setRegionPrices(snap.regionPrices);
-        setPublishChannels(snap.publishChannels);
-        setCampaigns(snap.campaigns);
-        setCampaignProducts(snap.campaignProducts);
-        setModelMappings(snap.mappings);
-        setAuditLogs(snap.auditLogs);
-        setPriceHistory(snap.priceHistory);
-        setSupplierQuotes(snap.supplierQuotes);
-        setReviewHistory(snap.reviewHistory);
-        setBootstrapLoading(false);
+    refreshAll()
+      .then(() => {
+        if (!cancelled) setBootstrapLoading(false);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -363,7 +387,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [usingSupabase]);
+  }, [refreshAll, usingSupabase]);
 
   /**
    * Fire a write through the service layer in supabase mode, no-op in mock
@@ -990,6 +1014,182 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     [appendAudit, currentUser.name, persist, pushPriceHistory],
   );
 
+  // ── bulk import (Phase 4e) ────────────────────────────────────────────────
+  //
+  // In supabase mode we delegate to the RPC and refetch; in mock mode we
+  // own the validation/state-mutation locally so that the dialog behaves
+  // identically across backends. Validation rules:
+  //   - sku must be non-empty
+  //   - if creating (sku not seen), name must be non-empty
+  //   - if `primaryCategoryCode` is set, it must match an existing category
+  //
+  // Successful rows insert a new product (or update name/brand/etc on an
+  // existing one) and, if `region` + `basePrice` are provided, upsert the
+  // matching pc_product_region_prices row.
+
+  const bulkUpsertProducts = useCallback(
+    async (rows: BulkImportRow[]): Promise<BulkImportResult> => {
+      if (usingSupabase) {
+        const res = await serviceRef.current.bulkUpsertProducts(rows);
+        try {
+          await refreshAll();
+        } catch (err: unknown) {
+          // eslint-disable-next-line no-console
+          console.error('[product-center] refresh after import failed', err);
+        }
+        return res;
+      }
+
+      // ── mock-mode application ────────────────────────────────────────────
+      const errors: BulkImportError[] = [];
+      let created = 0;
+      let updated = 0;
+      const ts = nowIso();
+      const knownCodes = new Set(categories.map((c) => c.code));
+      const skuToExisting = new Map(
+        products.map((p) => [p.sku.toLowerCase(), p] as const),
+      );
+
+      // Build the diffs we'll apply in two batched setState calls.
+      const productCreates: Product[] = [];
+      const productPatches = new Map<string, Partial<Product>>();
+      const priceUpserts: ProductRegionPrice[] = [];
+
+      const num = (v: unknown): number | undefined => {
+        if (v === '' || v == null) return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const str = (v: unknown): string | undefined => {
+        const s = String(v ?? '').trim();
+        return s.length ? s : undefined;
+      };
+
+      rows.forEach((row, i) => {
+        const idx = i + 1;
+        const sku = str(row.sku);
+        try {
+          if (!sku) throw new Error('pc:missing-sku');
+          if (row.primaryCategoryCode && !knownCodes.has(String(row.primaryCategoryCode))) {
+            throw new Error(`pc:unknown-category-code:${row.primaryCategoryCode}`);
+          }
+          const existing = skuToExisting.get(sku.toLowerCase());
+          const cat = row.primaryCategoryCode
+            ? categories.find((c) => c.code === row.primaryCategoryCode) ?? null
+            : null;
+
+          if (existing) {
+            const patch: Partial<Product> = { updatedAt: ts };
+            if (str(row.name)) patch.name = str(row.name)!;
+            if (str(row.nameEn)) patch.nameEn = str(row.nameEn);
+            if (str(row.nameZh)) patch.nameZh = str(row.nameZh);
+            if (str(row.brand)) patch.brand = str(row.brand);
+            if (str(row.status)) patch.status = str(row.status) as Product['status'];
+            if (str(row.reviewStatus))
+              patch.reviewStatus = str(row.reviewStatus) as ReviewStatus;
+            if (cat) patch.primaryCategoryId = cat.id;
+            if (str(row.hsCode)) patch.hsCode = str(row.hsCode);
+            const nMoq = num(row.moq);
+            if (nMoq != null) patch.moq = nMoq;
+            const nUpc = num(row.unitsPerCarton);
+            if (nUpc != null) patch.unitsPerCarton = nUpc;
+            const nLead = num(row.leadTimeDays);
+            if (nLead != null) patch.leadTimeDays = nLead;
+            productPatches.set(existing.id, patch);
+            updated += 1;
+          } else {
+            const name = str(row.name);
+            if (!name) throw new Error('pc:missing-name');
+            productCreates.push({
+              id: newId('p'),
+              tenantId: 'tenant_default',
+              sku,
+              name,
+              nameEn: str(row.nameEn),
+              nameZh: str(row.nameZh),
+              brand: str(row.brand),
+              status: (str(row.status) as Product['status']) ?? 'draft',
+              reviewStatus: (str(row.reviewStatus) as ReviewStatus) ?? 'not_submitted',
+              campaignStatus: 'no_campaign',
+              primaryCategoryId: cat?.id ?? null,
+              hsCode: str(row.hsCode),
+              moq: num(row.moq),
+              unitsPerCarton: num(row.unitsPerCarton),
+              leadTimeDays: num(row.leadTimeDays),
+              createdAt: ts,
+              updatedAt: ts,
+            });
+            created += 1;
+          }
+
+          // optional region price
+          const region = str(row.region) as RegionCode | undefined;
+          const basePrice = num(row.basePrice);
+          if (region && basePrice != null) {
+            const pid = existing?.id ?? productCreates[productCreates.length - 1].id;
+            priceUpserts.push({
+              id: newId('prp'),
+              productId: pid,
+              regionCode: region,
+              currency: str(row.currency) ?? (region === 'EA' ? 'EUR' : 'USD'),
+              basePrice,
+              salePrice: num(row.salePrice),
+              campaignPrice: num(row.campaignPrice),
+              isActive: true,
+              createdAt: ts,
+              updatedAt: ts,
+            });
+          }
+        } catch (err: unknown) {
+          errors.push({
+            index: idx,
+            sku: sku || undefined,
+            message: (err as Error).message,
+          });
+        }
+      });
+
+      // Apply all patches in two batched setStates.
+      if (productPatches.size || productCreates.length) {
+        setProducts((prev) => {
+          const next = prev.map((p) => {
+            const patch = productPatches.get(p.id);
+            return patch ? { ...p, ...patch } : p;
+          });
+          return [...next, ...productCreates];
+        });
+      }
+      if (priceUpserts.length) {
+        setRegionPrices((prev) => {
+          const byKey = new Map(
+            prev.map((rp) => [`${rp.productId}_${rp.regionCode}`, rp] as const),
+          );
+          priceUpserts.forEach((np) => {
+            byKey.set(`${np.productId}_${np.regionCode}`, np);
+          });
+          return Array.from(byKey.values());
+        });
+      }
+
+      // Single audit row summarizing the batch.
+      if (created || updated) {
+        appendAudit({
+          productId: '*',
+          action: 'bulk_import',
+          field: `+${created} ~${updated}`,
+          actorName: currentUser.name,
+          note:
+            errors.length > 0
+              ? `errors=${errors.length}`
+              : undefined,
+        });
+      }
+
+      return { created, updated, errors };
+    },
+    [appendAudit, categories, currentUser.name, products, refreshAll, usingSupabase],
+  );
+
   // ── supplier quotes (Phase 3) ─────────────────────────────────────────────
 
   const addSupplierQuote = useCallback(
@@ -1506,6 +1706,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       bulkUpdatePrices,
       recordPriceChange,
 
+      bulkUpsertProducts,
+      refreshAll,
+
       addSupplierQuote,
       updateSupplierQuote,
       setCurrentSupplierQuote,
@@ -1625,6 +1828,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       updateRegionPrice,
       bulkUpdatePrices,
       recordPriceChange,
+
+      bulkUpsertProducts,
+      refreshAll,
 
       addSupplierQuote,
       updateSupplierQuote,

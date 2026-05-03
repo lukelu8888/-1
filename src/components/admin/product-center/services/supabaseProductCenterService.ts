@@ -34,6 +34,9 @@ import type {
 } from '../context/types';
 import type {
   AnalyticsRollup,
+  BulkImportError,
+  BulkImportResult,
+  BulkImportRow,
   ProductCenterService,
   ProductCenterSnapshot,
   ProductExportRow,
@@ -1055,6 +1058,27 @@ export const supabaseProductCenterService: ProductCenterService = {
         missingCategory: Number(dq.missing_category ?? 0),
         missingPrice: Number(dq.missing_price ?? 0),
       },
+    };
+  },
+
+  // ── Phase 4e: bulk import (RPC-backed) ───────────────────────────────────
+  async bulkUpsertProducts(rows: BulkImportRow[]): Promise<BulkImportResult> {
+    const res = await supabase.rpc('pc_bulk_upsert_products', {
+      p_rows: rows,
+      p_actor_name: null,
+    });
+    if (res.error) throw new PcSupabaseError('bulkUpsertProducts', res.error);
+    const data = (res.data ?? {}) as Record<string, unknown>;
+    const errs = (data.errors as Array<Record<string, unknown>>) ?? [];
+    const errorRows: BulkImportError[] = errs.map((e) => ({
+      index: Number(e.index ?? 0),
+      sku: (e.sku as string | null) ?? undefined,
+      message: (e.message as string) ?? 'unknown error',
+    }));
+    return {
+      created: Number(data.created ?? 0),
+      updated: Number(data.updated ?? 0),
+      errors: errorRows,
     };
   },
 };

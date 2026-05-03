@@ -58,62 +58,17 @@ import { useProductCenter } from '../../context/ProductCenterContext';
 import { REGIONS, formatRegionMoney } from '../../context/regionConfig';
 import { getProductCenterService } from '../../services/productCenterService';
 import { downloadCsv, rowsToCsv } from '../../services/csv';
+import {
+  COLUMN_LABELS,
+  IMPORT_COLUMNS,
+} from '../../services/productImportColumns';
+import { BulkImportDialog } from '../../shared/BulkImportDialog';
 import type {
   ProductListFilters,
   PublishStatus,
   RegionCode,
   ReviewStatus,
 } from '../../context/types';
-
-// Column ordering + Chinese headers for the CSV export. Centralised here so
-// users see consistent labels regardless of which backend produced the rows.
-const EXPORT_COLUMNS = [
-  'sku',
-  'name',
-  'nameEn',
-  'brand',
-  'status',
-  'reviewStatus',
-  'primaryCategoryName',
-  'region',
-  'currency',
-  'basePrice',
-  'salePrice',
-  'campaignPrice',
-  'publishStatus',
-  'primarySupplier',
-  'costPrice',
-  'costCurrency',
-  'hsCode',
-  'moq',
-  'unitsPerCarton',
-  'leadTimeDays',
-  'updatedAt',
-] as const;
-
-const EXPORT_HEADERS: Record<(typeof EXPORT_COLUMNS)[number], string> = {
-  sku: 'SKU',
-  name: '中文名',
-  nameEn: '英文名',
-  brand: '品牌',
-  status: '产品状态',
-  reviewStatus: '审核状态',
-  primaryCategoryName: '主类目',
-  region: '地区',
-  currency: '币种',
-  basePrice: '标价',
-  salePrice: '售价',
-  campaignPrice: '活动价',
-  publishStatus: '发布状态',
-  primarySupplier: '主供应商',
-  costPrice: '采购成本',
-  costCurrency: '成本币种',
-  hsCode: 'HS Code',
-  moq: 'MOQ',
-  unitsPerCarton: '装箱量',
-  leadTimeDays: '交期(天)',
-  updatedAt: '更新时间',
-};
 
 interface Props {
   onOpenProduct: (id: string) => void;
@@ -182,6 +137,7 @@ export function PimListPage({ onOpenProduct }: Props) {
   const [bulkPriceOpen, setBulkPriceOpen] = useState(false);
   const [previewProductId, setPreviewProductId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   /**
    * Pull a wide row set through the service layer (mock or supabase) and
@@ -202,8 +158,8 @@ export function PimListPage({ onOpenProduct }: Props) {
         return;
       }
       const csv = rowsToCsv(rows, {
-        headers: EXPORT_COLUMNS as unknown as Array<keyof (typeof rows)[number] & string>,
-        headerLabels: EXPORT_HEADERS,
+        headers: IMPORT_COLUMNS as unknown as Array<keyof (typeof rows)[number] & string>,
+        headerLabels: COLUMN_LABELS,
       });
       const stamp = new Date().toISOString().slice(0, 10);
       const tag = region ? `_${region}` : '';
@@ -224,7 +180,12 @@ export function PimListPage({ onOpenProduct }: Props) {
         subtitle="所有产品主数据维护中心 — 唯一主数据源，由此发布到官网、活动、区域市场"
         actions={
           <>
-            <Button size="sm" variant="outline" className="h-8" onClick={() => toast.info('批量导入：模拟功能 — Phase 4 接入实际导入流水线')}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => setImportOpen(true)}
+            >
               <Upload className="mr-1 h-3.5 w-3.5" /> 批量导入
             </Button>
             <Button
@@ -822,6 +783,7 @@ export function PimListPage({ onOpenProduct }: Props) {
         productId={previewProductId}
         onClose={() => setPreviewProductId(null)}
       />
+      <BulkImportDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>
   );
 }

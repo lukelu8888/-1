@@ -175,4 +175,25 @@ describe('Phase 4d (mock impl)', () => {
     expect(rollup.priceSummaryByRegion.SA).toBeUndefined();
     expect(rollup.priceSummaryByRegion.EA).toBeUndefined();
   });
+
+  it('bulkUpsertProducts validates required fields and unknown categories', async () => {
+    // Use the first real SKU from the seed for the "update" path so we
+    // don't hard-code a brittle string here.
+    const { mockProducts } = await import('../context/mockData');
+    const existingSku = mockProducts[0].sku;
+
+    const res = await mockProductCenterService.bulkUpsertProducts([
+      { sku: existingSku, name: 'updated' },
+      { sku: 'IMPORT-NEW-001', name: '新产品' },
+      { sku: '' },
+      { sku: 'IMPORT-NEW-002' },
+      { sku: 'IMPORT-NEW-003', name: 'X', primaryCategoryCode: '__notexist__' },
+    ]);
+    expect(res.created + res.updated).toBeGreaterThan(0);
+    expect(res.errors.length).toBe(3);
+    expect(res.errors.map((e) => e.index).sort()).toEqual([3, 4, 5]);
+    expect(res.errors.find((e) => e.index === 3)?.message).toContain('missing-sku');
+    expect(res.errors.find((e) => e.index === 4)?.message).toContain('missing-name');
+    expect(res.errors.find((e) => e.index === 5)?.message).toContain('unknown-category-code');
+  });
 });

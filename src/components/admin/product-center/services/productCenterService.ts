@@ -162,6 +162,15 @@ export interface ProductCenterService {
    * Single round-trip analytics payload powering the "概览" dashboard.
    */
   getAnalyticsRollup(opts?: { region?: RegionCode }): Promise<AnalyticsRollup>;
+
+  /**
+   * Phase 4e — bulk import. Accepts a list of rows in the same shape as
+   * `pc_export_products` so the round-trip "导出 → Excel 编辑 → 导入"
+   * works without column mapping. Each row that fails is reported in
+   * `errors` (with its 1-based index and SKU); successful rows are
+   * counted in `created` / `updated`.
+   */
+  bulkUpsertProducts(rows: BulkImportRow[]): Promise<BulkImportResult>;
 }
 
 // ── Phase 4d shared types ───────────────────────────────────────────────────
@@ -234,6 +243,46 @@ export interface AnalyticsRollup {
     missingCategory: number;
     missingPrice: number;
   };
+}
+
+// ── Phase 4e — bulk import ──────────────────────────────────────────────────
+
+/**
+ * Wide-row import payload. Same key set as `ProductExportRow` but every
+ * field is optional (and string-typed for prices) so callers can feed
+ * straight from a CSV without coercion.
+ */
+export interface BulkImportRow {
+  sku: string;
+  name?: string;
+  nameEn?: string;
+  nameZh?: string;
+  brand?: string;
+  status?: string;
+  reviewStatus?: string;
+  primaryCategoryCode?: string;
+  region?: string;
+  currency?: string;
+  basePrice?: number | string;
+  salePrice?: number | string;
+  campaignPrice?: number | string;
+  hsCode?: string;
+  moq?: number | string;
+  unitsPerCarton?: number | string;
+  leadTimeDays?: number | string;
+}
+
+export interface BulkImportError {
+  /** 1-based row index (matches the user-visible CSV preview). */
+  index: number;
+  sku?: string;
+  message: string;
+}
+
+export interface BulkImportResult {
+  created: number;
+  updated: number;
+  errors: BulkImportError[];
 }
 
 /**
@@ -517,6 +566,45 @@ export const mockProductCenterService: ProductCenterService = {
       priceSummaryByRegion,
       dataQuality: { missingImage, missingCategory, missingPrice },
     };
+  },
+
+  async bulkUpsertProducts(rows) {
+    // Mock impl validates row shape, coerces numeric fields, and reports
+    // errors the same way the RPC does. We do NOT mutate the seed arrays:
+    // the Context layer owns mock state, so it will apply successful rows
+    // itself (see `bulkUpsertProducts` in ProductCenterContext).
+    const errors: BulkImportError[] = [];
+    let created = 0;
+    let updated = 0;
+    const { mockProducts, mockCategories } = await import('../context/mockData');
+    const knownCodes = new Set(mockCategories.map((c) => c.code));
+    const skuToProduct = new Map(mockProducts.map((p) => [p.sku.toLowerCase(), p]));
+
+    rows.forEach((row, i) => {
+      const idx = i + 1;
+      const sku = String(row.sku ?? '').trim();
+      const name = String(row.name ?? '').trim();
+      try {
+        if (!sku) throw new Error('pc:missing-sku');
+        if (row.primaryCategoryCode && !knownCodes.has(row.primaryCategoryCode)) {
+          throw new Error(`pc:unknown-category-code:${row.primaryCategoryCode}`);
+        }
+        if (skuToProduct.has(sku.toLowerCase())) {
+          updated += 1;
+        } else {
+          if (!name) throw new Error('pc:missing-name');
+          created += 1;
+        }
+      } catch (err) {
+        errors.push({
+          index: idx,
+          sku: sku || undefined,
+          message: (err as Error).message,
+        });
+      }
+    });
+
+    return { created, updated, errors };
   },
 };
 
