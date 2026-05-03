@@ -28,6 +28,7 @@ import { toast } from 'sonner';
 import type {
   Campaign,
   CampaignProduct,
+  EffectiveTierPriceResult,
   ModelMapping,
   Product,
   ProductAttribute,
@@ -44,11 +45,13 @@ import type {
   ProductPublishLog,
   ProductRegionPrice,
   ProductSupplierLink,
+  ProductTierPrice,
   PublishStatus,
   RegionCode,
   ReviewHistoryEntry,
   ReviewStatus,
   SupplierQuote,
+  TierIssue,
 } from './types';
 
 import {
@@ -70,10 +73,12 @@ import {
   mockReviewHistory,
   mockSupplierLinks,
   mockSupplierQuotes,
+  mockTierPrices,
 } from './mockData';
 
 import {
   PRODUCT_CENTER_BACKEND,
+  computeTierIssues,
   getProductCenterService,
   type BulkImportError,
   type BulkImportResult,
@@ -118,6 +123,8 @@ interface State {
   documents: ProductDocument[];
   supplierLinks: ProductSupplierLink[];
   regionPrices: ProductRegionPrice[];
+  /** Phase 5b — B2B 阶梯报价 */
+  tierPrices: ProductTierPrice[];
   publishChannels: ProductPublishChannel[];
   publishLogs: ProductPublishLog[];
   campaigns: Campaign[];
@@ -233,6 +240,17 @@ interface Actions {
   // audit (Phase 2)
   logAudit: (entry: Omit<ProductAuditLog, 'id' | 'occurredAt'>) => void;
 
+  // tier prices (Phase 5b — B2B 阶梯报价)
+  upsertTierPrice: (input: ProductTierPrice) => void;
+  removeTierPrice: (id: string) => void;
+  /** Async — calls the service (mock or RPC) to resolve effective unit price by qty. */
+  getEffectiveTierPrice: (opts: {
+    productId: string;
+    region: RegionCode;
+    qty: number;
+    asOfDate?: string;
+  }) => Promise<EffectiveTierPriceResult>;
+
   // media
   addMedia: (media: ProductMedia) => void;
   removeMedia: (id: string) => void;
@@ -271,6 +289,10 @@ interface Selectors {
   getDocumentsForProduct: (id: string) => ProductDocument[];
   getSupplierLinksForProduct: (id: string) => ProductSupplierLink[];
   getRegionPricesForProduct: (id: string) => ProductRegionPrice[];
+  /** Phase 5b — all tier-price rows for a product (optionally scoped to region). */
+  getTierPricesForProduct: (id: string, region?: RegionCode) => ProductTierPrice[];
+  /** Phase 5b — synchronous in-memory consistency check (UI uses this on save). */
+  validateTierPrices: (productId: string, region: RegionCode) => TierIssue[];
   getPublishChannelsForProduct: (id: string) => ProductPublishChannel[];
   getAttributeValuesForProduct: (id: string) => ProductAttributeValue[];
   getAuditLogsForProduct: (id: string) => ProductAuditLog[];
@@ -320,6 +342,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   const [documents] = useState<ProductDocument[]>(mockDocuments);
   const [supplierLinks] = useState<ProductSupplierLink[]>(mockSupplierLinks);
   const [regionPrices, setRegionPrices] = useState<ProductRegionPrice[]>(mockRegionPrices);
+  const [tierPrices, setTierPrices] = useState<ProductTierPrice[]>(mockTierPrices);
   const [publishChannels, setPublishChannels] = useState<ProductPublishChannel[]>(mockPublishChannels);
   const [publishLogs, setPublishLogs] = useState<ProductPublishLog[]>(mockPublishLogs);
   const [campaigns, setCampaigns] = useState<Campaign[]>(mockCampaigns);
@@ -368,6 +391,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     setAttributeValues(snap.attributeValues);
     setMedia(snap.media);
     setRegionPrices(snap.regionPrices);
+    setTierPrices(snap.tierPrices);
     setPublishChannels(snap.publishChannels);
     setCampaigns(snap.campaigns);
     setCampaignProducts(snap.campaignProducts);
@@ -1455,6 +1479,45 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     [persist],
   );
 
+  // ── Phase 5b: tier prices (B2B quantity tiers) ─────────────────────────────
+
+  const upsertTierPrice = useCallback(
+    (input: ProductTierPrice) => {
+      setTierPrices((prev) => {
+        const idx = prev.findIndex((t) => t.id === input.id);
+        const stamped = { ...input, updatedAt: nowIso() };
+        if (idx === -1) {
+          return [...prev, { ...stamped, createdAt: nowIso() }];
+        }
+        const next = [...prev];
+        next[idx] = stamped;
+        return next;
+      });
+      persist('保存阶梯价', () => serviceRef.current.upsertTierPrice(input));
+    },
+    [persist],
+  );
+
+  const removeTierPrice = useCallback(
+    (id: string) => {
+      setTierPrices((prev) => prev.filter((t) => t.id !== id));
+      persist('删除阶梯价', () => serviceRef.current.removeTierPrice(id));
+    },
+    [persist],
+  );
+
+  const getEffectiveTierPrice = useCallback(
+    async (opts: {
+      productId: string;
+      region: RegionCode;
+      qty: number;
+      asOfDate?: string;
+    }): Promise<EffectiveTierPriceResult> => {
+      return serviceRef.current.getEffectiveTierPrice(opts);
+    },
+    [],
+  );
+
   const attachMedia = useCallback(
     async (input: {
       productId: string;
@@ -1704,6 +1767,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       documents,
       supplierLinks,
       regionPrices,
+      tierPrices,
       publishChannels,
       publishLogs,
       campaigns,
@@ -1753,6 +1817,10 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       bulkUpdatePrices,
       recordPriceChange,
 
+      upsertTierPrice,
+      removeTierPrice,
+      getEffectiveTierPrice,
+
       bulkUpsertProducts,
       refreshAll,
 
@@ -1794,6 +1862,21 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         supplierLinks.filter((sl) => sl.productId === id),
       getRegionPricesForProduct: (id) =>
         regionPrices.filter((rp) => rp.productId === id),
+      getTierPricesForProduct: (id, region) =>
+        tierPrices
+          .filter((t) => t.productId === id && (region == null || t.regionCode === region))
+          .sort((a, b) =>
+            a.regionCode === b.regionCode
+              ? a.minQty - b.minQty
+              : a.regionCode.localeCompare(b.regionCode),
+          ),
+      validateTierPrices: (productId, region) => {
+        const product = productById.get(productId);
+        const sorted = tierPrices
+          .filter((t) => t.productId === productId && t.regionCode === region && t.isActive)
+          .sort((a, b) => a.minQty - b.minQty);
+        return computeTierIssues(sorted, product?.moq ?? null);
+      },
       getPublishChannelsForProduct: (id) =>
         publishChannels.filter((pc) => pc.productId === id),
       getAttributeValuesForProduct: (id) =>
@@ -1830,6 +1913,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       documents,
       supplierLinks,
       regionPrices,
+      tierPrices,
       publishChannels,
       publishLogs,
       campaigns,
@@ -1876,6 +1960,10 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       updateRegionPrice,
       bulkUpdatePrices,
       recordPriceChange,
+
+      upsertTierPrice,
+      removeTierPrice,
+      getEffectiveTierPrice,
 
       bulkUpsertProducts,
       refreshAll,

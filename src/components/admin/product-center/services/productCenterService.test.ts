@@ -8,7 +8,9 @@ import {
 import {
   mockProductCenterService,
   getProductCenterService,
+  computeTierIssues,
 } from './productCenterService';
+import type { ProductTierPrice } from '../context/types';
 
 describe('cost model', () => {
   it('computes landed cost with default region duties and FX', () => {
@@ -241,5 +243,183 @@ describe('Phase 5a (mock impl)', () => {
     });
     // Strips the extension but keeps the rest of the filename.
     expect(created.altText).toBe('product-shot-01');
+  });
+});
+
+// ─── Phase 5b: B2B tier prices ─────────────────────────────────────────────
+
+function makeTier(over: Partial<ProductTierPrice>): ProductTierPrice {
+  return {
+    id: over.id ?? 't',
+    productId: 'p_001',
+    regionCode: 'NA',
+    minQty: 100,
+    maxQty: null,
+    unitPrice: 10,
+    currency: 'USD',
+    isActive: true,
+    createdAt: '2026-05-01',
+    updatedAt: '2026-05-01',
+    ...over,
+  };
+}
+
+describe('Phase 5b — computeTierIssues', () => {
+  it('reports tier-below-moq when the lowest tier is below MOQ', () => {
+    const issues = computeTierIssues(
+      [makeTier({ minQty: 50, maxQty: 200 }), makeTier({ id: 't2', minQty: 200, maxQty: null })],
+      100,
+    );
+    const codes = issues.map((i) => i.code);
+    expect(codes).toContain('tier-below-moq');
+    expect(issues.find((i) => i.code === 'tier-below-moq')?.severity).toBe('error');
+  });
+
+  it('warns when no tier has an open-ended top (max_qty = null)', () => {
+    const issues = computeTierIssues(
+      [
+        makeTier({ id: 't1', minQty: 100, maxQty: 500 }),
+        makeTier({ id: 't2', minQty: 500, maxQty: 1000 }),
+      ],
+      100,
+    );
+    expect(issues.some((i) => i.code === 'no-open-top-tier' && i.severity === 'warning')).toBe(
+      true,
+    );
+  });
+
+  it('warns when adjacent tiers are not continuous (gap)', () => {
+    const issues = computeTierIssues(
+      [
+        makeTier({ id: 't1', minQty: 100, maxQty: 500 }),
+        makeTier({ id: 't2', minQty: 1000, maxQty: null }),
+      ],
+      100,
+    );
+    expect(issues.some((i) => i.code === 'tier-gap-or-overlap')).toBe(true);
+  });
+
+  it('reports duplicate-min-qty as error', () => {
+    const issues = computeTierIssues(
+      [
+        makeTier({ id: 't1', minQty: 100, maxQty: 500 }),
+        makeTier({ id: 't2', minQty: 100, maxQty: null }),
+      ],
+      100,
+    );
+    expect(issues.some((i) => i.code === 'duplicate-min-qty' && i.severity === 'error')).toBe(
+      true,
+    );
+  });
+
+  it('returns empty for a clean ladder at MOQ', () => {
+    const issues = computeTierIssues(
+      [
+        makeTier({ id: 't1', minQty: 100, maxQty: 500 }),
+        makeTier({ id: 't2', minQty: 500, maxQty: null }),
+      ],
+      100,
+    );
+    expect(issues).toEqual([]);
+  });
+});
+
+describe('Phase 5b — getEffectiveTierPrice (mock)', () => {
+  it('hits the lowest tier when qty is at MOQ', async () => {
+    // p_001 NA seed: 100/500/1500/5000
+    const r = await mockProductCenterService.getEffectiveTierPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 100,
+    });
+    expect(r.source).toBe('tier');
+    expect(r.minQty).toBe(100);
+    expect(r.unitPrice).toBe(19.99);
+    expect(r.currency).toBe('USD');
+  });
+
+  it('selects the highest matching tier when qty straddles multiple', async () => {
+    const r = await mockProductCenterService.getEffectiveTierPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 2000,
+    });
+    expect(r.source).toBe('tier');
+    expect(r.minQty).toBe(1500);
+    expect(r.unitPrice).toBe(15.5);
+  });
+
+  it('selects the open-ended top tier for very large qty', async () => {
+    const r = await mockProductCenterService.getEffectiveTierPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 100000,
+    });
+    expect(r.source).toBe('tier');
+    expect(r.minQty).toBe(5000);
+    expect(r.maxQty).toBeNull();
+    expect(r.unitPrice).toBe(13.8);
+  });
+
+  it("returns source='none' with reason='below-moq' when qty < MOQ", async () => {
+    // p_001 MOQ = 100
+    const r = await mockProductCenterService.getEffectiveTierPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 50,
+    });
+    expect(r.source).toBe('none');
+    expect(r.reason).toBe('below-moq');
+    expect(r.moq).toBe(100);
+  });
+
+  it("falls back to source='base' when qty ≥ MOQ but no tiers exist for the region", async () => {
+    // p_003 has region prices but no tier prices in seed; MOQ = 20
+    const r = await mockProductCenterService.getEffectiveTierPrice({
+      productId: 'p_003',
+      region: 'NA',
+      qty: 100,
+    });
+    expect(r.source).toBe('base');
+    expect(r.unitPrice).toBe(299);
+  });
+
+  it("returns source='none' with reason='no-region-price' when no region price either", async () => {
+    // p_004 has no NA region price seed
+    const r = await mockProductCenterService.getEffectiveTierPrice({
+      productId: 'p_004',
+      region: 'NA',
+      qty: 1000,
+    });
+    expect(r.source).toBe('none');
+    expect(r.reason).toBe('no-region-price');
+  });
+
+  it('returns source=none with reason=qty-required for invalid qty', async () => {
+    const r = await mockProductCenterService.getEffectiveTierPrice({
+      productId: 'p_001',
+      region: 'NA',
+      qty: 0,
+    });
+    expect(r.source).toBe('none');
+    expect(r.reason).toBe('qty-required');
+  });
+});
+
+describe('Phase 5b — validateTierPrices (mock)', () => {
+  it('returns no issues for the clean p_001 NA seed', async () => {
+    const issues = await mockProductCenterService.validateTierPrices({
+      productId: 'p_001',
+      region: 'NA',
+    });
+    expect(issues).toEqual([]);
+  });
+
+  it('returns no issues for an empty region (no tiers configured yet)', async () => {
+    const issues = await mockProductCenterService.validateTierPrices({
+      productId: 'p_003',
+      region: 'NA',
+    });
+    expect(issues).toEqual([]);
   });
 });

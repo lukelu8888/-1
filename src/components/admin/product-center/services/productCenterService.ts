@@ -23,6 +23,7 @@
 import type {
   Campaign,
   CampaignProduct,
+  EffectiveTierPriceResult,
   MediaKind,
   ModelMapping,
   Product,
@@ -36,10 +37,12 @@ import type {
   ProductRegionPrice,
   ProductStatus,
   ProductSupplierLink,
+  ProductTierPrice,
   PublishStatus,
   RegionCode,
   ReviewHistoryEntry,
   SupplierQuote,
+  TierIssue,
 } from '../context/types';
 import { supabaseProductCenterService } from './supabaseProductCenterService';
 
@@ -62,6 +65,8 @@ export interface ProductCenterSnapshot {
   media: ProductMedia[];
   suppliers: ProductSupplierLink[];
   regionPrices: ProductRegionPrice[];
+  /** Phase 5b — B2B 阶梯报价 */
+  tierPrices: ProductTierPrice[];
   publishChannels: ProductPublishChannel[];
   campaigns: Campaign[];
   campaignProducts: CampaignProduct[];
@@ -172,6 +177,41 @@ export interface ProductCenterService {
    * counted in `created` / `updated`.
    */
   bulkUpsertProducts(rows: BulkImportRow[]): Promise<BulkImportResult>;
+
+  // ── Phase 5b: B2B tier prices ────────────────────────────────────────────
+
+  /**
+   * Insert or update a single tier-price row. The unique key is
+   * (productId, regionCode, minQty) — saving with an existing key
+   * updates that row, otherwise creates a new one.
+   */
+  upsertTierPrice(input: ProductTierPrice): Promise<ProductTierPrice>;
+
+  /** Soft-disable or hard-delete a tier price (delete by default). */
+  removeTierPrice(id: string): Promise<void>;
+
+  /**
+   * Resolve the unit price for a given quantity in a region. Backed by
+   * the `pc_get_effective_tier_price` RPC server-side; mock impl runs
+   * the same selection logic over local seed data.
+   *
+   * Returns `source: 'tier'` when a tier matched, `'base'` when we
+   * fell back to `region.basePrice` (qty ≥ MOQ but no tier covered it),
+   * or `'none'` with a `reason` when no price is available (e.g. below
+   * MOQ).
+   */
+  getEffectiveTierPrice(opts: {
+    productId: string;
+    region: RegionCode;
+    qty: number;
+    asOfDate?: string;
+  }): Promise<EffectiveTierPriceResult>;
+
+  /** Per-product / per-region tier-table consistency check. */
+  validateTierPrices(opts: {
+    productId: string;
+    region: RegionCode;
+  }): Promise<TierIssue[]>;
 
   // ── Phase 5a: media upload ───────────────────────────────────────────────
 
@@ -335,6 +375,7 @@ export const mockProductCenterService: ProductCenterService = {
       media: [],
       suppliers: [],
       regionPrices: [],
+      tierPrices: [],
       publishChannels: [],
       campaigns: [],
       campaignProducts: [],
@@ -641,6 +682,87 @@ export const mockProductCenterService: ProductCenterService = {
     return { created, updated, errors };
   },
 
+  // ── Phase 5b (mock): tier price selection ────────────────────────────────
+  // The mock impl runs the same selection algorithm as the SQL RPC over
+  // the in-memory seed data, so unit tests verify the exact behaviour the
+  // server will exhibit once we point to Supabase.
+  async upsertTierPrice(input) {
+    return input;
+  },
+  async removeTierPrice() {
+    /* noop */
+  },
+  async getEffectiveTierPrice({ productId, region, qty, asOfDate }) {
+    if (!qty || qty < 1) {
+      return { source: 'none', reason: 'qty-required' } satisfies EffectiveTierPriceResult;
+    }
+    const { mockProducts, mockTierPrices, mockRegionPrices } = await import(
+      '../context/mockData'
+    );
+    const product = mockProducts.find((p) => p.id === productId);
+    const moq = product?.moq;
+    const today = (asOfDate ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+
+    const within = (s?: string | null, e?: string | null) => {
+      if (s && s > today) return false;
+      if (e && e < today) return false;
+      return true;
+    };
+
+    const eligible = mockTierPrices
+      .filter(
+        (t) =>
+          t.productId === productId &&
+          t.regionCode === region &&
+          t.isActive &&
+          within(t.effectiveFrom, t.effectiveTo) &&
+          t.minQty <= qty &&
+          (t.maxQty == null || t.maxQty > qty),
+      )
+      .sort((a, b) => b.minQty - a.minQty);
+
+    const hit = eligible[0];
+    if (hit) {
+      return {
+        source: 'tier',
+        unitPrice: hit.unitPrice,
+        currency: hit.currency,
+        minQty: hit.minQty,
+        maxQty: hit.maxQty ?? null,
+        tierId: hit.id,
+        incoterm: hit.incoterm,
+        discountPercent: hit.discountPercent,
+      };
+    }
+
+    if (moq != null && qty < moq) {
+      return { source: 'none', reason: 'below-moq', moq };
+    }
+
+    const base = mockRegionPrices.find(
+      (rp) => rp.productId === productId && rp.regionCode === region && rp.isActive,
+    );
+    if (!base) {
+      return { source: 'none', reason: 'no-region-price' };
+    }
+    return {
+      source: 'base',
+      unitPrice: base.basePrice,
+      currency: base.currency,
+      minQty: moq ?? 1,
+    };
+  },
+  async validateTierPrices({ productId, region }) {
+    const { mockTierPrices, mockProducts } = await import('../context/mockData');
+    const tiers = mockTierPrices
+      .filter((t) => t.productId === productId && t.regionCode === region && t.isActive)
+      .sort((a, b) => a.minQty - b.minQty);
+    if (tiers.length === 0) return [];
+
+    const product = mockProducts.find((p) => p.id === productId);
+    return computeTierIssues(tiers, product?.moq ?? null);
+  },
+
   // ── Phase 5a (mock) ──────────────────────────────────────────────────────
   // The mock impl returns a `blob:` URL that's valid only in this session
   // (revoked on `removeMediaFile`). It's enough to verify the full upload
@@ -688,6 +810,75 @@ function synthReview(
     reason,
     occurredAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Phase 5b — pure consistency checker shared by the mock service AND the
+ * Context (so save-time validation in mock mode matches what the SQL RPC
+ * `pc_validate_tier_prices` returns in supabase mode).
+ *
+ * Tiers must be passed sorted ascending by `minQty`.
+ */
+export function computeTierIssues(
+  tiers: ProductTierPrice[],
+  moq: number | null,
+): TierIssue[] {
+  const issues: TierIssue[] = [];
+  if (tiers.length === 0) return issues;
+
+  // 1. Lowest tier ≥ MOQ — non-negotiable for B2B.
+  if (moq != null && tiers[0].minQty < moq) {
+    issues.push({
+      code: 'tier-below-moq',
+      message: `最低档 ${tiers[0].minQty} 小于产品 MOQ ${moq}`,
+      severity: 'error',
+    });
+  }
+
+  // 2. Top tier should be open-ended (max_qty = null) — otherwise huge
+  //    orders fall into "no tier matched" path and we lose the negotiation
+  //    leverage. Treat as warning, not error, since some B2B contracts
+  //    legitimately cap a tier (e.g. annual quota lock).
+  const hasOpenTop = tiers.some((t) => t.maxQty == null);
+  if (!hasOpenTop) {
+    issues.push({
+      code: 'no-open-top-tier',
+      message: '最高档应有 max_qty = null（"以上不限"）以覆盖大额订单',
+      severity: 'warning',
+    });
+  }
+
+  // 3. Adjacent tiers should be exactly continuous: tier[i].max_qty ===
+  //    tier[i+1].min_qty (or tier[i] is the open-ended top).
+  for (let i = 0; i < tiers.length - 1; i += 1) {
+    const cur = tiers[i];
+    const next = tiers[i + 1];
+    if (cur.maxQty == null) continue;
+    if (cur.maxQty !== next.minQty) {
+      issues.push({
+        code: 'tier-gap-or-overlap',
+        message: `第 ${i + 1} 档 (${cur.minQty}-${cur.maxQty}) 与第 ${i + 2} 档 (${next.minQty}-) 不连续`,
+        severity: 'warning',
+      });
+    }
+  }
+
+  // 4. Duplicate min_qty (shouldn't happen because of the unique key on
+  //    the table but the editor staging area could try it before save).
+  const minQtys = new Set<number>();
+  for (const t of tiers) {
+    if (minQtys.has(t.minQty)) {
+      issues.push({
+        code: 'duplicate-min-qty',
+        message: `存在重复起订量 ${t.minQty} — 同一区域同一起订量只能有一档`,
+        severity: 'error',
+      });
+      break;
+    }
+    minQtys.add(t.minQty);
+  }
+
+  return issues;
 }
 
 /**

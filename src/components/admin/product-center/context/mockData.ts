@@ -20,6 +20,7 @@ import type {
   ProductPublishLog,
   ProductRegionPrice,
   ProductSupplierLink,
+  ProductTierPrice,
   ReviewHistoryEntry,
   SupplierQuote,
 } from './types';
@@ -394,6 +395,66 @@ function pricing(
     isActive: true,
     marginTarget: 0.35,
     marginActual: 0.3,
+    createdAt: lastWeek,
+    updatedAt: NOW,
+  };
+}
+
+// ─── Tier prices (B2B quantity tiers) ───────────────────────────────────────
+//
+// Phase 5b seed: 给三个最具代表性的产品建出真实 B2B 阶梯曲线。
+//   p_001 LED Panel (MOQ 100) — 灯具走 4 档
+//   p_002 Air Fryer (MOQ 50)  — 家电走 3 档
+//   p_004 LED Bulb  (MOQ 500) — 小件走 4 档（量阶差更大）
+// p_003 / p_005 暂不种数据，演示「无阶梯回退到 base_price」的兜底路径。
+
+export const mockTierPrices: ProductTierPrice[] = [
+  // ── p_001 LED Panel · NA (USD) ───────────────────────────────────────
+  // 整柜约 1480 件 (qty20gp) → 设阶梯档位 100 / 500 / 1500 / 5000
+  tier('p_001', 'NA', 100, 500, 19.99, 'USD', 0, 'FOB'),
+  tier('p_001', 'NA', 500, 1500, 17.5, 'USD', 12.46, 'FOB'),
+  tier('p_001', 'NA', 1500, 5000, 15.5, 'USD', 22.46, 'FOB'),
+  tier('p_001', 'NA', 5000, null, 13.8, 'USD', 30.97, 'FOB'),
+  // ── p_001 LED Panel · EA (EUR) ────────────────────────────────────────
+  tier('p_001', 'EA', 100, 500, 18.0, 'EUR', 0, 'CIF'),
+  tier('p_001', 'EA', 500, 2000, 15.8, 'EUR', 12.22, 'CIF'),
+  tier('p_001', 'EA', 2000, null, 13.5, 'EUR', 25.0, 'CIF'),
+
+  // ── p_002 Air Fryer · NA ──────────────────────────────────────────────
+  // 家电单件大、起订小，3 档够用
+  tier('p_002', 'NA', 50, 200, 59.99, 'USD', 0, 'FOB'),
+  tier('p_002', 'NA', 200, 1000, 52.0, 'USD', 13.32, 'FOB'),
+  tier('p_002', 'NA', 1000, null, 46.5, 'USD', 22.49, 'FOB'),
+
+  // ── p_004 LED Bulb · SA (USD, MOQ 500) ────────────────────────────────
+  // 小件起订量大，量阶差也大
+  tier('p_004', 'SA', 500, 5000, 1.49, 'USD', 0, 'CIF'),
+  tier('p_004', 'SA', 5000, 20000, 1.18, 'USD', 20.81, 'CIF'),
+  tier('p_004', 'SA', 20000, 100000, 0.95, 'USD', 36.24, 'CIF'),
+  tier('p_004', 'SA', 100000, null, 0.78, 'USD', 47.65, 'CIF'),
+];
+
+function tier(
+  productId: string,
+  region: ProductRegionPrice['regionCode'],
+  minQty: number,
+  maxQty: number | null,
+  unitPrice: number,
+  currency: string,
+  discountPercent: number,
+  incoterm: ProductTierPrice['incoterm'],
+): ProductTierPrice {
+  return {
+    id: `tier_${productId}_${region}_${minQty}`,
+    productId,
+    regionCode: region,
+    minQty,
+    maxQty,
+    unitPrice,
+    currency,
+    discountPercent: discountPercent || undefined,
+    incoterm,
+    isActive: true,
     createdAt: lastWeek,
     updatedAt: NOW,
   };

@@ -45,6 +45,7 @@ import { PriceHistoryDialog } from '../../shared/PriceHistoryDialog';
 import { SupplierQuoteDialog } from '../../shared/SupplierQuoteDialog';
 import { ReviewHistoryDrawer } from '../../shared/ReviewHistoryDrawer';
 import { MediaUploader } from '../../shared/MediaUploader';
+import { TierPricesEditor } from '../../shared/TierPricesEditor';
 import { useProductCenter } from '../../context/ProductCenterContext';
 import { REGIONS, formatRegionMoney, getRegion } from '../../context/regionConfig';
 import type {
@@ -1164,6 +1165,10 @@ function RegionPricesSection({
       </Table>
       <div className="mt-2 text-[11px] text-slate-500">
         提示：区域价格直接驱动「价格中心」、「促销管理」与官网前台展示。基础成本来自上方供应商表。
+      </div>
+
+      <div className="mt-4 border-t border-slate-200 pt-3">
+        <TierPricesEditor productId={productId} />
       </div>
     </SectionShell>
   );

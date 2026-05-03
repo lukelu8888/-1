@@ -231,6 +231,61 @@ export interface ProductRegionPrice {
   updatedAt: string;
 }
 
+// ─── Tier prices (B2B quantity tiers) ───────────────────────────────────────
+//
+// Phase 5b: B2B 询盘核心数据结构。每一档定义"此数量及以上"的单价，
+// max_qty = null 表示「以上不限」（最高档必须有一档为 null）。
+// min_qty 必须 ≥ product.moq —— 不能低于起订量报价。
+
+export type TierIncoterm = 'EXW' | 'FOB' | 'CIF' | 'DAP' | 'DDP';
+
+export interface ProductTierPrice {
+  id: string;
+  productId: string;
+  regionCode: RegionCode;
+  /** 本档生效的最小数量（含）。最低档应等于 product.moq。 */
+  minQty: number;
+  /** 本档失效的数量上限（不含）。null 表示"以上不限"。 */
+  maxQty?: number | null;
+  unitPrice: number;
+  currency: string;
+  /** 相对 region.base_price 的折扣 % — UI 计算展示用，可选。 */
+  discountPercent?: number;
+  /** 可覆盖区域默认 incoterm（如 ≥ 整柜走 FOB） */
+  incoterm?: TierIncoterm;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  isActive: boolean;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** RPC `pc_get_effective_tier_price` 返回的扁平结构。 */
+export type EffectiveTierPriceSource = 'tier' | 'base' | 'none';
+
+export interface EffectiveTierPriceResult {
+  source: EffectiveTierPriceSource;
+  unitPrice?: number;
+  currency?: string;
+  minQty?: number;
+  maxQty?: number | null;
+  tierId?: string;
+  incoterm?: TierIncoterm;
+  discountPercent?: number;
+  /** 当 source = 'none' 时填充，e.g. 'below-moq' / 'no-region-price' */
+  reason?: string;
+  moq?: number;
+}
+
+export type TierIssueSeverity = 'error' | 'warning';
+
+export interface TierIssue {
+  code: 'tier-below-moq' | 'no-open-top-tier' | 'tier-gap-or-overlap' | 'duplicate-min-qty';
+  message: string;
+  severity: TierIssueSeverity;
+}
+
 export interface ProductPriceHistory {
   id: string;
   productId: string;

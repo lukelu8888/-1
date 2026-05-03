@@ -17,6 +17,7 @@ import { supabase } from '../../../../lib/supabase';
 import type {
   Campaign,
   CampaignProduct,
+  EffectiveTierPriceResult,
   ModelMapping,
   Product,
   ProductAttribute,
@@ -28,9 +29,11 @@ import type {
   ProductPublishChannel,
   ProductRegionPrice,
   ProductSupplierLink,
+  ProductTierPrice,
   RegionCode,
   ReviewHistoryEntry,
   SupplierQuote,
+  TierIssue,
 } from '../context/types';
 import type {
   AnalyticsRollup,
@@ -400,6 +403,27 @@ function rowToMedia(row: Record<string, unknown>): ProductMedia {
   };
 }
 
+function rowToTierPrice(row: Record<string, unknown>): ProductTierPrice {
+  return {
+    id: row.id as string,
+    productId: row.product_id as string,
+    regionCode: row.region_code as RegionCode,
+    minQty: Number(row.min_qty),
+    maxQty: row.max_qty == null ? null : Number(row.max_qty),
+    unitPrice: Number(row.unit_price),
+    currency: row.currency as string,
+    discountPercent:
+      row.discount_percent == null ? undefined : Number(row.discount_percent),
+    incoterm: (row.incoterm as ProductTierPrice['incoterm']) ?? undefined,
+    effectiveFrom: (row.effective_from as string | null) ?? null,
+    effectiveTo: (row.effective_to as string | null) ?? null,
+    isActive: Boolean(row.is_active),
+    notes: (row.notes as string) ?? undefined,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
 function rowToSupplierLink(row: Record<string, unknown>): ProductSupplierLink {
   return {
     id: row.id as string,
@@ -433,6 +457,7 @@ export const supabaseProductCenterService: ProductCenterService = {
       media,
       suppliers,
       regionPrices,
+      tierPrices,
       publishChannels,
       campaigns,
       campaignProducts,
@@ -449,6 +474,12 @@ export const supabaseProductCenterService: ProductCenterService = {
       supabase.from('pc_product_media').select('*'),
       supabase.from('pc_product_suppliers').select('*'),
       supabase.from('pc_product_region_prices').select('*'),
+      supabase
+        .from('pc_product_tier_prices')
+        .select('*')
+        .order('product_id', { ascending: true })
+        .order('region_code', { ascending: true })
+        .order('min_qty', { ascending: true }),
       supabase.from('pc_product_publish_channels').select('*'),
       supabase.from('pc_campaigns').select('*'),
       supabase.from('pc_campaign_products').select('*'),
@@ -479,6 +510,7 @@ export const supabaseProductCenterService: ProductCenterService = {
       media.error,
       suppliers.error,
       regionPrices.error,
+      tierPrices.error,
       publishChannels.error,
       campaigns.error,
       campaignProducts.error,
@@ -503,6 +535,9 @@ export const supabaseProductCenterService: ProductCenterService = {
       suppliers: ((suppliers.data as Array<Record<string, unknown>>) ?? []).map(rowToSupplierLink),
       regionPrices: ((regionPrices.data as Array<Record<string, unknown>>) ?? []).map(
         rowToRegionPrice,
+      ),
+      tierPrices: ((tierPrices.data as Array<Record<string, unknown>>) ?? []).map(
+        rowToTierPrice,
       ),
       publishChannels: ((publishChannels.data as Array<Record<string, unknown>>) ?? []).map(
         rowToPublishChannel,
@@ -1060,6 +1095,79 @@ export const supabaseProductCenterService: ProductCenterService = {
         missingPrice: Number(dq.missing_price ?? 0),
       },
     };
+  },
+
+  // ── Phase 5b: B2B tier prices ────────────────────────────────────────────
+  async upsertTierPrice(input: ProductTierPrice): Promise<ProductTierPrice> {
+    const payload = stripUndefined({
+      id: input.id || undefined,
+      product_id: input.productId,
+      region_code: input.regionCode,
+      min_qty: input.minQty,
+      max_qty: input.maxQty,
+      unit_price: input.unitPrice,
+      currency: input.currency,
+      discount_percent: input.discountPercent,
+      incoterm: input.incoterm,
+      effective_from: input.effectiveFrom,
+      effective_to: input.effectiveTo,
+      is_active: input.isActive,
+      notes: input.notes,
+    });
+    const res = await supabase
+      .from('pc_product_tier_prices')
+      .upsert(payload, { onConflict: 'product_id,region_code,min_qty' })
+      .select('*')
+      .single();
+    return rowToTierPrice(unwrap(res, 'upsertTierPrice') as Record<string, unknown>);
+  },
+
+  async removeTierPrice(id: string): Promise<void> {
+    const res = await supabase.from('pc_product_tier_prices').delete().eq('id', id);
+    if (res.error) throw new PcSupabaseError('removeTierPrice', res.error);
+  },
+
+  async getEffectiveTierPrice({
+    productId,
+    region,
+    qty,
+    asOfDate,
+  }): Promise<EffectiveTierPriceResult> {
+    const res = await supabase.rpc('pc_get_effective_tier_price', {
+      p_product_id: productId,
+      p_region: region,
+      p_qty: qty,
+      p_as_of: asOfDate ?? null,
+    });
+    if (res.error) throw new PcSupabaseError('getEffectiveTierPrice', res.error);
+    const row = (res.data ?? {}) as Record<string, unknown>;
+    return {
+      source: (row.source as EffectiveTierPriceResult['source']) ?? 'none',
+      unitPrice: row.unit_price == null ? undefined : Number(row.unit_price),
+      currency: (row.currency as string) ?? undefined,
+      minQty: row.min_qty == null ? undefined : Number(row.min_qty),
+      maxQty: row.max_qty == null ? null : Number(row.max_qty),
+      tierId: (row.tier_id as string) ?? undefined,
+      incoterm: (row.incoterm as ProductTierPrice['incoterm']) ?? undefined,
+      discountPercent:
+        row.discount_percent == null ? undefined : Number(row.discount_percent),
+      reason: (row.reason as string) ?? undefined,
+      moq: row.moq == null ? undefined : Number(row.moq),
+    };
+  },
+
+  async validateTierPrices({ productId, region }): Promise<TierIssue[]> {
+    const res = await supabase.rpc('pc_validate_tier_prices', {
+      p_product_id: productId,
+      p_region: region,
+    });
+    if (res.error) throw new PcSupabaseError('validateTierPrices', res.error);
+    const rows = (res.data as Array<Record<string, unknown>>) ?? [];
+    return rows.map((r) => ({
+      code: (r.code as TierIssue['code']) ?? 'tier-gap-or-overlap',
+      message: (r.message as string) ?? 'unknown issue',
+      severity: (r.severity as TierIssue['severity']) ?? 'warning',
+    }));
   },
 
   // ── Phase 5a: media upload (Supabase Storage) ────────────────────────────
