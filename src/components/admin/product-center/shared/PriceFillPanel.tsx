@@ -268,18 +268,20 @@ export function PriceFillPanel({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {results.map((r) =>
-                r.resolved ? (
+              {results.map((r) => {
+                const qtyMap = new Map(lines.map((l) => [l.lineRef, l.qty]));
+                return r.resolved ? (
                   <ResolvedRow
                     key={r.lineRef}
                     row={r}
+                    qty={qtyMap.get(r.lineRef)}
                     checked={accepted.has(r.lineRef)}
                     onToggle={() => toggleAccept(r.lineRef)}
                   />
                 ) : (
-                  <FailedRow key={r.lineRef} row={r} />
-                ),
-              )}
+                  <FailedRow key={r.lineRef} row={r} qty={qtyMap.get(r.lineRef)} />
+                );
+              })}
             </TableBody>
           </Table>
 
@@ -325,10 +327,12 @@ export function PriceFillPanel({
 
 function ResolvedRow({
   row,
+  qty,
   checked,
   onToggle,
 }: {
   row: Extract<QuotationLineResolved, { resolved: true }>;
+  qty?: number;
   checked: boolean;
   onToggle: () => void;
 }) {
@@ -350,7 +354,9 @@ function ResolvedRow({
         </div>
         <div className="truncate text-[10px] text-slate-500">{row.pimProductName}</div>
       </TableCell>
-      <TableCell className="text-center font-mono">{/* qty echoed from parent */}—</TableCell>
+      <TableCell className="text-center font-mono text-[11px] text-slate-600">
+        {qty != null ? qty.toLocaleString() : '—'}
+      </TableCell>
       <TableCell className="text-right font-mono font-semibold">
         {row.currency} {row.unitPrice.toFixed(2)}
       </TableCell>
@@ -387,7 +393,13 @@ function ResolvedRow({
   );
 }
 
-function FailedRow({ row }: { row: Extract<QuotationLineResolved, { resolved: false }> }) {
+function FailedRow({
+  row,
+  qty,
+}: {
+  row: Extract<QuotationLineResolved, { resolved: false }>;
+  qty?: number;
+}) {
   return (
     <TableRow className="bg-rose-50/30">
       <TableCell>
@@ -399,7 +411,10 @@ function FailedRow({ row }: { row: Extract<QuotationLineResolved, { resolved: fa
           <span className="font-mono">{row.sku}</span>
         </div>
       </TableCell>
-      <TableCell colSpan={5}>
+      <TableCell className="text-center font-mono text-[11px] text-slate-500">
+        {qty != null ? qty.toLocaleString() : '—'}
+      </TableCell>
+      <TableCell colSpan={4}>
         <span className="text-[11px] text-rose-600">
           {REASON_LABEL[row.reason] ?? row.reason}
           {row.reason === 'below-moq' && row.moq != null && `（MOQ ${row.moq}）`}

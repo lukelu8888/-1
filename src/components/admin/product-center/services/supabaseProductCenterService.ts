@@ -1311,7 +1311,7 @@ export const supabaseProductCenterService: ProductCenterService = {
           resolved: true,
           sku: line.sku,
           pimProductId: productId,
-          pimProductName: (p.name_en as string) ?? (p.name as string),
+          pimProductName: (p.name as string) ?? (p.name_en as string) ?? '',
           unitPrice: Number(row.unit_price ?? 0),
           listPrice: Number(row.list_price ?? row.unit_price ?? 0),
           discountPercent: Number(row.discount_percent ?? 0),

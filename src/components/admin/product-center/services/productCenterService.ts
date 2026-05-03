@@ -859,7 +859,7 @@ export const mockProductCenterService: ProductCenterService = {
           resolved: true,
           sku: line.sku,
           pimProductId: product.id,
-          pimProductName: product.nameEn ?? product.name,
+          pimProductName: product.nameZh ?? product.name ?? product.nameEn ?? '',
           unitPrice: price.unitPrice ?? 0,
           listPrice: price.listPrice ?? price.unitPrice ?? 0,
           discountPercent: price.discountPercent ?? 0,
