@@ -56,12 +56,64 @@ import { BulkPriceEditorDialog } from '../../shared/BulkPriceEditorDialog';
 import { PublishPreviewModal } from '../../shared/PublishPreviewModal';
 import { useProductCenter } from '../../context/ProductCenterContext';
 import { REGIONS, formatRegionMoney } from '../../context/regionConfig';
+import { getProductCenterService } from '../../services/productCenterService';
+import { downloadCsv, rowsToCsv } from '../../services/csv';
 import type {
   ProductListFilters,
   PublishStatus,
   RegionCode,
   ReviewStatus,
 } from '../../context/types';
+
+// Column ordering + Chinese headers for the CSV export. Centralised here so
+// users see consistent labels regardless of which backend produced the rows.
+const EXPORT_COLUMNS = [
+  'sku',
+  'name',
+  'nameEn',
+  'brand',
+  'status',
+  'reviewStatus',
+  'primaryCategoryName',
+  'region',
+  'currency',
+  'basePrice',
+  'salePrice',
+  'campaignPrice',
+  'publishStatus',
+  'primarySupplier',
+  'costPrice',
+  'costCurrency',
+  'hsCode',
+  'moq',
+  'unitsPerCarton',
+  'leadTimeDays',
+  'updatedAt',
+] as const;
+
+const EXPORT_HEADERS: Record<(typeof EXPORT_COLUMNS)[number], string> = {
+  sku: 'SKU',
+  name: '中文名',
+  nameEn: '英文名',
+  brand: '品牌',
+  status: '产品状态',
+  reviewStatus: '审核状态',
+  primaryCategoryName: '主类目',
+  region: '地区',
+  currency: '币种',
+  basePrice: '标价',
+  salePrice: '售价',
+  campaignPrice: '活动价',
+  publishStatus: '发布状态',
+  primarySupplier: '主供应商',
+  costPrice: '采购成本',
+  costCurrency: '成本币种',
+  hsCode: 'HS Code',
+  moq: 'MOQ',
+  unitsPerCarton: '装箱量',
+  leadTimeDays: '交期(天)',
+  updatedAt: '更新时间',
+};
 
 interface Props {
   onOpenProduct: (id: string) => void;
@@ -129,6 +181,41 @@ export function PimListPage({ onOpenProduct }: Props) {
   const [bulkTag, setBulkTag] = useState<string>('');
   const [bulkPriceOpen, setBulkPriceOpen] = useState(false);
   const [previewProductId, setPreviewProductId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  /**
+   * Pull a wide row set through the service layer (mock or supabase) and
+   * stream it to the browser as CSV. We deliberately delegate to the
+   * service rather than re-using `buildListRows` so the column set matches
+   * the server-side `pc_export_products` RPC and stays consistent across
+   * backends.
+   */
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const service = getProductCenterService();
+      const region = filters.region && filters.region !== 'ALL' ? filters.region : undefined;
+      const rows = await service.exportProducts({ region });
+      if (rows.length === 0) {
+        toast.warning('没有可导出的产品');
+        return;
+      }
+      const csv = rowsToCsv(rows, {
+        headers: EXPORT_COLUMNS as unknown as Array<keyof (typeof rows)[number] & string>,
+        headerLabels: EXPORT_HEADERS,
+      });
+      const stamp = new Date().toISOString().slice(0, 10);
+      const tag = region ? `_${region}` : '';
+      downloadCsv(csv, `products${tag}_${stamp}`);
+      toast.success(`已导出 ${rows.length} 条产品`);
+    } catch (err) {
+      const msg = (err as Error)?.message ?? '导出失败';
+      toast.error(`导出失败：${msg}`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -140,8 +227,15 @@ export function PimListPage({ onOpenProduct }: Props) {
             <Button size="sm" variant="outline" className="h-8" onClick={() => toast.info('批量导入：模拟功能 — Phase 4 接入实际导入流水线')}>
               <Upload className="mr-1 h-3.5 w-3.5" /> 批量导入
             </Button>
-            <Button size="sm" variant="outline" className="h-8" onClick={() => toast.info('导出：模拟功能 — Phase 4 接入')}>
-              <Download className="mr-1 h-3.5 w-3.5" /> 导出
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              <Download className="mr-1 h-3.5 w-3.5" />
+              {exporting ? '导出中…' : '导出'}
             </Button>
             <Button size="sm" className="h-8" onClick={() => toast.info('新建产品向导：Phase 1 接通现有 ProductCreationWizard')}>
               <FilePlus2 className="mr-1 h-3.5 w-3.5" /> 新建产品

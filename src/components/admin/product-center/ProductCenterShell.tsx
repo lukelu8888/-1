@@ -10,11 +10,13 @@ import {
   GitBranch,
   ChevronLeft,
   ChevronRight,
+  BarChart3,
 } from 'lucide-react';
 import { cn } from '../../ui/utils';
 
 import { ROLE_LABELS, useProductCenter, type CurrentUser, type UserRole } from './context/ProductCenterContext';
 import { REGIONS } from './context/regionConfig';
+import { InsightsDialog } from './shared/InsightsDialog';
 import type { RegionCode } from './context/types';
 
 import { PimListPage } from './modules/pim/PimListPage';
@@ -139,6 +141,7 @@ export function ProductCenterShell({
 }: ShellProps) {
   const { activeRegion, setActiveRegion, currentUser, setCurrentUser } = useProductCenter();
   const [navCollapsed, setNavCollapsed] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
 
   const moduleContent = useMemo<ReactNode>(() => {
     if (detailProductId) {
@@ -179,6 +182,13 @@ export function ProductCenterShell({
         onChange={setActiveRegion}
         currentUser={currentUser}
         onChangeUser={setCurrentUser}
+        onOpenInsights={() => setInsightsOpen(true)}
+      />
+
+      <InsightsDialog
+        open={insightsOpen}
+        onOpenChange={setInsightsOpen}
+        region={activeRegion}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -262,11 +272,13 @@ function RegionBar({
   onChange,
   currentUser,
   onChangeUser,
+  onOpenInsights,
 }: {
   active: RegionCode;
   onChange: (region: RegionCode) => void;
   currentUser: CurrentUser;
   onChangeUser: (u: CurrentUser) => void;
+  onOpenInsights: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-200 bg-white px-3 py-1.5">
@@ -301,6 +313,15 @@ function RegionBar({
         })}
       </div>
       <div className="ml-auto flex items-center gap-3 text-[11px] text-slate-500">
+        <button
+          type="button"
+          onClick={onOpenInsights}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+          title="打开数据概览"
+        >
+          <BarChart3 className="h-3.5 w-3.5" />
+          <span>数据概览</span>
+        </button>
         <RoleSwitcher value={currentUser} onChange={onChangeUser} />
       </div>
     </div>

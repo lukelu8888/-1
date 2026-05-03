@@ -33,7 +33,9 @@ import type {
   ProductPriceHistory,
   ProductPublishChannel,
   ProductRegionPrice,
+  ProductStatus,
   ProductSupplierLink,
+  PublishStatus,
   RegionCode,
   ReviewHistoryEntry,
   SupplierQuote,
@@ -136,6 +138,102 @@ export interface ProductCenterService {
 
   // ── Audit ────────────────────────────────────────────────────────────────
   logAudit(entry: Omit<ProductAuditLog, 'id' | 'occurredAt'>): Promise<ProductAuditLog>;
+
+  // ── Phase 4d: search / export / analytics ────────────────────────────────
+
+  /**
+   * Server-side full-text search. Returns up to `limit` products ordered
+   * by ts_rank when a keyword is given, or by `updated_at desc` otherwise.
+   * Mock impl falls back to a substring filter over in-memory data.
+   */
+  searchProducts(opts: { keyword?: string; limit?: number }): Promise<Product[]>;
+
+  /**
+   * Wide row set for CSV/Excel export. Joins region price + publish status
+   * + primary supplier in one shot. The client converts to CSV — keeping
+   * MIME concerns and i18n column headers in one place.
+   */
+  exportProducts(opts: {
+    region?: RegionCode;
+    status?: ProductStatus;
+  }): Promise<ProductExportRow[]>;
+
+  /**
+   * Single round-trip analytics payload powering the "概览" dashboard.
+   */
+  getAnalyticsRollup(opts?: { region?: RegionCode }): Promise<AnalyticsRollup>;
+}
+
+// ── Phase 4d shared types ───────────────────────────────────────────────────
+
+export interface ProductExportRow {
+  sku: string;
+  name: string;
+  nameEn?: string | null;
+  nameZh?: string | null;
+  brand?: string | null;
+  status: string;
+  reviewStatus: string;
+  primaryCategoryCode?: string | null;
+  primaryCategoryName?: string | null;
+  region?: string | null;
+  currency?: string | null;
+  basePrice?: number | null;
+  salePrice?: number | null;
+  campaignPrice?: number | null;
+  publishStatus: string;
+  homepageFeatured: boolean;
+  categoryFeatured: boolean;
+  seoTitle?: string | null;
+  seoSlug?: string | null;
+  primarySupplier?: string | null;
+  costPrice?: number | null;
+  costCurrency?: string | null;
+  hsCode?: string | null;
+  moq?: number | null;
+  unitsPerCarton?: number | null;
+  leadTimeDays?: number | null;
+  updatedAt: string;
+}
+
+export interface AnalyticsRollup {
+  generatedAt: string;
+  regionFilter: RegionCode | null;
+  totals: {
+    all: number;
+    active: number;
+    draft: number;
+    disabled: number;
+    archived: number;
+    pendingReview: number;
+    approved: number;
+    rejected: number;
+    notSubmitted: number;
+  };
+  topCategories: Array<{
+    categoryId: string | null;
+    categoryName: string | null;
+    count: number;
+  }>;
+  publishStatusByRegion: Partial<Record<RegionCode, Partial<Record<PublishStatus, number>>>>;
+  priceSummaryByRegion: Partial<
+    Record<
+      RegionCode,
+      {
+        count: number;
+        currency: string | null;
+        avgSale: number | null;
+        minSale: number | null;
+        maxSale: number | null;
+        avgBase: number | null;
+      }
+    >
+  >;
+  dataQuality: {
+    missingImage: number;
+    missingCategory: number;
+    missingPrice: number;
+  };
 }
 
 /**
@@ -275,6 +373,150 @@ export const mockProductCenterService: ProductCenterService = {
       id: `al_${Date.now().toString(36)}`,
       occurredAt: new Date().toISOString(),
     } as ProductAuditLog;
+  },
+
+  // ── Phase 4d (mock) ──────────────────────────────────────────────────────
+  // The mock implementations are simplistic — Phase 4d UIs should fall back
+  // to client-side computation on the in-memory state when the backend is
+  // mock; but we still ship usable stubs so unit tests and feature flags
+  // exercise the same code path.
+  async searchProducts({ keyword, limit }) {
+    const { mockProducts } = await import('../context/mockData');
+    const kw = (keyword ?? '').trim().toLowerCase();
+    const rows = kw
+      ? mockProducts.filter((p) =>
+          [p.sku, p.name, p.nameEn, p.brand, p.spu]
+            .filter(Boolean)
+            .some((s) => (s as string).toLowerCase().includes(kw)),
+        )
+      : mockProducts;
+    return rows.slice(0, Math.max(1, Math.min(limit ?? 200, 1000)));
+  },
+  async exportProducts({ region, status }) {
+    const [{ mockProducts, mockRegionPrices, mockPublishChannels, mockSupplierLinks, mockCategories }] =
+      await Promise.all([import('../context/mockData')]);
+    const region2 = region ?? 'NA';
+    return mockProducts
+      .filter((p) => p.archivedAt == null)
+      .filter((p) => (status ? p.status === status : true))
+      .map((p) => {
+        const cat = mockCategories.find((c) => c.id === p.primaryCategoryId);
+        const rp = mockRegionPrices.find(
+          (x) => x.productId === p.id && x.regionCode === region2,
+        );
+        const ch = mockPublishChannels.find(
+          (x) => x.productId === p.id && x.regionCode === region2,
+        );
+        const sup = mockSupplierLinks.find((x) => x.productId === p.id && x.isPrimary);
+        return {
+          sku: p.sku,
+          name: p.name,
+          nameEn: p.nameEn,
+          nameZh: p.nameZh,
+          brand: p.brand,
+          status: p.status,
+          reviewStatus: p.reviewStatus,
+          primaryCategoryCode: cat?.code,
+          primaryCategoryName: cat?.nameEn ?? cat?.name,
+          region: region2,
+          currency: rp?.currency,
+          basePrice: rp?.basePrice ?? null,
+          salePrice: rp?.salePrice ?? null,
+          campaignPrice: rp?.campaignPrice ?? null,
+          publishStatus: ch?.publishStatus ?? 'not_published',
+          homepageFeatured: ch?.homepageFeatured ?? false,
+          categoryFeatured: ch?.categoryFeatured ?? false,
+          seoTitle: ch?.seoTitle,
+          seoSlug: ch?.seoSlug,
+          primarySupplier: sup?.supplierName,
+          costPrice: sup?.costPrice ?? null,
+          costCurrency: sup?.costCurrency,
+          hsCode: p.hsCode,
+          moq: p.moq ?? null,
+          unitsPerCarton: p.unitsPerCarton ?? null,
+          leadTimeDays: p.leadTimeDays ?? null,
+          updatedAt: p.updatedAt,
+        } satisfies ProductExportRow;
+      });
+  },
+  async getAnalyticsRollup(opts) {
+    const region = opts?.region;
+    const {
+      mockProducts,
+      mockCategories,
+      mockPublishChannels,
+      mockRegionPrices,
+      mockMedia,
+    } = await import('../context/mockData');
+    const live = mockProducts.filter((p) => p.archivedAt == null);
+    const totals = {
+      all: live.length,
+      active: live.filter((p) => p.status === 'active').length,
+      draft: live.filter((p) => p.status === 'draft').length,
+      disabled: live.filter((p) => p.status === 'disabled').length,
+      archived: 0,
+      pendingReview: live.filter((p) => p.reviewStatus === 'pending_review').length,
+      approved: live.filter((p) => p.reviewStatus === 'approved').length,
+      rejected: live.filter((p) => p.reviewStatus === 'rejected').length,
+      notSubmitted: live.filter((p) => p.reviewStatus === 'not_submitted').length,
+    };
+    const catCount = new Map<string | null, number>();
+    live.forEach((p) => {
+      const k = p.primaryCategoryId ?? null;
+      catCount.set(k, (catCount.get(k) ?? 0) + 1);
+    });
+    const topCategories = Array.from(catCount.entries())
+      .map(([id, count]) => ({
+        categoryId: id,
+        categoryName: id ? mockCategories.find((c) => c.id === id)?.nameEn ?? null : null,
+        count,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20);
+
+    const publishStatusByRegion: AnalyticsRollup['publishStatusByRegion'] = {};
+    mockPublishChannels
+      .filter((c) => !region || c.regionCode === region)
+      .forEach((c) => {
+        const map = (publishStatusByRegion[c.regionCode] ??= {});
+        map[c.publishStatus] = (map[c.publishStatus] ?? 0) + 1;
+      });
+
+    const priceSummaryByRegion: AnalyticsRollup['priceSummaryByRegion'] = {};
+    (['NA', 'SA', 'EA'] as const).forEach((reg) => {
+      if (region && reg !== region) return;
+      const rows = mockRegionPrices.filter((r) => r.regionCode === reg && r.isActive);
+      if (!rows.length) return;
+      const sales = rows.map((r) => r.salePrice ?? r.basePrice).filter((x): x is number => x != null);
+      const avgBase = rows.reduce((a, r) => a + r.basePrice, 0) / rows.length;
+      const avgSale = sales.length ? sales.reduce((a, b) => a + b, 0) / sales.length : null;
+      priceSummaryByRegion[reg] = {
+        count: rows.length,
+        currency: rows[0]?.currency ?? null,
+        avgSale: avgSale != null ? Math.round(avgSale * 100) / 100 : null,
+        minSale: sales.length ? Math.min(...sales) : null,
+        maxSale: sales.length ? Math.max(...sales) : null,
+        avgBase: Math.round(avgBase * 100) / 100,
+      };
+    });
+
+    const missingImage = live.filter(
+      (p) => !p.thumbnailUrl && !mockMedia.some((m) => m.productId === p.id && m.kind === 'main'),
+    ).length;
+    const missingCategory = live.filter((p) => !p.primaryCategoryId).length;
+    const missingPrice = live.filter(
+      (p) => !mockRegionPrices.some((r) => r.productId === p.id && (r.salePrice != null || r.basePrice != null)),
+    ).length;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      regionFilter: region ?? null,
+      totals,
+      topCategories,
+      publishStatusByRegion,
+      priceSummaryByRegion,
+      dataQuality: { missingImage, missingCategory, missingPrice },
+    };
   },
 };
 

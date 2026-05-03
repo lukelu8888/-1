@@ -109,3 +109,70 @@ describe('getProductCenterService', () => {
     expect(svc).toBe(mockProductCenterService);
   });
 });
+
+describe('Phase 4d (mock impl)', () => {
+  it('searchProducts returns substring matches when given a keyword', async () => {
+    // pick any sku from the seed data and split it to a sub-fragment to
+    // make sure the substring match path works.
+    const sample = await mockProductCenterService.searchProducts({ limit: 5 });
+    expect(sample.length).toBeGreaterThan(0);
+    const fragment = sample[0].sku.slice(0, 3);
+
+    const hits = await mockProductCenterService.searchProducts({ keyword: fragment });
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((p) => p.sku.toLowerCase().includes(fragment.toLowerCase()))).toBe(true);
+  });
+
+  it('searchProducts returns the full set (capped by limit) when keyword is empty', async () => {
+    const all = await mockProductCenterService.searchProducts({ limit: 3 });
+    expect(all.length).toBeLessThanOrEqual(3);
+  });
+
+  it('exportProducts emits CSV-friendly rows with the expected keys', async () => {
+    const rows = await mockProductCenterService.exportProducts({ region: 'NA' });
+    expect(rows.length).toBeGreaterThan(0);
+    const sample = rows[0];
+    expect(Object.keys(sample)).toEqual(
+      expect.arrayContaining([
+        'sku',
+        'name',
+        'status',
+        'reviewStatus',
+        'region',
+        'publishStatus',
+        'updatedAt',
+      ]),
+    );
+    // boolean / numeric / nullable fields are sane (not undefined)
+    expect(typeof sample.homepageFeatured).toBe('boolean');
+    expect(['number', 'object']).toContain(typeof sample.basePrice);
+  });
+
+  it('getAnalyticsRollup returns totals and per-region price summary', async () => {
+    const rollup = await mockProductCenterService.getAnalyticsRollup();
+    expect(rollup.totals.all).toBeGreaterThanOrEqual(rollup.totals.active);
+    expect(rollup.dataQuality).toEqual(
+      expect.objectContaining({
+        missingImage: expect.any(Number),
+        missingCategory: expect.any(Number),
+        missingPrice: expect.any(Number),
+      }),
+    );
+    // at least one of the three regions should have a price summary in
+    // mock data; if none do this signals a regression in mockData seeds.
+    const anyRegion =
+      rollup.priceSummaryByRegion.NA ??
+      rollup.priceSummaryByRegion.SA ??
+      rollup.priceSummaryByRegion.EA;
+    expect(anyRegion).toBeDefined();
+    expect(anyRegion!.count).toBeGreaterThan(0);
+  });
+
+  it('getAnalyticsRollup honours the region filter', async () => {
+    const rollup = await mockProductCenterService.getAnalyticsRollup({ region: 'NA' });
+    expect(rollup.regionFilter).toBe('NA');
+    // SA / EA buckets should not be filled when scoped to NA
+    expect(rollup.priceSummaryByRegion.SA).toBeUndefined();
+    expect(rollup.priceSummaryByRegion.EA).toBeUndefined();
+  });
+});

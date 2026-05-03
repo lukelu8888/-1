@@ -32,7 +32,12 @@ import type {
   ReviewHistoryEntry,
   SupplierQuote,
 } from '../context/types';
-import type { ProductCenterService, ProductCenterSnapshot } from './productCenterService';
+import type {
+  AnalyticsRollup,
+  ProductCenterService,
+  ProductCenterSnapshot,
+  ProductExportRow,
+} from './productCenterService';
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -936,6 +941,121 @@ export const supabaseProductCenterService: ProductCenterService = {
       .select('*')
       .single();
     return rowToAuditLog(unwrap(res, 'logAudit') as Record<string, unknown>);
+  },
+
+  // ── Phase 4d: search / export / analytics ────────────────────────────────
+  async searchProducts({ keyword, limit }) {
+    const res = await supabase.rpc('pc_search_products', {
+      p_keyword: keyword?.trim() ? keyword.trim() : null,
+      p_limit: limit ?? 200,
+    });
+    if (res.error) throw new PcSupabaseError('searchProducts', res.error);
+    const rows = (res.data as Array<Record<string, unknown>>) ?? [];
+    return rows.map(rowToProduct);
+  },
+
+  async exportProducts({ region, status }): Promise<ProductExportRow[]> {
+    const res = await supabase.rpc('pc_export_products', {
+      p_region: region ?? null,
+      p_status: status ?? null,
+    });
+    if (res.error) throw new PcSupabaseError('exportProducts', res.error);
+    const rows = (res.data as Array<Record<string, unknown>>) ?? [];
+    return rows.map((r) => ({
+      sku: (r.sku as string) ?? '',
+      name: (r.name as string) ?? '',
+      nameEn: (r.name_en as string | null) ?? null,
+      nameZh: (r.name_zh as string | null) ?? null,
+      brand: (r.brand as string | null) ?? null,
+      status: (r.status as string) ?? '',
+      reviewStatus: (r.review_status as string) ?? '',
+      primaryCategoryCode: (r.primary_category_code as string | null) ?? null,
+      primaryCategoryName: (r.primary_category_name as string | null) ?? null,
+      region: (r.region as string | null) ?? null,
+      currency: (r.currency as string | null) ?? null,
+      basePrice: (r.base_price as number | null) ?? null,
+      salePrice: (r.sale_price as number | null) ?? null,
+      campaignPrice: (r.campaign_price as number | null) ?? null,
+      publishStatus: (r.publish_status as string) ?? 'not_published',
+      homepageFeatured: Boolean(r.homepage_featured),
+      categoryFeatured: Boolean(r.category_featured),
+      seoTitle: (r.seo_title as string | null) ?? null,
+      seoSlug: (r.seo_slug as string | null) ?? null,
+      primarySupplier: (r.primary_supplier as string | null) ?? null,
+      costPrice: (r.cost_price as number | null) ?? null,
+      costCurrency: (r.cost_currency as string | null) ?? null,
+      hsCode: (r.hs_code as string | null) ?? null,
+      moq: (r.moq as number | null) ?? null,
+      unitsPerCarton: (r.units_per_carton as number | null) ?? null,
+      leadTimeDays: (r.lead_time_days as number | null) ?? null,
+      updatedAt: (r.updated_at as string) ?? new Date().toISOString(),
+    }));
+  },
+
+  async getAnalyticsRollup(opts): Promise<AnalyticsRollup> {
+    const res = await supabase.rpc('pc_analytics_rollup', {
+      p_region: opts?.region ?? null,
+    });
+    if (res.error) throw new PcSupabaseError('getAnalyticsRollup', res.error);
+    const data = (res.data ?? {}) as Record<string, unknown>;
+    const totalsRow = (data.totals ?? {}) as Record<string, number>;
+    const psbr = (data.publish_status_by_region ?? {}) as Record<
+      string,
+      Record<string, number>
+    >;
+    const priceRaw = (data.price_summary_by_region ?? {}) as Record<
+      string,
+      Record<string, number | string | null>
+    >;
+    const dq = (data.data_quality ?? {}) as Record<string, number>;
+    const topRaw = (data.top_categories ?? []) as Array<Record<string, unknown>>;
+
+    const priceSummary: AnalyticsRollup['priceSummaryByRegion'] = {};
+    for (const [region, summary] of Object.entries(priceRaw)) {
+      priceSummary[region as 'NA' | 'SA' | 'EA'] = {
+        count: Number(summary.count ?? 0),
+        currency: (summary.currency as string | null) ?? null,
+        avgSale: summary.avg_sale != null ? Number(summary.avg_sale) : null,
+        minSale: summary.min_sale != null ? Number(summary.min_sale) : null,
+        maxSale: summary.max_sale != null ? Number(summary.max_sale) : null,
+        avgBase: summary.avg_base != null ? Number(summary.avg_base) : null,
+      };
+    }
+
+    const publishStatusByRegion: AnalyticsRollup['publishStatusByRegion'] = {};
+    for (const [region, statusMap] of Object.entries(psbr)) {
+      publishStatusByRegion[region as 'NA' | 'SA' | 'EA'] = statusMap as Partial<
+        AnalyticsRollup['publishStatusByRegion']['NA']
+      >;
+    }
+
+    return {
+      generatedAt: (data.generated_at as string) ?? new Date().toISOString(),
+      regionFilter: (data.region_filter as 'NA' | 'SA' | 'EA' | null) ?? null,
+      totals: {
+        all: Number(totalsRow.all ?? 0),
+        active: Number(totalsRow.active ?? 0),
+        draft: Number(totalsRow.draft ?? 0),
+        disabled: Number(totalsRow.disabled ?? 0),
+        archived: Number(totalsRow.archived ?? 0),
+        pendingReview: Number(totalsRow.pending_review ?? 0),
+        approved: Number(totalsRow.approved ?? 0),
+        rejected: Number(totalsRow.rejected ?? 0),
+        notSubmitted: Number(totalsRow.not_submitted ?? 0),
+      },
+      topCategories: topRaw.map((row) => ({
+        categoryId: (row.category_id as string | null) ?? null,
+        categoryName: (row.category_name as string | null) ?? null,
+        count: Number(row.count ?? 0),
+      })),
+      publishStatusByRegion,
+      priceSummaryByRegion: priceSummary,
+      dataQuality: {
+        missingImage: Number(dq.missing_image ?? 0),
+        missingCategory: Number(dq.missing_category ?? 0),
+        missingPrice: Number(dq.missing_price ?? 0),
+      },
+    };
   },
 };
 
