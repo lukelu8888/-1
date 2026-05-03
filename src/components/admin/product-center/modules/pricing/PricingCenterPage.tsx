@@ -26,6 +26,8 @@ import {
 } from '../../context/costModel';
 import type { RegionCode } from '../../context/types';
 import { PriceHistoryDialog } from '../../shared/PriceHistoryDialog';
+import { PriceFillPanel } from '../../shared/PriceFillPanel';
+import type { QuotationFillLine } from '../../shared/useQuotationPriceFill';
 
 interface Props {
   onOpenProduct: (id: string) => void;
@@ -47,6 +49,10 @@ export function PricingCenterPage({ onOpenProduct }: Props) {
   const [keyword, setKeyword] = useState('');
   const [historyProduct, setHistoryProduct] = useState<string | null>(null);
   const [targetMargin, setTargetMargin] = useState(0.35); // 35% default
+  // Phase 5d — Quotation Workbench
+  const [qtSkuText, setQtSkuText] = useState('');
+  const [qtQtyText, setQtQtyText] = useState('');
+  const [qtWorkbenchOpen, setQtWorkbenchOpen] = useState(false);
 
   const rows = useMemo(() => {
     const list = ctx.products
@@ -316,6 +322,108 @@ export function PricingCenterPage({ onOpenProduct }: Props) {
         productId={historyProduct}
         onClose={() => setHistoryProduct(null)}
       />
+
+      {/* ── Phase 5d: 报价定价工作台 ─────────────────────────────────── */}
+      <div className="border-t border-slate-200 pt-4">
+        <div className="mb-2 flex items-center gap-2">
+          <Calculator className="h-4 w-4 text-slate-500" />
+          <span className="text-[13px] font-semibold text-slate-700">报价定价工作台</span>
+          <span className="text-[11px] text-slate-500">
+            · 输入报价 SKU + 数量，自动从产品中心三层定价拉取建议单价
+          </span>
+          <button
+            type="button"
+            onClick={() => setQtWorkbenchOpen((v) => !v)}
+            className="ml-auto text-[11px] text-slate-500 hover:text-slate-800 underline"
+          >
+            {qtWorkbenchOpen ? '收起' : '展开'}
+          </button>
+        </div>
+        {qtWorkbenchOpen && (
+          <QuotationWorkbench
+            onFillAccept={(accepted) => {
+              // Toast to let sales know the result — actual quotation update
+              // happens in the quotation module (this panel is read-only output).
+              const lines = accepted.map(
+                (a) => `${a.lineRef} → ${a.currency} ${a.unitPrice.toFixed(2)}${a.incoterm ? ` (${a.incoterm})` : ''}`,
+              ).join('\n');
+              toast.success(`已复制 ${accepted.length} 行报价到剪贴板`, {
+                description: lines.slice(0, 200),
+                duration: 4000,
+              });
+              const text = accepted
+                .map((a) => `${a.lineRef}\t${a.currency} ${a.unitPrice.toFixed(2)}\t${a.incoterm ?? ''}`)
+                .join('\n');
+              navigator.clipboard.writeText(text).catch(() => {/* ignore */});
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Self-contained workbench: paste/type SKUs, fill QTYs, run price lookup. */
+function QuotationWorkbench({
+  onFillAccept,
+}: {
+  onFillAccept: (
+    accepted: Array<{ lineRef: string | number; unitPrice: number; currency: string; incoterm?: string }>,
+  ) => void;
+}) {
+  const ctx = useProductCenter();
+  const [rawLines, setRawLines] = useState('');
+  const [fillLines, setFillLines] = useState<QuotationFillLine[]>([]);
+  const [region, setRegion] = useState<RegionCode>(ctx.activeRegion);
+
+  // Parse "SKU,qty" or "SKU qty" or "SKU\tqty" one per line
+  const parseLines = (): QuotationFillLine[] => {
+    return rawLines
+      .split('\n')
+      .map((l, i) => {
+        const parts = l.trim().split(/[\t,\s]+/);
+        const sku = parts[0]?.trim() ?? '';
+        const qty = parseInt(parts[1] ?? '1', 10) || 1;
+        return { lineRef: `L${i + 1}`, sku, qty };
+      })
+      .filter((l) => l.sku.length > 0);
+  };
+
+  const handleParse = () => {
+    setFillLines(parseLines());
+  };
+
+  return (
+    <div className="space-y-3 rounded border border-slate-200 bg-white p-3">
+      <div className="text-[11px] text-slate-600">
+        每行输入 <span className="font-mono">SKU,数量</span>（如 <span className="font-mono">COS-LED-60W,200</span>），
+        然后选区域 / 客户后点「引入价格」查询建议单价。
+      </div>
+      <div className="flex gap-2">
+        <textarea
+          value={rawLines}
+          onChange={(e) => setRawLines(e.target.value)}
+          placeholder={`COS-LED-PANEL-60W,500\nCOS-AIRFRY-50,200\nCOS-BULB-A60-9W,5000`}
+          className="flex-1 rounded border border-slate-300 p-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-slate-400"
+          rows={4}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-9 self-start text-[12px]"
+          onClick={handleParse}
+        >
+          解析
+        </Button>
+      </div>
+      {fillLines.length > 0 && (
+        <PriceFillPanel
+          lines={fillLines}
+          defaultRegion={region}
+          defaultCustomerId={null}
+          onAccept={onFillAccept}
+        />
+      )}
     </div>
   );
 }

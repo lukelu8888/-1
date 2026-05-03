@@ -39,6 +39,7 @@ import type {
   SupplierQuote,
   TierIssue,
 } from '../context/types';
+import type { QuotationLineInput, QuotationLineResolved } from './productCenterService';
 import type {
   AnalyticsRollup,
   BulkImportError,
@@ -1252,6 +1253,76 @@ export const supabaseProductCenterService: ProductCenterService = {
       message: (r.message as string) ?? 'unknown issue',
       severity: (r.severity as TierIssue['severity']) ?? 'warning',
     }));
+  },
+
+  // ── Phase 5d: quotation bridge ────────────────────────────────────────────
+  async resolveQuotationLinePrices(
+    lines: QuotationLineInput[],
+  ): Promise<QuotationLineResolved[]> {
+    const results: QuotationLineResolved[] = await Promise.all(
+      lines.map(async (line): Promise<QuotationLineResolved> => {
+        // 1. Look up the PIM product by SKU (case-insensitive ILIKE)
+        const { data: products, error: pErr } = await supabase
+          .from('pc_products')
+          .select('id, sku, name, name_en')
+          .ilike('sku', line.sku)
+          .is('archived_at', null)
+          .limit(1);
+
+        if (pErr || !products?.length) {
+          return { lineRef: line.lineRef, resolved: false, sku: line.sku, reason: 'sku-not-found' };
+        }
+        const p = products[0] as Record<string, unknown>;
+        const productId = p.id as string;
+
+        // 2. Call the three-layer RPC
+        const res = await supabase.rpc('pc_get_effective_price_for_customer', {
+          p_product_id: productId,
+          p_region: line.region,
+          p_qty: line.qty,
+          p_customer_id: line.customerId,
+          p_as_of: line.asOfDate ?? null,
+        });
+
+        if (res.error) {
+          return { lineRef: line.lineRef, resolved: false, sku: line.sku, reason: 'unknown' };
+        }
+
+        const row = (res.data ?? {}) as Record<string, unknown>;
+        const source = (row.source as EffectiveCustomerPriceResult['source']) ?? 'none';
+
+        if (source === 'none') {
+          const reasonMap: Record<string, QuotationLineResolved['reason']> = {
+            'below-moq': 'below-moq',
+            'no-region-price': 'no-region-price',
+            'qty-required': 'qty-required',
+          };
+          return {
+            lineRef: line.lineRef,
+            resolved: false,
+            sku: line.sku,
+            reason: reasonMap[(row.reason as string) ?? ''] ?? 'unknown',
+            moq: row.moq == null ? undefined : Number(row.moq),
+          };
+        }
+
+        return {
+          lineRef: line.lineRef,
+          resolved: true,
+          sku: line.sku,
+          pimProductId: productId,
+          pimProductName: (p.name_en as string) ?? (p.name as string),
+          unitPrice: Number(row.unit_price ?? 0),
+          listPrice: Number(row.list_price ?? row.unit_price ?? 0),
+          discountPercent: Number(row.discount_percent ?? 0),
+          currency: (row.currency as string) ?? 'USD',
+          incoterm: (row.incoterm as string) ?? undefined,
+          source,
+          customerTierCode: (row.customer_tier_code as string) ?? undefined,
+        };
+      }),
+    );
+    return results;
   },
 
   // ── Phase 5c: customer tier pricing + specific prices ────────────────────

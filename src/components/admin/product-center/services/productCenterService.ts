@@ -221,6 +221,28 @@ export interface ProductCenterService {
     region: RegionCode;
   }): Promise<TierIssue[]>;
 
+  // ── Phase 5d: quotation ↔ pricing-center bridge ──────────────────────────
+
+  /**
+   * Batch-resolve prices for a set of quotation lines.
+   *
+   * Each input line carries the minimum information a quotation row has:
+   * `sku` (to look up the PIM product), `qty`, `region`, and an optional
+   * `customerId` (to apply customer-specific / tier-discount logic).
+   *
+   * The returned array mirrors the input order. Each result includes:
+   *   - `resolved: true`  — price found; `unitPrice`, `currency`,
+   *     `incoterm`, `source`, `listPrice`, `discountPercent`
+   *   - `resolved: false` — not found; `reason` explains why
+   *     ('sku-not-found' | 'below-moq' | 'no-region-price' | 'qty-required')
+   *
+   * The caller (hook / UI) decides which results to accept — this function
+   * is pure lookup and NEVER modifies the quotation or the product center.
+   */
+  resolveQuotationLinePrices(
+    lines: QuotationLineInput[],
+  ): Promise<QuotationLineResolved[]>;
+
   // ── Phase 5c: customer tier pricing + specific prices ────────────────────
 
   /** Persist a customer-specific price (insert or update on conflict). */
@@ -800,6 +822,57 @@ export const mockProductCenterService: ProductCenterService = {
     return computeTierIssues(tiers, product?.moq ?? null);
   },
 
+  // ── Phase 5d (mock): quotation ↔ pricing-center bridge ─────────────────
+  async resolveQuotationLinePrices(lines) {
+    const { mockProducts } = await import('../context/mockData');
+    const skuMap = new Map(mockProducts.map((p) => [p.sku.toUpperCase(), p]));
+
+    const results: QuotationLineResolved[] = await Promise.all(
+      lines.map(async (line): Promise<QuotationLineResolved> => {
+        const product = skuMap.get(line.sku.toUpperCase());
+        if (!product) {
+          return { lineRef: line.lineRef, resolved: false, sku: line.sku, reason: 'sku-not-found' };
+        }
+        const price = await mockProductCenterService.getEffectiveCustomerPrice({
+          productId: product.id,
+          region: line.region,
+          qty: line.qty,
+          customerId: line.customerId,
+          asOfDate: line.asOfDate,
+        });
+        if (price.source === 'none') {
+          const reasonMap: Record<string, QuotationLineResolved['reason']> = {
+            'below-moq': 'below-moq',
+            'no-region-price': 'no-region-price',
+            'qty-required': 'qty-required',
+          };
+          return {
+            lineRef: line.lineRef,
+            resolved: false,
+            sku: line.sku,
+            reason: reasonMap[price.reason ?? ''] ?? 'unknown',
+            moq: price.moq,
+          };
+        }
+        return {
+          lineRef: line.lineRef,
+          resolved: true,
+          sku: line.sku,
+          pimProductId: product.id,
+          pimProductName: product.nameEn ?? product.name,
+          unitPrice: price.unitPrice ?? 0,
+          listPrice: price.listPrice ?? price.unitPrice ?? 0,
+          discountPercent: price.discountPercent ?? 0,
+          currency: price.currency ?? 'USD',
+          incoterm: price.incoterm,
+          source: price.source,
+          customerTierCode: price.customerTierCode,
+        };
+      }),
+    );
+    return results;
+  },
+
   // ── Phase 5c (mock): customer tier pricing + specific prices ────────────
   async upsertCustomerSpecificPrice(input) {
     return input;
@@ -953,6 +1026,52 @@ function synthReview(
     occurredAt: new Date().toISOString(),
   };
 }
+
+// ─── Phase 5d public types ───────────────────────────────────────────────────
+//
+// Deliberately minimal — we only define the fields both quotation modules
+// (admin QuotationManagement and salesperson SalesQuotationContext) share.
+// The hook / UI glues these into the native quotation-line shape.
+
+/** Fields required to resolve a price; `sku` is the PIM product lookup key. */
+export interface QuotationLineInput {
+  /** Internal line reference (index or id) — echoed back in the result. */
+  lineRef: string | number;
+  sku: string;
+  qty: number;
+  region: RegionCode;
+  /** null = public pricing (no customer-specific / tier discount) */
+  customerId: string | null;
+  asOfDate?: string;
+}
+
+export type QuotationLineResolved =
+  | {
+      lineRef: string | number;
+      resolved: true;
+      sku: string;
+      pimProductId: string;
+      pimProductName: string;
+      unitPrice: number;
+      listPrice: number;
+      discountPercent: number;
+      currency: string;
+      incoterm?: string;
+      source: EffectiveCustomerPriceResult['source'];
+      customerTierCode?: string;
+    }
+  | {
+      lineRef: string | number;
+      resolved: false;
+      sku: string;
+      reason:
+        | 'sku-not-found'
+        | 'below-moq'
+        | 'no-region-price'
+        | 'qty-required'
+        | 'unknown';
+      moq?: number;
+    };
 
 /**
  * Phase 5b — pure consistency checker shared by the mock service AND the

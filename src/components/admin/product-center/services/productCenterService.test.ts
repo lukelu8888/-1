@@ -541,3 +541,104 @@ describe('Phase 5c — getEffectiveCustomerPrice (mock)', () => {
     expect(r.discountPercent).toBe(0);
   });
 });
+
+// ─── Phase 5d: quotation ↔ pricing-center bridge ───────────────────────────
+
+describe('Phase 5d — resolveQuotationLinePrices (mock)', () => {
+  // Real mock SKUs: COS-LED-PNL-600 (p_001 NA MOQ 100),
+  //                COS-AIRFRY-50    (p_002 NA MOQ 50),
+  //                COS-BULB-A60-9W  (p_004 SA/EA, no NA region price)
+  // Customers: cust_us_001 BrightHome (Gold 10%), cust_eu_001 EuroLight (Silver 5%)
+  // BrightHome specific on p_001 NA 1500+ @ USD 14.50
+
+  it('resolves a single valid line with public pricing (no customer)', async () => {
+    const [r] = await mockProductCenterService.resolveQuotationLinePrices([
+      { lineRef: 'L1', sku: 'COS-LED-PNL-600', qty: 500, region: 'NA', customerId: null },
+    ]);
+    expect(r.resolved).toBe(true);
+    if (!r.resolved) throw new Error('unexpected');
+    expect(r.pimProductId).toBe('p_001');
+    expect(r.source).toBe('tier');
+    expect(r.unitPrice).toBe(17.5);
+    expect(r.currency).toBe('USD');
+  });
+
+  it('resolves Gold customer specific price over public tiers', async () => {
+    const [r] = await mockProductCenterService.resolveQuotationLinePrices([
+      { lineRef: 'L1', sku: 'COS-LED-PNL-600', qty: 2000, region: 'NA', customerId: 'cust_us_001' },
+    ]);
+    expect(r.resolved).toBe(true);
+    if (!r.resolved) throw new Error('unexpected');
+    expect(r.source).toBe('customer-specific');
+    expect(r.unitPrice).toBe(14.5);
+    expect(r.discountPercent).toBe(0);
+  });
+
+  it('resolves Silver customer with tier-with-discount', async () => {
+    const [r] = await mockProductCenterService.resolveQuotationLinePrices([
+      { lineRef: 'L1', sku: 'COS-AIRFRY-50', qty: 200, region: 'NA', customerId: 'cust_eu_001' },
+    ]);
+    expect(r.resolved).toBe(true);
+    if (!r.resolved) throw new Error('unexpected');
+    expect(r.source).toBe('tier-with-discount');
+    expect(r.discountPercent).toBe(5);
+    expect(r.unitPrice).toBeCloseTo(52 * 0.95, 2);
+    expect(r.customerTierCode).toBe('SILVER');
+  });
+
+  it('returns resolved=false with reason=sku-not-found for unknown SKU', async () => {
+    const [r] = await mockProductCenterService.resolveQuotationLinePrices([
+      { lineRef: 'L1', sku: 'FAKE-SKU-XXX', qty: 100, region: 'NA', customerId: null },
+    ]);
+    expect(r.resolved).toBe(false);
+    if (r.resolved) throw new Error('unexpected');
+    expect(r.reason).toBe('sku-not-found');
+  });
+
+  it('returns resolved=false with reason=below-moq', async () => {
+    // p_001 MOQ is 100; request qty=10
+    const [r] = await mockProductCenterService.resolveQuotationLinePrices([
+      { lineRef: 'L1', sku: 'COS-LED-PNL-600', qty: 10, region: 'NA', customerId: null },
+    ]);
+    expect(r.resolved).toBe(false);
+    if (r.resolved) throw new Error('unexpected');
+    expect(r.reason).toBe('below-moq');
+    expect(r.moq).toBe(100);
+  });
+
+  it('returns resolved=false with reason=no-region-price for region with no price', async () => {
+    // p_004 Bulb has no NA region price in mock seed
+    const [r] = await mockProductCenterService.resolveQuotationLinePrices([
+      { lineRef: 'L1', sku: 'COS-BULB-A60-9W', qty: 1000, region: 'NA', customerId: null },
+    ]);
+    expect(r.resolved).toBe(false);
+    if (r.resolved) throw new Error('unexpected');
+    expect(r.reason).toBe('no-region-price');
+  });
+
+  it('handles a mixed batch with correct per-line results in input order', async () => {
+    const results = await mockProductCenterService.resolveQuotationLinePrices([
+      { lineRef: 1, sku: 'COS-LED-PNL-600', qty: 500, region: 'NA', customerId: null }, // resolved
+      { lineRef: 2, sku: 'FAKE-XXX', qty: 100, region: 'NA', customerId: null },         // sku-not-found
+      { lineRef: 3, sku: 'COS-AIRFRY-50', qty: 30, region: 'NA', customerId: null },     // below-moq (50)
+      { lineRef: 4, sku: 'COS-BULB-A60-9W', qty: 5000, region: 'SA', customerId: null }, // resolved SA
+    ]);
+    expect(results).toHaveLength(4);
+    expect(results[0].resolved).toBe(true);
+    expect(results[1].resolved).toBe(false);
+    expect((results[1] as { resolved: false; reason: string }).reason).toBe('sku-not-found');
+    expect(results[2].resolved).toBe(false);
+    expect((results[2] as { resolved: false; reason: string }).reason).toBe('below-moq');
+    expect(results[3].resolved).toBe(true);
+    if (!results[3].resolved) throw new Error('unexpected');
+    expect(results[3].unitPrice).toBe(1.18);
+    expect(results.map((r) => r.lineRef)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('SKU lookup is case-insensitive', async () => {
+    const [r] = await mockProductCenterService.resolveQuotationLinePrices([
+      { lineRef: 'L1', sku: 'cos-led-pnl-600', qty: 100, region: 'NA', customerId: null },
+    ]);
+    expect(r.resolved).toBe(true);
+  });
+});

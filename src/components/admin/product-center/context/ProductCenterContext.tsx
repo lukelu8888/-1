@@ -90,6 +90,8 @@ import {
   type BulkImportError,
   type BulkImportResult,
   type BulkImportRow,
+  type QuotationLineInput,
+  type QuotationLineResolved,
 } from '../services/productCenterService';
 
 // ─── Role / identity model (Phase 3) ────────────────────────────────────────
@@ -261,6 +263,12 @@ interface Actions {
     qty: number;
     asOfDate?: string;
   }) => Promise<EffectiveTierPriceResult>;
+
+  // Phase 5d — quotation bridge
+  /** Batch-resolve prices for quotation lines via the three-layer stack. */
+  resolveQuotationLinePrices: (
+    lines: QuotationLineInput[],
+  ) => Promise<QuotationLineResolved[]>;
 
   // customer pricing (Phase 5c — 三层叠加)
   upsertCustomerSpecificPrice: (input: CustomerSpecificPrice) => void;
@@ -1604,6 +1612,13 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const resolveQuotationLinePrices = useCallback(
+    (lines: QuotationLineInput[]): Promise<QuotationLineResolved[]> => {
+      return serviceRef.current.resolveQuotationLinePrices(lines);
+    },
+    [],
+  );
+
   const attachMedia = useCallback(
     async (input: {
       productId: string;
@@ -1922,6 +1937,8 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       removeTierPrice,
       getEffectiveTierPrice,
 
+      resolveQuotationLinePrices,
+
       upsertCustomerSpecificPrice,
       removeCustomerSpecificPrice,
       getEffectiveCustomerPrice,
@@ -2099,6 +2116,8 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       upsertTierPrice,
       removeTierPrice,
       getEffectiveTierPrice,
+
+      resolveQuotationLinePrices,
 
       upsertCustomerSpecificPrice,
       removeCustomerSpecificPrice,
