@@ -44,6 +44,7 @@ import { PublishPreviewModal } from '../../shared/PublishPreviewModal';
 import { PriceHistoryDialog } from '../../shared/PriceHistoryDialog';
 import { SupplierQuoteDialog } from '../../shared/SupplierQuoteDialog';
 import { ReviewHistoryDrawer } from '../../shared/ReviewHistoryDrawer';
+import { MediaUploader } from '../../shared/MediaUploader';
 import { useProductCenter } from '../../context/ProductCenterContext';
 import { REGIONS, formatRegionMoney, getRegion } from '../../context/regionConfig';
 import type {
@@ -895,54 +896,68 @@ function PackagingSection({
 function MediaSection({ productId, thumbnailUrl }: { productId: string; thumbnailUrl?: string }) {
   const ctx = useProductCenter();
   const media = ctx.getMediaForProduct(productId);
+  const [uploaderOpen, setUploaderOpen] = useState(false);
   return (
-    <SectionShell
-      title="5. 图片与视频"
-      subtitle="主图 · 详情图 · 应用场景图 · A+ · 视频"
-      actions={
-        <Button size="sm" variant="outline" className="h-7 text-[12px]" onClick={() => toast.info('上传：模拟，Phase 2 接通存储')}>
-          + 上传媒体
-        </Button>
-      }
-    >
-      {media.length === 0 ? (
-        <div className="text-[12px] text-slate-500">
-          {thumbnailUrl ? (
-            <div className="flex items-center gap-2">
-              <img src={thumbnailUrl} alt="thumb" className="h-16 w-16 rounded border object-cover" />
-              <span>仅有列表缩略图，建议上传主图与详情图。</span>
-            </div>
-          ) : (
-            <span className="text-rose-600">该产品尚无任何媒体资源 — 请上传主图。</span>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-6 gap-2">
-          {media.map((m) => (
-            <div key={m.id} className="rounded border border-slate-200 bg-white p-1">
-              <img
-                src={m.url}
-                alt={m.altText ?? m.kind}
-                className="h-24 w-full rounded object-cover"
-                loading="lazy"
-              />
-              <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
-                <span className="rounded bg-slate-100 px-1">{m.kind}</span>
-                <button
-                  onClick={() => {
-                    ctx.removeMedia(m.id);
-                    toast.success('已移除');
-                  }}
-                  className="text-rose-600 hover:underline"
-                >
-                  移除
-                </button>
+    <>
+      <SectionShell
+        title="5. 图片与视频"
+        subtitle="主图 · 详情图 · 应用场景图 · A+ · 视频"
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[12px]"
+            onClick={() => setUploaderOpen(true)}
+          >
+            + 上传媒体
+          </Button>
+        }
+      >
+        {media.length === 0 ? (
+          <div className="text-[12px] text-slate-500">
+            {thumbnailUrl ? (
+              <div className="flex items-center gap-2">
+                <img src={thumbnailUrl} alt="thumb" className="h-16 w-16 rounded border object-cover" />
+                <span>仅有列表缩略图，建议上传主图与详情图。</span>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </SectionShell>
+            ) : (
+              <span className="text-rose-600">该产品尚无任何媒体资源 — 请上传主图。</span>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-6 gap-2">
+            {media.map((m) => (
+              <div key={m.id} className="rounded border border-slate-200 bg-white p-1">
+                <img
+                  src={m.url}
+                  alt={m.altText ?? m.kind}
+                  className="h-24 w-full rounded object-cover"
+                  loading="lazy"
+                />
+                <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                  <span className="rounded bg-slate-100 px-1">{m.kind}</span>
+                  <button
+                    onClick={() => {
+                      ctx.removeMedia(m.id);
+                      toast.success('已移除');
+                    }}
+                    className="text-rose-600 hover:underline"
+                  >
+                    移除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionShell>
+
+      <MediaUploader
+        open={uploaderOpen}
+        onOpenChange={setUploaderOpen}
+        productId={productId}
+      />
+    </>
   );
 }
 

@@ -23,6 +23,7 @@
 import type {
   Campaign,
   CampaignProduct,
+  MediaKind,
   ModelMapping,
   Product,
   ProductAttribute,
@@ -171,6 +172,39 @@ export interface ProductCenterService {
    * counted in `created` / `updated`.
    */
   bulkUpsertProducts(rows: BulkImportRow[]): Promise<BulkImportResult>;
+
+  // ── Phase 5a: media upload ───────────────────────────────────────────────
+
+  /**
+   * Upload a single image / video file and persist a `pc_product_media`
+   * row pointing at it. Returns the persisted media record (with the
+   * resolved CDN-friendly URL).
+   *
+   * Mock impl synthesises a `blob:` URL via `URL.createObjectURL` so the
+   * UI lights up the same way as in production — the file lives in the
+   * browser session only.
+   *
+   * Supabase impl uploads to the `product-media` bucket and inserts a
+   * `pc_product_media` row.
+   */
+  uploadMedia(input: MediaUploadInput): Promise<ProductMedia>;
+
+  /**
+   * Delete the underlying storage object for a media row. The row itself
+   * is removed by the caller (Context owns the in-memory state). Mock
+   * impl revokes the blob URL; supabase impl removes the bucket object.
+   */
+  removeMediaFile(media: ProductMedia): Promise<void>;
+}
+
+// ── Phase 5a shared types ───────────────────────────────────────────────────
+
+export interface MediaUploadInput {
+  productId: string;
+  kind: MediaKind;
+  file: File;
+  altText?: string;
+  sortOrder?: number;
 }
 
 // ── Phase 4d shared types ───────────────────────────────────────────────────
@@ -605,6 +639,39 @@ export const mockProductCenterService: ProductCenterService = {
     });
 
     return { created, updated, errors };
+  },
+
+  // ── Phase 5a (mock) ──────────────────────────────────────────────────────
+  // The mock impl returns a `blob:` URL that's valid only in this session
+  // (revoked on `removeMediaFile`). It's enough to verify the full upload
+  // → preview → list → delete UI loop without touching the network.
+  async uploadMedia({ productId, kind, file, altText, sortOrder }) {
+    const url =
+      typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+        ? URL.createObjectURL(file)
+        : `mock://product-media/${productId}/${kind}/${encodeURIComponent(file.name)}`;
+    const now = new Date().toISOString();
+    return {
+      id: `pm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      productId,
+      kind,
+      url,
+      altText: altText ?? file.name.replace(/\.[a-z0-9]+$/i, ''),
+      sortOrder: sortOrder ?? 0,
+      fileSize: file.size,
+      createdAt: now,
+      updatedAt: now,
+    } satisfies ProductMedia;
+  },
+
+  async removeMediaFile(media) {
+    if (
+      typeof URL !== 'undefined' &&
+      typeof URL.revokeObjectURL === 'function' &&
+      media.url.startsWith('blob:')
+    ) {
+      URL.revokeObjectURL(media.url);
+    }
   },
 };
 

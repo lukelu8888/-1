@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Image as ImageIcon, Search, Trash2 } from 'lucide-react';
+import { Image as ImageIcon, Search, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { Button } from '../../../../ui/button';
 import { Input } from '../../../../ui/input';
 
 import { PageHeading, Toolbar } from '../../shared/Toolbar';
+import { MediaUploader } from '../../shared/MediaUploader';
 import { useProductCenter } from '../../context/ProductCenterContext';
 import type { MediaKind } from '../../context/types';
 
@@ -25,6 +25,12 @@ export function MediaCenterPage({ onOpenProduct }: Props) {
   const ctx = useProductCenter();
   const [keyword, setKeyword] = useState('');
   const [kindFilter, setKindFilter] = useState<MediaKind | 'ALL'>('ALL');
+  /**
+   * Phase 5a — single uploader instance shared across rows. We open it
+   * with a target productId rather than embedding one dialog per row,
+   * which keeps DOM footprint tiny on long lists.
+   */
+  const [uploadTarget, setUploadTarget] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -51,9 +57,9 @@ export function MediaCenterPage({ onOpenProduct }: Props) {
         title="媒体中心 / Media Center"
         subtitle="主图 · 详情图 · 应用场景图 · A+ · 视频 · PDF · 认证文件"
         actions={
-          <Button size="sm" className="h-8" onClick={() => toast.info('上传：Phase 2 接通存储/CDN')}>
-            + 上传媒体
-          </Button>
+          <span className="text-[11px] text-slate-500">
+            点击下方产品的「+ 上传」按钮，可批量上传该产品的图片/视频
+          </span>
         }
       />
 
@@ -121,6 +127,14 @@ export function MediaCenterPage({ onOpenProduct }: Props) {
                 <div className="flex items-center gap-2 text-[11px] text-slate-500">
                   <ImageIcon className="h-3.5 w-3.5" />
                   共 {g.media.length} 项
+                  <button
+                    type="button"
+                    onClick={() => setUploadTarget(g.product.id)}
+                    className="ml-1 inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700 hover:border-slate-400 hover:bg-slate-50"
+                  >
+                    <Upload className="h-3 w-3" />
+                    上传
+                  </button>
                 </div>
               </div>
 
@@ -159,6 +173,16 @@ export function MediaCenterPage({ onOpenProduct }: Props) {
           ))}
         </div>
       </div>
+
+      {uploadTarget && (
+        <MediaUploader
+          open
+          onOpenChange={(o) => {
+            if (!o) setUploadTarget(null);
+          }}
+          productId={uploadTarget}
+        />
+      )}
     </div>
   );
 }

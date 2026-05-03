@@ -236,6 +236,20 @@ interface Actions {
   // media
   addMedia: (media: ProductMedia) => void;
   removeMedia: (id: string) => void;
+  /**
+   * Phase 5a — upload + register a media file in one shot.
+   * Mock backend: synthesises a `blob:` URL kept for the session.
+   * Supabase backend: uploads to the `product-media` bucket then inserts
+   * the row server-side. Returns the new media row so the caller can
+   * surface a thumbnail immediately.
+   */
+  attachMedia: (input: {
+    productId: string;
+    kind: ProductMedia['kind'];
+    file: File;
+    altText?: string;
+    sortOrder?: number;
+  }) => Promise<ProductMedia>;
 
   // categories
   upsertCategory: (cat: ProductCategory) => void;
@@ -1423,9 +1437,42 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     setMedia((prev) => [...prev, { ...m, createdAt: nowIso(), updatedAt: nowIso() }]);
   }, []);
 
-  const removeMedia = useCallback((id: string) => {
-    setMedia((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+  const removeMedia = useCallback(
+    (id: string) => {
+      // Capture the row before we drop it so we can ask the service to
+      // clean up the underlying file (best-effort: bucket failures should
+      // not block the UI removal).
+      let target: ProductMedia | undefined;
+      setMedia((prev) => {
+        target = prev.find((m) => m.id === id);
+        return prev.filter((m) => m.id !== id);
+      });
+      if (target) {
+        const captured = target;
+        persist('删除媒体文件', () => serviceRef.current.removeMediaFile(captured));
+      }
+    },
+    [persist],
+  );
+
+  const attachMedia = useCallback(
+    async (input: {
+      productId: string;
+      kind: ProductMedia['kind'];
+      file: File;
+      altText?: string;
+      sortOrder?: number;
+    }) => {
+      const created = await serviceRef.current.uploadMedia(input);
+      // In supabase mode the row already exists in the DB; we just need
+      // to mirror it locally so consumers re-render. In mock mode the
+      // service synthesises the row but does not persist anywhere — the
+      // store IS the source of truth.
+      setMedia((prev) => [...prev, created]);
+      return created;
+    },
+    [],
+  );
 
   const upsertCategory = useCallback((cat: ProductCategory) => {
     setCategories((prev) => {
@@ -1728,6 +1775,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
 
       addMedia,
       removeMedia,
+      attachMedia,
 
       upsertCategory,
       removeCategory,
@@ -1851,6 +1899,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
 
       addMedia,
       removeMedia,
+      attachMedia,
 
       upsertCategory,
       removeCategory,

@@ -197,3 +197,49 @@ describe('Phase 4d (mock impl)', () => {
     expect(res.errors.find((e) => e.index === 5)?.message).toContain('unknown-category-code');
   });
 });
+
+describe('Phase 5a (mock impl)', () => {
+  it('uploadMedia returns a media row with a session blob URL and forwards file metadata', async () => {
+    const file = new File(['hello'], 'hero.png', { type: 'image/png' });
+    const created = await mockProductCenterService.uploadMedia({
+      productId: 'p_test',
+      kind: 'main',
+      file,
+      altText: 'Hero shot',
+      sortOrder: 0,
+    });
+    expect(created.productId).toBe('p_test');
+    expect(created.kind).toBe('main');
+    expect(created.altText).toBe('Hero shot');
+    expect(created.fileSize).toBe(file.size);
+    // jsdom in vitest exposes URL.createObjectURL → blob: URL.
+    expect(created.url.startsWith('blob:') || created.url.startsWith('mock://')).toBe(true);
+    expect(typeof created.id).toBe('string');
+    expect(created.id.length).toBeGreaterThan(0);
+  });
+
+  it('removeMediaFile is a no-op for non-blob URLs and does not throw', async () => {
+    await expect(
+      mockProductCenterService.removeMediaFile({
+        id: 'pm1',
+        productId: 'p_test',
+        kind: 'main',
+        url: 'https://cdn.example.com/foo.jpg',
+        sortOrder: 0,
+        createdAt: '2026-01-01',
+        updatedAt: '2026-01-01',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('uploadMedia derives altText from filename when none supplied', async () => {
+    const file = new File(['x'], 'product-shot-01.jpg', { type: 'image/jpeg' });
+    const created = await mockProductCenterService.uploadMedia({
+      productId: 'p_test',
+      kind: 'detail',
+      file,
+    });
+    // Strips the extension but keeps the rest of the filename.
+    expect(created.altText).toBe('product-shot-01');
+  });
+});

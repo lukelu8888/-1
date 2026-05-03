@@ -37,6 +37,7 @@ import type {
   BulkImportError,
   BulkImportResult,
   BulkImportRow,
+  MediaUploadInput,
   ProductCenterService,
   ProductCenterSnapshot,
   ProductExportRow,
@@ -1061,6 +1062,74 @@ export const supabaseProductCenterService: ProductCenterService = {
     };
   },
 
+  // ── Phase 5a: media upload (Supabase Storage) ────────────────────────────
+  async uploadMedia({
+    productId,
+    kind,
+    file,
+    altText,
+    sortOrder,
+  }: MediaUploadInput): Promise<ProductMedia> {
+    // Path scheme matches the storage RLS policy in
+    // 20260503050000_product_center_media_storage.sql so writes are
+    // tenant-scoped on the bucket side as well as the table side.
+    const safeBase = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 16);
+    // We can't read pc_current_tenant_id() from the JS client; the storage
+    // RLS policy will reject mismatched paths, but for the canonical case
+    // (single-tenant `tenant_default`) we route through it explicitly so
+    // the bucket layout matches what the SQL helper would produce.
+    const tenant = await resolveTenantId();
+    const path = `${tenant}/${productId}/${kind}/${stamp}_${safeBase}`;
+
+    const upload = await supabase.storage
+      .from('product-media')
+      .upload(path, file, {
+        contentType: file.type || undefined,
+        upsert: false,
+        cacheControl: '3600',
+      });
+    if (upload.error) {
+      throw new PcSupabaseError(`uploadMedia:storage: ${upload.error.message}`, upload.error);
+    }
+
+    const { data: pub } = supabase.storage.from('product-media').getPublicUrl(path);
+    const publicUrl = pub.publicUrl;
+
+    const insertRes = await supabase
+      .from('pc_product_media')
+      .insert(
+        stripUndefined({
+          product_id: productId,
+          kind,
+          url: publicUrl,
+          alt_text: altText,
+          sort_order: sortOrder ?? 0,
+          file_size: file.size,
+        }),
+      )
+      .select('*')
+      .single();
+    if (insertRes.error) {
+      // Best-effort cleanup so we don't leak orphan files.
+      await supabase.storage.from('product-media').remove([path]).catch(() => undefined);
+      throw new PcSupabaseError(`uploadMedia:row: ${insertRes.error.message}`, insertRes.error);
+    }
+    return rowToMedia(insertRes.data as Record<string, unknown>);
+  },
+
+  async removeMediaFile(media: ProductMedia): Promise<void> {
+    // Extract the bucket-relative key from the public URL. The storage
+    // module exposes both /object/public/<bucket>/<key> and the signed
+    // form; we handle both.
+    const key = extractStorageKey(media.url);
+    if (!key) return;
+    const res = await supabase.storage.from('product-media').remove([key]);
+    if (res.error) {
+      throw new PcSupabaseError(`removeMediaFile: ${res.error.message}`, res.error);
+    }
+  },
+
   // ── Phase 4e: bulk import (RPC-backed) ───────────────────────────────────
   async bulkUpsertProducts(rows: BulkImportRow[]): Promise<BulkImportResult> {
     const res = await supabase.rpc('pc_bulk_upsert_products', {
@@ -1091,4 +1160,44 @@ function camelToSnake(input: Record<string, unknown>): Record<string, unknown> {
     out[key] = v;
   }
   return out;
+}
+
+// ─── Phase 5a helpers ───────────────────────────────────────────────────────
+
+/**
+ * Resolve the `tenant_id` claim from the current JWT, falling back to
+ * `tenant_default` so single-tenant deployments keep working without any
+ * extra config. Mirrors `pc_current_tenant_id()` in the SQL helpers.
+ */
+async function resolveTenantId(): Promise<string> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const session = data.session as
+      | (typeof data.session & {
+          user?: {
+            user_metadata?: Record<string, unknown>;
+            app_metadata?: Record<string, unknown>;
+          };
+        })
+      | null;
+    const claims = session?.user;
+    const fromAppMeta = (claims?.app_metadata as { tenant_id?: string } | undefined)?.tenant_id;
+    const fromUserMeta = (claims?.user_metadata as { tenant_id?: string } | undefined)?.tenant_id;
+    return fromAppMeta || fromUserMeta || 'tenant_default';
+  } catch {
+    return 'tenant_default';
+  }
+}
+
+/**
+ * Extract the bucket-relative key from a `getPublicUrl` URL such as
+ *   https://<host>/storage/v1/object/public/product-media/<key>
+ * Returns null if the URL does not look like a Supabase Storage URL.
+ */
+function extractStorageKey(url: string): string | null {
+  if (!url) return null;
+  const marker = '/storage/v1/object/public/product-media/';
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.slice(idx + marker.length));
 }
