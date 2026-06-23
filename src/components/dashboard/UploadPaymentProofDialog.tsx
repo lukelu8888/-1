@@ -9,6 +9,9 @@ import { toast } from 'sonner@2.0.3';
 import { useFinance } from '../../contexts/FinanceContext';
 import { orderService } from '../../lib/supabaseService';
 import { paymentProofStorage, isDataUrl, dataUrlToFile } from '../../lib/storageService';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
+
+const MAX_PAYMENT_PROOF_FILE_BYTES = 10 * 1024 * 1024;
 
 interface UploadPaymentProofDialogProps {
   open: boolean;
@@ -45,15 +48,77 @@ export function UploadPaymentProofDialog({
   setPaymentFile,
   paymentType // 🔥 新增
 }: UploadPaymentProofDialogProps) {
+  
   const { updateARByOrderNumber } = useFinance();
   const [submitting, setSubmitting] = useState(false);
+  // 选择文件后先存本地 File 对象，不再转 base64
   const [selectedFileObj, setSelectedFileObj] = useState<File | null>(null);
-  const orderUid = order?.id || order?.orderNumber || '';
-  const orderNumber = order?.orderNumber || order?.id || '';
+
+  if (!order) return null;
+
+  const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
+  const syncCustomerPaymentProofToServer = async (contractNumber: string, proofData: Record<string, any>) => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      apikey: supabaseAnonKey,
+    };
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
+
+    const response = await withTimeout(
+      fetch(
+        `${supabaseUrl}/functions/v1/make-server-880fd43b/auth/customer-upload-sales-contract-payment-proof`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            contractNumber,
+            paymentType,
+            proof: proofData,
+          }),
+        },
+      ),
+      20000,
+      'Payment proof status sync timed out. Please refresh and check the order status.',
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.success === false) {
+      throw new Error(String(payload?.message || 'Payment proof sync failed'));
+    }
+    return payload;
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > MAX_PAYMENT_PROOF_FILE_BYTES) {
+        setSelectedFileObj(null);
+        setPaymentFile('');
+        e.target.value = '';
+        toast.error('File is too large', {
+          description: 'Please upload a JPG, PNG, or PDF file smaller than 10MB.',
+          duration: 4000,
+        });
+        return;
+      }
       setSelectedFileObj(file);
       // 生成本地预览 URL（仅用于 UI 显示，不存储）
       const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : '';
@@ -64,14 +129,6 @@ export function UploadPaymentProofDialog({
 
   // 提交付款凭证：上传到 Supabase Storage，只保存 URL
   const handleSubmitProof = async () => {
-    if (!order || !orderUid || !orderNumber) {
-      toast.error('Order data is missing', {
-        description: 'Please reopen the dialog and try again.',
-        duration: 3000,
-      });
-      return;
-    }
-
     if (!paymentAmount || !paymentReference || (!paymentFile && !selectedFileObj)) {
       toast.error('Missing Required Fields', {
         description: 'Please fill in all required fields and upload a payment proof file.',
@@ -82,7 +139,8 @@ export function UploadPaymentProofDialog({
 
     const isBalance = paymentType === 'balance';
     const paymentTypeLabel = isBalance ? 'Balance' : 'Deposit';
-    const defaultFileName = (paymentType === 'balance' ? 'balance' : 'deposit') + '_proof_' + orderNumber + '.jpg';
+    const orderUid = order.id || order.orderNumber;
+    const defaultFileName = (paymentType === 'balance' ? 'balance' : 'deposit') + '_proof_' + (order.orderNumber || order.id) + '.jpg';
 
     setSubmitting(true);
     try {
@@ -93,11 +151,18 @@ export function UploadPaymentProofDialog({
       // 上传到 Supabase Storage
       const fileToUpload = selectedFileObj || (isDataUrl(paymentFile) ? dataUrlToFile(paymentFile, defaultFileName) : null);
       if (fileToUpload) {
-        const result = await paymentProofStorage.upload(
-          fileToUpload,
-          orderNumber,
-          paymentType || 'deposit',
-          user?.email || 'unknown'
+        if (fileToUpload.size > MAX_PAYMENT_PROOF_FILE_BYTES) {
+          throw new Error('File is too large. Please upload a file smaller than 10MB.');
+        }
+        const result = await withTimeout(
+          paymentProofStorage.upload(
+            fileToUpload,
+            order.orderNumber || order.id,
+            paymentType || 'deposit',
+            user?.email || 'unknown',
+          ),
+          45000,
+          'File upload timed out. Please compress the file or try again with a smaller image/PDF.',
         );
         fileUrl = result.url;
         fileName = result.fileName;
@@ -106,23 +171,45 @@ export function UploadPaymentProofDialog({
         fileUrl = paymentFile;
       }
 
-      // 同步到 Supabase
-      const proofField = paymentType === 'deposit' ? 'deposit_payment_proof' : 'balance_payment_proof';
-      await orderService.upsert({
-        id: orderUid,
-        [proofField]: { fileUrl, fileName, storagePath, amount: parseFloat(paymentAmount), transactionId: paymentReference, notes: paymentNotes || null, uploadedAt: new Date().toISOString() },
-      });
-
-      const contractNumber = orderNumber;
+      const contractNumber = order.orderNumber || order.id;
       const proofData = {
         fileName,
         fileUrl,
         storagePath,
         uploadedAt: new Date().toISOString(),
+        uploadedBy: user?.email || 'customer',
         amount: parseFloat(paymentAmount),
+        currency: order.currency || 'USD',
         transactionId: paymentReference,
         notes: paymentNotes || undefined,
       };
+
+      await syncCustomerPaymentProofToServer(contractNumber, proofData);
+
+      // 同步到 Supabase orders，兼容已有订单行和从 SC 映射出来的订单
+      const proofField = paymentType === 'deposit' ? 'deposit_payment_proof' : 'balance_payment_proof';
+      try {
+        await withTimeout(
+          orderService.upsert({
+            id: orderUid,
+            orderNumber: order.orderNumber || contractNumber,
+            contractNumber,
+            customer: order.customer || user?.name || '',
+            customerEmail: order.customerEmail || user?.email || '',
+            quotationNumber: order.quotationNumber || '',
+            totalAmount: order.totalAmount || 0,
+            currency: order.currency || 'USD',
+            products: order.products || [],
+            status: isBalance ? 'Balance Payment Proof Uploaded' : 'Payment Proof Uploaded',
+            paymentStatus: isBalance ? 'Balance Proof Uploaded' : 'Proof Uploaded',
+            [proofField]: { fileUrl, fileName, storagePath, amount: parseFloat(paymentAmount), transactionId: paymentReference, notes: paymentNotes || null, uploadedAt: new Date().toISOString() },
+          }),
+          15000,
+          'Order compatibility sync timed out.',
+        );
+      } catch (orderSyncError) {
+        console.warn('[UploadPaymentProof] orders compatibility sync skipped:', orderSyncError);
+      }
 
       // 直接写入财务应收账款 localStorage（客户端不在 FinanceProvider 内，无法通过 Context 写入）
       try {
@@ -204,7 +291,7 @@ export function UploadPaymentProofDialog({
       const arUpdates = isBalance
         ? { balanceProof: paymentProofData, status: 'balance_proof_uploaded' }
         : { depositProof: paymentProofData, status: 'proof_uploaded' };
-      updateARByOrderNumber(orderNumber, arUpdates);
+      updateARByOrderNumber(order.orderNumber, arUpdates);
 
       // 通知 Admin / 财务（本地消息）
       sendNotificationToUser('admin@cosun.com', {
@@ -240,8 +327,8 @@ export function UploadPaymentProofDialog({
         },
       });
 
-      toast.success(`✅ ${paymentTypeLabel} Payment Proof Uploaded Successfully!`, {
-        description: 'Your payment proof has been submitted. We will verify and update the order status shortly.',
+      toast.success(`✅ ${paymentTypeLabel} Payment Proof Submitted Successfully!`, {
+        description: 'Your payment proof has been submitted to Cosun Finance. You will be notified once verification is complete.',
         duration: 5000,
       });
 
@@ -417,7 +504,7 @@ export function UploadPaymentProofDialog({
           <Button
             className="bg-green-600 hover:bg-green-700"
             onClick={handleSubmitProof}
-            disabled={!order || !paymentAmount || !paymentReference || !paymentFile || submitting}
+            disabled={!paymentAmount || !paymentReference || !paymentFile || submitting}
           >
             <Upload className="w-4 h-4 mr-2" />
             {submitting ? 'Submitting...' : 'Submit Payment Proof'}

@@ -12,19 +12,19 @@ export function CustomerMasterSection({
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/70 px-6 py-3">
-        {icon ? <span className="text-slate-400">{icon}</span> : null}
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-5 py-3">
+        {icon ? <span className="text-slate-500">{icon}</span> : null}
         <div className="flex items-center gap-2">
-          <span className="text-[14px] font-semibold tracking-tight text-slate-700">{title}</span>
+          <span className="text-[13px] font-semibold tracking-tight text-slate-800">{title}</span>
           {titleEN ? (
-            <span className="text-[12px] font-medium uppercase tracking-wide text-slate-300">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
               · {titleEN}
             </span>
           ) : null}
         </div>
       </div>
-      <div className="px-6 py-4">{children}</div>
+      <div className="px-5 py-4">{children}</div>
     </div>
   );
 }
@@ -37,8 +37,8 @@ export function CustomerSingleRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-slate-50 py-3 last:border-0">
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+    <div className="border-b border-slate-200 py-3 last:border-0">
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</p>
       {children}
     </div>
   );
@@ -56,14 +56,14 @@ export function CustomerDualRow({
   rightNode: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-slate-50 py-3 last:border-0">
+    <div className="border-b border-slate-200 py-3 last:border-0">
       <div className="grid gap-4 md:grid-cols-2">
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{leftLabel}</p>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{leftLabel}</p>
           {leftNode}
         </div>
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{rightLabel}</p>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{rightLabel}</p>
           {rightNode}
         </div>
       </div>

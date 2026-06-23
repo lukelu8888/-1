@@ -46,7 +46,6 @@ import { tradeProductSnapshotService } from '../../lib/services/tradeProductSnap
 import { toast } from 'sonner';
 import { CreateProductFlow } from './product-library/CreateProductFlow';
 import type { CreateProductCompletion } from './product-library/createProductFlowTypes';
-import { ProjectControlPanel } from './project-control/ProjectControlPanel';
 
 // ─── Formatters ────────────────────────────────────────────────────────────────
 
@@ -2228,17 +2227,6 @@ export function MyProducts() {
                             </Button>
                           </div>
                         </div>
-                      )}
-
-                      {selectedProduct.isProjectBased && selectedRevisionPreview && selectedProduct.manualRecord?.id && (
-                        <ProjectControlPanel
-                          projectId={selectedProduct.manualRecord.id}
-                          projectCode={selectedProduct.projectCode || selectedProduct.manualRecord.projectCode}
-                          projectName={selectedProduct.projectName || selectedProduct.productName}
-                          projectRevisionId={selectedRevisionPreview.revisionId}
-                          projectRevisionCode={selectedRevisionPreview.revisionCode}
-                          actorLabel={currentUserEmail || 'project-owner'}
-                        />
                       )}
                     </div>
                   )}

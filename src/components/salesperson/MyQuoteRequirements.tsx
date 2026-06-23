@@ -39,8 +39,113 @@ import {
   buildDefaultQuoteRequirementTextOverrides,
 } from '../documents/templates/QuoteRequirementDocument';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
-import { buildSalesSafeQuoteRequirementDocument, desensitizePurchaserFeedbackText } from '../../utils/purchaserFeedbackSanitizer';
+import { desensitizePurchaserFeedbackText, sanitizeQuoteRequirementDocumentForSales } from '../../utils/purchaserFeedbackSanitizer';
 import { matchesBusinessOwnerEmail, resolveQuoteRequirementOwner } from '../../utils/quotationOwnership';
+import { buildQuoteRequirementDocumentSnapshot } from '../admin/purchase-order/purchaseOrderUtils';
+import { supplierQuotationService } from '../../lib/supabaseService';
+import {
+  ERP_LIST_UI_SPEC_V1,
+  getErpListFilterPillClass,
+  getErpListFilterPillStyle,
+} from '../shared/erpListUiSpec';
+import { normalizeLegacyQrNumber } from '../../utils/quoteRequirementNumber';
+
+const normalizeComparable = (value: unknown) =>
+  String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+const toPositiveNumberOrNull = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const enrichSalesQrPreviewDocument = (
+  qr: any,
+  documentData: QuoteRequirementDocumentData | null,
+): QuoteRequirementDocumentData | null => {
+  if (!qr || !documentData) return documentData;
+
+  const feedbackProducts = Array.isArray(qr?.purchaserFeedback?.products)
+    ? qr.purchaserFeedback.products
+    : [];
+  const snapshotProducts = Array.isArray(qr?.documentDataSnapshot?.products)
+    ? qr.documentDataSnapshot.products
+    : Array.isArray(qr?.document_data_snapshot?.products)
+      ? qr.document_data_snapshot.products
+      : [];
+  const sourceItems = Array.isArray(qr?.items) ? qr.items : [];
+
+  const nextProducts = documentData.products.map((product, index) => {
+    const sourceItem = sourceItems[index] || null;
+    const feedbackProduct = feedbackProducts.find((item: any, feedbackIndex: number) => {
+      if (feedbackIndex === index) return true;
+      const sameId =
+        normalizeComparable(item?.productId) &&
+        normalizeComparable(item?.productId) === normalizeComparable(sourceItem?.id);
+      const sameModel =
+        normalizeComparable(item?.modelNo || item?.productModelNo) &&
+        normalizeComparable(item?.modelNo || item?.productModelNo) === normalizeComparable(product?.modelNo || sourceItem?.modelNo);
+      const sameName =
+        normalizeComparable(item?.productName) &&
+        normalizeComparable(item?.productName) === normalizeComparable(product?.productName || sourceItem?.productName);
+      return Boolean(sameId || sameModel || sameName);
+    }) || null;
+
+    const snapshotProduct = snapshotProducts.find((item: any, snapshotIndex: number) => {
+      if (snapshotIndex === index) return true;
+      const sameModel =
+        normalizeComparable(item?.modelNo || item?.model || item?.sku) &&
+        normalizeComparable(item?.modelNo || item?.model || item?.sku) === normalizeComparable(product?.modelNo || sourceItem?.modelNo);
+      const sameName =
+        normalizeComparable(item?.productName || item?.name || item?.description) &&
+        normalizeComparable(item?.productName || item?.name || item?.description) === normalizeComparable(product?.productName || sourceItem?.productName);
+      return Boolean(sameModel || sameName);
+    }) || null;
+
+    const quantity = Number(product?.quantity || feedbackProduct?.quantity || sourceItem?.quantity || 0);
+    const feedbackUnitPrice =
+      toPositiveNumberOrNull(feedbackProduct?.sourcePricing?.unitPrice) ??
+      toPositiveNumberOrNull(feedbackProduct?.costPrice) ??
+      (
+        toPositiveNumberOrNull(feedbackProduct?.amount) != null && quantity > 0
+          ? Number(feedbackProduct.amount) / quantity
+          : null
+      );
+    const snapshotUnitPrice =
+      toPositiveNumberOrNull(snapshotProduct?.unitPrice) ??
+      toPositiveNumberOrNull(snapshotProduct?.price) ??
+      toPositiveNumberOrNull(snapshotProduct?.quotedPrice);
+    const resolvedUnitPrice = feedbackUnitPrice ?? snapshotUnitPrice ?? product.unitPrice;
+
+    const feedbackTotal =
+      toPositiveNumberOrNull(feedbackProduct?.amount) ??
+      (feedbackUnitPrice != null && quantity > 0 ? feedbackUnitPrice * quantity : null);
+    const snapshotTotal =
+      toPositiveNumberOrNull(snapshotProduct?.totalPrice) ??
+      toPositiveNumberOrNull(snapshotProduct?.amount) ??
+      (snapshotUnitPrice != null && quantity > 0 ? snapshotUnitPrice * quantity : null);
+
+    return {
+      ...product,
+      unitPrice: resolvedUnitPrice ?? product.unitPrice,
+      totalPrice: feedbackTotal ?? snapshotTotal ?? product.totalPrice,
+      currency: String(
+        feedbackProduct?.sourcePricing?.currency ||
+        feedbackProduct?.currency ||
+        snapshotProduct?.currency ||
+        product.currency ||
+        'CNY',
+      ).toUpperCase(),
+    };
+  });
+
+  return {
+    ...documentData,
+    products: nextProducts,
+  };
+};
 
 export function MyQuoteRequirements() {
   const { requirements: quoteRequirements } = useQuoteRequirements();
@@ -54,6 +159,7 @@ export function MyQuoteRequirements() {
   const [showFeedbackView, setShowFeedbackView] = useState(false);
   const [showCreateQuotation, setShowCreateQuotation] = useState(false);
   const [showDocumentPreview, setShowDocumentPreview] = useState(false);
+  const [resolvedPreviewDocumentData, setResolvedPreviewDocumentData] = useState<QuoteRequirementDocumentData | null>(null);
   
   // 🔥 筛选我的 QR
   const myRequirements = useMemo(() => {
@@ -75,7 +181,7 @@ export function MyQuoteRequirements() {
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         return (
-          qr.requirementNo.toLowerCase().includes(term) ||
+          normalizeLegacyQrNumber(qr.requirementNo).toLowerCase().includes(term) ||
           qr.sourceInquiryNumber?.toLowerCase().includes(term) ||
           qr.items.some(item => 
             item.productName.toLowerCase().includes(term) ||
@@ -158,6 +264,165 @@ export function MyQuoteRequirements() {
     setSelectedQR(qr);
     setShowDocumentPreview(true);
   };
+
+  React.useEffect(() => {
+    let alive = true;
+
+    const buildPreviewDocument = async () => {
+      if (!selectedQR || !showDocumentPreview) {
+        if (alive) setResolvedPreviewDocumentData(null);
+        return;
+      }
+
+      const baseDocument = enrichSalesQrPreviewDocument(
+        selectedQR,
+        sanitizeQuoteRequirementDocumentForSales(
+          buildQuoteRequirementDocumentSnapshot(
+            selectedQR,
+            currentUser?.type || currentUser?.role || 'Sales_Rep',
+            { forceRebuild: true },
+          ),
+          selectedQR?.purchaserFeedback,
+          'Sales_Rep',
+        ) as QuoteRequirementDocumentData | null,
+      );
+
+      if (!baseDocument) {
+        if (alive) setResolvedPreviewDocumentData(null);
+        return;
+      }
+
+      if (alive) setResolvedPreviewDocumentData(baseDocument);
+
+      try {
+        const quotations = await supplierQuotationService.getAll();
+        const allRows = Array.isArray(quotations) ? quotations : [];
+        const linkedBJList = String(selectedQR?.purchaserFeedback?.linkedBJ || '')
+          .split(/[\n,，、;；]+/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+        const requirementNo = String(selectedQR?.requirementNo || '').trim();
+        const sourceInquiryNo = String(
+          selectedQR?.sourceInquiryNumber ||
+          selectedQR?.sourceRef ||
+          baseDocument?.sourceInquiryNo ||
+          '',
+        ).trim();
+        const linkedRows = allRows.filter((quotation: any) =>
+          linkedBJList.includes(String(quotation?.quotationNo || quotation?.bjNumber || '').trim()),
+        );
+        const relatedRows = linkedRows.length > 0
+          ? linkedRows
+          : allRows.filter((quotation: any) => {
+              const quotationNo = String(quotation?.quotationNo || quotation?.bjNumber || '').trim();
+              const qrNo = String(quotation?.sourceQR || quotation?.requirementNo || '').trim();
+              const xjNo = String(quotation?.sourceXJ || quotation?.xjNumber || '').trim();
+              return Boolean(
+                (requirementNo && qrNo === requirementNo) ||
+                (linkedBJList.length > 0 && linkedBJList.includes(quotationNo)) ||
+                (sourceInquiryNo && xjNo === sourceInquiryNo)
+              );
+            });
+        if (relatedRows.length === 0 || !alive) return;
+
+        const bjItems = relatedRows.flatMap((quotation: any) => {
+          const snapshotProducts = Array.isArray(quotation?.documentDataSnapshot?.products)
+            ? quotation.documentDataSnapshot.products
+            : Array.isArray(quotation?.document_data_snapshot?.products)
+              ? quotation.document_data_snapshot.products
+              : [];
+          const rowItems = Array.isArray(quotation?.items) ? quotation.items : [];
+          const sourceItems = snapshotProducts.length > 0 ? snapshotProducts : rowItems;
+          return sourceItems.map((item: any, index: number) => {
+            const fallbackRowItem = rowItems[index] || null;
+            return {
+              ...fallbackRowItem,
+              ...item,
+              productId: item?.productId || item?.id || fallbackRowItem?.productId || fallbackRowItem?.id,
+              productName:
+                item?.productName ||
+                item?.name ||
+                item?.description ||
+                item?.product ||
+                fallbackRowItem?.productName ||
+                fallbackRowItem?.name ||
+                fallbackRowItem?.description,
+              modelNo:
+                item?.modelNo ||
+                item?.model ||
+                item?.sku ||
+                fallbackRowItem?.modelNo ||
+                fallbackRowItem?.model ||
+                fallbackRowItem?.sku,
+              unitPrice:
+                item?.unitPrice ??
+                item?.price ??
+                item?.quotedPrice ??
+                item?.supplierPrice ??
+                fallbackRowItem?.unitPrice ??
+                fallbackRowItem?.price,
+              amount:
+                item?.amount ??
+                item?.totalPrice ??
+                item?.lineAmount ??
+                item?.totalAmount ??
+                fallbackRowItem?.amount ??
+                fallbackRowItem?.totalPrice ??
+                fallbackRowItem?.lineAmount,
+              currency:
+                item?.currency ||
+                item?.quoteCurrency ||
+                fallbackRowItem?.currency ||
+                fallbackRowItem?.quoteCurrency ||
+                quotation?.currency ||
+                'CNY',
+            };
+          });
+        });
+
+        const nextProducts = baseDocument.products.map((product, index) => {
+          const matched = bjItems.find((item: any, bjIndex: number) => {
+            if (bjIndex === index) return true;
+            const sameModel =
+              normalizeComparable(item?.modelNo) &&
+              normalizeComparable(item?.modelNo) === normalizeComparable(product?.modelNo);
+            const sameName =
+              normalizeComparable(item?.productName) &&
+              normalizeComparable(item?.productName) === normalizeComparable(product?.productName);
+            return Boolean(sameModel || sameName);
+          }) || null;
+
+          if (!matched) return product;
+
+          const quantity = Number(product?.quantity || 0);
+          const unitPrice = toPositiveNumberOrNull(matched?.unitPrice);
+          const totalPrice =
+            toPositiveNumberOrNull(matched?.amount) ??
+            (unitPrice != null && quantity > 0 ? unitPrice * quantity : null);
+
+          return {
+            ...product,
+            unitPrice: unitPrice ?? product.unitPrice,
+            totalPrice: totalPrice ?? product.totalPrice,
+            currency: String(matched?.currency || product.currency || 'CNY').toUpperCase(),
+          };
+        });
+
+        if (!alive) return;
+        setResolvedPreviewDocumentData({
+          ...baseDocument,
+          products: nextProducts,
+        });
+      } catch (error) {
+        console.warn('⚠️ [MyQuoteRequirements] failed to enrich sales QR preview from linked BJ:', error);
+      }
+    };
+
+    void buildPreviewDocument();
+    return () => {
+      alive = false;
+    };
+  }, [currentUser, selectedQR, showDocumentPreview]);
   
   // 🔥 状态标识
   const getStatusBadge = (qr: any) => {
@@ -244,7 +509,7 @@ export function MyQuoteRequirements() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="搜索 QR 编号、ING 编号、产品名称..."
-                className="pl-10"
+                className={`pl-10 h-9 ${ERP_LIST_UI_SPEC_V1.searchTextClass}`}
               />
             </div>
           </div>
@@ -253,22 +518,28 @@ export function MyQuoteRequirements() {
             <Filter className="h-4 w-4 text-gray-500" />
             <div className="flex gap-2">
               <Button 
-                variant={filterStatus === 'all' ? 'default' : 'outline'}
+                variant="outline"
                 size="sm"
+                style={getErpListFilterPillStyle(filterStatus === 'all')}
+                className={getErpListFilterPillClass(filterStatus === 'all')}
                 onClick={() => setFilterStatus('all')}
               >
                 全部 ({stats.total})
               </Button>
               <Button 
-                variant={filterStatus === 'pending' ? 'default' : 'outline'}
+                variant="outline"
                 size="sm"
+                style={getErpListFilterPillStyle(filterStatus === 'pending')}
+                className={getErpListFilterPillClass(filterStatus === 'pending')}
                 onClick={() => setFilterStatus('pending')}
               >
                 等待反馈 ({stats.pending})
               </Button>
               <Button 
-                variant={filterStatus === 'feedbacked' ? 'default' : 'outline'}
+                variant="outline"
                 size="sm"
+                style={getErpListFilterPillStyle(filterStatus === 'feedbacked')}
+                className={getErpListFilterPillClass(filterStatus === 'feedbacked')}
                 onClick={() => setFilterStatus('feedbacked')}
               >
                 已反馈 ({stats.feedbacked})
@@ -305,7 +576,7 @@ export function MyQuoteRequirements() {
               myRequirements.map((qr) => (
                 <TableRow key={qr.id} className="hover:bg-gray-50">
                   <TableCell className="font-mono font-semibold text-blue-600">
-                    {qr.requirementNo}
+                    {normalizeLegacyQrNumber(qr.requirementNo)}
                   </TableCell>
                   <TableCell className="font-mono text-sm text-gray-600">
                     {qr.sourceInquiryNumber || '-'}
@@ -441,13 +712,13 @@ export function MyQuoteRequirements() {
         <Dialog open={showDocumentPreview} onOpenChange={setShowDocumentPreview}>
           <DialogContent className="max-w-[95vw] h-[95vh] overflow-hidden p-0">
             <DialogHeader className="border-b px-6 py-4">
-              <DialogTitle>QR 文档预览 - {selectedQR.requirementNo}</DialogTitle>
+              <DialogTitle>QR 文档预览 - {normalizeLegacyQrNumber(selectedQR.requirementNo)}</DialogTitle>
             </DialogHeader>
             <div className="h-[calc(95vh-72px)] overflow-auto bg-[#525659] p-6">
               {(() => {
                 const templateSnapshot = selectedQR.templateSnapshot || selectedQR.template_snapshot || null;
                 const templateVersion = templateSnapshot?.version || null;
-                const documentData = buildSalesSafeQuoteRequirementDocument(selectedQR, 'Sales_Rep') as QuoteRequirementDocumentData | null;
+                const documentData = resolvedPreviewDocumentData;
                 if (!templateVersion || !documentData) {
                   return (
                     <div className="mx-auto rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
@@ -462,6 +733,7 @@ export function MyQuoteRequirements() {
                       data={documentData}
                       layoutConfig={templateVersion?.layout_json || undefined}
                       textOverrides={textOverrides}
+                      showRelationBanner={false}
                     />
                   </div>
                 );

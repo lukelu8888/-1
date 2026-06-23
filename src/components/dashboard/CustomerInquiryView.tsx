@@ -1,6 +1,6 @@
 import React, { forwardRef, useEffect, useState } from 'react';
 import { Badge } from '../ui/badge';
-import { Boxes, Cloud, Download, FileStack, Link2, Package2, Paperclip, ShieldAlert } from 'lucide-react';
+import { Cloud, Download, FileStack, Package2, ShieldAlert } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '../ui/dialog';
@@ -88,49 +88,6 @@ type InternalAttachmentBundleItem = {
   processingState: OemFileProcessingState;
   deliveryScope: OemFileDeliveryScope;
   factoryFacingOutput: OemFactoryFacingOutput | null;
-};
-
-const getProductPackageSummary = (product: any) => {
-  const snapshot = product?.productPackageSnapshot || null;
-  const normalizedSnapshotOem = normalizeOemData(snapshot?.oem || null);
-  const normalizedProductOem = normalizeOemData(product?.oem || null);
-  const attachmentCount =
-    Number(snapshot?.attachmentCount || 0) ||
-    (normalizedSnapshotOem.enabled ? normalizedSnapshotOem.files.length : 0) ||
-    (normalizedProductOem.enabled ? normalizedProductOem.files.length : 0);
-
-  return {
-    customerProductId: String(product?.customerProductId || snapshot?.id || '').trim() || null,
-    sourceProductId: String(product?.sourceProductId || snapshot?.sourceProductId || '').trim() || null,
-    supplierProductId: String(product?.supplierProductId || snapshot?.supplierProductId || '').trim() || null,
-    customerModelNo: String(product?.customerModelNo || snapshot?.customerModelNo || '').trim() || null,
-    supplierModelNo: String(product?.supplierModelNo || product?.modelNo || snapshot?.supplierModelNo || '').trim() || null,
-    attachmentCount,
-    description: String(snapshot?.description || product?.specification || product?.specifications || '').trim() || null,
-    hasSnapshot: Boolean(snapshot),
-    itemType:
-      String(product?.itemType || snapshot?.itemType || '').trim() === 'oem_custom'
-        ? 'OEM / Custom'
-        : 'Standard',
-  };
-};
-
-const getProjectRevisionSummary = (product: any) => {
-  const revision = product?.projectRevisionSnapshot || null;
-  if (!revision) return null;
-  return {
-    projectId: String(revision.projectId || '').trim() || null,
-    projectCode: String(revision.projectCode || '').trim() || null,
-    projectName: String(revision.projectName || '').trim() || null,
-    revisionId: String(revision.revisionId || '').trim() || null,
-    revisionCode: String(revision.revisionCode || '').trim() || null,
-    revisionStatus: String(revision.revisionStatus || '').trim() || 'working',
-    finalRevisionId: String(revision.finalRevisionId || '').trim() || null,
-    finalRevisionCode: String(revision.finalRevisionCode || '').trim() || null,
-    snapshotAt: String(revision.snapshotAt || '').trim() || null,
-    attachmentCount: Number(revision.attachmentCount || 0),
-    description: String(revision.description || '').trim() || null,
-  };
 };
 
 const formatFileSize = (size?: number | null) => {
@@ -1018,131 +975,6 @@ function InternalAttachmentBundlePanel({
   );
 }
 
-function InternalProductPackagePanel({ inquiry }: { inquiry: any }) {
-  const products = Array.isArray(inquiry?.products) ? inquiry.products : [];
-  if (products.length === 0) return null;
-
-  return (
-    <A4DocumentContainer pageWidth="210mm" pageMinHeight="297mm">
-      <section className="h-full">
-        <div className="mb-3">
-          <div className="mb-2 flex items-start justify-between">
-            <div>
-              <h2 className="text-2xl font-bold tracking-wider text-black">CUSTOMER PRODUCT PACKAGE SHEET</h2>
-              <div className="mt-1 text-xs text-slate-600">
-                Internal handoff page for customer-side My Products package references attached to this inquiry.
-              </div>
-            </div>
-            <Badge variant="outline" className="text-[11px]">
-              Internal View
-            </Badge>
-          </div>
-          <div className="border-t-2 border-b border-gray-400" style={{ borderTopColor: '#000000', borderTopWidth: '3px' }} />
-        </div>
-
-        <div className="mb-3 border border-gray-400">
-          <div className="bg-gray-200 px-3 py-1.5 text-xs font-bold">PACKAGE OVERVIEW</div>
-          <div className="grid grid-cols-4 divide-x divide-gray-300 text-xs">
-            <div className="px-3 py-2">
-              <div className="text-gray-500">Inquiry No.</div>
-              <div className="mt-1 font-semibold text-black">{inquiry?.inquiryNumber || inquiry?.id || '-'}</div>
-            </div>
-            <div className="px-3 py-2">
-              <div className="text-gray-500">Customer</div>
-              <div className="mt-1 font-semibold text-black">{inquiry?.buyerInfo?.companyName || '-'}</div>
-            </div>
-            <div className="px-3 py-2">
-              <div className="text-gray-500">Package-linked Items</div>
-              <div className="mt-1 font-semibold text-black">{products.length}</div>
-            </div>
-            <div className="px-3 py-2">
-              <div className="text-gray-500">Generated For</div>
-              <div className="mt-1 font-semibold text-black">Sales / Internal Follow-up</div>
-            </div>
-          </div>
-        </div>
-
-        <table className="w-full border-collapse border border-gray-400 text-xs">
-          <thead>
-            <tr className="bg-gray-100">
-              <th className="border border-gray-300 px-2 py-2 text-left">No.</th>
-              <th className="border border-gray-300 px-2 py-2 text-left">Product</th>
-              <th className="border border-gray-300 px-2 py-2 text-left">Customer Package Ref</th>
-              <th className="border border-gray-300 px-2 py-2 text-left">Model Mapping</th>
-              <th className="border border-gray-300 px-2 py-2 text-left">Package Snapshot</th>
-              <th className="border border-gray-300 px-2 py-2 text-left">Inquiry Link</th>
-            </tr>
-          </thead>
-          <tbody>
-            {products.map((product: any, index: number) => {
-              const summary = getProductPackageSummary(product);
-              const projectRevision = getProjectRevisionSummary(product);
-              return (
-                <tr key={String(product?.id || index)} className="align-top">
-                  <td className="border border-gray-300 px-2 py-2 text-center">{index + 1}</td>
-                  <td className="border border-gray-300 px-2 py-2">
-                    <div className="font-semibold text-black">{product?.productName || 'Unnamed Product'}</div>
-                    <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-600">
-                      <Boxes className="h-3.5 w-3.5" />
-                      {summary.itemType}
-                    </div>
-                  </td>
-                  <td className="border border-gray-300 px-2 py-2">
-                    <div className="space-y-1">
-                      <div><span className="text-gray-500">Customer Product ID:</span> <span className="break-all text-black">{summary.customerProductId || '-'}</span></div>
-                      <div><span className="text-gray-500">Source Product ID:</span> <span className="break-all text-black">{summary.sourceProductId || '-'}</span></div>
-                      <div className="inline-flex items-center gap-1 text-black">
-                        <Paperclip className="h-3.5 w-3.5 text-slate-400" />
-                        {summary.attachmentCount} attachment(s)
-                      </div>
-                    </div>
-                  </td>
-                  <td className="border border-gray-300 px-2 py-2">
-                    <div className="space-y-1">
-                      <div><span className="text-gray-500">Customer Model#:</span> <span className="text-black">{summary.customerModelNo || '-'}</span></div>
-                      <div className="inline-flex items-center gap-1 text-black">
-                        <Link2 className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{summary.supplierModelNo || '-'}</span>
-                      </div>
-                      <div><span className="text-gray-500">Supplier Product ID:</span> <span className="break-all text-black">{summary.supplierProductId || '-'}</span></div>
-                    </div>
-                  </td>
-                  <td className="border border-gray-300 px-2 py-2">
-                    <div className="space-y-1">
-                      <div className="inline-flex items-center gap-1 text-black">
-                        <FileStack className="h-3.5 w-3.5 text-slate-400" />
-                        {summary.hasSnapshot ? 'Snapshot attached' : 'No snapshot'}
-                      </div>
-                      {projectRevision ? (
-                        <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">
-                          <div><span className="text-gray-500">Project:</span> <span className="text-black">{projectRevision.projectCode ? `${projectRevision.projectCode} · ` : ''}{projectRevision.projectName || '-'}</span></div>
-                          <div><span className="text-gray-500">Revision:</span> <span className="text-black">{projectRevision.revisionCode || '-'} · {projectRevision.revisionStatus}</span></div>
-                          <div><span className="text-gray-500">Final Rev:</span> <span className="text-black">{projectRevision.finalRevisionCode || 'Not locked yet'}</span></div>
-                          <div><span className="text-gray-500">Snapshot At:</span> <span className="text-black">{projectRevision.snapshotAt || '-'}</span></div>
-                        </div>
-                      ) : null}
-                      <div className="whitespace-pre-wrap text-slate-700">
-                        {summary.description || 'No description snapshot attached.'}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="border border-gray-300 px-2 py-2">
-                    <div className="space-y-1">
-                      <div><span className="text-gray-500">Qty:</span> <span className="text-black">{Number(product?.quantity || 0) || 0}</span></div>
-                      <div><span className="text-gray-500">Unit:</span> <span className="text-black">{product?.unit || 'pcs'}</span></div>
-                      <div><span className="text-gray-500">Target:</span> <span className="text-black">{Number(product?.targetPrice || product?.price || 0) || 0}</span></div>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
-    </A4DocumentContainer>
-  );
-}
-
 export const CustomerInquiryView = forwardRef<HTMLDivElement, CustomerInquiryViewProps>(
   ({ inquiry, audience = 'customer', onUpdateInquiry }, ref) => {
     const cachedPublishedTemplateSettings = peekPublishedTemplateSettingsCache('ing');
@@ -1274,7 +1106,6 @@ export const CustomerInquiryView = forwardRef<HTMLDivElement, CustomerInquiryVie
           </div>
         ) : null}
         <CustomerInquiryDocumentA4Pages data={documentData} />
-        {audience === 'internal' ? <InternalProductPackagePanel inquiry={inquiry} /> : null}
         {audience === 'internal' ? <InternalAttachmentBundlePanel inquiry={inquiry} onUpdateInquiry={onUpdateInquiry} /> : null}
         <OemInquirySummary inquiry={inquiry} audience={audience} />
       </div>

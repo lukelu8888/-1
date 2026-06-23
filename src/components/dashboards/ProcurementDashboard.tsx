@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { Package, TrendingUp, AlertTriangle, CheckCircle, Clock, Truck, FileText, Building2, MapPin, Calendar, DollarSign, ShoppingCart, ClipboardCheck, AlertCircle } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Package, AlertTriangle, Clock, Truck, ShoppingCart, ClipboardCheck, AlertCircle, Building2, FileText, MapPin, CheckCircle } from 'lucide-react';
 import { ProcurementQuotationRequests } from '../admin/ProcurementQuotationRequests';
+import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext';
+import { buildProcurementDashboardOverview } from '../../lib/services/procurementDashboardDataService';
 
 interface ProcurementDashboardProps {
   user: {
@@ -14,6 +16,14 @@ interface ProcurementDashboardProps {
 export default function ProcurementDashboard({ user }: ProcurementDashboardProps) {
   // 🔥 采购专员工作台 - 紧凑专业版 · 全面整合验货
   const [activeTab, setActiveTab] = useState<'overview' | 'quotation-requests'>('quotation-requests');
+  const { purchaseOrders } = usePurchaseOrders();
+
+  const overview = useMemo(() => {
+    return buildProcurementDashboardOverview(purchaseOrders, user.email);
+  }, [purchaseOrders, user.email]);
+  const { taskCenter } = overview;
+  const collaborationSections = taskCenter.collaborationSections;
+  const taskSections = taskCenter.taskSections;
 
   // 🔍 调试日志
   React.useEffect(() => {
@@ -31,9 +41,11 @@ export default function ProcurementDashboard({ user }: ProcurementDashboardProps
           <p className="opacity-90 text-sm">欢迎回来，{user.name} · 今日采购、发货、验货任务概览</p>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <div className="bg-white/20 px-3 py-1 rounded">📦 23个采购订单</div>
-          <div className="bg-white/20 px-3 py-1 rounded">🚢 18个待发货</div>
-          <div className="bg-white/20 px-3 py-1 rounded">🔍 12个待验货</div>
+          <div className="bg-white/20 px-3 py-1 rounded">📦 {overview.procurementContracts.length}个采购订单</div>
+          <div className="bg-white/20 px-3 py-1 rounded">🧾 {overview.prAssignmentQueue.length}个PR待分配</div>
+          <div className="bg-white/20 px-3 py-1 rounded">✅ {overview.cgApprovalQueue.length}个CG待审批</div>
+          <div className="bg-white/20 px-3 py-1 rounded">🚢 {overview.inTransitOrders.length}个在途/待发货</div>
+          <div className="bg-white/20 px-3 py-1 rounded">🔍 {overview.inspectionOrders.length}个待验货</div>
         </div>
       </div>
 
@@ -80,8 +92,8 @@ export default function ProcurementDashboard({ user }: ProcurementDashboardProps
                     <ShoppingCart className="w-4 h-4 text-blue-600" />
                     <p className="text-xs text-gray-600">待处理采购单</p>
                   </div>
-                  <p className="text-2xl text-gray-900">23</p>
-                  <p className="text-xs text-blue-600 mt-1">总额 $1,256,800</p>
+                  <p className="text-2xl text-gray-900">{overview.pendingProcurement.length}</p>
+                  <p className="text-xs text-blue-600 mt-1">总额 ${overview.amountTotal.toLocaleString()}</p>
                 </div>
               </div>
             </div>
@@ -94,8 +106,8 @@ export default function ProcurementDashboard({ user }: ProcurementDashboardProps
                     <Package className="w-4 h-4 text-orange-600" />
                     <p className="text-xs text-gray-600">待发货订单</p>
                   </div>
-                  <p className="text-2xl text-gray-900">18</p>
-                  <p className="text-xs text-orange-600 mt-1">⚡ 5个紧急</p>
+                  <p className="text-2xl text-gray-900">{overview.inTransitOrders.length}</p>
+                  <p className="text-xs text-orange-600 mt-1">⚡ {overview.urgentOrders.length}个紧急</p>
                 </div>
               </div>
             </div>
@@ -108,8 +120,8 @@ export default function ProcurementDashboard({ user }: ProcurementDashboardProps
                     <ClipboardCheck className="w-4 h-4 text-indigo-600" />
                     <p className="text-xs text-gray-600">待验货订单</p>
                   </div>
-                  <p className="text-2xl text-gray-900">12</p>
-                  <p className="text-xs text-indigo-600 mt-1">🔍 3个纯验货</p>
+                  <p className="text-2xl text-gray-900">{overview.inspectionOrders.length}</p>
+                  <p className="text-xs text-indigo-600 mt-1">🧾 {overview.prAssignmentQueue.length}个PR待分配</p>
                 </div>
               </div>
             </div>
@@ -122,8 +134,8 @@ export default function ProcurementDashboard({ user }: ProcurementDashboardProps
                     <Truck className="w-4 h-4 text-purple-600" />
                     <p className="text-xs text-gray-600">在途货物</p>
                   </div>
-                  <p className="text-2xl text-gray-900">34</p>
-                  <p className="text-xs text-purple-600 mt-1">🚢 追踪34批次</p>
+                  <p className="text-2xl text-gray-900">{overview.inTransitOrders.length}</p>
+                  <p className="text-xs text-purple-600 mt-1">🚢 跟踪 {overview.inTransitOrders.length} 批次</p>
                 </div>
               </div>
             </div>
@@ -137,35 +149,32 @@ export default function ProcurementDashboard({ user }: ProcurementDashboardProps
                 <div className="flex items-center justify-between">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
                     <Package className="w-4 h-4 text-orange-600" />
-                    <span>紧急发货 (5)</span>
+                    <span>紧急/待批采购 ({overview.topUrgent.length})</span>
                   </h3>
                 </div>
               </div>
               <div className="p-3 space-y-2 max-h-72 overflow-y-auto">
-                {[
-                  { order: 'SO-2024-1156', customer: 'ABC Corporation', items: '电气配件×500', deadline: '今天', urgent: true },
-                  { order: 'SO-2024-1142', customer: 'Global Trade Ltd', items: '卫浴五金×300', deadline: '明天', urgent: true },
-                  { order: 'SO-2024-1138', customer: 'Euro Imports', items: '门窗配件×800', deadline: '明天', urgent: false },
-                  { order: 'SO-2024-1129', customer: 'Pacific Trading', items: '劳保用品×1200', deadline: '后天', urgent: false },
-                  { order: 'SO-2024-1115', customer: 'Delta Exports', items: '电气开关×600', deadline: '3天后', urgent: false },
-                ].map((task, idx) => (
+                {overview.topUrgent.map((task, idx) => (
                   <div 
                     key={idx} 
                     className={`p-2 rounded border ${
-                      task.urgent ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'
+                      String(task.cgType || '').toLowerCase() === 'urgent' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-gray-900">{task.order}</span>
-                      {task.urgent && <AlertCircle className="w-3 h-3 text-red-600" />}
+                      <span className="text-xs font-semibold text-gray-900">{task.poNumber}</span>
+                      {String(task.cgType || '').toLowerCase() === 'urgent' && <AlertCircle className="w-3 h-3 text-red-600" />}
                     </div>
-                    <p className="text-xs text-gray-600 truncate">{task.customer}</p>
+                    <p className="text-xs text-gray-600 truncate">{task.supplierName || '待定供应商'}</p>
                     <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
-                      <span>{task.items}</span>
-                      <span className="text-orange-600">{task.deadline}</span>
+                      <span>{(task.items || []).slice(0, 1).map((item) => `${item.productName}×${item.quantity}`).join(', ') || '待补充明细'}</span>
+                      <span className="text-orange-600">{task.procurementRequestStatus || task.status}</span>
                     </div>
                   </div>
                 ))}
+                {overview.topUrgent.length === 0 && (
+                  <div className="p-3 text-xs text-gray-500">暂无紧急或待批采购任务</div>
+                )}
               </div>
             </div>
 
@@ -175,37 +184,36 @@ export default function ProcurementDashboard({ user }: ProcurementDashboardProps
                 <div className="flex items-center justify-between">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
                     <ShoppingCart className="w-4 h-4 text-blue-600" />
-                    <span>待处理采购 (23)</span>
+                    <span>待处理采购 ({overview.topPending.length})</span>
                   </h3>
                 </div>
               </div>
               <div className="p-3 space-y-2 max-h-72 overflow-y-auto">
-                {[
-                  { po: 'PO-2024-0856', supplier: '华南五金供应商', items: '电气开关×2000', amount: '$45,800', processing: false },
-                  { po: 'PO-2024-0843', supplier: '东莞包装材料厂', items: '包装箱×5000', amount: '$18,600', processing: true },
-                  { po: 'PO-2024-0831', supplier: '深圳塑料制品厂', items: '塑料配件×3000', amount: '$32,400', processing: false },
-                  { po: 'PO-2024-0829', supplier: '广州电子配件商', items: '电子元件×1500', amount: '$67,200', processing: true },
-                  { po: 'PO-2024-0815', supplier: '佛山模具工厂', items: '金属模具×100', amount: '$128,400', processing: false },
-                ].map((task, idx) => (
+                {overview.topPending.map((task, idx) => (
                   <div 
                     key={idx} 
                     className={`p-2 rounded border ${
-                      task.processing ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'
+                      ['pending_manager_approval', 'pending_ceo_approval'].includes(String(task.procurementRequestStatus || ''))
+                        ? 'bg-blue-50 border-blue-200'
+                        : 'bg-gray-50 border-gray-200'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-gray-900">{task.po}</span>
-                      {task.processing && (
+                      <span className="text-xs font-semibold text-gray-900">{task.poNumber}</span>
+                      {['pending_manager_approval', 'pending_ceo_approval'].includes(String(task.procurementRequestStatus || '')) && (
                         <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">处理中</span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-600 truncate">{task.supplier}</p>
+                    <p className="text-xs text-gray-600 truncate">{task.supplierName || '待定供应商'}</p>
                     <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
-                      <span>{task.items}</span>
-                      <span className="text-blue-600">{task.amount}</span>
+                      <span>{(task.items || []).slice(0, 1).map((item) => `${item.productName}×${item.quantity}`).join(', ') || '待补充明细'}</span>
+                      <span className="text-blue-600">${Number(task.totalAmount || 0).toLocaleString()}</span>
                     </div>
                   </div>
                 ))}
+                {overview.topPending.length === 0 && (
+                  <div className="p-3 text-xs text-gray-500">暂无待处理采购任务</div>
+                )}
               </div>
             </div>
 
@@ -215,134 +223,211 @@ export default function ProcurementDashboard({ user }: ProcurementDashboardProps
                 <div className="flex items-center justify-between">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
                     <ClipboardCheck className="w-4 h-4 text-indigo-600" />
-                    <span>验货任务 (12)</span>
+                    <span>验货任务 ({overview.topInspection.length})</span>
                   </h3>
                 </div>
               </div>
               <div className="p-3 space-y-2 max-h-72 overflow-y-auto">
-                {[
-                  { id: 'INS-2024-0345', type: '纯验货服务', supplier: '东莞电子厂', status: '验货中', fee: '$350' },
-                  { id: 'INS-2024-0342', type: '标准采购验货', supplier: '深圳五金厂', status: '待验货', fee: '-' },
-                  { id: 'INS-2024-0338', type: '代理采购验货', supplier: '广州塑料厂', status: '验货中', fee: '-' },
-                  { id: 'INS-2024-0335', type: '工程项目验货', supplier: '佛山模具厂', status: '待验货', fee: '-' },
-                  { id: 'INS-2024-0332', type: '纯验货服务', supplier: '中山���子厂', status: '待开票', fee: '$280' },
-                ].map((task, idx) => (
+                {overview.topInspection.map((task, idx) => (
                   <div 
                     key={idx} 
                     className={`p-2 rounded border ${
-                      task.status === '验货中' ? 'bg-indigo-50 border-indigo-200' :
-                      task.status === '待开票' ? 'bg-green-50 border-green-200' :
+                      String(task.qcInspectionStatus || '').toLowerCase() === 'in_progress' ? 'bg-indigo-50 border-indigo-200' :
+                      String(task.qcInspectionStatus || '').toLowerCase() === 'completed' ? 'bg-green-50 border-green-200' :
                       'bg-gray-50 border-gray-200'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-gray-900">{task.id}</span>
+                      <span className="text-xs font-semibold text-gray-900">{task.poNumber}</span>
                       <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        task.status === '验货中' ? 'bg-indigo-100 text-indigo-700' :
-                        task.status === '待开票' ? 'bg-green-100 text-green-700' :
+                        String(task.qcInspectionStatus || '').toLowerCase() === 'in_progress' ? 'bg-indigo-100 text-indigo-700' :
+                        String(task.qcInspectionStatus || '').toLowerCase() === 'completed' ? 'bg-green-100 text-green-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {task.status}
+                        {task.qcInspectionStatus || '待验货'}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-600 truncate">{task.supplier}</p>
+                    <p className="text-xs text-gray-600 truncate">{task.supplierName || '待定供应商'}</p>
                     <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
-                      <span>{task.type}</span>
-                      {task.fee !== '-' && <span className="text-green-600 font-semibold">{task.fee}</span>}
+                      <span>{task.inspectionExecutionMode || '标准采购验货'}</span>
+                      <span className="text-green-600 font-semibold">{task.qcReleaseStatus || '-'}</span>
                     </div>
                   </div>
                 ))}
+                {overview.topInspection.length === 0 && (
+                  <div className="p-3 text-xs text-gray-500">暂无待验货采购任务</div>
+                )}
               </div>
             </div>
           </div>
 
           {/* 📊 监控面板 - 双列 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 在途货物跟踪 - 紧凑版 */}
             <div className="bg-white rounded-lg shadow-sm">
-              <div className="p-3 border-b border-gray-200">
+              <div className="p-3 border-b border-gray-200 bg-amber-50">
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
-                  <Truck className="w-4 h-4 text-purple-600" />
-                  <span>在途货物跟踪（最新5批）</span>
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <span>风险摘要</span>
+                </h3>
+              </div>
+              <div className="p-3 grid grid-cols-2 gap-2">
+                <div className="rounded border border-red-200 bg-red-50 p-3">
+                  <div className="text-xs text-red-700">紧急采购</div>
+                  <div className="mt-1 text-xl font-semibold text-red-900">{overview.riskSummary.urgentCount}</div>
+                </div>
+                <div className="rounded border border-blue-200 bg-blue-50 p-3">
+                  <div className="text-xs text-blue-700">待审批</div>
+                  <div className="mt-1 text-xl font-semibold text-blue-900">{overview.riskSummary.pendingApprovalCount}</div>
+                </div>
+                <div className="rounded border border-amber-200 bg-amber-50 p-3">
+                  <div className="text-xs text-amber-700">待校验</div>
+                  <div className="mt-1 text-xl font-semibold text-amber-900">{overview.riskSummary.pendingValidationCount}</div>
+                </div>
+                <div className="rounded border border-gray-200 bg-gray-50 p-3">
+                  <div className="text-xs text-gray-700">缺供应商</div>
+                  <div className="mt-1 text-xl font-semibold text-gray-900">{overview.riskSummary.missingSupplierCount}</div>
+                </div>
+                <div className="rounded border border-purple-200 bg-purple-50 p-3 col-span-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-purple-700">QC阻断</div>
+                      <div className="mt-1 text-xl font-semibold text-purple-900">{overview.riskSummary.qcBlockedCount}</div>
+                    </div>
+                    <Clock className="w-5 h-5 text-purple-500" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-sm">
+              <div className="p-3 border-b border-gray-200 bg-slate-50">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <Building2 className="w-4 h-4 text-slate-600" />
+                  <span>协同角色入口</span>
                 </h3>
               </div>
               <div className="p-3 space-y-2">
-                {[
-                  { tracking: 'SHIP-2024-5623', from: '深圳', to: '洛杉矶', status: '海运中', eta: '12月15日', progress: 65 },
-                  { tracking: 'SHIP-2024-5618', from: '广州', to: '纽约', status: '清关中', eta: '12月8日', progress: 85 },
-                  { tracking: 'SHIP-2024-5607', from: '东莞', to: '芝加哥', status: '海运中', eta: '12月20日', progress: 45 },
-                  { tracking: 'SHIP-2024-5595', from: '佛山', to: '迈阿密', status: '已发货', eta: '12月25日', progress: 20 },
-                  { tracking: 'SHIP-2024-5584', from: '深圳', to: '旧金山', status: '海运中', eta: '12月18日', progress: 55 },
-                ].map((item, idx) => (
-                  <div key={idx} className="p-2 rounded-lg bg-gray-50 border border-gray-200">
+                {collaborationSections.map((section) => (
+                  <div key={section.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">{section.label}</div>
+                        <div className="mt-1 text-xs text-slate-600">{section.roles.join(' / ')}</div>
+                      </div>
+                      <div className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm">
+                        {section.count}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {collaborationSections.length === 0 && (
+                  <div className="p-3 text-xs text-gray-500">暂无待协同事项</div>
+                )}
+              </div>
+            </div>
+
+            {/* PR / CG 队列区块（由数据契约驱动） */}
+            <div className="bg-white rounded-lg shadow-sm">
+              <div className="p-3 border-b border-gray-200">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <ShoppingCart className="w-4 h-4 text-blue-600" />
+                  <span>{taskSections[0]?.label || 'PR 分配待办'}（最新5条）</span>
+                </h3>
+              </div>
+              <div className="p-3 space-y-2">
+                {(taskSections[0]?.items || []).map((item, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-2 rounded-lg border ${
+                      String(item.procurementRequestStatus || '') === 'pending_procurement_assignment'
+                        ? 'bg-amber-50 border-amber-200'
+                        : 'bg-blue-50 border-blue-200'
+                    }`}
+                  >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-gray-900">{item.tracking}</span>
+                      <span className="text-xs font-semibold text-gray-900">{item.poNumber}</span>
                       <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        item.status === '清关中' ? 'bg-orange-100 text-orange-700' :
-                        item.status === '海运中' ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-700'
+                        String(item.procurementRequestStatus || '') === 'pending_procurement_assignment'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-blue-100 text-blue-700'
                       }`}>
-                        {item.status}
+                        {item.procurementRequestStatus || '待分配'}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-gray-600 mb-2">
                       <MapPin className="w-3 h-3" />
-                      <span>{item.from} → {item.to}</span>
-                      <span className="ml-auto text-purple-600">ETA: {item.eta}</span>
+                      <span>{item.customerCompany || item.customerName || '待补客户'}</span>
+                      <span className="ml-auto text-blue-600">
+                        {Number(item.allocatedSupplierCount || 0)}/{(item.items || []).length || 0} 已分配
+                      </span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-1.5">
+                    <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1">
                       <div 
-                        className="bg-purple-600 h-1.5 rounded-full transition-all"
-                        style={{ width: `${item.progress}%` }}
+                        className="bg-blue-600 h-1.5 rounded-full transition-all"
+                        style={{
+                          width: `${(Number(item.allocatedSupplierCount || 0) / Math.max((item.items || []).length || 1, 1)) * 100}%`,
+                        }}
                       />
                     </div>
+                    <p className="text-xs text-gray-500 truncate">
+                      {(item.items || []).slice(0, 1).map((product) => `${product.productName}×${product.quantity}`).join(', ') || '待补充明细'}
+                    </p>
                   </div>
                 ))}
+                {(taskSections[0]?.items || []).length === 0 && (
+                  <div className="p-3 text-xs text-gray-500">暂无待分配 PR</div>
+                )}
               </div>
             </div>
 
-            {/* 供应商绩效评估 - 紧凑版 */}
+            {/* CG 审批待办 */}
             <div className="bg-white rounded-lg shadow-sm">
               <div className="p-3 border-b border-gray-200">
                 <h3 className="flex items-center gap-2 text-sm font-semibold">
-                  <Building2 className="w-4 h-4 text-green-600" />
-                  <span>供应商绩效（Top 5）</span>
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                  <span>{taskSections[1]?.label || 'CG 审批待办'}（最新5条）</span>
                 </h3>
               </div>
               <div className="p-3 space-y-2">
-                {[
-                  { supplier: '华南五金供应商', score: 98, onTime: '99%', quality: '98%', rating: 'A+' },
-                  { supplier: '东莞包装材料厂', score: 95, onTime: '97%', quality: '96%', rating: 'A' },
-                  { supplier: '深圳塑料制品厂', score: 92, onTime: '95%', quality: '93%', rating: 'A' },
-                  { supplier: '广州电子配件商', score: 88, onTime: '90%', quality: '91%', rating: 'B+' },
-                  { supplier: '佛山模具工厂', score: 85, onTime: '88%', quality: '89%', rating: 'B' },
-                ].map((item, idx) => (
-                  <div key={idx} className="p-2 rounded-lg bg-gray-50 border border-gray-200">
+                {(taskSections[1]?.items || []).map((item, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-2 rounded-lg border ${
+                      String(item.procurementRequestStatus || '') === 'pending_ceo_approval'
+                        ? 'bg-red-50 border-red-200'
+                        : 'bg-green-50 border-green-200'
+                    }`}
+                  >
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs font-semibold text-gray-900 truncate">{item.supplier}</span>
+                      <span className="text-xs font-semibold text-gray-900 truncate">{item.poNumber}</span>
                       <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${
-                        item.rating.startsWith('A') ? 'bg-green-100 text-green-700' :
-                        'bg-yellow-100 text-yellow-700'
+                        String(item.procurementRequestStatus || '') === 'pending_ceo_approval'
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-green-100 text-green-700'
                       }`}>
-                        {item.rating}
+                        {item.procurementRequestStatus === 'pending_ceo_approval' ? 'CEO审批' : '经理审批'}
                       </span>
                     </div>
+                    <p className="text-xs text-gray-600 truncate mb-2">{item.supplierName || '待定供应商'}</p>
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div>
-                        <span className="block text-gray-500">评分</span>
-                        <span className="font-semibold text-gray-900">{item.score}</span>
+                        <span className="block text-gray-500">类型</span>
+                        <span className="font-semibold text-gray-900">{item.cgType || 'standard'}</span>
                       </div>
                       <div>
-                        <span className="block text-gray-500">准时</span>
-                        <span className="font-semibold text-gray-900">{item.onTime}</span>
+                        <span className="block text-gray-500">金额</span>
+                        <span className="font-semibold text-gray-900">${Number(item.totalAmount || 0).toLocaleString()}</span>
                       </div>
                       <div>
-                        <span className="block text-gray-500">质量</span>
-                        <span className="font-semibold text-gray-900">{item.quality}</span>
+                        <span className="block text-gray-500">校验</span>
+                        <span className="font-semibold text-gray-900">{item.prValidationStatus || '-'}</span>
                       </div>
                     </div>
                   </div>
                 ))}
+                {(taskSections[1]?.items || []).length === 0 && (
+                  <div className="p-3 text-xs text-gray-500">暂无待审批 CG</div>
+                )}
               </div>
             </div>
           </div>

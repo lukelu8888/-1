@@ -12,7 +12,6 @@ import QuotationDetailView from './QuotationDetailView';
 import { Quotation } from '../admin/QuotationManagement';
 import { toast } from 'sonner';
 import { salesQuotationService } from '../../lib/supabaseService';
-import { readCustomerQuotationCache, writeCustomerQuotationCache } from '../../lib/customerPortalCache';
 import { addTombstones, filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { canDeleteQuotation } from '../../lib/erp-core/delete-guard';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
@@ -26,25 +25,22 @@ interface QuotationReceivedProps {
 }
 
 export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: QuotationReceivedProps) {
-  const { user } = useUser();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [detailInitialAction, setDetailInitialAction] = useState<'accepted' | 'rejected' | 'negotiating' | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]); // 🆕 批量选择状态
-  const [serverQuotations, setServerQuotations] = useState<any[]>(() => readCustomerQuotationCache(user?.email));
+  const [serverQuotations, setServerQuotations] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  useEffect(() => {
-    setSelectedIds([]);
-  }, [user?.email]);
+  const { user } = useUser();
 
   useEffect(() => {
-    setServerQuotations(readCustomerQuotationCache(user?.email));
+    setSelectedIds([]);
   }, [user?.email]);
 
   // 🔥 从服务器加载“客户收到的报价”（接口：GET /api/sales-quotations，customer 角色会自动按 customer_email 过滤）
@@ -61,7 +57,6 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
         if (!alive) return;
         const apiList = Array.isArray(rows) ? rows : [];
         setServerQuotations(apiList);
-        writeCustomerQuotationCache(user.email, apiList);
         setLastFetchedAt(new Date().toISOString());
       } catch (e: any) {
         console.error('❌ [QuotationReceived] 加载 /api/sales-quotations 失败:', e);
@@ -355,7 +350,16 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
         })
       );
 
-      toast.success('✅ Quotation accepted');
+      toast.success('✅ 报价已确认接受！', {
+        description: '确认已回传给业务员。业务员将准备销售合同，审批通过并发送后会出现在 Active Orders。',
+        duration: 6000,
+      });
+      window.dispatchEvent(new CustomEvent('ordersUpdated', {
+        detail: {
+          source: 'customer_accept_quotation',
+          quotationKey,
+        },
+      }));
       setReloadKey((k) => k + 1);
     } catch (e: any) {
       console.error('❌ [QuotationReceived] 接受报价失败:', e);
@@ -674,11 +678,17 @@ export function QuotationReceived({ onNavigate, onSwitchMyOrdersTab }: Quotation
                                 size="sm"
                                 className="h-8 bg-green-600 px-2 text-white hover:bg-green-700"
                                 onClick={() => handleAcceptQuotation(quotation)}
+                                title="接受报价后，确认将回传给业务员准备销售合同"
                               >
                                 <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                                Accept
+                                Accept QT
                               </Button>
                             </>
+                          )}
+                          {quotation.customerStatus === 'accepted' && (
+                            <Badge className="bg-blue-50 text-blue-700 border-blue-200">
+                              Waiting for SC
+                            </Badge>
                           )}
                           <Button
                             variant="ghost"

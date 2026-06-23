@@ -12,6 +12,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
+import { exportShipmentBridgeService } from '../../lib/services/export-service/exportShipmentBridgeService';
+import { syncExportDocumentationBridgeFromOperations } from '../../lib/services/export-service/exportDocumentationBridgeWorkflowService';
+import { syncExportExecutionBridgeState } from '../../lib/services/export-service/syncExportExecutionBridgeState';
 
 // 发货信息接口
 interface ShipmentInfo {
@@ -104,6 +107,7 @@ interface ShipmentInfo {
 export default function ShipmentManagement() {
   const [viewMode, setViewMode] = useState<'list' | 'detail'>('list');
   const [selectedShipment, setSelectedShipment] = useState<ShipmentInfo | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // 模拟发货数据
   const mockShipments: ShipmentInfo[] = [
@@ -298,6 +302,8 @@ export default function ShipmentManagement() {
     }
   ];
 
+  const allShipments: ShipmentInfo[] = [...exportShipmentBridgeService.list(), ...mockShipments];
+
   // 获取状态配置
   const getStatusConfig = (status: string) => {
     const configs = {
@@ -317,6 +323,50 @@ export default function ShipmentManagement() {
     setViewMode('detail');
   };
 
+  const advanceExportShipment = () => {
+    if (!selectedShipment || !selectedShipment.contractNumber.startsWith('ES-SHIP-')) return
+    const bridgeRecord = exportShipmentBridgeService.list().find((item) => item.contractNumber === selectedShipment.contractNumber)
+    if (!bridgeRecord) return
+
+    const nextStatusMap: Record<ShipmentInfo['tracking']['currentStatus'], ShipmentInfo['tracking']['currentStatus']> = {
+      preparing: 'shipped',
+      shipped: 'in_transit',
+      in_transit: 'arrived',
+      arrived: 'cleared',
+      cleared: 'delivered',
+      delivered: 'delivered',
+    }
+    const nextStatus = nextStatusMap[bridgeRecord.tracking.currentStatus]
+    const today = new Date().toISOString().slice(0, 10)
+
+    const nextDocuments = { ...bridgeRecord.documents }
+    if (nextStatus === 'shipped' && nextDocuments.billOfLading) {
+      nextDocuments.billOfLading = { ...nextDocuments.billOfLading, status: 'issued', issueDate: today }
+    }
+
+    exportShipmentBridgeService.update(bridgeRecord.id, {
+      tracking: {
+        ...bridgeRecord.tracking,
+        currentStatus: nextStatus,
+        timeline: [
+          ...bridgeRecord.tracking.timeline,
+          {
+            date: today,
+            status: `桥接推进到${nextStatus}`,
+            location: bridgeRecord.portOfLoading,
+            note: '由 ShipmentManagement 推进',
+          },
+        ],
+      },
+      documents: nextDocuments,
+    })
+    syncExportDocumentationBridgeFromOperations(bridgeRecord.serviceOrderId, 'ShipmentManagement')
+    syncExportExecutionBridgeState(bridgeRecord.serviceOrderId)
+    const nextSelected = exportShipmentBridgeService.list().find((item) => item.id === bridgeRecord.id)
+    setSelectedShipment((nextSelected as ShipmentInfo) || null)
+    setRefreshKey((value) => value + 1)
+  }
+
   // 返回列表
   const backToList = () => {
     setViewMode('list');
@@ -324,7 +374,7 @@ export default function ShipmentManagement() {
   };
 
   if (viewMode === 'detail' && selectedShipment) {
-    return <ShipmentDetail shipment={selectedShipment} onBack={backToList} />;
+    return <ShipmentDetail shipment={selectedShipment} onBack={backToList} onAdvanceExportShipment={advanceExportShipment} />;
   }
 
   // 发货列表视图
@@ -345,7 +395,7 @@ export default function ShipmentManagement() {
       {/* 发货列表 */}
       <div className="bg-white border border-gray-200 rounded overflow-hidden">
         <div className="grid gap-3 p-3">
-          {mockShipments.map((shipment) => {
+          {allShipments.map((shipment) => {
             const statusConfig = getStatusConfig(shipment.tracking.currentStatus);
             const StatusIcon = statusConfig.icon;
             
@@ -438,11 +488,11 @@ export default function ShipmentManagement() {
 
       {/* 统计信息 */}
       <div className="flex items-center justify-between text-[11px] text-gray-500">
-        <span>共 {mockShipments.length} 个发货订单</span>
+        <span>共 {allShipments.length} 个发货订单</span>
         <div className="flex items-center gap-4">
-          <span>准备中: {mockShipments.filter(s => s.tracking.currentStatus === 'preparing').length}</span>
-          <span>在途: {mockShipments.filter(s => s.tracking.currentStatus === 'in_transit').length}</span>
-          <span>已到港: {mockShipments.filter(s => s.tracking.currentStatus === 'arrived').length}</span>
+          <span>准备中: {allShipments.filter(s => s.tracking.currentStatus === 'preparing').length}</span>
+          <span>在途: {allShipments.filter(s => s.tracking.currentStatus === 'in_transit').length}</span>
+          <span>已到港: {allShipments.filter(s => s.tracking.currentStatus === 'arrived').length}</span>
         </div>
       </div>
     </div>
@@ -450,7 +500,15 @@ export default function ShipmentManagement() {
 }
 
 // 发货详情组件（包含4个标签页）
-function ShipmentDetail({ shipment, onBack }: { shipment: ShipmentInfo; onBack: () => void }) {
+function ShipmentDetail({
+  shipment,
+  onBack,
+  onAdvanceExportShipment,
+}: {
+  shipment: ShipmentInfo
+  onBack: () => void
+  onAdvanceExportShipment: () => void
+}) {
   const statusConfig = getStatusConfig(shipment.tracking.currentStatus);
   const StatusIcon = statusConfig.icon;
 
@@ -473,6 +531,11 @@ function ShipmentDetail({ shipment, onBack }: { shipment: ShipmentInfo; onBack: 
               <StatusIcon className="w-3 h-3 mr-1" />
               {statusConfig.label}
             </Badge>
+            {shipment.contractNumber.startsWith('ES-SHIP-') && shipment.tracking.currentStatus !== 'delivered' && (
+              <Button size="sm" className="h-7 text-[12px] bg-[#F96302] hover:bg-[#E55A02]" onClick={onAdvanceExportShipment}>
+                推进一步
+              </Button>
+            )}
           </div>
           <p className="text-[11px] text-gray-500 mt-0.5">{shipment.customerName}</p>
         </div>

@@ -13,6 +13,7 @@ import {
   Check,
   Eye,
   ShoppingCart,
+  Package,
 } from 'lucide-react';
 import { MainCategory } from '../../data/productData';
 import { fetchProductCatalog } from '../../lib/services/productCatalogService';
@@ -23,6 +24,7 @@ import { useRegion } from '../../contexts/RegionContext';
 import { toRegionCode } from '../../lib/supabaseService';
 import { getCustomerFacingModelNo } from '../../utils/productModelDisplay';
 import { websiteCatalogAdapter } from '../../lib/adapters/websiteCatalogAdapter';
+import { buildMainCategoriesFromStorefrontDepartments } from '../../lib/storefrontDepartmentBaseline';
 
 interface InquiryProductHomeProps {
   onAddProduct: (product: any) => void;
@@ -39,11 +41,45 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
   const [selectedProductCategory, setSelectedProductCategory] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [productCatalog, setProductCatalog] = useState<MainCategory[]>([]);
+  const [productCatalog, setProductCatalog] = useState<MainCategory[]>(() =>
+    buildMainCategoriesFromStorefrontDepartments()
+  );
+  const renderCategoryIcon = (icon?: string) => {
+    if (!icon || icon === 'Package') {
+      return <Package className="h-5 w-5 text-[#F96302]" />;
+    }
+    return <span className="text-lg leading-none">{icon}</span>;
+  };
 
   useEffect(() => {
-    fetchProductCatalog().then(setProductCatalog).catch(console.error);
-  }, []);
+    let isCurrent = true;
+    const instantCatalog = buildMainCategoriesFromStorefrontDepartments();
+    setProductCatalog(instantCatalog);
+
+    fetchProductCatalog(toRegionCode(region))
+      .then((catalog) => {
+        if (!isCurrent) return;
+        setProductCatalog(catalog.length > 0 ? catalog : instantCatalog);
+      })
+      .catch((error) => {
+        console.error(error);
+        if (isCurrent) setProductCatalog(instantCatalog);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [region]);
+
+  useEffect(() => {
+    if (productCatalog.length === 0) return;
+    const hasExpandedCategory = productCatalog.some((category) => category.id === expandedCategory);
+    if (!hasExpandedCategory) {
+      setExpandedCategory(productCatalog[0].id);
+      setSelectedSubCategory(null);
+      setSelectedProductCategory(null);
+    }
+  }, [expandedCategory, productCatalog]);
 
   // Toggle sub-category expansion
   const toggleSubCategory = (subCategoryId: string) => {
@@ -87,7 +123,10 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
     return prodCat.products.length;
   };
 
-  const currentCategory = productCatalog.find(c => c.id === expandedCategory);
+  const currentCategory =
+    productCatalog.find(c => c.id === expandedCategory) ||
+    productCatalog[0] ||
+    null;
 
   // Filter categories based on search
   const filteredCategories = productCatalog.filter(cat =>
@@ -172,6 +211,7 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
       model: modelNo,
       modelNo,
       internalModelNo: modelNo,
+      factoryModelNo: inquirySnapshotDraft.factoryModelNo || inquirySnapshotDraft.masterRef?.factoryModelNo || modelNo,
       sku: modelNo,
       regionCode,
       targetPrice: product.price || 0,
@@ -276,7 +316,9 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                     ) : (
                       <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-[#F96302] flex-shrink-0" />
                     )}
-                    <span className="text-xl flex-shrink-0">{category.icon}</span>
+                    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+                      {renderCategoryIcon(category.icon)}
+                    </span>
                     <span className={`flex-1 text-sm ${isExpanded ? 'font-medium text-[#F96302]' : 'text-gray-700'}`}>
                       {category.name}
                     </span>
@@ -442,11 +484,9 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                               alt={product.name}
                               className="w-full h-full object-cover"
                             />
-                            {product.price && (
-                              <div className="absolute top-2 right-2 bg-[#F96302] text-white px-2 py-1 rounded font-medium text-sm">
-                                ${product.price.toFixed(2)}
-                              </div>
-                            )}
+                            <div className="absolute top-2 right-2 bg-[#F96302] text-white px-2 py-1 rounded font-medium text-sm">
+                              ${Number(product.price || 0).toFixed(2)}
+                            </div>
                             {isAdded && (
                               <div className="absolute top-2 left-2 bg-green-600 text-white px-2 py-1 rounded flex items-center gap-1 text-xs font-medium">
                                 <Check className="w-3 h-3" />
@@ -525,8 +565,8 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                             onClick={() => setSelectedProductCategory(prodCat.id)}
                           >
                             <div className="flex items-start gap-3 mb-3">
-                              <div className="w-12 h-12 bg-[#F96302]/10 rounded flex items-center justify-center text-2xl flex-shrink-0">
-                                {currentCategory.icon}
+                              <div className="w-12 h-12 bg-[#F96302]/10 rounded flex items-center justify-center flex-shrink-0">
+                                {renderCategoryIcon(currentCategory.icon)}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <h3 className="font-medium text-[#1A1A1A] mb-1">{prodCat.name}</h3>
@@ -564,8 +604,8 @@ export function InquiryProductHome({ onAddProduct, addedProductIds, onSelectCate
                           onClick={() => setSelectedSubCategory(subCat.id)}
                         >
                           <div className="flex items-start gap-3 mb-3">
-                            <div className="w-12 h-12 bg-[#F96302]/10 rounded flex items-center justify-center text-2xl flex-shrink-0">
-                              {currentCategory.icon}
+                            <div className="w-12 h-12 bg-[#F96302]/10 rounded flex items-center justify-center flex-shrink-0">
+                              {renderCategoryIcon(currentCategory.icon)}
                             </div>
                             <div className="flex-1 min-w-0">
                               <h3 className="font-medium text-[#1A1A1A] mb-1">{subCat.name}</h3>

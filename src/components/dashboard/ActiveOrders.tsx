@@ -47,6 +47,7 @@ import { filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { canDeleteOrder } from '../../lib/erp-core/delete-guard';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 import { getCurrentUser } from '../../utils/dataIsolation';
+import { StandardDocumentViewerShell } from '../documents/StandardDocumentViewerShell';
 
 interface ActiveOrdersProps {
   orders?: any[];
@@ -55,25 +56,6 @@ interface ActiveOrdersProps {
 }
 
 export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOrdersProps) {
-  const normalizePortalOrder = (order: any) => {
-    if (!order) return order;
-    return {
-      ...order,
-      orderNumber: order.orderNumber || order.order_number || '',
-      customerEmail: order.customerEmail || order.customer_email || '',
-      quotationId: order.quotationId || order.quotation_id || null,
-      quotationNumber: order.quotationNumber || order.quotation_number || null,
-      contractNumber: order.contractNumber || order.contract_number || null,
-      expectedDelivery: order.expectedDelivery || order.expected_delivery || '',
-      totalAmount: order.totalAmount ?? order.total_amount ?? 0,
-      paymentStatus: order.paymentStatus || order.payment_status || '',
-      shippingMethod: order.shippingMethod || order.shipping_method || '',
-      trackingNumber: order.trackingNumber || order.tracking_number || '',
-      createdAt: order.createdAt || order.created_at || null,
-      updatedAt: order.updatedAt || order.updated_at || null,
-    };
-  };
-
   const toSafeNumber = (value: unknown): number => {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value === 'string') {
@@ -127,12 +109,13 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
       const SENT_STATUSES = new Set(['sent_to_customer', 'sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'payment_proof_uploaded', 'balance_uploaded']);
       const sent = contracts.filter((c: any) => {
         const isSent = SENT_STATUSES.has(c.status);
-        const cEmail = (c.customerEmail || '').toLowerCase();
-        const isInvalidEmail = !cEmail || cEmail === 'n/a' || !cEmail.includes('@');
-        const emailMatch = cEmail === email || isInvalidEmail;
-        return isSent && emailMatch;
+        return isSent;
       });
-      const mappedOrders = sent.map((c: any) => ({
+      const mappedOrders = sent.map((c: any) => {
+        const depositProof = c.depositProof || c.customerPaymentProof || c.deposit_payment_proof || c.deposit_proof || null;
+        const depositStatus = String(c.paymentStatusDeposit || c.payment_status_deposit || '').trim().toLowerCase();
+        const contractStatus = String(c.status || '').trim().toLowerCase();
+        return ({
           id: c.id,
           orderNumber: c.contractNumber,
           customer: c.customerName,
@@ -143,10 +126,12 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
           totalAmount: c.totalAmount,
           currency: c.currency || 'USD',
           // 合同状态映射到订单状态
-          status: c.status === 'customer_confirmed' ? 'Awaiting Deposit'
-            : c.status === 'deposit_uploaded' ? 'Payment Proof Uploaded'
-            : c.status === 'deposit_confirmed' ? 'Deposit Received'
-            : c.status === 'cancelled' ? 'cancelled'
+          status: depositStatus === 'uploaded' || contractStatus === 'deposit_uploaded' || contractStatus === 'payment_proof_uploaded' || depositProof
+            ? 'Payment Proof Uploaded'
+            : depositStatus === 'confirmed' || contractStatus === 'deposit_confirmed'
+              ? 'Deposit Received'
+            : contractStatus === 'customer_confirmed' ? 'Awaiting Deposit'
+            : contractStatus === 'cancelled' ? 'cancelled'
             : 'Pending',
           progress: 0,
           products: (c.products || []).map((p: any) => ({
@@ -166,9 +151,11 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
           contactPerson: c.contactPerson,
           phone: c.contactPhone,
           createdFrom: 'sales_contract',
+          depositPaymentProof: depositProof,
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
-        }));
+        });
+      });
       const combined = [...mappedOrders];
         setContractOrders(combined);
         console.log(`📦 [ActiveOrders] 最终显示 ${combined.length} 条已发送合同 (email: ${email})`);
@@ -183,18 +170,23 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
   }, [contracts]);
 
   // 🔥 筛选当前用户的活跃订单（合并 OrderContext + 合同上下文）
-  const contextOrders = allOrders
-    .map((order) => normalizePortalOrder(order))
-    .filter(order =>
-      customerEmail &&
-      (order.customerEmail || '').toLowerCase() === customerEmail &&
-      order.status !== 'delivered' &&
-      order.status !== 'completed' &&
-      order.status !== 'cancelled'
-    );
+  const contextOrders = allOrders.filter(order => {
+    if (!customerEmail) return false;
+    const currentUserType = String((currentUser as any)?.type || '').toLowerCase();
+    const isTerminal = order.status === 'delivered' || order.status === 'completed' || order.status === 'cancelled';
+    if (isTerminal) return false;
+
+    // Customer order loading is already scoped by the server to the logged-in
+    // customer's enterprise. Do not re-filter by exact contact email here:
+    // a company can log in as abc.customer@test.com while the SC contact is
+    // talal@citybuilders.biz.
+    if (currentUserType === 'customer') return true;
+
+    return (order.customerEmail || '').toLowerCase() === customerEmail;
+  });
   // 合并去重
   const seen = new Set<string>();
-  const activeOrders = [...contextOrders, ...contractOrders.map((order) => normalizePortalOrder(order))].filter(order => {
+  const activeOrders = [...contextOrders, ...contractOrders].filter(order => {
     const key = order.orderNumber || order.id;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -872,82 +864,68 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
       </Card>
 
       {/* Order Details Dialog - 直接显示销售合同 */}
-      <Dialog open={isDetailOpen} onOpenChange={(open) => {
-        setIsDetailOpen(open);
-      }}>
-        <DialogContent className="w-[calc(210mm+56px)] max-w-[calc(100vw-2rem)] h-[95vh] overflow-hidden p-0 flex flex-col">
-          <div className="shrink-0 border-b bg-white px-6 py-4">
-            <DialogTitle className="text-lg">
-              Sales Contract - {sanitizeDisplayText(selectedOrder?.orderNumber || selectedOrder?.id)}
-            </DialogTitle>
-            <DialogDescription className="text-sm">
-              View and download your sales contract
-            </DialogDescription>
-          </div>
-          {selectedOrder && (
-            <>
-              <div className="min-h-0 flex-1 overflow-auto bg-[#525659] px-6 py-6">
-                <div className="mx-auto flex w-fit justify-center">
-                  <SalesContractDocument 
-                    data={adaptOrderToSalesContract({
-                      orderNumber: selectedOrder.orderNumber || selectedOrder.id,
-                      customer: selectedOrder.customer || user?.name || '',
-                      customerEmail: selectedOrder.customerEmail || user?.email,
-                      customerCountry: selectedOrder.customerCountry || selectedOrder.country,
-                      customerAddress: selectedOrder.shippingAddress || selectedOrder.customerAddress,
-                      customerContact: selectedOrder.contactPerson,
-                      customerPhone: selectedOrder.contactPhone || selectedOrder.phone,
-                      date: selectedOrder.date,
-                      expectedDelivery: selectedOrder.deliveryTime || selectedOrder.expectedDelivery || '25-30 days',
-                      totalAmount: toSafeNumber(selectedOrder.totalAmount),
-                      currency: selectedOrder.currency || 'USD',
-                      products: (Array.isArray(selectedOrder.products) ? selectedOrder.products : []).map((p: any) => {
-                        const quantity = toSafeNumber(p.quantity ?? p.qty);
-                        const unitPrice = toSafeNumber(p.price ?? p.unitPrice);
-                        return {
-                        name: p.name,
-                        specs: p.specification || p.specs,
-                        quantity,
-                        unitPrice,
-                        totalPrice: toSafeNumber(p.totalPrice) || (quantity * unitPrice),
-                        unit: p.unit || 'pcs',
-                        hsCode: p.hsCode,
-                        modelNo: getFormalBusinessModelNo(p),
-                        imageUrl: p.imageUrl
-                      }}),
-                      shippingMethod: selectedOrder.shippingMethod,
-                      quotationNumber: selectedOrder.quotationNumber,
-                      region: (selectedOrder.region || 'NA') as 'NA' | 'SA' | 'EU',
-                      paymentTerms: selectedOrder.paymentTerms,
-                      tradeTerms: selectedOrder.tradeTerms,
-                      portOfLoading: selectedOrder.portOfLoading,
-                      portOfDestination: selectedOrder.portOfDestination
-                    })}
-                  />
-                </div>
-              </div>
-
-              <div className="shrink-0 flex justify-end gap-2 border-t bg-white px-6 py-4 print:hidden">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsDetailOpen(false)}
-                >
-                  Close
-                </Button>
-                <Button
-                  size="sm"
-                  className="bg-[#F96302] hover:bg-[#E05502]"
-                  onClick={() => window.print()}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Print / Download PDF
-                </Button>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      <StandardDocumentViewerShell
+        open={isDetailOpen}
+        onClose={() => setIsDetailOpen(false)}
+        title={`Sales Contract - ${sanitizeDisplayText(selectedOrder?.orderNumber || selectedOrder?.id || 'SC')}`}
+        closeLabel="Close"
+        bodyClassName="flex-1 overflow-auto bg-gray-100 p-6"
+        innerClassName="mx-auto max-w-[210mm]"
+        actions={(
+          <Button
+            size="sm"
+            className="bg-[#F96302] hover:bg-[#E05502]"
+            onClick={() => window.print()}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Print / Download PDF
+          </Button>
+        )}
+      >
+        {selectedOrder ? (
+          <SalesContractDocument
+            data={adaptOrderToSalesContract({
+              orderNumber: selectedOrder.orderNumber || selectedOrder.id,
+              customer: selectedOrder.customer || user?.name || '',
+              customerEmail: selectedOrder.customerEmail || user?.email,
+              customerCountry: selectedOrder.customerCountry || selectedOrder.country,
+              customerAddress: selectedOrder.shippingAddress || selectedOrder.customerAddress,
+              customerContact: selectedOrder.contactPerson,
+              customerPhone: selectedOrder.contactPhone || selectedOrder.phone,
+              date: selectedOrder.date,
+              expectedDelivery: selectedOrder.deliveryTime || selectedOrder.expectedDelivery || '25-30 days',
+              totalAmount: toSafeNumber(selectedOrder.totalAmount),
+              currency: selectedOrder.currency || 'USD',
+              products: (Array.isArray(selectedOrder.products) ? selectedOrder.products : []).map((p: any) => {
+                const quantity = toSafeNumber(p.quantity ?? p.qty);
+                const unitPrice = toSafeNumber(p.price ?? p.unitPrice);
+                return {
+                  name: p.name,
+                  specs: p.specification || p.specs,
+                  quantity,
+                  unitPrice,
+                  totalPrice: toSafeNumber(p.totalPrice) || (quantity * unitPrice),
+                  unit: p.unit || 'pcs',
+                  hsCode: p.hsCode,
+                  modelNo: getFormalBusinessModelNo(p),
+                  imageUrl: p.imageUrl,
+                  productNameEn: p.productNameEn,
+                  productNameZh: p.productNameZh,
+                  specificationEn: p.specificationEn,
+                  specificationZh: p.specificationZh,
+                };
+              }),
+              shippingMethod: selectedOrder.shippingMethod,
+              quotationNumber: selectedOrder.quotationNumber,
+              region: (selectedOrder.region || 'NA') as 'NA' | 'SA' | 'EU',
+              paymentTerms: selectedOrder.paymentTerms,
+              tradeTerms: selectedOrder.tradeTerms,
+              portOfLoading: selectedOrder.portOfLoading,
+              portOfDestination: selectedOrder.portOfDestination,
+            })}
+          />
+        ) : null}
+      </StandardDocumentViewerShell>
 
       {/* 🆕 Submit Response Dialog */}
       <Dialog open={isResponseOpen} onOpenChange={setIsResponseOpen}>
@@ -1083,11 +1061,13 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                 if (!selectedOrder || !user || !responseType) return;
                 if ((responseType === 'negotiate' || responseType === 'reject') && !responseMessage.trim()) return;
 
-                const orderId = selectedOrder.id || selectedOrder.orderNumber;
+                const orderId = selectedOrder.contractNumber || selectedOrder.orderNumber || selectedOrder.id;
                 const customerFeedbackPayload = {
+                  status: responseType === 'accept' ? 'accepted' : responseType,
                   type: responseType,
                   message: responseMessage.trim(),
                   submittedAt: new Date().toISOString(),
+                  submittedBy: user.email,
                 };
                 try {
                   if (responseType === 'accept') {
@@ -1142,6 +1122,15 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                       signatureData: `Electronically confirmed via customer portal`,
                     };
                     await customerConfirmContract(orderId, syntheticSig, true, customerFeedbackPayload);
+                    effectiveUpdateOrder(orderId, {
+                      status: 'Awaiting Deposit',
+                      paymentStatus: 'Pending',
+                      confirmed: true,
+                      confirmedAt: new Date().toISOString(),
+                      confirmedBy: user.email,
+                      confirmedDate: new Date().toISOString().split('T')[0],
+                      customerFeedback: customerFeedbackPayload,
+                    } as any);
 
                     // 步骤5️⃣: 通知财务部门新的应收账款
                     sendNotificationToUser('finance@gaoshengda.com', {
@@ -1204,7 +1193,7 @@ export function ActiveOrders({ orders, onUpdateOrder, initialOrderId }: ActiveOr
                   }
 
                 } catch (e: any) {
-                  toast.error(e?.message || '提交失败，请重试');
+                  toast.error(e?.message || 'Submission failed. Please try again.');
                 } finally {
                   setIsResponseOpen(false);
                   setResponseType(null);

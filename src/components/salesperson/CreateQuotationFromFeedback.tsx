@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { QuoteRequirement, QuoteRequirementFeedback } from '../../contexts/QuoteRequirementContext';
-import { SalesQuotation, SalesQuotationItem, useSalesQuotations } from '../../contexts/SalesQuotationContext';
+import { SalesQuotation, SalesQuotationItem, useSalesQuotations, type PaymentMode } from '../../contexts/SalesQuotationContext';
 import { useInquiries } from '../../contexts/InquiryContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { supabase } from '../../lib/supabase';
@@ -38,6 +38,13 @@ import { adaptSalesQuotationToDocumentData } from '../../utils/documentDataAdapt
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import { desensitizePurchaserFeedbackText, sanitizePurchaserFeedbackForSales } from '../../utils/purchaserFeedbackSanitizer';
 import { resolveQuoteRequirementOwner } from '../../utils/quotationOwnership';
+import {
+  BALANCE_TRIGGER_OPTIONS,
+  PAYMENT_MODE_OPTIONS,
+  buildPaymentTermsText,
+  deriveBalanceTrigger,
+  type BalanceTrigger,
+} from '../../lib/paymentFlow';
 
 interface CreateQuotationFromFeedbackProps {
   open: boolean;
@@ -45,6 +52,37 @@ interface CreateQuotationFromFeedbackProps {
   qr: QuoteRequirement;
   feedback: QuoteRequirementFeedback;
 }
+
+const SALES_QUOTATION_TARGET_CURRENCY = 'USD';
+const DEFAULT_CNY_PER_USD = 7.2;
+
+const normalizeCurrencyCode = (value: unknown) =>
+  String(value || '').trim().toUpperCase();
+
+const getSourceCostCurrency = (product: QuoteRequirementFeedback['products'][number]) =>
+  normalizeCurrencyCode(product.sourcePricing?.currency || product.currency || product.sourcePricing?.priceType) || 'CNY';
+
+const getCnyPerUsdRate = (product: QuoteRequirementFeedback['products'][number]) => {
+  const candidates = [
+    product.sourcePricing?.exchangeRate,
+    product.taxSettings?.usdRate,
+  ];
+  const matched = candidates
+    .map((value) => Number(value))
+    .find((value) => Number.isFinite(value) && value > 0);
+
+  return matched || DEFAULT_CNY_PER_USD;
+};
+
+const convertSupplierCostToSalesCurrency = (product: QuoteRequirementFeedback['products'][number]) => {
+  const rawCostPrice = Number(product.costPrice || 0);
+  const sourceCurrency = getSourceCostCurrency(product);
+  if (sourceCurrency === SALES_QUOTATION_TARGET_CURRENCY) return rawCostPrice;
+  if (sourceCurrency === 'CNY' || sourceCurrency === 'RMB' || sourceCurrency === 'CNY_WITH_TAX' || sourceCurrency === 'CNY_NO_TAX') {
+    return rawCostPrice / getCnyPerUsdRate(product);
+  }
+  return rawCostPrice;
+};
 
 export function CreateQuotationFromFeedback({
   open,
@@ -61,18 +99,35 @@ export function CreateQuotationFromFeedback({
   const [margin, setMargin] = useState(feedback.suggestedMargin || 30);
   const [items, setItems] = useState<SalesQuotationItem[]>([]);
   const [validityDays, setValidityDays] = useState(30);
-  const [paymentTerms, setPaymentTerms] = useState(feedback.paymentTerms || 'T/T 30% 定金，70% 发货前');
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('tt_deposit_balance_before_shipment');
+  const [balanceTrigger, setBalanceTrigger] = useState<BalanceTrigger>('before_shipment');
+  const [paymentTerms, setPaymentTerms] = useState(buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'));
   const [deliveryTerms, setDeliveryTerms] = useState(feedback.deliveryTerms || 'FOB 厦门');
   const [deliveryDate, setDeliveryDate] = useState('');
   const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const rawMode = String((feedback as any).paymentMode || (feedback as any).payment_mode || '').trim() as PaymentMode;
+    const nextMode = PAYMENT_MODE_OPTIONS.some((option) => option.value === rawMode)
+      ? rawMode
+      : 'tt_deposit_balance_before_shipment';
+    const nextTrigger = deriveBalanceTrigger(nextMode, (feedback as any).balanceTrigger || (feedback as any).balance_trigger || null);
+    setPaymentMode(nextMode);
+    setBalanceTrigger(nextTrigger);
+    setPaymentTerms(
+      String(feedback.paymentTerms || buildPaymentTermsText(nextMode, nextTrigger)).trim(),
+    );
+  }, [feedback]);
   
   // 🔥 初始化产品列表
   useEffect(() => {
     if (feedback.products) {
       const initialItems = feedback.products.map((p, index) => {
         const marginDecimal = margin / 100;
-        const salesPrice = p.costPrice * (1 + marginDecimal);
-        const profit = salesPrice - p.costPrice;
+        const costPrice = convertSupplierCostToSalesCurrency(p);
+        const salesPrice = costPrice * (1 + marginDecimal);
+        const profit = salesPrice - costPrice;
         
         return {
           id: `${Date.now()}-${index}`,
@@ -82,11 +137,13 @@ export function CreateQuotationFromFeedback({
           quantity: p.quantity,
           unit: p.unit,
           
-          // 成本信息（脱敏，不显示具体供应商）
-          costPrice: p.costPrice,
+          // 成本信息（脱敏，不显示具体供应商）；客户 QT 统一按 USD 销售币种核算
+          costPrice: parseFloat(costPrice.toFixed(4)),
           selectedSupplier: '已隐藏',
           selectedSupplierName: '已隐藏',
           selectedBJ: salesSafeFeedback.linkedBJ || '已隐藏',
+          currency: SALES_QUOTATION_TARGET_CURRENCY,
+          sourcePricing: p.sourcePricing || null,
           
           // 销售报价
           salesPrice: parseFloat(salesPrice.toFixed(2)),
@@ -239,118 +296,127 @@ export function CreateQuotationFromFeedback({
       });
       return;
     }
-    
-    const qtNumber = await generateQTNumber();
-    const today = new Date().toISOString().split('T')[0];
-    const validUntilDate = new Date();
-    validUntilDate.setDate(validUntilDate.getDate() + validityDays);
-    const validUntil = validUntilDate.toISOString().split('T')[0];
-    const quotationOwner = resolveQuoteRequirementOwner(qr, inquiries, currentUser);
-    
-    const quotation: SalesQuotation = {
-      id: `qt-${Date.now()}`,
-      qtNumber,
-      
-      // 关联单据
-      qrNumber: qr.requirementNo,
-      inqNumber: relatedInquiry.inquiryNumber || relatedInquiry.id,
-      
-      // 区域和客户
-      region: qr.region as 'NA' | 'SA' | 'EU',
-      customerEmail: relatedInquiry.email,
-      customerName: relatedInquiry.contactPerson || relatedInquiry.companyName,
-      customerCompany: relatedInquiry.companyName,
-      
-      // 业务员信息
-      salesPerson: quotationOwner.email || currentUser?.email || '',
-      salesPersonName: quotationOwner.name || currentUser?.name || '',
-      
-      // 报价产品
-      items,
-      
-      // 财务汇总
-      totalCost,
-      totalPrice,
-      totalProfit,
-      profitRate,
-      
-      // 付款和交付条件
-      currency: feedback.products[0]?.currency || 'CNY',
-      paymentTerms,
-      deliveryTerms,
-      deliveryDate: deliveryDate || today,
-      
-      // 审批状态
-      approvalStatus: 'draft',
-      approvalChain: [], // 提交审批时填充
-      
-      // 客户响应
-      customerStatus: 'not_sent',
-      
-      // 报价有效期
-      validUntil,
-      
-      // 版本管理
-      version: 1,
-      
-      // 时间戳
-      createdAt: today,
-      updatedAt: today,
-      
-      // 🔥 备注：分离客户备注和内部备注
-      customerNotes: notes || '', // ✅ 给客户看的备注
-      remarks: notes || '', // ✅ 给客户看的备注（用于文档显示）
-      internalNotes: `基于采购反馈 ${qr.requirementNo} 创建\n采购员建议利润率：${feedback.suggestedMargin}%\n实际利润率：${(profitRate * 100).toFixed(2)}%\n\n采购员建议：\n${desensitizePurchaserFeedbackText(feedback.purchaserRemarks || '', feedback, 'Sales_Rep')}`, // 🔒 内部敏感信息
-      templateId: (qr as any).templateId || (qr as any).template_id || null,
-      templateVersionId: (qr as any).templateVersionId || (qr as any).template_version_id || null,
-      templateSnapshot: (qr as any).templateSnapshot || (qr as any).template_snapshot || { pendingResolution: true },
-      
-      // 🔥 贸易条款（用于文档生成）
-      tradeTerms: {
-        incoterms: deliveryTerms,
-        paymentTerms: paymentTerms,
-        deliveryTime: deliveryDate ? `${Math.ceil((new Date(deliveryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))} days after deposit` : '25-30 days after deposit',
-        packing: 'Export carton with pallets',
-        portOfLoading: 'Xiamen, China',
-        portOfDestination: relatedInquiry.country || '',
-        warranty: '12 months from delivery date against manufacturing defects',
-        inspection: "Seller's factory inspection, buyer has the right to re-inspect upon arrival"
-      }
-    };
 
-    (quotation as any).documentDataSnapshot = adaptSalesQuotationToDocumentData({
-      ...quotation,
-      customerAddress: (relatedInquiry as any).buyerInfo?.address || (relatedInquiry as any).address || '',
-      customerPhone: (relatedInquiry as any).buyerInfo?.phone || (relatedInquiry as any).phone || '',
-      customerCountry: (relatedInquiry as any).country || '',
-    });
-    
-    // 🔥 调试：检查报价单数据
-    console.log('🔍 [CreateQuotationFromFeedback] 创建报价单数据:', {
-      qtNumber,
-      totalPrice,
-      totalCost,
-      profitRate: (profitRate * 100).toFixed(2) + '%',
-      itemsCount: items.length,
-      items: items.map(item => ({
-        productName: item.productName,
-        quantity: item.quantity,
-        costPrice: item.costPrice,
-        salesPrice: item.salesPrice,
-        profit: item.profit,
-        profitMargin: (item.profitMargin * 100).toFixed(2) + '%'
-      }))
-    });
-    
-    // 保存报价单
-    await addQuotation(quotation);
-    
-    toast.success(`✅ 客户报价单已创建 - ${qtNumber}`, {
-      description: `利润率 ${(profitRate * 100).toFixed(2)}%，利润 ${totalProfit.toLocaleString()} ${feedback.products[0]?.currency}`,
-      duration: 5000
-    });
-    
-    onOpenChange(false);
+    try {
+      setSubmitting(true);
+      const qtNumber = await generateQTNumber();
+      const today = new Date().toISOString().split('T')[0];
+      const validUntilDate = new Date();
+      validUntilDate.setDate(validUntilDate.getDate() + validityDays);
+      const validUntil = validUntilDate.toISOString().split('T')[0];
+      const quotationOwner = resolveQuoteRequirementOwner(qr, inquiries, currentUser);
+      const inquiryBuyerInfo = (relatedInquiry as any)?.buyerInfo || {};
+      const customerEmail = String(
+        inquiryBuyerInfo?.email ||
+        (relatedInquiry as any)?.email ||
+        (relatedInquiry as any)?.userEmail ||
+        '',
+      ).trim();
+      const customerName = String(
+        inquiryBuyerInfo?.contactPerson ||
+        (relatedInquiry as any)?.contactPerson ||
+        (relatedInquiry as any)?.customerName ||
+        inquiryBuyerInfo?.companyName ||
+        (relatedInquiry as any)?.companyName ||
+        '',
+      ).trim();
+      const customerCompany = String(
+        inquiryBuyerInfo?.companyName ||
+        (relatedInquiry as any)?.companyName ||
+        (relatedInquiry as any)?.buyerCompany ||
+        customerName ||
+        '',
+      ).trim();
+
+      const quotation: SalesQuotation = {
+        id: `qt-${Date.now()}`,
+        qtNumber,
+        qrNumber: qr.requirementNo,
+        inqNumber: relatedInquiry.inquiryNumber || relatedInquiry.id,
+        region: qr.region as 'NA' | 'SA' | 'EU',
+        customerEmail,
+        customerName,
+        customerCompany,
+        salesPerson: quotationOwner.email || currentUser?.email || '',
+        salesPersonName: quotationOwner.name || currentUser?.name || '',
+        items,
+        totalCost,
+        totalPrice,
+        totalProfit,
+        profitRate,
+        currency: SALES_QUOTATION_TARGET_CURRENCY,
+        paymentTerms,
+        paymentMode,
+        balanceTrigger,
+        deliveryTerms,
+        deliveryDate: deliveryDate || today,
+        approvalStatus: 'draft',
+        approvalChain: [],
+        customerStatus: 'not_sent',
+        validUntil,
+        version: 1,
+        createdAt: today,
+        updatedAt: today,
+        customerNotes: notes || '',
+        remarks: notes || '',
+        internalNotes: `基于采购反馈 ${qr.requirementNo} 创建\n采购员建议利润率：${feedback.suggestedMargin}%\n实际利润率：${(profitRate * 100).toFixed(2)}%\n\n采购员建议：\n${desensitizePurchaserFeedbackText(feedback.purchaserRemarks || '', feedback, 'Sales_Rep')}`,
+        templateId: (qr as any).templateId || (qr as any).template_id || null,
+        templateVersionId: (qr as any).templateVersionId || (qr as any).template_version_id || null,
+        templateSnapshot: (qr as any).templateSnapshot || (qr as any).template_snapshot || { pendingResolution: true },
+        tradeTerms: {
+          incoterms: deliveryTerms,
+          paymentTerms: paymentTerms,
+          deliveryTime: deliveryDate ? `${Math.ceil((new Date(deliveryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))} days after deposit` : '25-30 days after deposit',
+          packing: 'Export carton with pallets',
+          portOfLoading: 'Xiamen, China',
+          portOfDestination: (relatedInquiry as any)?.country || '',
+          warranty: '12 months from delivery date against manufacturing defects',
+          inspection: "Seller's factory inspection, buyer has the right to re-inspect upon arrival"
+        }
+      };
+
+      (quotation as any).documentDataSnapshot = adaptSalesQuotationToDocumentData({
+        ...quotation,
+        customerAddress: inquiryBuyerInfo?.address || (relatedInquiry as any)?.address || '',
+        customerPhone: inquiryBuyerInfo?.phone || (relatedInquiry as any)?.phone || '',
+        customerCountry: (relatedInquiry as any)?.country || '',
+      });
+
+      console.log('🔍 [CreateQuotationFromFeedback] 创建报价单数据:', {
+        qtNumber,
+        totalPrice,
+        totalCost,
+        profitRate: (profitRate * 100).toFixed(2) + '%',
+        itemsCount: items.length,
+        customerEmail,
+        customerCompany,
+        items: items.map(item => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          costPrice: item.costPrice,
+          salesPrice: item.salesPrice,
+          profit: item.profit,
+          profitMargin: (item.profitMargin * 100).toFixed(2) + '%'
+        }))
+      });
+
+      await addQuotation(quotation);
+
+      toast.success(`✅ 客户报价单已创建 - ${qtNumber}`, {
+        description: `利润率 ${(profitRate * 100).toFixed(2)}%，利润 ${totalProfit.toLocaleString()} ${SALES_QUOTATION_TARGET_CURRENCY}`,
+        duration: 5000
+      });
+
+      onOpenChange(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '创建报价单失败'
+      console.error('[CreateQuotationFromFeedback] create quotation failed:', error)
+      toast.error('创建报价单失败', {
+        description: message,
+      })
+    } finally {
+      setSubmitting(false);
+    }
   };
   
   return (
@@ -401,7 +467,7 @@ export function CreateQuotationFromFeedback({
               <div className="text-center">
                 <div className="text-sm text-gray-600 mb-1">采购成本</div>
                 <div className="text-xl font-bold text-orange-600">
-                  {feedback.products[0]?.currency || 'CNY'} {totalCost.toFixed(2)}
+                  {SALES_QUOTATION_TARGET_CURRENCY} {totalCost.toFixed(2)}
                 </div>
               </div>
               <div className="text-center">
@@ -424,13 +490,13 @@ export function CreateQuotationFromFeedback({
               <div className="text-center">
                 <div className="text-sm text-gray-600 mb-1">预估利润</div>
                 <div className="text-xl font-bold text-green-600">
-                  {feedback.products[0]?.currency || 'CNY'} {totalProfit.toFixed(2)}
+                  {SALES_QUOTATION_TARGET_CURRENCY} {totalProfit.toFixed(2)}
                 </div>
               </div>
               <div className="text-center">
                 <div className="text-sm text-gray-600 mb-1">客户报价</div>
                 <div className="text-xl font-bold text-blue-600">
-                  {feedback.products[0]?.currency || 'CNY'} {totalPrice.toFixed(2)}
+                  {SALES_QUOTATION_TARGET_CURRENCY} {totalPrice.toFixed(2)}
                 </div>
               </div>
               <div className="text-center">
@@ -478,7 +544,7 @@ export function CreateQuotationFromFeedback({
                           {item.quantity.toLocaleString()} {item.unit}
                         </TableCell>
                         <TableCell className="text-right text-orange-600 bg-orange-50">
-                          {feedback.products[0]?.currency} {item.costPrice.toFixed(2)}
+                          {SALES_QUOTATION_TARGET_CURRENCY} {item.costPrice.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-right bg-blue-50">
                           <Input 
@@ -491,7 +557,7 @@ export function CreateQuotationFromFeedback({
                           />
                         </TableCell>
                         <TableCell className="text-right font-semibold text-green-600">
-                          {feedback.products[0]?.currency} {totalAmount.toFixed(2)}
+                          {SALES_QUOTATION_TARGET_CURRENCY} {totalAmount.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-center">
                           <Badge className={
@@ -510,11 +576,11 @@ export function CreateQuotationFromFeedback({
                   <TableRow className="bg-gray-50 font-semibold text-base">
                     <TableCell colSpan={3} className="text-right">总计：</TableCell>
                     <TableCell className="text-right text-orange-600 bg-orange-50">
-                      {feedback.products[0]?.currency || 'CNY'} {totalCost.toFixed(2)}
+                      {SALES_QUOTATION_TARGET_CURRENCY} {totalCost.toFixed(2)}
                     </TableCell>
                     <TableCell className="text-right bg-blue-50"></TableCell>
                     <TableCell className="text-right text-green-600 text-lg">
-                      {feedback.products[0]?.currency || 'CNY'} {totalPrice.toFixed(2)}
+                      {SALES_QUOTATION_TARGET_CURRENCY} {totalPrice.toFixed(2)}
                     </TableCell>
                     <TableCell className="text-center">
                       <Badge className={
@@ -544,17 +610,55 @@ export function CreateQuotationFromFeedback({
               />
             </div>
             <div>
-              <Label>付款方式</Label>
-              <Input 
-                value={paymentTerms}
-                onChange={(e) => setPaymentTerms(e.target.value)}
-              />
+              <Label>付款模式</Label>
+              <select
+                value={paymentMode}
+                onChange={(e) => {
+                  const nextMode = e.target.value as PaymentMode;
+                  const nextTrigger = deriveBalanceTrigger(nextMode, null);
+                  setPaymentMode(nextMode);
+                  setBalanceTrigger(nextTrigger);
+                  setPaymentTerms(buildPaymentTermsText(nextMode, nextTrigger));
+                }}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                {PAYMENT_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <Label>交货条款</Label>
               <Input 
                 value={deliveryTerms}
                 onChange={(e) => setDeliveryTerms(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>余款触发节点</Label>
+              <select
+                value={balanceTrigger}
+                onChange={(e) => {
+                  const nextTrigger = e.target.value as BalanceTrigger;
+                  setBalanceTrigger(nextTrigger);
+                  setPaymentTerms(buildPaymentTermsText(paymentMode, nextTrigger));
+                }}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                {BALANCE_TRIGGER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-3">
+              <Label>付款条款展示文本</Label>
+              <Input
+                value={paymentTerms}
+                onChange={(e) => setPaymentTerms(e.target.value)}
               />
             </div>
             <div className="col-span-3">
@@ -597,11 +701,11 @@ export function CreateQuotationFromFeedback({
           </Button>
           <Button 
             onClick={handleSubmit}
-            disabled={!relatedInquiry}
+            disabled={!relatedInquiry || submitting}
             className="bg-orange-600 hover:bg-orange-700 gap-2"
           >
             <CheckCircle className="h-4 w-4" />
-            创建客户报价单
+            {submitting ? '创建中...' : '创建客户报价单'}
           </Button>
         </DialogFooter>
       </DialogContent>

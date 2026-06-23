@@ -1,5 +1,4 @@
 import React, { useState, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { Printer, Download, X, CheckCircle, XCircle, MessageSquare, Calculator } from 'lucide-react';
@@ -12,6 +11,8 @@ import { salesQuotationService } from '../../lib/supabaseService';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { buildPaymentTermsTextEn, deriveBalanceTrigger } from '../../lib/paymentFlow';
+import { StandardDocumentViewerShell } from '../documents/StandardDocumentViewerShell';
 
 interface QuotationDetailViewProps {
   open: boolean;
@@ -286,9 +287,9 @@ export default function QuotationDetailView({
       
       // 公司信息
       company: {
-        name: '福建高盛达富建材有限公司',
+        name: 'Fujian Gaoshengdafu Building Materials Co., Ltd.',
         nameEn: 'Fujian Gaoshengdafu Building Materials Co., Ltd.',
-        address: '中国福建省厦门市思明区',
+        address: 'Siming District, Xiamen, Fujian Province, China',
         addressEn: 'Siming District, Xiamen, Fujian Province, China',
         tel: '+86-592-1234567',
         fax: '+86-592-1234568',
@@ -324,8 +325,15 @@ export default function QuotationDetailView({
       
       // 贸易条款
       tradeTerms: {
-        incoterms: (quotation as any).tradeTerms?.incoterms || quotation.deliveryTerms || 'FOB 厦门',
-        paymentTerms: (quotation as any).tradeTerms?.paymentTerms || (quotation as any).paymentTerms || quotation.paymentTerms || 'T/T 30天',
+        incoterms: (quotation as any).tradeTerms?.incoterms || quotation.deliveryTerms || 'FOB Xiamen',
+        paymentTerms:
+          (quotation as any).tradeTerms?.paymentTerms
+          || (quotation as any).paymentTerms
+          || quotation.paymentTerms
+          || buildPaymentTermsTextEn(
+            (quotation as any).paymentMode,
+            deriveBalanceTrigger((quotation as any).paymentMode, (quotation as any).balanceTrigger || null),
+          ),
         deliveryTime: (quotation as any).tradeTerms?.deliveryTime || quotation.deliveryTime || '25-30 days after deposit',
         packing: (quotation as any).tradeTerms?.packing || quotation.packing || 'Export carton with pallets',
         portOfLoading: (quotation as any).tradeTerms?.portOfLoading || quotation.portOfLoading || 'Xiamen, China',
@@ -351,58 +359,37 @@ export default function QuotationDetailView({
   const quotationData = convertToQuotationData();
 
   return (
-    <Dialog open={open} onOpenChange={onClose} modal={true}>
-        <DialogContent 
-          className="max-w-5xl max-h-[90vh] flex flex-col p-0"
-          onPointerDownOutside={(e) => {
-            // 检查点击是否在Profit Analyzer上
-            const target = e.target as HTMLElement;
-            if (target.closest('[data-profit-analyzer]')) {
-              e.preventDefault(); // 阻止Dialog关闭
-            }
-          }}
-          onInteractOutside={(e) => {
-            // 检查点击是否在Profit Analyzer上
-            const target = e.target as HTMLElement;
-            if (target.closest('[data-profit-analyzer]')) {
-              e.preventDefault(); // 阻止Dialog关闭
-            }
-          }}
-        >
-          {/* 🔥 Header区域 - 固定不滚动 */}
-          <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div>
-                <DialogTitle className="text-base">Quotation Details</DialogTitle>
-                <DialogDescription className="text-xs text-gray-500 mt-1">
-                  Quotation Number: {(quotation as any).qtNumber || quotation.quotationNumber}
-                </DialogDescription>
-              </div>
-              <div className="flex items-center gap-2 print:hidden">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={handlePrint}
-                >
-                  <Printer className="w-3.5 h-3.5 mr-1" />
-                  Print
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={handleDownload}
-                >
-                  <Download className="w-3.5 h-3.5 mr-1" />
-                  Download PDF
-                </Button>
-              </div>
-            </div>
-          </DialogHeader>
-
-          {/* 🔥 Content区域 - 可滚动 */}
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+    <StandardDocumentViewerShell
+      open={open}
+      onClose={onClose}
+      title={`Quotation - ${String((quotation as any).qtNumber || quotation.quotationNumber || 'QT')}`}
+      closeLabel="Close"
+      bodyClassName="flex-1 overflow-auto bg-gray-100 p-6"
+      innerClassName="mx-auto max-w-[210mm]"
+      actions={(
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={handleDownload}
+          >
+            <Download className="w-3.5 h-3.5 mr-1" />
+            Download PDF
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={handlePrint}
+          >
+            <Printer className="w-3.5 h-3.5 mr-1" />
+            Print
+          </Button>
+        </>
+      )}
+    >
+      <div className="space-y-4">
             {/* 台湾大厂风格报价单模板 */}
             <QuotationDocument ref={printRef} quotation={quotationData} />
 
@@ -507,11 +494,9 @@ export default function QuotationDetailView({
                 </div>
               </div>
             )}
-          </div>
-
-          {/* 🔥 粘性操作栏 - 固定在底部，始终可见 */}
+          {/* 🔥 操作栏 */}
           {!hasFeedback && customerStatus !== 'converted' && (
-            <div className="border-t bg-white flex-shrink-0 print:hidden">
+            <div className="border border-gray-200 bg-white print:hidden">
               {/* 🔥 利润计算提示区域 - 放在最顶部 */}
               {!showFeedback && (
                 <div className="px-6 py-3 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-200">
@@ -664,7 +649,7 @@ export default function QuotationDetailView({
 
           {/* 已有反馈或已转订单的关闭按钮 */}
           {(hasFeedback || customerStatus === 'converted') && (
-            <div className="border-t bg-white px-6 py-4 flex-shrink-0 print:hidden">
+            <div className="border border-gray-200 bg-white px-6 py-4 print:hidden">
               <div className="flex justify-end">
                 <Button variant="outline" size="sm" className="h-9 text-sm px-6" onClick={onClose}>
                   Close
@@ -672,7 +657,7 @@ export default function QuotationDetailView({
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+      </div>
+    </StandardDocumentViewerShell>
   );
 }

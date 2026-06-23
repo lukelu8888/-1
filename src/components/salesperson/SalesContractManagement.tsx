@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { WorkflowPipelineBanner, MAIN_WORKFLOW_STEPS } from '../shared/WorkflowPipelineBanner';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -63,12 +64,15 @@ import { deriveSalesContractSplitFields } from '../../lib/customerPortalContract
 import { derivePurchaseOrderWorkflowFields } from '../../lib/services/purchaseOrderQuoteRequirementServices';
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport';
 import { StandardDocumentViewerShell } from '../documents/StandardDocumentViewerShell';
+import { CompactDetailsPopover, type CompactDetailItem } from '../shared/CompactDetailsPopover';
 
 interface SalesContractManagementProps {
   highlightScNumber?: string; // 🔥 高亮显示的销售合同号
   onNavigateToInquiryWithHighlight?: (inquiryNumber: string) => void;
   onNavigateToCostInquiryWithHighlight?: (qrNumber: string) => void;
   onNavigateToQuotationWithHighlight?: (qtNumber: string) => void;
+  /** 下推采购成功后跳转到采购模块的回调 */
+  onNavigateToProcurement?: () => void;
 }
 
 type SalesContractColumnKey =
@@ -171,12 +175,32 @@ const deriveQuotationFinancialSummaryForContract = (
   quotationLike: Record<string, any> | null | undefined,
   contractLike?: Record<string, any> | null,
 ) => {
+  const toPositiveNumber = (...values: any[]) => {
+    for (const value of values) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 0) return numeric;
+    }
+    return Number.NaN;
+  };
+
+  const pickProducts = (...sources: any[]) => {
+    for (const source of sources) {
+      if (Array.isArray(source) && source.length > 0) return source;
+    }
+    return [];
+  };
+
   const contractFinancialSummary =
     contractLike?.documentDataSnapshot?.financialSummary ||
     contractLike?.documentDataSnapshot?.financials ||
+    contractLike?.documentDataSnapshot?.quotationFinancialBridge ||
     contractLike?.documentRenderMeta?.financialSummary ||
     contractLike?.documentRenderMeta?.financials ||
     contractLike?.documentRenderMeta?.quotationFinancialBridge ||
+    contractLike?.document_render_meta?.quotationFinancialBridge ||
+    contractLike?.document_data_snapshot?.financialSummary ||
+    contractLike?.document_data_snapshot?.financials ||
+    contractLike?.document_data_snapshot?.quotationFinancialBridge ||
     null;
   const quotationSnapshot =
     quotationLike?.documentDataSnapshot?.financialSummary ||
@@ -184,24 +208,40 @@ const deriveQuotationFinancialSummaryForContract = (
     quotationLike?.documentRenderMeta?.financialSummary ||
     quotationLike?.documentRenderMeta?.financials ||
     null;
-  const items = Array.isArray(quotationLike?.items)
-    ? quotationLike.items
-    : Array.isArray(quotationLike?.documentDataSnapshot?.products)
-      ? quotationLike.documentDataSnapshot.products
-      : Array.isArray(quotationLike?.templateSnapshot?.products)
-        ? quotationLike.templateSnapshot.products
-        : [];
+  const items = pickProducts(
+    quotationLike?.items,
+    quotationLike?.products,
+    quotationLike?.documentDataSnapshot?.products,
+    quotationLike?.document_data_snapshot?.products,
+    quotationLike?.templateSnapshot?.products,
+    contractLike?.products,
+    contractLike?.documentDataSnapshot?.products,
+    contractLike?.document_data_snapshot?.products,
+    contractLike?.templateSnapshot?.products,
+    contractLike?.documentRenderMeta?.products,
+  );
   const itemsTotalAmount = items.reduce((sum: number, item: any) => {
     const quantity = Number(item?.quantity ?? item?.qty ?? item?.pcs ?? item?.count ?? 0);
     const unitPrice = Number(
       item?.salesPrice ??
       item?.unitPrice ??
+      item?.price ??
       item?.quotePrice ??
+      item?.sales_price ??
+      item?.unit_price ??
       item?.sales_price ??
       item?.quote_price ??
       0,
     );
-    const lineAmount = Number(item?.totalPrice ?? item?.totalAmount ?? item?.total_price);
+    const lineAmount = Number(
+      item?.totalPrice ??
+      item?.totalAmount ??
+      item?.amount ??
+      item?.lineAmount ??
+      item?.line_amount ??
+      item?.total_price ??
+      item?.total_amount,
+    );
     if (Number.isFinite(lineAmount)) return sum + lineAmount;
     return sum + ((Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(unitPrice) ? unitPrice : 0));
   }, 0);
@@ -210,40 +250,96 @@ const deriveQuotationFinancialSummaryForContract = (
     const costPrice = Number(
       item?.costPrice ??
       item?.costUSD ??
+      item?.unitCost ??
+      item?.cost ??
+      item?.purchasePrice ??
+      item?.supplierCost ??
+      item?.supplierPrice ??
+      item?.factoryPrice ??
+      item?.targetCost ??
+      item?.estimatedCost ??
       item?.cost_price ??
       item?.cost_usd ??
+      item?.unit_cost ??
+      item?.purchase_price ??
+      item?.supplier_cost ??
+      item?.supplier_price ??
+      item?.factory_price ??
+      item?.target_cost ??
+      item?.estimated_cost ??
       0,
     );
-    const lineCost = Number(item?.totalCost ?? item?.total_cost);
+    const lineCost = Number(
+      item?.totalCost ??
+      item?.costAmount ??
+      item?.lineCost ??
+      item?.estimatedTotalCost ??
+      item?.totalEstimatedCost ??
+      item?.total_cost ??
+      item?.cost_amount ??
+      item?.line_cost ??
+      item?.estimated_total_cost ??
+      item?.total_estimated_cost,
+    );
     if (Number.isFinite(lineCost)) return sum + lineCost;
     return sum + ((Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(costPrice) ? costPrice : 0));
   }, 0);
 
-  const totalAmount = Number(
-    contractFinancialSummary?.totalAmount ??
-    contractFinancialSummary?.totalPrice ??
-    quotationLike?.totalAmount ??
-    quotationLike?.totalPrice ??
-    quotationSnapshot?.totalAmount ??
-    quotationSnapshot?.totalPrice ??
+  const totalAmount = toPositiveNumber(
+    contractFinancialSummary?.totalAmount,
+    contractFinancialSummary?.totalPrice,
+    contractFinancialSummary?.total_amount,
+    contractFinancialSummary?.total_price,
+    quotationLike?.totalAmount,
+    quotationLike?.totalPrice,
+    quotationLike?.total_amount,
+    quotationLike?.total_price,
+    quotationSnapshot?.totalAmount,
+    quotationSnapshot?.totalPrice,
+    quotationSnapshot?.total_amount,
+    quotationSnapshot?.total_price,
+    contractLike?.totalAmount,
+    contractLike?.totalPrice,
+    contractLike?.total_amount,
+    contractLike?.total_price,
     itemsTotalAmount,
   );
-  const totalCost = Number(
-    contractFinancialSummary?.totalCost ??
-    contractFinancialSummary?.total_cost ??
-    quotationLike?.totalCost ??
-    quotationLike?.total_cost ??
-    quotationSnapshot?.totalCost ??
-    quotationSnapshot?.total_cost ??
+  const totalCost = toPositiveNumber(
+    contractFinancialSummary?.totalCost,
+    contractFinancialSummary?.total_cost,
+    contractFinancialSummary?.estimatedCost,
+    contractFinancialSummary?.estimated_cost,
+    quotationLike?.totalCost,
+    quotationLike?.total_cost,
+    quotationLike?.estimatedCost,
+    quotationLike?.estimated_cost,
+    quotationSnapshot?.totalCost,
+    quotationSnapshot?.total_cost,
+    quotationSnapshot?.estimatedCost,
+    quotationSnapshot?.estimated_cost,
+    contractLike?.totalCost,
+    contractLike?.total_cost,
+    contractLike?.estimatedCost,
+    contractLike?.estimated_cost,
     itemsTotalCost,
   );
   const rawTotalProfit =
     contractFinancialSummary?.totalProfit ??
     contractFinancialSummary?.total_profit ??
+    contractFinancialSummary?.estimatedProfit ??
+    contractFinancialSummary?.estimated_profit ??
     quotationLike?.totalProfit ??
     quotationLike?.total_profit ??
+    quotationLike?.estimatedProfit ??
+    quotationLike?.estimated_profit ??
     quotationSnapshot?.totalProfit ??
-    quotationSnapshot?.total_profit;
+    quotationSnapshot?.total_profit ??
+    quotationSnapshot?.estimatedProfit ??
+    quotationSnapshot?.estimated_profit ??
+    contractLike?.totalProfit ??
+    contractLike?.total_profit ??
+    contractLike?.estimatedProfit ??
+    contractLike?.estimated_profit;
   const totalProfit = Number.isFinite(Number(rawTotalProfit))
     ? Number(rawTotalProfit)
     : (totalAmount - totalCost);
@@ -259,7 +355,11 @@ const deriveQuotationFinancialSummaryForContract = (
     quotationSnapshot?.profitRate ??
     quotationSnapshot?.profit_rate ??
     quotationSnapshot?.profitMargin ??
-    quotationSnapshot?.profit_margin,
+    quotationSnapshot?.profit_margin ??
+    contractLike?.profitRate ??
+    contractLike?.profit_rate ??
+    contractLike?.profitMargin ??
+    contractLike?.profit_margin,
     Number.NaN,
   );
   const profitRate = Number.isFinite(storedProfitRate)
@@ -410,6 +510,7 @@ export function SalesContractManagement({
   onNavigateToInquiryWithHighlight,
   onNavigateToCostInquiryWithHighlight,
   onNavigateToQuotationWithHighlight,
+  onNavigateToProcurement,
 }: SalesContractManagementProps = {}) {
   const { contracts, deleteContract, submitForApproval, sendToCustomer, updateContract, refreshFromBackend, confirmBalancePayment, advanceSCToShipped, advanceSCToCompleted, markPRInitiated } = useSalesContracts();
   const { orders } = useOrders(); // 🔥 获取订单数据
@@ -419,6 +520,7 @@ export function SalesContractManagement({
   const { getQuotationByNumber } = useSalesQuotations(); // Phase 6a: QT look-up for estimated profit
   const currentUser = getCurrentUser();
   const [sendingContractIds, setSendingContractIds] = useState<string[]>([]);
+  const [submittingApprovalIds, setSubmittingApprovalIds] = useState<string[]>([]);
   const [expandedRelatedIds, setExpandedRelatedIds] = useState<string[]>([]);
   const salesContractTableContainerRef = React.useRef<HTMLDivElement | null>(null);
   const salesContractColumnResizeRef = React.useRef<{
@@ -607,6 +709,49 @@ export function SalesContractManagement({
     await updateContract(contractId, { fxRates: updatedRates });
     setEditingFxKey(null);
   };
+
+  const resolveContractWorkflowStatus = React.useCallback((contract: any): string => {
+    const splitFields = deriveSalesContractSplitFields(contract);
+    const executionStatus = String(splitFields.executionStatus || contract?.executionStatus || '').trim().toLowerCase();
+    const order = orders.find((item: any) =>
+      String(item?.orderNumber || '').trim() === String(contract?.contractNumber || '').trim() ||
+      String(item?.contractNumber || '').trim() === String(contract?.contractNumber || '').trim()
+    );
+    const orderStatus = String(order?.status || '').trim().toLowerCase();
+    const feedbackStatus = String(order?.customerFeedback?.status || order?.customerFeedback?.type || '').trim().toLowerCase();
+
+    if (
+      order?.confirmed ||
+      order?.confirmedAt ||
+      feedbackStatus === 'accepted' ||
+      feedbackStatus === 'accept' ||
+      orderStatus === 'awaiting deposit' ||
+      orderStatus === 'customer_confirmed'
+    ) {
+      return 'customer_confirmed';
+    }
+
+    switch (executionStatus) {
+      case 'sent_to_customer':
+        return 'sent';
+      case 'customer_confirmed':
+      case 'customer_rejected':
+      case 'customer_requested_changes':
+      case 'deposit_uploaded':
+      case 'deposit_confirmed':
+      case 'balance_confirmed':
+      case 'shipped':
+      case 'completed':
+        return executionStatus;
+      case 'in_procurement':
+        return 'po_generated';
+      case 'in_pre_production':
+      case 'in_production':
+        return 'production';
+      default:
+        return String(contract?.status || 'draft').trim().toLowerCase();
+    }
+  }, [orders]);
 
   useEffect(() => {
     let cancelled = false;
@@ -950,8 +1095,11 @@ export function SalesContractManagement({
     }
 
     toast.success('✅ 已请求采购', {
-      description: `采购单号：${poNumber}（待采购员分配供应商）`,
-      duration: 4500
+      description: `采购单号：${poNumber}（待采购员在「采购订单管理」模块分配供应商）`,
+      duration: 6000,
+      action: onNavigateToProcurement
+        ? { label: '去采购模块 →', onClick: onNavigateToProcurement }
+        : undefined,
     });
   };
 
@@ -1002,6 +1150,15 @@ export function SalesContractManagement({
   // 🔥 提交审批
   const handleSubmitForApproval = async (contract: any) => {
     console.log('📤 [SO] 提交审批:', contract);
+    const contractKey = String(contract?.id || contract?.contractNumber || '').trim();
+    if (!contractKey) {
+      toast.error('提审失败：合同缺少系统编号，请刷新后重试');
+      return;
+    }
+    if (submittingApprovalIds.includes(contractKey)) return;
+
+    setSubmittingApprovalIds((prev) => [...prev, contractKey]);
+    try {
     
     // 判断审批流程
     const governance = deriveScApprovalGovernance(contract);
@@ -1021,10 +1178,13 @@ export function SalesContractManagement({
     const directorEmail = 'sales.director@cosunchina.com'; // 销售总监：王强
     
     // 🔥 产品摘要
-    const productCount = contract.products.length;
+    const products = Array.isArray(contract.products) ? contract.products : [];
+    const productCount = products.length;
     const productSummary = productCount === 1
-      ? `${contract.products[0].productName} × ${contract.products[0].quantity} ${contract.products[0].unit}`
-      : `${contract.products[0].productName} × ${contract.products[0].quantity} ${contract.products[0].unit} 等 ${productCount} 项产品`;
+      ? `${products[0].productName} × ${products[0].quantity} ${products[0].unit}`
+      : productCount > 1
+        ? `${products[0].productName} × ${products[0].quantity} ${products[0].unit} 等 ${productCount} 项产品`
+        : '未填写产品';
     
     // 🔥 创建审批请求
     await addApprovalRequest({
@@ -1067,6 +1227,15 @@ export function SalesContractManagement({
     });
     
     console.log('✅ [SO] 审批请求创建成功:', contract.contractNumber);
+    } catch (error: any) {
+      console.error('❌ [SO] 提交审批失败:', error);
+      toast.error('提审失败', {
+        description: error?.message || '请稍后重试',
+        duration: 5000,
+      });
+    } finally {
+      setSubmittingApprovalIds((prev) => prev.filter((item) => item !== contractKey));
+    }
   };
   
   // 🔥 发送给客户
@@ -1239,30 +1408,31 @@ export function SalesContractManagement({
       console.log(`  - ${contract.contractNumber}: salesPerson=${contract.salesPerson}`);
 
       // 状态筛选
+      const workflowStatus = resolveContractWorkflowStatus(contract);
       if (filterStatus !== 'all') {
-        if (filterStatus === 'pending' && !['pending_supervisor', 'pending_director'].includes(contract.status)) {
+        if (filterStatus === 'pending' && !['pending_supervisor', 'pending_director'].includes(workflowStatus)) {
           return false;
-        } else if (filterStatus === 'sent' && !['sent', 'sent_to_customer', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes'].includes(contract.status)) {
+        } else if (filterStatus === 'sent' && !['sent', 'sent_to_customer', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes'].includes(workflowStatus)) {
           return false;
-        } else if (filterStatus === 'confirmed' && contract.status !== 'customer_confirmed') {
+        } else if (filterStatus === 'confirmed' && workflowStatus !== 'customer_confirmed') {
           return false;
         } else if (filterStatus === 'profit_unavailable') {
           // Phase 6c: show SCs in procurement phases where actual profit cannot yet be computed
-          if (!PROFIT_VISIBLE_STATUSES.includes(contract.status)) return false;
+          if (!PROFIT_VISIBLE_STATUSES.includes(workflowStatus as any)) return false;
           const p = computeSCProfit(contract, getQuotationByNumber(contract.quotationNumber) ?? null, purchaseOrders);
           if (p.actual.available) return false;
         } else if (filterStatus === 'profit_alert') {
           // Phase 6c: show SCs where actual profit is negative
-          if (!PROFIT_VISIBLE_STATUSES.includes(contract.status)) return false;
+          if (!PROFIT_VISIBLE_STATUSES.includes(workflowStatus as any)) return false;
           const p = computeSCProfit(contract, getQuotationByNumber(contract.quotationNumber) ?? null, purchaseOrders);
           if (!p.actual.available || p.actual.actualMargin >= 0) return false;
         } else if (filterStatus === 'profit_deviation') {
           // Phase 6d: show SCs where actual margin underperforms estimated by > 5pp
-          if (!PROFIT_VISIBLE_STATUSES.includes(contract.status)) return false;
+          if (!PROFIT_VISIBLE_STATUSES.includes(workflowStatus as any)) return false;
           const p = computeSCProfit(contract, getQuotationByNumber(contract.quotationNumber) ?? null, purchaseOrders);
           if (!p.actual.available || !p.estimated) return false;
           if ((p.actual.actualMargin - p.estimated.estimatedMargin) >= -0.05) return false;
-        } else if (!['pending', 'sent', 'confirmed'].includes(filterStatus) && contract.status !== filterStatus) {
+        } else if (!['pending', 'sent', 'confirmed'].includes(filterStatus) && workflowStatus !== filterStatus) {
           return false;
         }
       }
@@ -1305,37 +1475,37 @@ export function SalesContractManagement({
       const key = String(contract.quotationNumber || contract.contractNumber || contract.id || '').trim();
       return !key || latestByQuotation.get(key)?.id === contract.id;
     });
-  }, [contracts, currentUser, filterStatus, searchTerm, getQuotationByNumber, purchaseOrders]);
+  }, [contracts, currentUser, filterStatus, searchTerm, getQuotationByNumber, purchaseOrders, resolveContractWorkflowStatus]);
   
   // 🔥 统计信息
   const stats = useMemo(() => {
     const total = myContracts.length;
-    const draft = myContracts.filter(c => c.status === 'draft').length;
-    const pending = myContracts.filter(c => ['pending_supervisor', 'pending_director'].includes(c.status)).length;
-    const approved = myContracts.filter(c => c.status === 'approved').length;
-    const rejected = myContracts.filter(c => c.status === 'rejected').length;
-    const sent = myContracts.filter(c => ['sent', 'sent_to_customer', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes'].includes(c.status)).length;
-    const confirmed = myContracts.filter(c => c.status === 'customer_confirmed').length;
+    const draft = myContracts.filter(c => resolveContractWorkflowStatus(c) === 'draft').length;
+    const pending = myContracts.filter(c => ['pending_supervisor', 'pending_director'].includes(resolveContractWorkflowStatus(c))).length;
+    const approved = myContracts.filter(c => resolveContractWorkflowStatus(c) === 'approved').length;
+    const rejected = myContracts.filter(c => resolveContractWorkflowStatus(c) === 'rejected').length;
+    const sent = myContracts.filter(c => ['sent', 'sent_to_customer', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes'].includes(resolveContractWorkflowStatus(c))).length;
+    const confirmed = myContracts.filter(c => resolveContractWorkflowStatus(c) === 'customer_confirmed').length;
     // Phase 6c: profit-state counts — only over procurement-phase SCs
     const profitUnavailable = myContracts.filter(c => {
-      if (!PROFIT_VISIBLE_STATUSES.includes(c.status)) return false;
+      if (!PROFIT_VISIBLE_STATUSES.includes(resolveContractWorkflowStatus(c) as any)) return false;
       const p = computeSCProfit(c, getQuotationByNumber(c.quotationNumber) ?? null, purchaseOrders);
       return !p.actual.available;
     }).length;
     const profitAlert = myContracts.filter(c => {
-      if (!PROFIT_VISIBLE_STATUSES.includes(c.status)) return false;
+      if (!PROFIT_VISIBLE_STATUSES.includes(resolveContractWorkflowStatus(c) as any)) return false;
       const p = computeSCProfit(c, getQuotationByNumber(c.quotationNumber) ?? null, purchaseOrders);
       return p.actual.available && p.actual.actualMargin < 0;
     }).length;
     // Phase 6d: actual margin underperforms estimated by > 5pp (both values must be present)
     const profitDeviation = myContracts.filter(c => {
-      if (!PROFIT_VISIBLE_STATUSES.includes(c.status)) return false;
+      if (!PROFIT_VISIBLE_STATUSES.includes(resolveContractWorkflowStatus(c) as any)) return false;
       const p = computeSCProfit(c, getQuotationByNumber(c.quotationNumber) ?? null, purchaseOrders);
       if (!p.actual.available || !p.estimated) return false;
       return (p.actual.actualMargin - p.estimated.estimatedMargin) < -0.05;
     }).length;
     return { total, draft, pending, approved, rejected, sent, confirmed, profitUnavailable, profitAlert, profitDeviation };
-  }, [myContracts, getQuotationByNumber, purchaseOrders]);
+  }, [myContracts, getQuotationByNumber, purchaseOrders, resolveContractWorkflowStatus]);
 
   const overviewCards: Array<{
     label: string;
@@ -1523,7 +1693,13 @@ export function SalesContractManagement({
   };
   
   return (
-    <div className="flex h-full flex-1 min-h-[calc(100dvh-360px)] min-h-0 flex-col">
+    <div className="flex h-full flex-1 min-h-[calc(100dvh-360px)] min-h-0 flex-col gap-3">
+      {/* 🔥 业务链路进度 */}
+      <WorkflowPipelineBanner
+        steps={MAIN_WORKFLOW_STEPS}
+        currentKey="sc"
+        hint="当前：销售合同 → 定金确认后请求采购"
+      />
       <div className="flex h-full flex-1 min-h-0 flex-col">
       {/* 🔥 合同列表 */}
       <div className="flex h-full flex-1 min-h-[calc(100dvh-360px)] min-h-0 w-full max-w-full flex-col overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -1633,6 +1809,15 @@ export function SalesContractManagement({
                   const isHighlighted = highlightedId === contract.id; // 🔥 判断是否高亮
                   const linkedQuotation = getQuotationByNumber(contract.quotationNumber) as any;
                   const quotationFinancialSummary = deriveQuotationFinancialSummaryForContract(linkedQuotation, contract);
+                  const linkedQuotationForProfit = linkedQuotation || (
+                    quotationFinancialSummary.totalCost > 0
+                      ? {
+                          totalCost: quotationFinancialSummary.totalCost,
+                          totalProfit: quotationFinancialSummary.totalProfit,
+                          profitRate: quotationFinancialSummary.profitRate,
+                        }
+                      : null
+                  );
                   const normalizedProfitRate = Number.isFinite(quotationFinancialSummary.profitRate)
                     ? quotationFinancialSummary.profitRate
                     : 0;
@@ -1660,6 +1845,7 @@ export function SalesContractManagement({
                     !procurementFullyPushed;
                   // 🔥 查找对应的订单数据，兼容历史订单层 proof
                   const correspondingOrder = orders.find(o => o.orderNumber === contract.contractNumber);
+                  const workflowStatus = resolveContractWorkflowStatus(contract);
                   const depositConfirmed =
                     paymentStatusDeposit === 'confirmed' ||
                     executionStatus === 'deposit_confirmed' ||
@@ -1676,7 +1862,7 @@ export function SalesContractManagement({
                   // lc_100: no deposit stage, trigger from customer_confirmed onwards
                   // all other modes: trigger from split deposit-confirmed/in-procurement states
                   const procurementEligible = contract.paymentMode === 'lc_100'
-                    ? ['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'in_procurement', 'in_pre_production', 'in_production'].includes(executionStatus || contract.status)
+                    ? ['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'in_procurement', 'in_pre_production', 'in_production'].includes(executionStatus || workflowStatus)
                     : (depositConfirmed || hasLiveProcurementRequest);
                   
                   return (
@@ -1701,20 +1887,23 @@ export function SalesContractManagement({
                           {index + 1}
                         </div>
                       </TableCell>
-                      <TableCell className="px-2 py-3 align-top overflow-hidden" style={getSalesContractColumnStyle('date')}>
-                        <div className="flex flex-col">
-                          <div className="min-h-[20px] flex items-start">
-                            <span className="mr-1 text-[12px] text-slate-500">创</span>
-                            <span className="text-[12px] font-medium text-slate-900">
-                              {formatSalesContractDateOnly(contract.createdAt || contract.created_at)}
-                            </span>
-                          </div>
-                          <div className="min-h-[16px]" />
-                          <div className="min-h-[16px]" />
+                      <TableCell className="px-2 py-2 align-middle overflow-hidden" style={getSalesContractColumnStyle('date')}>
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
+                          <span className="text-[12px] text-slate-500">创</span>
+                          <span className="text-[12px] font-medium text-slate-900">
+                            {formatSalesContractDateOnly(contract.createdAt || contract.created_at)}
+                          </span>
+                          <CompactDetailsPopover
+                            items={[
+                              { label: '发送', value: formatSalesContractDateOnly(contract.sentToCustomerAt) },
+                              { label: '确认', value: formatSalesContractDateOnly(contract.customerConfirmedAt) },
+                              { label: '更新', value: formatSalesContractDateOnly(contract.updatedAt || contract.updated_at) },
+                            ]}
+                          />
                         </div>
                       </TableCell>
                       <TableCell 
-                        className="px-2 cursor-pointer overflow-hidden align-top font-mono font-semibold text-blue-600 hover:text-blue-700"
+                        className="px-2 cursor-pointer overflow-hidden align-middle font-mono font-semibold text-blue-600 hover:text-blue-700"
                         style={getSalesContractColumnStyle('contractNo')}
                         onClick={() => {
                           setSelectedContract(contract);
@@ -1722,131 +1911,89 @@ export function SalesContractManagement({
                         }}
                         title="点击查看合同文档"
                       >
-                        <div className="flex flex-col">
-                          <div className="min-h-[20px] flex items-start">
-                            <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} leading-5`} title={formatContractNumberForDisplay(contract.contractNumber)}>
-                              {formatContractNumberForDisplay(contract.contractNumber)}
-                            </div>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} leading-5`} title={formatContractNumberForDisplay(contract.contractNumber)}>
+                            {formatContractNumberForDisplay(contract.contractNumber)}
                           </div>
-                          {relatedRefs.length > 0 ? (
-                            <div className="min-h-[16px]">
-                              <button
-                                type="button"
-                                onClick={(event) => {
+                          <CompactDetailsPopover
+                            items={[
+                              ...relatedRefs.map((ref) => ({
+                                label: '关联',
+                                value: ref.value,
+                                className: `font-mono ${ref.className}`,
+                                onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
                                   event.stopPropagation();
-                                  setExpandedRelatedIds((current) =>
-                                    current.includes(contract.id)
-                                      ? current.filter((id) => id !== contract.id)
-                                      : [...current, contract.id],
-                                  );
-                                }}
-                                className="text-[11px] font-medium leading-4 text-slate-500 hover:text-slate-700"
-                              >
-                                {relatedRefsExpanded ? '收起关联编号' : `展开关联编号 (${relatedRefs.length})`}
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="min-h-[16px]" />
-                          )}
-                          {relatedRefsExpanded ? (
-                            <div className="space-y-0.5">
-                              {relatedRefs.map((ref) => (
-                                <button
-                                  key={ref.value}
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    const target = String(ref.value || '').trim();
-                                    if (target.startsWith('ING-')) {
-                                      onNavigateToInquiryWithHighlight?.(target);
-                                      return;
-                                    }
-                                    if (target.startsWith('QR-')) {
-                                      onNavigateToCostInquiryWithHighlight?.(target);
-                                      return;
-                                    }
-                                    if (target.startsWith('QT-')) {
-                                      onNavigateToQuotationWithHighlight?.(target);
-                                    }
-                                  }}
-                                  className={`block break-all font-mono ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} whitespace-normal leading-4 ${ref.className} ${String(ref.value || '').trim().match(/^(ING|QR|QT)-/) ? 'cursor-pointer hover:underline text-left' : 'cursor-default text-left'}`}
-                                  title={ref.value}
-                                >
-                                  {ref.value}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                          {contract.projectRevisionId && (
-                            <div className="min-h-[16px]">
-                              <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} whitespace-normal leading-4 text-indigo-500`}>
-                                执行基线：{contract.projectCode ? `${contract.projectCode} · ` : ''}{contract.projectName || 'Project'} / Rev {contract.projectRevisionCode || '-'}
-                              </div>
-                            </div>
-                          )}
-                          {!contract.projectRevisionId && !relatedRefsExpanded && <div className="min-h-[16px]" />}
+                                  const target = String(ref.value || '').trim();
+                                  if (target.startsWith('ING-')) {
+                                    onNavigateToInquiryWithHighlight?.(target);
+                                    return;
+                                  }
+                                  if (target.startsWith('QR-')) {
+                                    onNavigateToCostInquiryWithHighlight?.(target);
+                                    return;
+                                  }
+                                  if (target.startsWith('QT-')) {
+                                    onNavigateToQuotationWithHighlight?.(target);
+                                  }
+                                },
+                              })),
+                              contract.projectRevisionId ? {
+                                label: '基线',
+                                value: `${contract.projectCode ? `${contract.projectCode} · ` : ''}${contract.projectName || 'Project'} / Rev ${contract.projectRevisionCode || '-'}`,
+                                className: 'text-indigo-500',
+                              } : null,
+                            ].filter(Boolean) as CompactDetailItem[]}
+                          />
                         </div>
                       </TableCell>
-                      <TableCell className="px-2 align-top overflow-hidden" style={getSalesContractColumnStyle('country')}>
+                      <TableCell className="px-2 align-middle overflow-hidden" style={getSalesContractColumnStyle('country')}>
                         {(() => {
                           const countryLabel = String(contract.customerCountry || '').trim()
                             || REGION_LABEL_MAP[String(contract.region || '').trim().toUpperCase()]
                             || String(contract.region || '').trim()
                             || '—';
                           return (
-                            <div className="flex flex-col">
-                              <div className="min-h-[20px] flex items-start">
-                                <Badge variant="outline" className={`h-6 rounded-full px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-700`}>
-                                  {countryLabel}
-                                </Badge>
-                              </div>
-                              <div className="min-h-[16px]" />
-                            </div>
+                            <Badge variant="outline" className={`h-6 rounded-full px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-700`}>
+                              {countryLabel}
+                            </Badge>
                           );
                         })()}
                       </TableCell>
-                      <TableCell className="px-2 align-top overflow-hidden" style={getSalesContractColumnStyle('customer')}>
-                        <div className="flex flex-col">
-                          <div className="min-h-[20px]">
-                            <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-800 leading-5`} title={contract.customerCompany}>
-                              {contract.customerCompany}
-                            </div>
+                      <TableCell className="px-2 align-middle overflow-hidden" style={getSalesContractColumnStyle('customer')}>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-800 leading-5`} title={contract.customerCompany}>
+                            {contract.customerCompany}
                           </div>
-                          <div className="min-h-[16px]">
-                            <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-600 whitespace-normal leading-4`} title={contract.customerName}>
-                              {contract.customerName}
-                            </div>
-                          </div>
-                          <div className="min-h-[16px]">
-                            <div className={`break-all ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-400 whitespace-normal leading-4`} title={contract.customerEmail}>
-                              {contract.customerEmail}
-                            </div>
-                          </div>
+                          <CompactDetailsPopover
+                            items={[
+                              { label: '联系人', value: contract.customerName, className: 'text-slate-600' },
+                              { label: '邮箱', value: contract.customerEmail, className: 'break-all text-slate-500' },
+                            ]}
+                          />
                         </div>
                       </TableCell>
-                      <TableCell className="px-2 align-top overflow-hidden" style={getSalesContractColumnStyle('product')}>
+                      <TableCell className="px-2 align-middle overflow-hidden" style={getSalesContractColumnStyle('product')}>
                         {(() => {
                           const products = Array.isArray(contract.products) ? contract.products : [];
                           const first = products[0];
                           const totalQty = products.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
                           const unit = first?.unit || '';
                           return (
-                            <div className="flex flex-col">
-                              <div className="min-h-[20px]">
-                                <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} text-slate-800 leading-5`} title={first?.productName || 'N/A'}>
-                                  {first?.productName || 'N/A'}
-                                </div>
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} text-slate-800 leading-5`} title={first?.productName || 'N/A'}>
+                                {first?.productName || 'N/A'}
                               </div>
-                              <div className="min-h-[16px]">
-                                <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-500 whitespace-normal leading-4`} title={`共 ${Math.max(products.length, 1)} 个产品`}>
-                                  共 {Math.max(products.length, 1)} 个产品 · {totalQty.toLocaleString()} {unit}
-                                </div>
-                              </div>
+                              <CompactDetailsPopover
+                                items={[
+                                  { label: '产品', value: `共 ${Math.max(products.length, 1)} 个产品` },
+                                  { label: '数量', value: `${totalQty.toLocaleString()} ${unit}` },
+                                ]}
+                              />
                             </div>
                           );
                         })()}
                       </TableCell>
-                      <TableCell className="px-2 text-right align-top overflow-hidden" style={getSalesContractColumnStyle('unitPrice')}>
+                      <TableCell className="px-2 text-right align-middle overflow-hidden" style={getSalesContractColumnStyle('unitPrice')}>
                         {(() => {
                           const products = Array.isArray(contract.products) ? contract.products : [];
                           const prices = products
@@ -1865,33 +2012,38 @@ export function SalesContractManagement({
                             value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                           const hasRange = products.length > 1 && maxPrice > minPrice;
                           return (
-                            <div className="flex flex-col items-end">
-                              <div className="min-h-[20px]">
-                                <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-800 leading-5`}>
-                                  {hasRange
-                                    ? `${currency} ${formatPrice(minPrice)} ~ ${formatPrice(maxPrice)}`
-                                    : `${currency} ${formatPrice(maxPrice)}`}
-                                </div>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-800 leading-5`}>
+                                {hasRange
+                                  ? `${currency} ${formatPrice(minPrice)} ~ ${formatPrice(maxPrice)}`
+                                  : `${currency} ${formatPrice(maxPrice)}`}
                               </div>
-                              <div className="min-h-[16px]" />
                             </div>
                           );
                         })()}
                       </TableCell>
-                      <TableCell className="px-2 text-right align-top overflow-hidden" style={getSalesContractColumnStyle('amount')}>
-                        <div className="flex flex-col items-end">
-                          <div className="min-h-[20px]">
+                      <TableCell className="px-2 text-right align-middle overflow-hidden" style={getSalesContractColumnStyle('amount')}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div>
                             <div className="truncate whitespace-nowrap text-[12px] font-bold leading-5 text-slate-900">
                             {contract.currency} {contract.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                           </div>
-                          <div className="min-h-[16px] text-[11px] leading-4 text-slate-500">
+                          <CompactDetailsPopover
+                            align="end"
+                            items={[
+                              { label: '定金', value: `${contract.depositPercentage}%: ${contract.currency} ${contract.depositAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+                              { label: '余款', value: `${contract.balancePercentage}%: ${contract.currency} ${contract.balanceAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+                              { label: '利润率', value: normalizedProfitRate > 0 ? `${normalizedProfitRate.toFixed(1)}% (${profitLevelLabel})` : '—', className: normalizedProfitRate > 0 ? 'text-emerald-600 font-medium' : 'text-slate-400' },
+                            ]}
+                          />
+                          <div className="hidden text-[11px] leading-4 text-slate-500">
                             定金 {contract.depositPercentage}%: {contract.currency} {contract.depositAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
-                          <div className="min-h-[16px] text-[11px] leading-4 text-slate-500">
+                          <div className="hidden text-[11px] leading-4 text-slate-500">
                             余款 {contract.balancePercentage}%: {contract.currency} {contract.balanceAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
-                          <div className="min-h-[16px] text-[11px] leading-4 flex justify-between gap-2">
+                          <div className="hidden text-[11px] leading-4 justify-between gap-2">
                             <span className="text-gray-500">预估利润率</span>
                             <span
                               className={`font-medium ${normalizedProfitRate > 0 ? 'text-emerald-600' : 'text-slate-400'}`}
@@ -1906,10 +2058,10 @@ export function SalesContractManagement({
                               Estimated = QT.totalCost/totalProfit (Phase 6a)
                               Actual    = sum(CG.totalAmount) + SC.additionalCost (Phase 6b)
                               Phase 5 rule: no SC state is changed here — read-only derived view. */}
-                          {PROFIT_VISIBLE_STATUSES.includes(contract.status) && (() => {
+                          {PROFIT_VISIBLE_STATUSES.includes(workflowStatus as any) && (() => {
                             const profit = computeSCProfit(
                               contract,
-                              getQuotationByNumber(contract.quotationNumber) ?? null,
+                              linkedQuotationForProfit,
                               purchaseOrders,
                             );
                             const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -1923,7 +2075,7 @@ export function SalesContractManagement({
                             const addCost = contract.additionalCost ?? 0;
                             const isEditingThis = editingAdditionalCostId === contract.id;
                             return (
-                              <div className="border-t border-gray-100 mt-1 pt-1 space-y-0.5">
+                              <div className="hidden border-t border-gray-100 mt-1 pt-1 space-y-0.5">
                                 {/* Estimated line — from QT.totalProfit; always shown (暂无 when QT data absent) */}
                                 <div className="text-[10px] text-gray-400 italic flex justify-between gap-2">
                                   <span>估算毛利</span>
@@ -2124,38 +2276,35 @@ export function SalesContractManagement({
                           })()}
                         </div>
                       </TableCell>
-                      <TableCell className="px-2 text-center align-top overflow-hidden" style={getSalesContractColumnStyle('approvalStatus')}>
-                        <div className="flex w-full flex-col items-center">
-                          <div className="min-h-[20px]">
-                            {getApprovalStatusBadge(contract.status)}
-                          </div>
-                          <div className="min-h-[16px]" />
+                      <TableCell className="px-2 text-center align-middle overflow-hidden" style={getSalesContractColumnStyle('approvalStatus')}>
+                        <div className="flex w-full items-center justify-center">
+                          {getApprovalStatusBadge(workflowStatus)}
                         </div>
                       </TableCell>
-                      <TableCell className="px-2 text-center align-top overflow-hidden" style={getSalesContractColumnStyle('procurementProgress')}>
-                        <div className="flex w-full flex-col items-center">
-                          <div className="min-h-[20px]">
-                            {procurementTracking.requestStatusLabel ? (
-                              <Badge className={`h-5 rounded-full px-2 text-[10px] font-medium ${procurementTracking.requestStatusTone}`}>
-                                {procurementTracking.requestStatusLabel}
-                              </Badge>
-                            ) : (
-                              <span className="text-[10px] leading-4 text-slate-500">{PROCUREMENT_STATUS_COPY.uncreated}</span>
-                            )}
-                          </div>
-                          <div className="block min-h-[32px] min-w-0 w-full text-center whitespace-normal break-words text-[10px] leading-4 text-slate-500">
-                            {procurementTracking.requestStatusLabel
-                              ? getProcurementCgProgressLabel(procurementTracking)
-                              : ''}
-                          </div>
+                      <TableCell className="px-2 text-center align-middle overflow-hidden" style={getSalesContractColumnStyle('procurementProgress')}>
+                        <div className="flex w-full items-center justify-center gap-1.5">
+                          {procurementTracking.requestStatusLabel ? (
+                            <Badge className={`h-5 rounded-full px-2 text-[10px] font-medium ${procurementTracking.requestStatusTone}`}>
+                              {procurementTracking.requestStatusLabel}
+                            </Badge>
+                          ) : (
+                            <span className="text-[10px] leading-4 text-slate-500">{PROCUREMENT_STATUS_COPY.uncreated}</span>
+                          )}
+                          <CompactDetailsPopover
+                            align="center"
+                            items={[
+                              procurementTracking.requestStatusLabel ? {
+                                label: '进度',
+                                value: getProcurementCgProgressLabel(procurementTracking),
+                                className: 'text-slate-500',
+                              } : null,
+                            ].filter(Boolean) as CompactDetailItem[]}
+                          />
                         </div>
                       </TableCell>
-                      <TableCell className="px-2 text-center align-top overflow-hidden" style={getSalesContractColumnStyle('customerStatus')}>
-                        <div className="flex w-full flex-col items-center">
-                          <div className="min-h-[20px]">
-                            {getContractCustomerStatusBadge(contract.status)}
-                          </div>
-                          <div className="min-h-[16px]" />
+                      <TableCell className="px-2 text-center align-middle overflow-hidden" style={getSalesContractColumnStyle('customerStatus')}>
+                        <div className="flex w-full items-center justify-center">
+                          {getContractCustomerStatusBadge(workflowStatus)}
                         </div>
                       </TableCell>
                       <TableCell className="px-2 align-top overflow-hidden" style={getSalesContractColumnStyle('actions')}>
@@ -2203,18 +2352,19 @@ export function SalesContractManagement({
                             </Button>
                           )}
                           
-                          {contract.status === 'draft' && (
+                          {workflowStatus === 'draft' && (
                             <Button 
                               size="sm"
                               onClick={() => handleSubmitForApproval(contract)}
+                              disabled={submittingApprovalIds.includes(String(contract.id || contract.contractNumber || '').trim())}
                               className={`h-7 justify-center gap-1 rounded-full bg-blue-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-blue-600`}
                               title={contract.totalAmount >= 20000 ? '金额≥$20,000，需主管+总监双重审批' : '金额<$20,000，只需主管审批'}
                             >
-                              提审
+                              {submittingApprovalIds.includes(String(contract.id || contract.contractNumber || '').trim()) ? '提审中' : '提审'}
                             </Button>
                           )}
                           
-                          {contract.status === 'approved' && (
+                          {workflowStatus === 'approved' && (
                             <Button 
                               size="sm"
                               onClick={() => handleSendToCustomer(contract)}
@@ -2227,7 +2377,7 @@ export function SalesContractManagement({
                           )}
                           
                           {/* 🔥 已发送客户：只显示已发状态 */}
-                          {(contract.status === 'sent' || contract.status === 'sent_to_customer') && (
+                          {(workflowStatus === 'sent' || workflowStatus === 'sent_to_customer') && (
                             <Button 
                               size="sm"
                               disabled
@@ -2238,7 +2388,7 @@ export function SalesContractManagement({
                           )}
                           
                           {/* 🔥 客户确认但未到款：显示等待定金确认 */}
-                          {contract.status === 'customer_confirmed' && !depositConfirmed && (
+                          {workflowStatus === 'customer_confirmed' && !depositConfirmed && (
                             <Button 
                               size="sm"
                               disabled
@@ -2259,10 +2409,10 @@ export function SalesContractManagement({
                               <Button
                                 size="sm"
                                 disabled
-                                className={`h-7 justify-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-slate-400 cursor-not-allowed hover:bg-slate-50`}
-                                title="采购已下推供应商，当前无需再次发起采购"
+                                className={`h-7 justify-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-emerald-600 cursor-not-allowed`}
+                                title="采购已下推供应商，合同正在履约中，请在「采购订单管理」模块查看进度"
                               >
-                                已下推
+                                ✓ 采购已发起
                               </Button>
                             ) : canReactivateProcurement ? (
                               <Button
@@ -2278,12 +2428,12 @@ export function SalesContractManagement({
                               <Button
                                 size="sm"
                                 onClick={() => requestProcurementFromContract(contract)}
-                                className={`h-7 justify-center gap-1 rounded-full bg-orange-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-orange-600`}
+                                className={`h-7 justify-center gap-1 rounded-full bg-[#F96302] px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-[#e05a02] text-white font-medium`}
                                 title={contract.paymentMode === 'lc_100'
-                                  ? '客户已确认（LC模式无需定金），点击请求采购'
-                                  : '定金已确认，点击请求采购（由采购员分配供应商）'}
+                                  ? '客户已确认（LC模式无需定金），生成采购请求(PR)，采购员将分配供应商'
+                                  : '定金已确认，生成采购请求(PR)→采购员分配供应商→生成采购订单(CG)'}
                               >
-                                采购
+                                下推 → 采购请求
                               </Button>
                             )
                           )}
@@ -2294,8 +2444,8 @@ export function SalesContractManagement({
                               lc_100          : show at po_generated | production (no deposit stage)
                               deposit_plus_lc : show at deposit_confirmed | po_generated | production */}
                           {(
-                            ['in_production', 'qc_pending', 'qc_passed', 'awaiting_balance', 'balance_uploaded', 'balance_confirmed'].includes(executionStatus || contract.status) ||
-                            (isShipFirst && (executionStatus || contract.status) === 'shipped') ||
+                            ['in_production', 'qc_pending', 'qc_passed', 'awaiting_balance', 'balance_uploaded', 'balance_confirmed'].includes(executionStatus || workflowStatus) ||
+                            (isShipFirst && (executionStatus || workflowStatus) === 'shipped') ||
                             (paymentStatusBalance === 'uploaded')
                           ) && (
                             <Button
@@ -2317,8 +2467,8 @@ export function SalesContractManagement({
                               Mode 1/null : show only at balance_confirmed (balance already received)
                               Ship-first  : show at customer_confirmed | deposit_confirmed | po_generated | production (ship before balance) */}
                           {(
-                            (isShipFirst && ['customer_confirmed', 'deposit_confirmed', 'po_generated', 'production'].includes(contract.status)) ||
-                            (!isShipFirst && contract.status === 'balance_confirmed')
+                            (isShipFirst && ['customer_confirmed', 'deposit_confirmed', 'po_generated', 'production'].includes(workflowStatus)) ||
+                            (!isShipFirst && workflowStatus === 'balance_confirmed')
                           ) && (
                             <Button
                               size="sm"
@@ -2337,8 +2487,8 @@ export function SalesContractManagement({
                               Mode 1/null : show at shipped (balance was already received pre-ship)
                               Ship-first  : show at balance_confirmed (post-ship balance received → ready to complete) */}
                           {(
-                            (isShipFirst && contract.status === 'balance_confirmed') ||
-                            (!isShipFirst && contract.status === 'shipped')
+                            (isShipFirst && workflowStatus === 'balance_confirmed') ||
+                            (!isShipFirst && workflowStatus === 'shipped')
                           ) && (
                             <Button
                               size="sm"
@@ -2409,9 +2559,25 @@ export function SalesContractManagement({
           const procurementCurrentAction = getProcurementCurrentActionLabel(procurementTracking);
           const rawContractData = (selectedContract.documentDataSnapshot || selectedContract.document_data_snapshot) as SalesContractData | null;
           const layoutConfig = (templateVersion?.layout_json || null) as DocumentLayoutConfig | null;
+          const previewCurrency = String(
+            selectedContract.currency ||
+            rawContractData?.terms?.currency ||
+            'USD',
+          ).trim().toUpperCase() || 'USD';
           const contractData: SalesContractData | null = rawContractData
             ? {
                 ...rawContractData,
+                contractNo: selectedContract.contractNumber || rawContractData.contractNo || 'SC-DRAFT',
+                quotationNo: selectedContract.quotationNumber || rawContractData.quotationNo,
+                contractDate: selectedContract.createdAt?.split('T')[0] || rawContractData.contractDate,
+                products: (rawContractData.products || []).map((product) => ({
+                  ...product,
+                  currency: previewCurrency,
+                })),
+                terms: {
+                  ...rawContractData.terms,
+                  currency: previewCurrency,
+                },
                 buyer: resolveSalesContractBuyerData({
                   customerCompany: selectedContract.customerCompany,
                   customerName: selectedContract.customerName,

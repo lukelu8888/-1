@@ -3,7 +3,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
-import { Textarea } from '../ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import {
@@ -11,7 +10,6 @@ import {
   Globe,
   Boxes,
   Plus,
-  Save,
   X,
   Package,
   Trash2,
@@ -30,15 +28,16 @@ import { InquiryHistorySelector } from './InquiryHistorySelector';
 import { MyProductsSelector } from './MyProductsSelector';
 import {
   buildCustomerInquiryRequirementText,
-  CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   normalizeCustomerInquiryRequirementFields,
   parseCustomerInquiryRequirementText,
+  syncCustomerInquiryRequirementFields,
   type CustomerInquiryRequirementFormFields,
 } from '../documents/templates/CustomerInquiryDocument';
 import { toast } from 'sonner';
 import { aggregateInquiryOemFromProducts, normalizeOemData } from '../../types/oem';
 import { customerInquiryDraftService } from '../../lib/supabaseService';
+import { formatUnknownError } from '../../lib/services/inquiryRuntimeHelpers';
 import { tradeProductSnapshotService } from '../../lib/services/tradeProductSnapshotService';
 import {
   getCustomerFacingModelNo,
@@ -46,20 +45,24 @@ import {
   shouldShowCustomerRefLine,
 } from '../../utils/productModelDisplay';
 import { getCurrentUser } from '../../utils/dataIsolation';
+import { CustomerTradingRequirementsForm } from './CustomerTradingRequirementsForm';
 
 interface UnifiedInquiryDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreateInquiry: (products: any[], additionalInfo?: any) => void | Promise<void>;
+  onCreateInquiry: (
+    products: any[],
+    additionalInfo?: any,
+  ) => void | Promise<{ syncStatus?: 'pending' | 'synced' | null; inquiryNumber?: string | null } | void>;
   editMode?: boolean;
   existingInquiry?: any;
   onUpdateInquiry?: (updatedInquiry: any) => void | Promise<void>;
+  draftHydrationMode?: 'restore' | 'fresh';
 }
 
 type ViewMode = 'selection' | 'website' | 'my_products' | 'history';
-type SubmitIntent = 'create' | 'save' | 'update' | null;
+type SubmitIntent = 'create' | 'update' | null;
 const LOGO_ACCENT = '#D82018';
-const SUBMIT_TIMEOUT_MS = 60000;
 const NEW_INQUIRY_DRAFT_PRODUCTS_KEY = 'new_inquiry_draft_products_v1';
 
 // Standard ERP dialog specimen.
@@ -78,27 +81,17 @@ const ERP_DIALOG_STYLE = {
   tableHead: 'py-3 text-[12px] font-semibold text-slate-600',
   summaryLabel: 'text-[12px] uppercase tracking-[0.16em] text-slate-500',
   summaryValue: 'mt-2 text-[14px] font-semibold text-[#1A1A1A]',
-  footer: 'flex items-center justify-between border-t border-gray-200 bg-slate-50 px-8 py-4',
+  footer: 'mt-auto flex items-center justify-between border-t border-gray-200 bg-slate-50 px-8 py-2',
   secondaryButton: 'h-11 min-w-[132px] border-slate-300 px-5 text-[14px] font-semibold',
   primaryButton: 'h-11 min-w-[220px] justify-center gap-2.5 rounded-md px-6 text-[14px] font-semibold text-white shadow-none',
 } as const;
-
-const withSubmitTimeout = async <T,>(task: Promise<T>) => {
-  return Promise.race<T>([
-    task,
-    new Promise<T>((_, reject) => {
-      window.setTimeout(() => reject(new Error('Request timed out. Please try again.')), SUBMIT_TIMEOUT_MS);
-    }),
-  ]);
-};
 
 const sanitizeRequirementEditorValues = (
   fields: CustomerInquiryRequirementFormFields
 ): CustomerInquiryRequirementFormFields => {
   return Object.fromEntries(
     Object.entries(fields).map(([key, value]) => {
-      const text = String(value ?? '').trim();
-      return [key, /^\d+$/.test(text) ? '' : String(value ?? '')];
+      return [key, String(value ?? '')];
     })
   ) as CustomerInquiryRequirementFormFields;
 };
@@ -136,6 +129,15 @@ const normalizeSelectedProductLine = (product: any) =>
 const normalizeSelectedProductLines = (products: any[]) =>
   Array.isArray(products) ? products.map((product) => normalizeSelectedProductLine(product)) : [];
 
+const isAbortLikeError = (error: unknown) => {
+  const message = String((error as any)?.message || error || '').toLowerCase();
+  return (
+    (error as any)?.name === 'AbortError' ||
+    message.includes('signal is aborted') ||
+    message.includes('request aborted')
+  );
+};
+
 export function UnifiedInquiryDialog({
   isOpen,
   onClose,
@@ -143,15 +145,21 @@ export function UnifiedInquiryDialog({
   editMode = false,
   existingInquiry = null,
   onUpdateInquiry,
+  draftHydrationMode = 'restore',
 }: UnifiedInquiryDialogProps) {
   const draftHydratedRef = useRef(false);
+  const hydratedEditInquiryKeyRef = useRef<string | null>(null);
   const draftPersistTimeoutRef = useRef<number | null>(null);
+  const draftPersistRequestIdRef = useRef(0);
   const [viewMode, setViewMode] = useState<ViewMode>('selection');
   const [selectedProducts, setSelectedProducts] = useState<any[]>([]);
   const [expandedSelectedOemIds, setExpandedSelectedOemIds] = useState<string[]>([]);
-  const [customerRequirement, setCustomerRequirement] = useState<CustomerInquiryRequirementFormFields>(DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS);
+  const [customerRequirement, setCustomerRequirement] = useState<CustomerInquiryRequirementFormFields>(
+    syncCustomerInquiryRequirementFields(DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS),
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitIntent, setSubmitIntent] = useState<SubmitIntent>(null);
+  const [pendingCreateNotice, setPendingCreateNotice] = useState<string | null>(null);
   
   // Track initial state for comparison in edit mode
   const [initialState, setInitialState] = useState<{
@@ -164,18 +172,35 @@ export function UnifiedInquiryDialog({
 
   // Initialize state when editing
   useEffect(() => {
+    if (!isOpen) {
+      hydratedEditInquiryKeyRef.current = null;
+      return;
+    }
+
     if (editMode && existingInquiry && isOpen) {
+      const inquiryHydrationKey = String(existingInquiry.id || existingInquiry.inquiryNumber || '').trim();
+      if (
+        draftHydratedRef.current &&
+        hydratedEditInquiryKeyRef.current &&
+        hydratedEditInquiryKeyRef.current === inquiryHydrationKey
+      ) {
+        return;
+      }
+
       const products = normalizeSelectedProductLines(existingInquiry.products || []);
       const legacyRequirementText = existingInquiry.message || existingInquiry.deliveryAddress || '';
       const resolvedRequirement = existingInquiry.requirements
         ? normalizeCustomerInquiryRequirementFields(existingInquiry.requirements)
         : parseCustomerInquiryRequirementText(legacyRequirementText);
-      const sanitizedRequirement = sanitizeRequirementEditorValues(resolvedRequirement);
+      const sanitizedRequirement = syncCustomerInquiryRequirementFields(
+        sanitizeRequirementEditorValues(resolvedRequirement),
+      );
       
       setSelectedProducts(products);
       setCustomerRequirement(sanitizedRequirement);
       setIsDraftHydrated(true);
       draftHydratedRef.current = true;
+      hydratedEditInquiryKeyRef.current = inquiryHydrationKey || 'edit-mode';
       
       // Save initial state for comparison
       setInitialState({
@@ -185,10 +210,20 @@ export function UnifiedInquiryDialog({
     } else if (!editMode && isOpen) {
       let cancelled = false;
       draftHydratedRef.current = false;
+      hydratedEditInquiryKeyRef.current = null;
       setIsDraftHydrated(false);
       setInitialState(null);
-      setCustomerRequirement({ ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS });
+      setPendingCreateNotice(null);
+      setCustomerRequirement(syncCustomerInquiryRequirementFields(DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS));
       setSelectedProducts([]);
+
+      if (draftHydrationMode === 'fresh') {
+        draftHydratedRef.current = true;
+        setIsDraftHydrated(true);
+        return () => {
+          cancelled = true;
+        };
+      }
 
       const hydrateDraft = async () => {
         try {
@@ -220,16 +255,19 @@ export function UnifiedInquiryDialog({
         cancelled = true;
       };
     }
-  }, [draftCustomerEmail, editMode, existingInquiry, isOpen]);
+  }, [draftCustomerEmail, draftHydrationMode, editMode, existingInquiry, isOpen]);
 
   useEffect(() => {
-    if (editMode || !isOpen || !isDraftHydrated || !draftHydratedRef.current) return;
+    if (editMode || !isOpen || !isDraftHydrated || !draftHydratedRef.current || isSubmitting) return;
+    persistDraftSelectedProducts(selectedProducts);
     if (draftPersistTimeoutRef.current) {
       window.clearTimeout(draftPersistTimeoutRef.current);
     }
 
     draftPersistTimeoutRef.current = window.setTimeout(() => {
       const persistDraft = async () => {
+        const requestId = draftPersistRequestIdRef.current + 1;
+        draftPersistRequestIdRef.current = requestId;
         try {
           if (draftCustomerEmail) {
             await customerInquiryDraftService.upsert({
@@ -239,15 +277,19 @@ export function UnifiedInquiryDialog({
               regionCode: currentUser?.region || null,
               products: selectedProducts,
             });
-            clearDraftSelectedProducts();
+            if (draftPersistRequestIdRef.current === requestId) {
+              clearDraftSelectedProducts();
+            }
           }
         } catch (error) {
+          if (isAbortLikeError(error)) {
+            return;
+          }
           console.warn('[UnifiedInquiryDialog] Failed to persist cloud inquiry draft, saving local fallback.', error);
-          persistDraftSelectedProducts(selectedProducts);
         }
       };
 
-      persistDraft();
+      void persistDraft();
     }, 250);
 
     return () => {
@@ -255,7 +297,7 @@ export function UnifiedInquiryDialog({
         window.clearTimeout(draftPersistTimeoutRef.current);
       }
     };
-  }, [currentUser?.companyId, currentUser?.id, currentUser?.region, draftCustomerEmail, editMode, isDraftHydrated, isOpen, selectedProducts]);
+  }, [currentUser?.companyId, currentUser?.id, currentUser?.region, draftCustomerEmail, editMode, isDraftHydrated, isOpen, isSubmitting, selectedProducts]);
 
   // Track which products have been added (by unique ID)
   const addedProductIds = new Set(selectedProducts.map(p => p.id));
@@ -339,6 +381,18 @@ export function UnifiedInquiryDialog({
     setViewMode('selection');
   };
 
+  const clearCloudDraftInBackground = (actionLabel: 'create' | 'update') => {
+    if (!draftCustomerEmail) return;
+    void customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail).catch((error) => {
+      const message = String((error as Error)?.message || error || '');
+      if (message.includes('AbortError') || (error as Error)?.name === 'AbortError') {
+        console.warn(`[UnifiedInquiryDialog] Cloud inquiry draft cleanup aborted after ${actionLabel}; keeping local flow.`, error);
+      } else {
+        console.warn(`[UnifiedInquiryDialog] Failed to clear cloud inquiry draft after ${actionLabel}.`, error);
+      }
+    });
+  };
+
   const getCustomerFacingSourceBadgeClass = (product: any) => {
     const label = getCustomerFacingSourceLabel(product).toLowerCase();
     if (label === 'my products') {
@@ -359,65 +413,66 @@ export function UnifiedInquiryDialog({
       return;
     }
 
-    const customerRequirementText = buildCustomerInquiryRequirementText(customerRequirement);
+    const syncedRequirement = syncCustomerInquiryRequirementFields(customerRequirement);
+    const customerRequirementText = buildCustomerInquiryRequirementText(syncedRequirement);
     const normalizedSelectedProducts = normalizeSelectedProductLines(selectedProducts);
     const normalizedOemData = aggregateInquiryOemFromProducts(normalizedSelectedProducts);
 
     setIsSubmitting(true);
     setSubmitIntent('create');
+    setPendingCreateNotice(null);
+    if (draftPersistTimeoutRef.current) {
+      window.clearTimeout(draftPersistTimeoutRef.current);
+      draftPersistTimeoutRef.current = null;
+    }
     try {
-      await withSubmitTimeout(
-        Promise.resolve(
-          onCreateInquiry(normalizedSelectedProducts, {
-            notes: customerRequirementText,
-            deliveryAddress: '',
-            requirements: { ...customerRequirement },
-            oem: normalizedOemData,
-          })
-        )
+      const createResult = await Promise.resolve(
+        onCreateInquiry(normalizedSelectedProducts, {
+          notes: customerRequirementText,
+          deliveryAddress: '',
+          requirements: syncedRequirement,
+          oem: normalizedOemData,
+        })
       );
 
-      setSelectedProducts([]);
-      if (draftCustomerEmail) {
-        void customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail).catch((error) => {
-          console.warn('[UnifiedInquiryDialog] Failed to clear cloud inquiry draft after create.', error);
-        });
+      if (createResult?.syncStatus === 'pending') {
+        const pendingMessage = createResult?.inquiryNumber
+          ? `Inquiry ${createResult.inquiryNumber} was kept locally and is still syncing to the server.`
+          : 'Inquiry was kept locally and is still syncing to the server.';
+        setPendingCreateNotice(pendingMessage);
+        toast(pendingMessage);
       }
+
+      const shouldCloseAfterCreate =
+        createResult?.syncStatus === 'pending' || createResult?.syncStatus === 'synced' || !createResult;
+
+      if (!shouldCloseAfterCreate) {
+        return;
+      }
+
+      setSelectedProducts([]);
+      clearCloudDraftInBackground('create');
       clearDraftSelectedProducts();
-      setCustomerRequirement({ ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS });
+      setCustomerRequirement(syncCustomerInquiryRequirementFields(DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS));
       setViewMode('selection');
       onClose();
     } catch (error) {
       console.error('Failed to create inquiry from dialog:', error);
-      const message = error instanceof Error ? error.message : 'Failed to create inquiry. Please try again.';
-      if (message.toLowerCase().includes('timed out')) {
-        toast.success('Inquiry draft created locally and is syncing to server…');
-        setSelectedProducts([]);
-        if (draftCustomerEmail) {
-          void customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail).catch((draftError) => {
-            console.warn('[UnifiedInquiryDialog] Failed to clear cloud inquiry draft after timeout fallback.', draftError);
-          });
-        }
-        clearDraftSelectedProducts();
-        setCustomerRequirement({ ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS });
-        setViewMode('selection');
-        onClose();
-        return;
-      }
-      toast.error(message);
+      toast.error(formatUnknownError(error, 'Failed to create inquiry. Please try again.'));
     } finally {
       setIsSubmitting(false);
       setSubmitIntent(null);
     }
   };
 
-  const handleUpdateInquiry = async (intent: Exclude<SubmitIntent, 'create' | null> = 'update') => {
+  const handleUpdateInquiry = async () => {
     if (selectedProducts.length === 0) {
       toast.error('Please add at least one product');
       return;
     }
 
-    const customerRequirementText = buildCustomerInquiryRequirementText(customerRequirement);
+    const syncedRequirement = syncCustomerInquiryRequirementFields(customerRequirement);
+    const customerRequirementText = buildCustomerInquiryRequirementText(syncedRequirement);
     const normalizedSelectedProducts = normalizeSelectedProductLines(selectedProducts);
     const normalizedOemData = aggregateInquiryOemFromProducts(normalizedSelectedProducts);
 
@@ -425,28 +480,24 @@ export function UnifiedInquiryDialog({
       products: normalizedSelectedProducts,
       notes: customerRequirementText,
       deliveryAddress: '',
-      requirements: { ...customerRequirement },
+      requirements: syncedRequirement,
       oem: normalizedOemData,
     };
 
     setIsSubmitting(true);
-    setSubmitIntent(intent);
+    setSubmitIntent('update');
     try {
-      await withSubmitTimeout(Promise.resolve(onUpdateInquiry?.(updatedInquiry)));
+      await Promise.resolve(onUpdateInquiry?.(updatedInquiry));
 
       setSelectedProducts([]);
-      if (draftCustomerEmail) {
-        void customerInquiryDraftService.clearByCustomerEmail(draftCustomerEmail).catch((error) => {
-          console.warn('[UnifiedInquiryDialog] Failed to clear cloud inquiry draft after update.', error);
-        });
-      }
+      clearCloudDraftInBackground('update');
       clearDraftSelectedProducts();
-      setCustomerRequirement({ ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS });
+      setCustomerRequirement(syncCustomerInquiryRequirementFields(DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS));
       setViewMode('selection');
       onClose();
     } catch (error) {
       console.error('Failed to update inquiry from dialog:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to update inquiry. Please try again.');
+      toast.error(formatUnknownError(error, 'Failed to update inquiry. Please try again.'));
     } finally {
       setIsSubmitting(false);
       setSubmitIntent(null);
@@ -454,13 +505,18 @@ export function UnifiedInquiryDialog({
   };
 
   const handleCancel = () => {
+    if (isSubmitting) {
+      return;
+    }
+
     // Check if there are unsaved changes
     let hasChanges = false;
     
     if (editMode && initialState) {
       // In edit mode, check if anything changed
       const productsChanged = JSON.stringify(selectedProducts) !== JSON.stringify(initialState.products);
-      const requirementChanged = buildCustomerInquiryRequirementText(customerRequirement) !== initialState.requirement;
+      const requirementChanged =
+        buildCustomerInquiryRequirementText(syncCustomerInquiryRequirementFields(customerRequirement)) !== initialState.requirement;
       
       hasChanges = productsChanged || requirementChanged;
     } else if (!editMode && selectedProducts.length > 0) {
@@ -476,9 +532,10 @@ export function UnifiedInquiryDialog({
     
     // Reset non-product transient state only. Added items stay until manually removed
     // or the inquiry is successfully submitted.
-    setCustomerRequirement({ ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS });
+    setCustomerRequirement(syncCustomerInquiryRequirementFields(DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS));
     setViewMode('selection');
     setInitialState(null);
+    setPendingCreateNotice(null);
     onClose();
   };
 
@@ -489,9 +546,6 @@ export function UnifiedInquiryDialog({
   const getTotalValue = () => {
     return selectedProducts.reduce((sum, p) => sum + ((p.targetPrice || 0) * (p.quantity || 0)), 0);
   };
-
-  const getRequirementTextareaRows = (value: string, baseRows = 3) =>
-    Math.max(baseRows, value.split('\n').length + 1);
 
   // 🔥 计算货柜信息 - 使用与Container Load Planner完全相同的智能装柜算法
   const getContainerInfo = () => {
@@ -652,9 +706,26 @@ export function UnifiedInquiryDialog({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleCancel}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          handleCancel();
+        }
+      }}
+    >
       <DialogContent
         hideClose={viewMode === 'website' || viewMode === 'my_products' || viewMode === 'history'}
+        onPointerDownOutside={(event) => {
+          if (isSubmitting) {
+            event.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(event) => {
+          if (isSubmitting) {
+            event.preventDefault();
+          }
+        }}
         className={`${
           viewMode === 'website'
             ? '!left-3 !top-3 !translate-x-0 !translate-y-0 !h-[calc(100dvh-24px)] !w-[calc(100vw-24px)] !max-w-none !p-0 overflow-hidden rounded-xl'
@@ -1074,56 +1145,12 @@ export function UnifiedInquiryDialog({
                       </div>
                     </div>
                     <div className={ERP_DIALOG_STYLE.panel}>
-                          {CUSTOMER_INQUIRY_REQUIREMENT_FIELDS.map((field, index) => {
-                            const value = customerRequirement[field.key];
-                            const isOtherRequirements = field.key === 'otherRequirements';
-                            const textareaRows = getRequirementTextareaRows(
-                              value,
-                              isOtherRequirements ? field.rows || 4 : 1,
-                            );
-
-                            return (
-                              <div
-                                key={field.key}
-                                className={`grid gap-3 border-b border-slate-200 px-4 py-3 last:border-b-0 ${isOtherRequirements ? 'md:grid-cols-[176px_minmax(0,1fr)] md:items-start' : 'md:grid-cols-[176px_minmax(0,1fr)] md:items-center'}`}
-                              >
-                                <div className={isOtherRequirements ? 'md:pt-0.5' : ''}>
-                                  <div className="flex items-center gap-2">
-                                    <label className="block text-[12px] font-semibold tracking-tight text-[#1A1A1A]">
-                                      {index + 1}. {field.sourceLabel}
-                                    </label>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <button
-                                          type="button"
-                                          className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-500 text-slate-600 hover:border-slate-700 hover:text-slate-800"
-                                        >
-                                          <CircleHelp className="h-3 w-3" />
-                                        </button>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-[240px] text-xs leading-5">
-                                        {field.description}
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </div>
-                                </div>
-                                <div>
-                                  <Textarea
-                                    value={value}
-                                    onChange={(e) =>
-                                      setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))
-                                    }
-                                    rows={textareaRows}
-                                    placeholder={field.placeholder}
-                                    style={{ fieldSizing: 'fixed' as any }}
-                                    className={`resize-y whitespace-pre-wrap rounded-md border-slate-300 bg-white text-[14px] leading-6 placeholder:text-slate-400 ${
-                                      isOtherRequirements ? 'min-h-[104px]' : 'min-h-[40px]'
-                                    }`}
-                                  />
-                                </div>
-                              </div>
-                            );
-                          })}
+                      <div className="px-4 py-4">
+                        <CustomerTradingRequirementsForm
+                          value={customerRequirement}
+                          onChange={setCustomerRequirement}
+                        />
+                      </div>
                     </div>
                   </section>
 
@@ -1150,6 +1177,11 @@ export function UnifiedInquiryDialog({
                 ) : (
                   <span>Select products to create inquiry</span>
                 )}
+                {pendingCreateNotice ? (
+                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+                    {pendingCreateNotice}
+                  </div>
+                ) : null}
               </div>
               <div className="flex gap-3">
                 <Button
@@ -1160,26 +1192,15 @@ export function UnifiedInquiryDialog({
                   Cancel
                 </Button>
                 {editMode ? (
-                  <>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleUpdateInquiry('save')}
-                      disabled={isSubmitting}
-                      className={ERP_DIALOG_STYLE.secondaryButton}
-                    >
-                      <Save className="w-4 h-4" />
-                      {submitIntent === 'save' ? 'Saving...' : 'Save'}
-                    </Button>
-                    <Button
-                      onClick={() => handleUpdateInquiry('update')}
-                      disabled={isSubmitting}
-                      className={ERP_DIALOG_STYLE.primaryButton}
-                      style={{ backgroundColor: LOGO_ACCENT }}
-                    >
-                      <Plus className="w-4 h-4" />
-                      {submitIntent === 'update' ? 'Updating...' : 'Update Inquiry'}
-                    </Button>
-                  </>
+                  <Button
+                    onClick={handleUpdateInquiry}
+                    disabled={isSubmitting}
+                    className={ERP_DIALOG_STYLE.primaryButton}
+                    style={{ backgroundColor: LOGO_ACCENT }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    {submitIntent === 'update' ? 'Updating...' : 'Update Inquiry'}
+                  </Button>
                 ) : (
                   <Button
                     onClick={handleCreateInquiry}

@@ -1,16 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import {
-  LayoutDashboard,
-  FileText,
-  DollarSign,
-  Clock,
-  CheckCircle2,
+import { 
+  LayoutDashboard, 
+  FileText, 
+  DollarSign, 
+  Clock, 
+  CheckCircle2, 
   TruckIcon,
   Package,
   PlusCircle,
-  GripVertical,
-  Anchor
+  GripVertical
 } from 'lucide-react';
 import { InquiryManagement } from './InquiryManagement';
 import { ActiveOrders } from './ActiveOrders';
@@ -20,10 +19,6 @@ import { MyOrdersOverview } from './MyOrdersOverview';
 import { QuotationReceived } from './QuotationReceived';
 import { CreateOrder } from './CreateOrder';
 import { CustomerNotificationCenter } from '../CustomerNotificationCenter';
-import { CustomerExportServicePanel, useExportServiceEnabled } from './CustomerExportServicePanel';
-import { useUser } from '../../contexts/UserContext';
-import { salesQuotationService } from '../../lib/supabaseService';
-import { writeCustomerQuotationCache } from '../../lib/customerPortalCache';
 
 interface TabItem {
   id: string;
@@ -114,12 +109,8 @@ export function MyOrders({
   onOrderSubmitted,
   onNavigateToShop
 }: MyOrdersProps) {
-  const { user } = useUser();
   // 🔥 从localStorage读取默认tab（用于从Profit Analyzer返回时自动定位到quotations）
   const [activeTab, setActiveTab] = useState(() => {
-    if (typeof window === 'undefined') {
-      return 'overview';
-    }
     const savedTab = localStorage.getItem('myOrders_activeTab');
     if (savedTab) {
       localStorage.removeItem('myOrders_activeTab'); // 读取后立即清除
@@ -127,10 +118,7 @@ export function MyOrders({
     }
     return 'overview';
   });
-
-  // Export Service feature flag - only show tab when enabled for this customer
-  const exportServiceEnabled = useExportServiceEnabled();
-
+  
   // Default tab order
   const defaultTabs: TabItem[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -139,8 +127,7 @@ export function MyOrders({
     { id: 'active', label: 'Active Orders', icon: Clock },
     { id: 'completed', label: 'Completed', icon: CheckCircle2 },
     { id: 'tracking', label: 'Tracking', icon: TruckIcon },
-    { id: 'create', label: 'Create Order', icon: PlusCircle },
-    ...(exportServiceEnabled ? [{ id: 'export-service', label: 'Export Service', icon: Anchor }] : []),
+    { id: 'create', label: 'Create Order', icon: PlusCircle }
   ];
 
   const [tabs, setTabs] = useState<TabItem[]>(defaultTabs);
@@ -148,7 +135,6 @@ export function MyOrders({
 
   // Load tab order from localStorage on mount
   useEffect(() => {
-    if (typeof window === 'undefined') return;
     const savedOrder = localStorage.getItem('myOrdersTabOrder');
     if (savedOrder) {
       try {
@@ -171,7 +157,6 @@ export function MyOrders({
 
   // Save tab order to localStorage whenever it changes
   useEffect(() => {
-    if (typeof window === 'undefined') return;
     const tabIds = tabs.map(tab => tab.id);
     localStorage.setItem('myOrdersTabOrder', JSON.stringify(tabIds));
   }, [tabs]);
@@ -203,24 +188,6 @@ export function MyOrders({
   const handleDragEnd = () => {
     setDragIndex(null);
   };
-
-  useEffect(() => {
-    let alive = true;
-    if (!user?.email) return undefined;
-
-    void salesQuotationService.getByCustomerEmail(user.email)
-      .then((rows) => {
-        if (!alive) return;
-        writeCustomerQuotationCache(user.email, Array.isArray(rows) ? rows : []);
-      })
-      .catch(() => {
-        // Prefetch is best-effort and should not affect navigation.
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, [user?.email]);
 
   return (
     <div className="space-y-6 pb-6" style={{ fontFamily: 'var(--hd-font)' }}>
@@ -304,18 +271,12 @@ export function MyOrders({
           </TabsContent>
 
           <TabsContent value="create" className="m-0">
-            <CreateOrder
+            <CreateOrder 
               draftOrder={draftOrder}
               onOrderSubmitted={onOrderSubmitted}
               onNavigateToShop={onNavigateToShop}
             />
           </TabsContent>
-
-          {exportServiceEnabled && (
-            <TabsContent value="export-service" className="m-0">
-              <CustomerExportServicePanel />
-            </TabsContent>
-          )}
         </div>
       </Tabs>
     </div>

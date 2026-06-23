@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Search, Filter, Eye, Download, Plus, FileText, Calendar, DollarSign, Package, MapPin, Send, Trash2, ChevronDown, CheckCircle, Clock, CheckCircle2, Edit, ExternalLink, Container, MessageCircle, Phone, Copy, Check, Printer, Workflow, CheckSquare, Square } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Label } from '../ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
@@ -23,9 +23,45 @@ import WorkflowStatusTracker from '../workflow/WorkflowStatusTracker';
 import { filterNotDeleted } from '../../lib/erp-core/deletion-tombstone';
 import { canDeleteInquiry } from '../../lib/erp-core/delete-guard';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
-import { adaptInquiryToDocumentData } from '../../utils/documentDataAdapters';
+import { adaptInquiryToDocumentData, resolveCustomerInquiryDisplayNo } from '../../utils/documentDataAdapters';
 import { oemAttachmentStorage } from '../../lib/storageService';
 import { aggregateInquiryOemFromProducts, normalizeOemData, serializeOemDataForPersistence } from '../../types/oem';
+import { StandardDocumentViewerShell } from '../documents/StandardDocumentViewerShell';
+import { templateCenterService } from '../../lib/supabaseService';
+import { formatUnknownError } from '../../lib/services/inquiryRuntimeHelpers';
+import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport';
+
+const resolveInquiryPreviewNumber = (
+  inquiry: Record<string, any> | null | undefined,
+  companyId?: string,
+) => {
+  if (!inquiry) return 'ING';
+
+  const resolvedDisplayNo = resolveCustomerInquiryDisplayNo(inquiry, companyId);
+  if (String(resolvedDisplayNo || '').trim()) {
+    return String(resolvedDisplayNo).trim();
+  }
+
+  const adaptedInquiryNo = String(adaptInquiryToDocumentData(inquiry as any)?.inquiryNo || '').trim();
+  if (adaptedInquiryNo) {
+    return adaptedInquiryNo;
+  }
+
+  const fallbackCandidates = [
+    inquiry.inquiryNumber,
+    inquiry.inquiry_number,
+    inquiry.inquiryNo,
+    inquiry.documentDataSnapshot?.inquiryNo,
+    inquiry.document_data_snapshot?.inquiryNo,
+  ];
+
+  for (const candidate of fallbackCandidates) {
+    const value = String(candidate || '').trim();
+    if (value) return value;
+  }
+
+  return 'ING';
+};
 
 const withTimeout = async <T,>(task: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
   return Promise.race([
@@ -35,8 +71,6 @@ const withTimeout = async <T,>(task: Promise<T>, timeoutMs: number, message: str
     }),
   ]);
 };
-
-const INQUIRY_CREATE_TIMEOUT_MS = 20000;
 
 const MY_PRODUCTS_AUTO_OPEN_INQUIRY_KEY = 'my_products_open_new_inquiry';
 
@@ -52,11 +86,14 @@ export function InquiryManagement() {
   const [isContainerPlannerOpen, setIsContainerPlannerOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isNewInquiryOpen, setIsNewInquiryOpen] = useState(false);
+  const [newInquiryDraftHydrationMode, setNewInquiryDraftHydrationMode] = useState<'restore' | 'fresh'>('restore');
   const [deleteInquiryId, setDeleteInquiryId] = useState<string | null>(null); // 🗑️ State for delete confirmation
   const [submitInquiryId, setSubmitInquiryId] = useState<string | null>(null); // 🚀 State for submit confirmation
   const [isSubmittingInquiry, setIsSubmittingInquiry] = useState(false);
+  const [currentIngPublishedVersion, setCurrentIngPublishedVersion] = useState<string | null>(null);
   // 🔥 批量删除功能的状态管理
   const [selectedInquiryIds, setSelectedInquiryIds] = useState<string[]>([]);
+  const inquiryPreviewRef = useRef<HTMLDivElement | null>(null);
   
   const { user } = useUser();
   const { inquiries: contextInquiries, addInquiry, updateInquiry, deleteInquiry, submitInquiry, refreshInquiries } = useInquiry();
@@ -108,12 +145,40 @@ export function InquiryManagement() {
   }, []);
 
   React.useEffect(() => {
+    let cancelled = false;
+    Promise.allSettled([
+      templateCenterService.getTemplateBindingsStatus('ing', ['ing-create']),
+      templateCenterService.getPublishedTemplateSettings('ing'),
+    ])
+      .then(([bindingsResult, settingsResult]) => {
+        if (cancelled) return;
+        const publishedVersionFromBindings =
+          bindingsResult.status === 'fulfilled'
+            ? bindingsResult.value?.find((binding) => binding?.version)?.version || null
+            : null;
+        const publishedVersionFromSettings =
+          settingsResult.status === 'fulfilled'
+            ? String((settingsResult.value as any)?.__templateVersion || '').trim() || null
+            : null;
+
+        setCurrentIngPublishedVersion(publishedVersionFromSettings || publishedVersionFromBindings || null);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentIngPublishedVersion(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
     const tryOpenMyProductsInquiry = () => {
       try {
         if (localStorage.getItem(MY_PRODUCTS_AUTO_OPEN_INQUIRY_KEY) !== '1') {
           return;
         }
         localStorage.removeItem(MY_PRODUCTS_AUTO_OPEN_INQUIRY_KEY);
+        setNewInquiryDraftHydrationMode('restore');
         setIsNewInquiryOpen(true);
       } catch {
         // Keep the flow resilient if storage is unavailable.
@@ -184,9 +249,6 @@ export function InquiryManagement() {
     String(inquiry?.id || ''),
   ]);
 
-  const pendingSyncInquiries = visibleInquiries.filter((inquiry) => inquiry.syncStatus === 'pending');
-  const latestPendingInquiry = pendingSyncInquiries[0] || null;
-
   const filteredInquiries = visibleInquiries.filter(inquiry => {
     // Get first product name for search
     const firstProductName = inquiry.products && inquiry.products.length > 0 
@@ -211,26 +273,44 @@ export function InquiryManagement() {
     const inquiry = findInquiryByReference(referenceId);
     if (!inquiry) {
       return {
-        internalNo: referenceId || '-',
+        internalNo: '',
         externalNo: null as string | null,
       };
     }
 
-    const internalNo = String((inquiry as any)?.inquiryNumber || inquiry.id);
+    const resolvedInquiryNo = resolveCustomerInquiryDisplayNo(
+      inquiry as Record<string, any>,
+      currentUser?.companyId ? String(currentUser.companyId) : undefined,
+    );
+    const internalNo = String((inquiry as any)?.inquiryNumber || '').trim();
     const numberDisplay = resolveDisplayNumber({
       domain: 'ing',
-      internalNo,
+      internalNo: internalNo || inquiry.id,
       companyId: currentUser?.companyId ? String(currentUser.companyId) : undefined,
     });
 
     return {
-      internalNo,
+      internalNo: resolvedInquiryNo || (internalNo && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(internalNo) ? internalNo : ''),
       externalNo: numberDisplay.externalNo || null,
     };
   };
 
   const deleteInquiryDisplay = getInquiryDisplayReference(deleteInquiryId);
+  const deleteInquiryTarget = deleteInquiryId
+    ? inquiries.find((inq) => inq.id === deleteInquiryId || inq.inquiryNumber === deleteInquiryId)
+    : null;
+  const isRecoveredDeleteTarget = Boolean(
+    deleteInquiryTarget?.documentRenderMeta?.syntheticRecovered ||
+    String(deleteInquiryTarget?.id || deleteInquiryId || '').startsWith('recovered:')
+  );
   const submitInquiryDisplay = getInquiryDisplayReference(submitInquiryId);
+  const selectedInquiryTitleNo = React.useMemo(() => {
+    if (!selectedInquiry) return 'ING';
+    return resolveInquiryPreviewNumber(
+      selectedInquiry as Record<string, any>,
+      currentUser?.companyId ? String(currentUser.companyId) : undefined,
+    );
+  }, [currentUser?.companyId, selectedInquiry]);
 
   const preparePersistedOemData = async (storageKey: string, oemInput?: any) => {
     if (!oemInput) return undefined;
@@ -343,35 +423,36 @@ export function InquiryManagement() {
     try {
       newInquiry.products = await withTimeout(
         preparePersistedProductsWithOem(newInquiry.id, products),
-        INQUIRY_CREATE_TIMEOUT_MS,
-        'Preparing inquiry products timed out. Please try again.',
+        15000,
+        'Preparing inquiry products timed out',
       );
       newInquiry.oem = aggregateInquiryOemFromProducts(newInquiry.products);
       (newInquiry as any).documentDataSnapshot = adaptInquiryToDocumentData(newInquiry as any);
-      const savedInquiry = await withTimeout(
-        addInquiry(newInquiry as any),
-        INQUIRY_CREATE_TIMEOUT_MS,
-        'Creating inquiry timed out. Please try again.',
-      );
+      const savedInquiry = await addInquiry(newInquiry as any);
+      const syncStatus = (savedInquiry as any)?.syncStatus === 'pending' ? 'pending' : 'synced';
       const createdInquiryNo = String(
         (savedInquiry as any)?.inquiryNumber ||
         ''
       ).trim();
-      toast.success(
-        createdInquiryNo
-          ? `Inquiry ${createdInquiryNo} created as draft successfully!`
-          : 'Inquiry draft created successfully and is syncing to server…'
-      );
-      setIsNewInquiryOpen(false);
+      if (syncStatus === 'synced') {
+        toast.success(
+          createdInquiryNo
+            ? `Inquiry ${createdInquiryNo} created successfully!`
+            : 'Inquiry created successfully and is syncing to server…'
+        );
+      }
+      if (syncStatus === 'synced') {
+        setIsNewInquiryOpen(false);
+      }
+      return {
+        syncStatus,
+        inquiryNumber: createdInquiryNo || null,
+      } as const;
     } catch (err) {
       console.error('❌ handleCreateInquiry failed:', err);
-      const message = err instanceof Error ? err.message : 'Failed to create inquiry — check console for details';
-      if (message.toLowerCase().includes('timed out')) {
-        toast.success('Inquiry draft created locally and is syncing to server…');
-        setIsNewInquiryOpen(false);
-        return;
-      }
+      const message = formatUnknownError(err, 'Failed to create inquiry — check console for details');
       toast.error(message);
+      throw err;
     }
   };
 
@@ -436,7 +517,10 @@ export function InquiryManagement() {
             <Button
               className="text-white"
               style={{ backgroundColor: 'var(--customer-primary)' }}
-              onClick={() => setIsNewInquiryOpen(true)}
+              onClick={() => {
+                setNewInquiryDraftHydrationMode('fresh');
+                setIsNewInquiryOpen(true);
+              }}
             >
               <Plus className="h-4 w-4 mr-2" />
               New Inquiry
@@ -444,16 +528,6 @@ export function InquiryManagement() {
           </div>
         </div>
         <div className="p-5">
-          {pendingSyncInquiries.length > 0 && (
-            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <div className="font-semibold">
-                Pending sync diagnostics: {pendingSyncInquiries.length} inquiry(s) waiting to sync
-              </div>
-              <div className="mt-1 text-xs text-amber-800">
-                Latest pending id: {latestPendingInquiry?.id || '-'} | inquiryNo: {String((latestPendingInquiry as any)?.inquiryNumber || '') || '-'} | email: {latestPendingInquiry?.userEmail || '-'}
-              </div>
-            </div>
-          )}
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -467,6 +541,7 @@ export function InquiryManagement() {
             <div className="flex gap-2">
               {selectedInquiryIds.length > 0 && (
                 <Button
+                  type="button"
                   variant="destructive"
                   className="gap-2"
                   onClick={handleBatchDelete}
@@ -560,7 +635,10 @@ export function InquiryManagement() {
                     : firstProduct?.productName || 'N/A';
                   
                   const inquiryNo = String((inquiry as any)?.inquiryNumber || '').trim();
-                  const inquiryDisplayNo = inquiryNo || `ING syncing…`;
+                  const inquiryDisplayNo = resolveCustomerInquiryDisplayNo(
+                    inquiry as Record<string, any>,
+                    currentUser?.companyId ? String(currentUser.companyId) : undefined,
+                  ) || inquiryNo || 'ING syncing…';
                   const numberDisplay = resolveDisplayNumber({
                     domain: 'ing',
                     internalNo: inquiryNo || inquiry.id,
@@ -580,7 +658,7 @@ export function InquiryManagement() {
                         <span className="font-bold text-gray-900">
                           {inquiryDisplayNo}
                         </span>
-                        {!inquiryNo && inquiry.syncStatus === 'pending' && (
+                        {!inquiryNo && !inquiryDisplayNo.startsWith('ING-') && inquiry.syncStatus === 'pending' && (
                           <div className="text-[11px] text-amber-600 mt-0.5">
                             Waiting for server number
                           </div>
@@ -678,6 +756,7 @@ export function InquiryManagement() {
                           {/* 🗑️ Delete Button - Only show for draft inquiries */}
                           {canDeleteInquiry(inquiry) && (
                             <Button 
+                              type="button"
                               variant="ghost" 
                               size="sm"
                               className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
@@ -707,62 +786,74 @@ export function InquiryManagement() {
         </Card>
       )}
 
-      <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent
-          className="w-[calc(210mm+56px)] max-w-[calc(100vw-2rem)] max-h-[95vh] overflow-hidden border-none bg-[#525659] p-0 gap-0 shadow-2xl [&>button]:hidden"
-        >
-          <DialogTitle className="sr-only">询价单详情</DialogTitle>
-          <DialogDescription className="sr-only">
-            查看完整的询价单信息和产品详情
-          </DialogDescription>
-
-          <div className="absolute top-4 right-16 z-50 flex gap-2 print:hidden">
+      <StandardDocumentViewerShell
+        open={isDetailOpen}
+        onClose={() => setIsDetailOpen(false)}
+        title="Customer Inquiry"
+        subtitle={selectedInquiryTitleNo}
+        templateVersionPrefix="Template Version"
+        closeLabel="Close"
+        templateLabel={
+          selectedInquiry?.templateSnapshot?.version ||
+          selectedInquiry?.template_snapshot?.version ||
+          currentIngPublishedVersion ||
+          null
+        }
+        bodyClassName="flex-1 overflow-auto bg-gray-100 p-6"
+        innerClassName="mx-auto w-full max-w-[210mm] space-y-6"
+        actions={(
+          <>
             <Button
               variant="outline"
               size="sm"
-              className="h-9 text-sm bg-white shadow-lg hover:bg-gray-50"
-              onClick={() => {
+              className="gap-2"
+              disabled={isDownloadingPDF}
+              onClick={async () => {
+                if (!inquiryPreviewRef.current || !selectedInquiry) return;
+                setIsDownloadingPDF(true);
+                try {
+                  const filename = generatePDFFilename(
+                    'Inquiry',
+                    String(selectedInquiry?.inquiryNumber || selectedInquiry?.id || selectedInquiryTitleNo || 'ING'),
+                  );
+                  await exportToPDF(inquiryPreviewRef.current, filename);
+                } finally {
+                  setIsDownloadingPDF(false);
+                }
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Download PDF
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={async () => {
+                if (!inquiryPreviewRef.current) return;
                 document.body.classList.add('printing-inq');
-                window.print();
-                setTimeout(() => {
+                const filename = generatePDFFilename(
+                  'Inquiry',
+                  String(selectedInquiry?.inquiryNumber || selectedInquiry?.id || selectedInquiryTitleNo || 'ING'),
+                );
+                await exportToPDFPrint(inquiryPreviewRef.current, filename);
+                window.setTimeout(() => {
                   document.body.classList.remove('printing-inq');
                 }, 1000);
               }}
             >
-              <FileText className="w-4 h-4 mr-2" />
-              打印
+              <FileText className="h-4 w-4" />
+              Print
             </Button>
-          </div>
-
-          <DialogClose asChild>
-            <button
-              className="absolute right-4 top-4 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition-colors print:hidden"
-              aria-label="Close"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
-          </DialogClose>
-
-          <div className="overflow-y-auto max-h-[95vh] bg-[#525659]">
-            {selectedInquiry && (
-              <CustomerInquiryView inquiry={selectedInquiry} audience="customer" />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+          </>
+        )}
+      >
+        <div ref={inquiryPreviewRef}>
+          {selectedInquiry ? (
+            <CustomerInquiryView inquiry={selectedInquiry} audience="customer" />
+          ) : null}
+        </div>
+      </StandardDocumentViewerShell>
 
       {/* WeChat Contact Dialog */}
       <Dialog open={isWeChatDialogOpen} onOpenChange={setIsWeChatDialogOpen}>
@@ -930,8 +1021,12 @@ export function InquiryManagement() {
       {/* New Inquiry Method Selection Dialog */}
       <UnifiedInquiryDialog 
         isOpen={isNewInquiryOpen}
-        onClose={() => setIsNewInquiryOpen(false)}
+        onClose={() => {
+          setIsNewInquiryOpen(false);
+          setNewInquiryDraftHydrationMode('restore');
+        }}
         onCreateInquiry={handleCreateInquiry}
+        draftHydrationMode={newInquiryDraftHydrationMode}
       />
 
       {/* Container Load Planner Dialog */}
@@ -973,16 +1068,24 @@ export function InquiryManagement() {
 
             try {
               const inquiryNumber = selectedInquiry.inquiryNumber || selectedInquiry.id;
-              const persistedProducts = await preparePersistedProductsWithOem(inquiryNumber, updatedData.products);
+              const persistedProducts = await withTimeout(
+                preparePersistedProductsWithOem(inquiryNumber, updatedData.products),
+                15000,
+                'Preparing updated inquiry products timed out',
+              );
               const persistedOemData = aggregateInquiryOemFromProducts(persistedProducts);
-              await updateInquiry(selectedInquiry.id, {
-                products: persistedProducts,
-                requirements: updatedData.requirements,
-                oem: persistedOemData,
-                message: updatedData.notes,
-                deliveryAddress: updatedData.deliveryAddress,
-                totalPrice,
-              });
+              await withTimeout(
+                updateInquiry(selectedInquiry.id, {
+                  products: persistedProducts,
+                  requirements: updatedData.requirements,
+                  oem: persistedOemData,
+                  message: updatedData.notes,
+                  deliveryAddress: updatedData.deliveryAddress,
+                  totalPrice,
+                }),
+                20000,
+                'Updating inquiry record timed out',
+              );
 
               toast.success(`Inquiry ${inquiryNumber} updated successfully!`);
               setIsEditMode(false);
@@ -1000,10 +1103,12 @@ export function InquiryManagement() {
           <DialogHeader className="space-y-3">
             <DialogTitle className="flex items-center gap-2 text-xl">
               <Trash2 className="h-5 w-5 text-red-600" />
-              Delete Inquiry
+              {isRecoveredDeleteTarget ? 'Remove Recovered Inquiry' : 'Delete Inquiry'}
             </DialogTitle>
             <DialogDescription className="text-base">
-              Hide this inquiry from your current view? The original inquiry record will remain available.
+              {isRecoveredDeleteTarget
+                ? 'This inquiry is a recovered view-only record. Removing it will not affect the original formal data.'
+                : 'Are you sure you want to delete this inquiry? This action is manual and will not run automatically.'}
             </DialogDescription>
           </DialogHeader>
           
@@ -1019,25 +1124,26 @@ export function InquiryManagement() {
           </div>
           
           <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setDeleteInquiryId(null)}>
+            <Button type="button" variant="outline" onClick={() => setDeleteInquiryId(null)}>
               Cancel
             </Button>
             <Button 
+              type="button"
               className="bg-red-600 hover:bg-red-700 text-white"
               onClick={async () => {
                 if (deleteInquiryId) {
                   try {
                     await deleteInquiry(deleteInquiryId);
-                    toast.success(`Inquiry hidden from current view!`);
+                    toast.success(isRecoveredDeleteTarget ? 'Recovered inquiry removed from the current view.' : 'Inquiry deleted.');
                     setDeleteInquiryId(null);
                   } catch (error: any) {
-                    toast.error(error?.message || 'Failed to hide inquiry');
+                    toast.error(error?.message || 'Failed to delete inquiry.');
                   }
                 }
               }}
             >
               <Trash2 className="h-4 w-4 mr-2" />
-              Hide
+              {isRecoveredDeleteTarget ? 'Remove' : 'Delete'}
             </Button>
           </div>
         </DialogContent>
@@ -1058,7 +1164,7 @@ export function InquiryManagement() {
           
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 my-6">
             <p className="text-sm text-blue-800">
-              <strong>Inquiry No:</strong> {submitInquiryDisplay.internalNo}
+              <strong>Inquiry No:</strong> {submitInquiryDisplay.internalNo || 'Will be assigned on submit'}
             </p>
             {submitInquiryDisplay.externalNo && (
               <p className="mt-2 text-sm text-blue-700">

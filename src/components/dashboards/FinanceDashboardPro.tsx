@@ -1,7 +1,7 @@
 // 💰 财务专员工作台 Pro - 大厂级专业财务看板
 // 参考阿里、腾讯财务系统设计，紧凑布局，专业指标
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -17,6 +17,9 @@ import {
   FileSpreadsheet, Send, Mail, Phone, History, Eye, Edit, Check, X
 } from 'lucide-react';
 import { AccountsReceivable } from '../finance/AccountsReceivable'; // 🔥 新增：应收账款管理组件
+import { useFinance } from '../../contexts/FinanceContext';
+import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext';
+import { buildFinanceDashboardDataState } from '../../lib/services/financeDashboardDataService';
 
 interface FinanceDashboardProProps {
   user: {
@@ -30,54 +33,16 @@ interface FinanceDashboardProProps {
 export default function FinanceDashboardPro({ user }: FinanceDashboardProProps) {
   const [timeRange, setTimeRange] = useState('today');
   const [activeTab, setActiveTab] = useState('overview');
+  const { accountsReceivable } = useFinance();
+  const { purchaseOrders } = usePurchaseOrders();
 
-  // 核心财务数据
-  const financialData = {
-    receivables: {
-      total: 2847500,
-      overdue: 387200,
-      due7days: 256800,
-      due30days: 892300,
-      current: 1311200,
-      overdueCount: 5,
-      dueCount: 23,
-      collectionRate: 87.5
-    },
-    payables: {
-      total: 1523800,
-      urgent: 186400,
-      due7days: 342600,
-      due30days: 994800,
-      overdueCount: 2,
-      dueCount: 12,
-      paymentRate: 92.3
-    },
-    cashflow: {
-      todayIn: 125600,
-      todayOut: 86300,
-      weekIn: 687400,
-      weekOut: 423900,
-      monthIn: 2845300,
-      monthOut: 1876200,
-      balance: 3567800
-    },
-    tasks: {
-      pending: 18,
-      urgent: 5,
-      completed: 127,
-      todayTarget: 12
-    }
-  };
+  const dashboardState = useMemo(
+    () => buildFinanceDashboardDataState(accountsReceivable, purchaseOrders),
+    [accountsReceivable, purchaseOrders],
+  );
 
-  // 待办任务数据
-  const pendingTasks = [
-    { id: '1', type: 'collection', customer: 'Home Depot Inc.', amount: 125600, days: 15, priority: 'urgent', orderNo: 'SO-2024-1234' },
-    { id: '2', type: 'collection', customer: 'ABC Hardware', amount: 87300, days: 8, priority: 'high', orderNo: 'SO-2024-1198' },
-    { id: '3', type: 'payment', supplier: '深圳XX五金厂', amount: 86400, days: 3, priority: 'urgent', poNo: 'PO-2024-0845' },
-    { id: '4', type: 'collection', customer: "Lowe's Companies", amount: 65200, days: 3, priority: 'medium', orderNo: 'SO-2024-1267' },
-    { id: '5', type: 'payment', supplier: '东莞XX电器', amount: 54800, days: 5, priority: 'high', poNo: 'PO-2024-0892' },
-    { id: '6', type: 'collection', customer: 'Euro Imports GmbH', amount: 48900, days: 12, priority: 'high', orderNo: 'SO-2024-1156' },
-  ];
+  const { financialData, pendingTasks, releaseRiskOrders, riskSummary, taskCenter } = dashboardState;
+  const collaborationSections = taskCenter.collaborationSections;
 
   // 账龄分析数据
   const agingData = {
@@ -288,6 +253,62 @@ export default function FinanceDashboardPro({ user }: FinanceDashboardProProps) 
 
         {/* Tab 1: 工作概览 */}
         <TabsContent value="overview" className="space-y-3 mt-3">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <Card className="p-3">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <AlertTriangle className="size-4 text-amber-600" />
+                  财务风险摘要
+                </h3>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                  <div className="text-xs text-red-700">逾期应收</div>
+                  <div className="mt-1 text-xl font-semibold text-red-900">{riskSummary.overdueReceivables}</div>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <div className="text-xs text-amber-700">7天内到期</div>
+                  <div className="mt-1 text-xl font-semibold text-amber-900">{riskSummary.dueSoonReceivables}</div>
+                </div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                  <div className="text-xs text-blue-700">待付采购</div>
+                  <div className="mt-1 text-xl font-semibold text-blue-900">{riskSummary.pendingSupplierPayments}</div>
+                </div>
+                <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+                  <div className="text-xs text-purple-700">放单阻断</div>
+                  <div className="mt-1 text-xl font-semibold text-purple-900">{riskSummary.releaseBlockedOrders}</div>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-3">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Users className="size-4 text-slate-600" />
+                  协同角色入口
+                </h3>
+              </div>
+              <div className="space-y-2">
+                {collaborationSections.map((section) => (
+                  <div key={section.key} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">{section.label}</div>
+                        <div className="mt-0.5 text-xs text-slate-600">{section.roles.join(' / ')}</div>
+                      </div>
+                      <div className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-700 border border-slate-200">
+                        {section.count}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {collaborationSections.length === 0 && (
+                  <div className="text-xs text-slate-500">暂无待协同事项</div>
+                )}
+              </div>
+            </Card>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             {/* 待办任务列表 */}
             <Card className="p-3">
@@ -450,6 +471,29 @@ export default function FinanceDashboardPro({ user }: FinanceDashboardProProps) 
                   <div className="p-2 bg-slate-50 rounded text-center">
                     <p className="text-xs text-slate-600 mb-0.5">资金周转</p>
                     <p className="text-sm font-bold text-purple-600">18天</p>
+                  </div>
+                </div>
+
+                <div className="mt-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="size-4 text-amber-600" />
+                      <span className="text-sm font-bold text-amber-900">放单风控队列</span>
+                    </div>
+                    <Badge className="bg-amber-500 text-white text-xs">
+                      {releaseRiskOrders.length}笔阻断
+                    </Badge>
+                  </div>
+                  <div className="space-y-1">
+                    {releaseRiskOrders.slice(0, 3).map((order) => (
+                      <div key={order.id} className="flex items-center justify-between text-xs text-slate-700">
+                        <span className="font-medium">{order.poNumber}</span>
+                        <span>{order.documentReleaseStatus || order.customerBalanceGateStatus || 'blocked'}</span>
+                      </div>
+                    ))}
+                    {releaseRiskOrders.length === 0 && (
+                      <div className="text-xs text-slate-500">暂无被财务风控阻断的放单订单</div>
+                    )}
                   </div>
                 </div>
               </div>

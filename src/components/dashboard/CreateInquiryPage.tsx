@@ -32,21 +32,11 @@ import { nextInquiryNumber } from '../../lib/supabaseService';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import {
   buildCustomerInquiryRequirementText,
-  CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+  syncCustomerInquiryRequirementFields,
   type CustomerInquiryRequirementFormFields,
 } from '../documents/templates/CustomerInquiryDocument';
-
-const withTimeout = async <T,>(task: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
-  return Promise.race([
-    task,
-    new Promise<T>((_, reject) => {
-      window.setTimeout(() => reject(new Error(message)), timeoutMs);
-    }),
-  ]);
-};
-
-const INQUIRY_CREATE_TIMEOUT_MS = 20000;
+import { CustomerTradingRequirementsForm } from './CustomerTradingRequirementsForm';
 
 interface ProductItem {
   id: string;
@@ -91,7 +81,7 @@ export function CreateInquiryPage({
     specifications: ''
   });
   const [customerRequirement, setCustomerRequirement] = useState<CustomerInquiryRequirementFormFields>({
-    ...DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
+    ...syncCustomerInquiryRequirementFields(DEFAULT_CUSTOMER_INQUIRY_REQUIREMENT_FIELDS),
   });
 
   // Get user's inquiry history
@@ -177,7 +167,7 @@ export function CreateInquiryPage({
     // Save to localStorage as draft
     localStorage.setItem('inquiry_draft', JSON.stringify({
       products,
-      requirements: customerRequirement,
+      requirements: syncCustomerInquiryRequirementFields(customerRequirement),
       timestamp: Date.now()
     }));
     
@@ -228,8 +218,8 @@ export function CreateInquiryPage({
         image: p.image || '/placeholder.jpg'
       })),
       totalPrice,
-      status: 'draft' as const,
-      isSubmitted: false,
+      status: 'pending' as const,
+      isSubmitted: false, // 🚀 Draft state - not submitted to admin yet
       buyerInfo: {
         companyName: userInfo?.companyName || currentUser?.company || 'N/A',
         contactPerson: userInfo?.contactPerson || currentUser?.email.split('@')[0] || 'N/A',
@@ -245,9 +235,9 @@ export function CreateInquiryPage({
         totalGrossWeight: '0',
         totalNetWeight: '0'
       },
-      requirements: { ...customerRequirement },
-      message: buildCustomerInquiryRequirementText(customerRequirement),
-      createdAt: now,
+      requirements: syncCustomerInquiryRequirementFields(customerRequirement),
+      message: buildCustomerInquiryRequirementText(syncCustomerInquiryRequirementFields(customerRequirement)),
+      createdAt: now
     };
     (newInquiry as any).templateSnapshot = { pendingResolution: true };
     (newInquiry as any).documentRenderMeta = null;
@@ -255,27 +245,15 @@ export function CreateInquiryPage({
 
     console.log('🔵 提交新询价:', newInquiry);
     try {
-      await withTimeout(
-        addInquiry(newInquiry),
-        INQUIRY_CREATE_TIMEOUT_MS,
-        'Creating inquiry timed out. Please try again.',
-      );
+      await addInquiry(newInquiry);
     } catch (saveErr) {
       console.error('Failed to save inquiry:', saveErr);
-      const message = saveErr instanceof Error ? saveErr.message : 'Failed to save inquiry. Please try again.';
-      if (message.toLowerCase().includes('timed out')) {
-        localStorage.removeItem('inquiry_draft');
-        toast.success(`Inquiry ${inquiryNumber} created locally and is syncing to server…`);
-        setProducts([]);
-        onClose();
-        return;
-      }
-      toast.error(message);
+      toast.error('Failed to save inquiry. Please try again.');
       return;
     }
 
     localStorage.removeItem('inquiry_draft');
-    toast.success(`Inquiry ${inquiryNumber} created as draft successfully!`);
+    toast.success(`Inquiry ${inquiryNumber} created successfully!`);
     setProducts([]);
     onClose();
   };
@@ -486,39 +464,14 @@ export function CreateInquiryPage({
                   TRADING REQUIREMENTS
                 </h3>
                 <p className="mt-1 text-gray-600" style={{ fontSize: '12px', fontWeight: 400 }}>
-                  These terms will be written into the inquiry document and flow into the ING template directly.
+                  Structured trade and payment details will flow directly into the inquiry document and the internal ING process.
                 </p>
               </div>
-              <div className="grid grid-cols-1 gap-4 p-6 md:grid-cols-2">
-                {CUSTOMER_INQUIRY_REQUIREMENT_FIELDS.map((field) => (
-                  <div
-                    key={field.key}
-                    className={field.type === 'textarea' && field.key === 'otherRequirements' ? 'md:col-span-2' : ''}
-                  >
-                    <Label htmlFor={`create-inquiry-${field.key}`} style={{ fontSize: '13px', fontWeight: 600 }}>
-                      {field.sourceLabel}
-                    </Label>
-                    <p className="mt-1 text-[12px] text-gray-500">{field.description}</p>
-                    {field.type === 'textarea' ? (
-                      <Textarea
-                        id={`create-inquiry-${field.key}`}
-                        placeholder={field.placeholder}
-                        rows={field.rows || 3}
-                        value={customerRequirement[field.key] || ''}
-                        onChange={(e) => setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                        className="mt-2"
-                      />
-                    ) : (
-                      <Input
-                        id={`create-inquiry-${field.key}`}
-                        placeholder={field.placeholder}
-                        value={customerRequirement[field.key] || ''}
-                        onChange={(e) => setCustomerRequirement((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                        className="mt-2"
-                      />
-                    )}
-                  </div>
-                ))}
+              <div className="p-6">
+                <CustomerTradingRequirementsForm
+                  value={customerRequirement}
+                  onChange={setCustomerRequirement}
+                />
               </div>
             </div>
           </div>

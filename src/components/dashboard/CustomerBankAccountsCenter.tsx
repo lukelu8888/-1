@@ -199,7 +199,7 @@ export default function CustomerBankAccountsCenter({
     onEditingChange?.(isEditing);
   }, [isEditing, onEditingChange]);
 
-  const fieldClass = `w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-orange-300 focus:ring-4 focus:ring-orange-100 ${rtl ? 'text-right' : ''}`;
+  const fieldClass = `w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100 ${rtl ? 'text-right' : ''}`;
 
   const persist = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
@@ -230,14 +230,14 @@ export default function CustomerBankAccountsCenter({
             <>
               <button
                 onClick={cancel}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >
                 <X className="h-4 w-4" />
                 {copy.bank.cancel}
               </button>
               <button
                 onClick={persist}
-                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+                className="inline-flex items-center gap-2 rounded-md border border-[#16325c] bg-[#16325c] px-4 py-2 text-sm font-medium text-white hover:bg-[#0f274c]"
               >
                 <Save className="h-4 w-4" />
                 {copy.bank.save}
@@ -246,7 +246,7 @@ export default function CustomerBankAccountsCenter({
           ) : showActions ? (
             <button
               onClick={() => setIsEditing(true)}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               <Pencil className="h-4 w-4" />
               {copy.bank.edit}
@@ -260,15 +260,15 @@ export default function CustomerBankAccountsCenter({
           {draft.accounts.filter((item) => item.id !== 'private').map((account, index) => {
             const current = state.accounts[index] || account;
             const accent = account.id === 'primary'
-              ? { card: 'border-red-100', header: 'bg-red-50 text-red-700 border-red-100', badge: 'bg-red-100 text-red-600', flag: countryContext.flag }
-              : { card: 'border-blue-100', header: 'bg-blue-50 text-blue-700 border-blue-100', badge: 'bg-blue-100 text-blue-600', flag: '🇺🇸' };
+              ? { card: 'border-slate-200', header: 'bg-slate-50 text-slate-800 border-slate-200', badge: 'bg-white text-slate-600 border border-slate-200', flag: countryContext.flag }
+              : { card: 'border-slate-200', header: 'bg-slate-50 text-slate-800 border-slate-200', badge: 'bg-white text-slate-600 border border-slate-200', flag: '🇺🇸' };
             return (
-              <div key={`top-${account.id}`} className={`overflow-hidden rounded-xl border ${accent.card}`}>
+              <div key={`top-${account.id}`} className={`overflow-hidden rounded-lg border ${accent.card}`}>
                 <div className={`flex items-center gap-2 border-b px-4 py-3 ${accent.header}`}>
                   <span className="text-lg leading-none">{accent.flag}</span>
                   <div>
-                    <p className="text-[12px] font-bold leading-tight">{current.accountType}</p>
-                    <p className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${accent.badge}`}>
+                    <p className="text-[13px] font-semibold leading-tight">{current.accountType}</p>
+                    <p className={`mt-1 inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-medium ${accent.badge}`}>
                       {current.currency || copy.bank.notSet} · {current.primaryUse || copy.bank.notSet}
                     </p>
                   </div>
@@ -308,16 +308,16 @@ export default function CustomerBankAccountsCenter({
         if (!privateDraft || !privateState) return null;
         return (
           <>
-            <div className="flex items-start gap-2 px-1 text-[11px] text-slate-400">
+            <div className="flex items-start gap-2 px-1 text-[11px] text-slate-500">
               <Languages className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
               <span>{copy.bank.quotationHint}</span>
             </div>
-            <div className="overflow-hidden rounded-xl border border-slate-200">
-              <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-4 py-3 text-amber-700">
+            <div className="overflow-hidden rounded-lg border border-slate-200">
+              <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 text-slate-800">
                 <span className="text-lg leading-none">{countryContext.flag}</span>
                 <div>
-                  <p className="text-[12px] font-bold leading-tight">{privateState.accountType}</p>
-                  <p className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                  <p className="text-[13px] font-semibold leading-tight">{privateState.accountType}</p>
+                  <p className="mt-1 inline-flex rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
                     {privateState.currency || copy.bank.notSet} · {privateState.primaryUse || copy.bank.notSet}
                   </p>
                 </div>

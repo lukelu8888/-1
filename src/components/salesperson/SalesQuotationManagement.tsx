@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { WorkflowPipelineBanner, MAIN_WORKFLOW_STEPS } from '../shared/WorkflowPipelineBanner';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -61,6 +62,7 @@ import { getColumnStyle, renderColumnResizeHandle } from '../admin/admin-organiz
 import QuoteCreationIntelligent from '../admin/QuoteCreationIntelligent'; // 🔥 智能报价创建
 import type { User as RbacUser } from '../../lib/rbac-config';
 import { ERP_LIST_UI_SPEC_V1 } from '../shared/erpListUiSpec';
+import { CompactDetailsPopover, type CompactDetailItem } from '../shared/CompactDetailsPopover';
 // ❌ 已禁用：文件不存在
 // import { CustomerInquiryView } from '../admin/CustomerInquiryView'; // 🔥 客户询价单查看
 import { QuotationView } from './QuotationView'; // 🔥 报价单查看（使用文档中心模版）
@@ -73,16 +75,32 @@ const normalizeProfitPercent = (value: unknown, fallback = 0) => {
 };
 
 const getQuotationProfitMetrics = (qt: any) => {
-  const totalAmount = Number(qt?.totalAmount ?? qt?.totalPrice ?? 0);
-  const totalCost = Number(qt?.totalCost ?? 0);
-  const totalProfit = Number.isFinite(Number(qt?.totalProfit))
-    ? Number(qt.totalProfit)
+  const items = Array.isArray(qt?.items) ? qt.items : [];
+  const itemTotalAmount = items.reduce((sum: number, item: any) => {
+    const quantity = Number(item?.quantity ?? item?.qty ?? 0);
+    const unitPrice = Number(item?.salesPrice ?? item?.unitPrice ?? item?.quotePrice ?? item?.price ?? 0);
+    const lineTotal = Number(item?.totalPrice ?? item?.totalAmount ?? item?.amount);
+    return sum + (Number.isFinite(lineTotal) && lineTotal > 0 ? lineTotal : quantity * unitPrice);
+  }, 0);
+  const itemTotalCost = items.reduce((sum: number, item: any) => {
+    const quantity = Number(item?.quantity ?? item?.qty ?? 0);
+    const unitCost = Number(item?.costPrice ?? item?.costUSD ?? item?.unitCost ?? item?.cost ?? 0);
+    const lineCost = Number(item?.totalCost ?? item?.total_cost);
+    return sum + (Number.isFinite(lineCost) && lineCost > 0 ? lineCost : quantity * unitCost);
+  }, 0);
+  const rawTotalAmount = Number(qt?.totalAmount ?? qt?.totalPrice ?? 0);
+  const totalAmount = rawTotalAmount > 0 ? rawTotalAmount : itemTotalAmount;
+  const rawTotalCost = Number(qt?.totalCost ?? qt?.total_cost ?? 0);
+  const totalCost = rawTotalCost > 0 ? rawTotalCost : itemTotalCost;
+  const rawTotalProfit = Number(qt?.totalProfit ?? qt?.total_profit);
+  const totalProfit = Number.isFinite(rawTotalProfit) && rawTotalProfit !== 0
+    ? rawTotalProfit
     : (totalAmount - totalCost);
   const storedProfitRate = normalizeProfitPercent(
     qt?.profitRate ?? qt?.profit_rate ?? qt?.profitMargin,
     Number.NaN,
   );
-  const profitRate = Number.isFinite(storedProfitRate)
+  const profitRate = Number.isFinite(storedProfitRate) && storedProfitRate !== 0
     ? storedProfitRate
     : totalCost > 0
       ? (totalProfit / totalCost) * 100
@@ -522,39 +540,67 @@ const mergeQuotationRows = (rows: any[]) => {
   );
 };
 
+const isGenericProductPlaceholder = (value: unknown) => {
+  const text = String(value || '').trim();
+  return !text || text === '-' || text === '--' || /^n\/a$/i.test(text) || /^product\s*\d*$/i.test(text);
+};
+
+const normalizeMeaningfulProductText = (value: unknown) => {
+  const text = String(value || '').trim();
+  return isGenericProductPlaceholder(text) ? '' : text;
+};
+
 const normalizeQuotationItemsForManagement = (items: any[], qt: any, fallbackQt?: any) => {
   const totalPrice = Number(fallbackQt?.totalPrice ?? fallbackQt?.totalAmount ?? qt?.totalPrice ?? qt?.totalAmount ?? 0);
   const totalCost = Number(fallbackQt?.totalCost ?? qt?.totalCost ?? 0);
 
   return (Array.isArray(items) ? items : [])
     .map((item: any, index: number) => {
+      const normalizedCore = normalizeFlowProductCore(item, index);
       const quantity = Number(item?.quantity ?? item?.qty ?? item?.pcs ?? item?.count ?? 0);
       const fallbackUnitPrice = quantity > 0 ? totalPrice / quantity : 0;
       const fallbackCostPrice = quantity > 0 ? totalCost / quantity : 0;
       const salesPrice = Number(item?.salesPrice ?? item?.unitPrice ?? item?.quotePrice ?? item?.sales_price ?? fallbackUnitPrice ?? 0);
       const costPrice = Number(item?.costPrice ?? item?.cost_price ?? fallbackCostPrice ?? 0);
-      const productName = String(
-        item?.productName ??
-        item?.name ??
-        item?.product_name ??
-        item?.itemName ??
-        item?.item_name ??
-        item?.title ??
-        item?.description ??
-        item?.modelNo ??
-        item?.model_no ??
-        item?.specification ??
-        '',
-      ).trim();
+      const productName = [
+        item?.productName,
+        item?.productNameEn,
+        item?.productNameZh,
+        item?.name,
+        item?.product_name,
+        item?.itemName,
+        item?.item_name,
+        item?.title,
+        item?.description,
+        normalizedCore.productName,
+        normalizedCore.productNameEn,
+        normalizedCore.productNameZh,
+        item?.modelNo,
+        item?.model_no,
+        item?.specification,
+      ]
+        .map(normalizeMeaningfulProductText)
+        .find(Boolean) || '';
+      const modelNo = [
+        item?.modelNo,
+        item?.model_no,
+        normalizedCore.modelNo,
+      ].map(normalizeMeaningfulProductText).find(Boolean) || '';
+      const specification = [
+        item?.specification,
+        item?.specificationEn,
+        item?.specificationZh,
+        normalizedCore.specification,
+      ].map(normalizeMeaningfulProductText).find(Boolean) || '';
 
       return {
         ...item,
         id: item?.id || `${String(qt?.qtNumber || qt?.id || 'qt')}-${index + 1}`,
         productName: productName || `Product ${index + 1}`,
-        modelNo: item?.modelNo || item?.model_no || '',
-        specification: item?.specification || '',
+        modelNo,
+        specification,
         quantity,
-        unit: item?.unit || 'PCS',
+        unit: item?.unit || normalizedCore.unit || 'PCS',
         costPrice,
         salesPrice,
         unitPrice: salesPrice,
@@ -567,6 +613,13 @@ const normalizeQuotationItemsForManagement = (items: any[], qt: any, fallbackQt?
     .filter((item: any) => item.quantity > 0 || item.salesPrice > 0 || item.totalPrice > 0);
 };
 
+const hasDetailedQuotationItems = (items: any[]) =>
+  Array.isArray(items) && items.some((item: any) =>
+    !isGenericProductPlaceholder(item?.productName) ||
+    Boolean(normalizeMeaningfulProductText(item?.modelNo)) ||
+    Boolean(normalizeMeaningfulProductText(item?.specification))
+  );
+
 const resolveQuotationItemsForSync = (
   qt: any,
   options: {
@@ -575,7 +628,7 @@ const resolveQuotationItemsForSync = (
   },
 ) => {
   const currentItems = normalizeQuotationItemsForManagement(qt?.items || [], qt);
-  if (currentItems.length > 0) return currentItems;
+  if (currentItems.length > 0 && hasDetailedQuotationItems(currentItems)) return currentItems;
 
   const siblingQuotation = (Array.isArray(options.effectiveQuotations) ? options.effectiveQuotations : []).find((candidate) => {
     if (String(candidate?.id || '') === String(qt?.id || '')) return false;
@@ -584,7 +637,7 @@ const resolveQuotationItemsForSync = (
     return (sameQr || sameInquiry) && Array.isArray(candidate?.items) && candidate.items.length > 0;
   });
   const siblingItems = normalizeQuotationItemsForManagement(siblingQuotation?.items || [], qt, siblingQuotation);
-  if (siblingItems.length > 0) {
+  if (siblingItems.length > 0 && hasDetailedQuotationItems(siblingItems)) {
     return siblingItems.map((item: any) => ({
       ...item,
       salesPrice: item.salesPrice || item.unitPrice || 0,
@@ -595,8 +648,21 @@ const resolveQuotationItemsForSync = (
   const relatedQr = (Array.isArray(options.quoteRequirements) ? options.quoteRequirements : []).find(
     (req: any) => String(req?.requirementNo || req?.qrNumber || '').trim() === String(qt?.qrNumber || '').trim(),
   );
-  const qrItems = normalizeQuotationItemsForManagement(relatedQr?.items || [], qt);
-  if (qrItems.length > 0) return qrItems;
+  const qrItems = normalizeQuotationItemsForManagement(relatedQr?.items || relatedQr?.products || [], qt);
+  if (qrItems.length > 0 && hasDetailedQuotationItems(qrItems)) return qrItems;
+
+  const qrFeedbackItems = normalizeQuotationItemsForManagement(relatedQr?.purchaserFeedback?.products || [], qt);
+  if (qrFeedbackItems.length > 0 && hasDetailedQuotationItems(qrFeedbackItems)) return qrFeedbackItems;
+
+  const qrSnapshotItems = normalizeQuotationItemsForManagement(
+    relatedQr?.documentDataSnapshot?.products
+      || relatedQr?.document_data_snapshot?.products
+      || relatedQr?.templateSnapshot?.products
+      || relatedQr?.template_snapshot?.products
+      || [],
+    qt,
+  );
+  if (qrSnapshotItems.length > 0 && hasDetailedQuotationItems(qrSnapshotItems)) return qrSnapshotItems;
 
   const snapshotItems = normalizeQuotationItemsForManagement(
     qt?.documentDataSnapshot?.products
@@ -604,7 +670,9 @@ const resolveQuotationItemsForSync = (
       || [],
     qt,
   );
-  if (snapshotItems.length > 0) return snapshotItems;
+  if (snapshotItems.length > 0 && hasDetailedQuotationItems(snapshotItems)) return snapshotItems;
+
+  if (currentItems.length > 0) return currentItems;
 
   const fallbackTotalPrice = Number(qt?.totalPrice ?? qt?.totalAmount ?? 0);
   const fallbackTotalCost = Number(qt?.totalCost ?? 0);
@@ -674,7 +742,13 @@ const normalizeMeaningfulText = (value: any) => {
 const getQuotationDisplayNumber = (qt: any) =>
   normalizeMeaningfulText(
     qt?.qtNumber ??
+    qt?.qt_number ??
     qt?.quotationNumber ??
+    qt?.quotation_number ??
+    qt?.documentDataSnapshot?.quotationNo ??
+    qt?.document_data_snapshot?.quotationNo ??
+    qt?.templateSnapshot?.quotationNo ??
+    qt?.template_snapshot?.quotationNo ??
     qt?.quoteNumber ??
     qt?.number ??
     qt?.internalNo,
@@ -703,6 +777,7 @@ export function SalesQuotationManagement({
   initialQuotations = [],
 }: SalesQuotationManagementProps = {}) {
   const [isSavingPriceCalculation, setIsSavingPriceCalculation] = useState(false);
+  const [priceCalculationAction, setPriceCalculationAction] = useState<'draft' | 'review' | null>(null);
   const stickyQtNumberRef = React.useRef<string | undefined>(undefined);
   const ownerRepairAttemptedRef = React.useRef<Set<string>>(new Set());
   const REGIONAL_MANAGER_EMAILS: Record<string, string> = {
@@ -1145,8 +1220,15 @@ export function SalesQuotationManagement({
     }, 0);
 
     const rawTotalPrice = Number(overrides.totalPrice ?? overrides.totalAmount ?? qt?.totalPrice ?? qt?.totalAmount ?? 0);
+    const itemDerivedCost = items.reduce((sum: number, item: any) => {
+      const quantity = Number(item?.quantity ?? item?.qty ?? 0);
+      const unitCost = Number(item?.costPrice ?? item?.costUSD ?? item?.unitCost ?? item?.cost ?? 0);
+      const lineCost = Number(item?.totalCost ?? item?.total_cost);
+      return sum + (Number.isFinite(lineCost) && lineCost > 0 ? lineCost : quantity * unitCost);
+    }, 0);
     const totalPrice = rawTotalPrice > 0 ? rawTotalPrice : itemDerivedTotal;
-    const totalCost = Number(overrides.totalCost ?? qt?.totalCost ?? 0);
+    const rawTotalCost = Number(overrides.totalCost ?? overrides.total_cost ?? qt?.totalCost ?? qt?.total_cost ?? 0);
+    const totalCost = rawTotalCost > 0 ? rawTotalCost : itemDerivedCost;
     const totalProfit = Number(
       overrides.totalProfit
       ?? qt?.totalProfit
@@ -1189,15 +1271,37 @@ export function SalesQuotationManagement({
       documentDataSnapshot: overrides.documentDataSnapshot ?? qt?.documentDataSnapshot ?? null,
       documentRenderMeta: overrides.documentRenderMeta ?? qt?.documentRenderMeta ?? null,
       qrNumber: normalizeMeaningfulText(overrides.qrNumber ?? qt?.qrNumber) || null,
-      inqNumber: normalizeMeaningfulText(overrides.inqNumber ?? qt?.inqNumber) || null,
+      inqNumber: normalizeMeaningfulText(overrides.inqNumber ?? qt?.inqNumber ?? customerFields.inqNumber) || null,
       salesPerson: normalizeMeaningfulText(overrides.salesPerson ?? qt?.salesPerson ?? currentUser?.email) || '',
       salesPersonName: normalizeMeaningfulText(overrides.salesPersonName ?? qt?.salesPersonName ?? currentUser?.name) || '',
+      ownerEmail: normalizeMeaningfulText(overrides.ownerEmail ?? qt?.ownerEmail ?? overrides.salesPerson ?? qt?.salesPerson ?? currentUser?.email) || '',
+      ownerName: normalizeMeaningfulText(overrides.ownerName ?? qt?.ownerName ?? overrides.salesPersonName ?? qt?.salesPersonName ?? currentUser?.name) || '',
+      ownerRole: normalizeMeaningfulText(overrides.ownerRole ?? qt?.ownerRole) || 'Sales_Rep',
     } as any;
   }, [currentUser?.email, currentUser?.name, currentUser?.region, resolveQuotationCustomerFields, effectiveQuotations, quoteRequirements]);
 
   const persistQuotationPatchDirect = React.useCallback(async (qt: any, overrides: Record<string, any> = {}) => {
-    const patch = buildQuotationPreservedPatch(qt, overrides);
-    const primaryQtNumber = String(patch.qtNumber || getQuotationDisplayNumber(qt) || '').trim();
+    const matchedById = effectiveQuotations.find((candidate: any) =>
+      String(candidate?.id || '').trim() === String(qt?.id || '').trim()
+    );
+    const matchedByNumber = effectiveQuotations.find((candidate: any) => {
+      const left = getQuotationDisplayNumber(candidate);
+      const right = getQuotationDisplayNumber(qt);
+      return Boolean(left && right && left === right);
+    });
+    const enrichedQt = matchedById || matchedByNumber
+      ? { ...qt, ...(matchedById || matchedByNumber) }
+      : qt;
+    const patch = buildQuotationPreservedPatch(enrichedQt, overrides);
+    const primaryQtNumber = String(
+      patch.qtNumber ||
+      patch.qt_number ||
+      patch.quotationNumber ||
+      patch.quotation_number ||
+      getQuotationDisplayNumber(enrichedQt) ||
+      getQuotationDisplayNumber(qt) ||
+      '',
+    ).trim();
     const fallbackId = String(qt?.id || '').trim();
     if (!primaryQtNumber && !fallbackId) {
       throw new Error('报价单标识缺失，无法更新');
@@ -1207,7 +1311,7 @@ export function SalesQuotationManagement({
       try {
         return await salesQuotationService.updateStatus(
           primaryQtNumber,
-          String(patch.approvalStatus || qt?.approvalStatus || 'draft'),
+          String(patch.approvalStatus || enrichedQt?.approvalStatus || qt?.approvalStatus || 'draft'),
           patch,
         );
       } catch (error) {
@@ -1222,15 +1326,15 @@ export function SalesQuotationManagement({
       if (matched?.id) {
         return await salesQuotationService.updateStatus(
           String(matched.id),
-          String(patch.approvalStatus || matched.approvalStatus || qt?.approvalStatus || 'draft'),
+          String(patch.approvalStatus || matched.approvalStatus || enrichedQt?.approvalStatus || qt?.approvalStatus || 'draft'),
           { ...matched, ...patch, id: matched.id, qtNumber: matched.qtNumber || primaryQtNumber },
         );
       }
 
       return await salesQuotationService.upsertViaServer({
-        ...qt,
+        ...enrichedQt,
         ...patch,
-        id: qt?.id || undefined,
+        id: enrichedQt?.id || qt?.id || undefined,
         qtNumber: primaryQtNumber,
       });
     }
@@ -1239,7 +1343,7 @@ export function SalesQuotationManagement({
       try {
         return await salesQuotationService.updateStatus(
           fallbackId,
-          String(patch.approvalStatus || qt?.approvalStatus || 'draft'),
+          String(patch.approvalStatus || enrichedQt?.approvalStatus || qt?.approvalStatus || 'draft'),
           patch,
         );
       } catch (error) {
@@ -1248,10 +1352,36 @@ export function SalesQuotationManagement({
           throw error;
         }
       }
+
+      const serverRows = await salesQuotationService.listViaServer({}).catch(() => []);
+      const matched = Array.isArray(serverRows)
+        ? serverRows.find((row: any) => String(row?.id || '').trim() === fallbackId)
+        : null;
+      if (matched) {
+        const matchedQtNumber = getQuotationDisplayNumber(matched);
+        if (matchedQtNumber) {
+          return await salesQuotationService.updateStatus(
+            matchedQtNumber,
+            String(patch.approvalStatus || matched.approvalStatus || enrichedQt?.approvalStatus || qt?.approvalStatus || 'draft'),
+            { ...matched, ...patch, id: matched.id, qtNumber: matchedQtNumber },
+          );
+        }
+        return await salesQuotationService.upsertViaServer({
+          ...matched,
+          ...patch,
+          id: matched.id,
+        });
+      }
+
+      return await salesQuotationService.upsertViaServer({
+        ...enrichedQt,
+        ...patch,
+        id: fallbackId,
+      });
     }
 
     throw new Error(`No sales quotation matched identifier: ${fallbackId || primaryQtNumber}`);
-  }, [buildQuotationPreservedPatch]);
+  }, [buildQuotationPreservedPatch, effectiveQuotations]);
 
   const ensureBoundQuotationSnapshot = React.useCallback(async (qt: any) => {
     const templateSnapshot = qt?.templateSnapshot || qt?.template_snapshot || null;
@@ -1819,6 +1949,7 @@ export function SalesQuotationManagement({
       customerName: customerFields.customerName || ownerResolvedQt.customerName || '',
       customerCompany: customerFields.customerCompany || ownerResolvedQt.customerCompany || '',
       region: customerFields.region || ownerResolvedQt.region || currentUser?.region || '',
+      inqNumber: customerFields.inqNumber || ownerResolvedQt.inqNumber || '',
     });
 
     return await salesQuotationService.upsertViaServer({
@@ -1854,7 +1985,13 @@ export function SalesQuotationManagement({
   
   // 🔥 新增：核算价格（打开智能报价创建弹窗）
   const handleCalculatePrice = (qt: any) => {
-    setSelectedQuotation(qt);
+    setSelectedQuotation({
+      ...qt,
+      items: resolveQuotationItemsForSync(qt, {
+        effectiveQuotations,
+        quoteRequirements,
+      }),
+    });
     setShowPriceCalculation(true);
   };
   
@@ -1959,22 +2096,73 @@ export function SalesQuotationManagement({
   // 🔥 撤回审批：将待审批中的报价单撤回为草稿，可重新编辑/提交
   // 场景：审批记录被管理员删除，但报价单状态仍停留在 pending_supervisor/pending_director
   const handleWithdraw = async (qt: any) => {
-    if (!window.confirm(`确定撤回报价单 ${qt.qtNumber} 吗？撤回后可重新编辑并提交审批。`)) return;
+    const displayNumber = getQuotationDisplayNumber(qt);
+    if (!window.confirm(`确定撤回报价单 ${displayNumber || qt.id || '当前报价单'} 吗？撤回后可重新编辑并提交审批。`)) return;
     try {
-      await updateQuotation(String(qt.id || qt.qtNumber), {
-        qtNumber: qt.qtNumber,
+      const matchedLocal = effectiveQuotations.find((candidate: any) =>
+        String(candidate?.id || '').trim() === String(qt?.id || '').trim()
+        || (displayNumber && getQuotationDisplayNumber(candidate) === displayNumber)
+      );
+      const stableQt = matchedLocal ? { ...qt, ...matchedLocal } : qt;
+      const stableDisplayNumber = getQuotationDisplayNumber(stableQt) || displayNumber;
+      const submissionOwner = resolveQuotationOwnerFromQr(stableQt);
+      const withdrawPatch = buildQuotationPreservedPatch(stableQt, {
+        qtNumber: stableDisplayNumber || undefined,
         approvalStatus: 'draft',
         approvalChain: [],
-      } as any);
+        salesPerson: submissionOwner.salesPerson || stableQt.salesPerson || currentUser?.email || '',
+        salesPersonName: submissionOwner.salesPersonName || stableQt.salesPersonName || currentUser?.name || '',
+        ownerEmail: submissionOwner.salesPerson || stableQt.ownerEmail || stableQt.salesPerson || currentUser?.email || '',
+        ownerName: submissionOwner.salesPersonName || stableQt.ownerName || stableQt.salesPersonName || currentUser?.name || '',
+        ownerRole: stableQt.ownerRole || 'Sales_Rep',
+      });
+
+      const withdrawViaServer = async (sourceQt: any, qtNumber: string) => {
+        return salesQuotationService.upsertViaServer({
+          ...sourceQt,
+          ...withdrawPatch,
+          qtNumber,
+          approvalStatus: 'draft',
+          approvalChain: [],
+        });
+      };
+
+      if (stableDisplayNumber) {
+        try {
+          await withdrawViaServer(stableQt, stableDisplayNumber);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error || '');
+          if (!/No sales quotation matched identifier/i.test(message) && !/服务端保存 QT 失败|push sales quotation failed/i.test(message)) throw error;
+          await salesQuotationService.updateStatus(stableDisplayNumber, 'draft', withdrawPatch);
+        }
+      } else {
+        const serverRows = await salesQuotationService.listViaServer({}).catch(() => []);
+        const matchedServer = Array.isArray(serverRows)
+          ? serverRows.find((row: any) => String(row?.id || '').trim() === String(stableQt?.id || '').trim())
+          : null;
+        const matchedNumber = getQuotationDisplayNumber(matchedServer);
+        if (matchedServer && matchedNumber) {
+          await withdrawViaServer({ ...stableQt, ...matchedServer }, matchedNumber);
+        } else {
+          await persistQuotationPatchDirect(stableQt, withdrawPatch);
+        }
+      }
       setServerQuotations((prev: any[]) =>
-        prev.map((q: any) => q.id === qt.id ? { ...q, approvalStatus: 'draft', approvalChain: [] } : q)
+        prev.map((q: any) =>
+          q.id === stableQt.id || String(getQuotationDisplayNumber(q) || '').trim() === String(stableDisplayNumber || '').trim()
+            ? { ...q, ...withdrawPatch, approvalStatus: 'draft', approvalChain: [] }
+            : q
+        )
       );
       toast.success('✅ 报价单已撤回，可重新编辑并提交审批', {
-        description: `报价单号：${qt.qtNumber}`,
+        description: `报价单号：${stableDisplayNumber || stableQt.id}`,
         duration: 4000,
       });
     } catch (e: any) {
-      toast.error(`❌ 撤回失败：${e?.message || 'Supabase 写入失败'}`);
+      const message = String(e?.message || 'Supabase 写入失败');
+      toast.error(`❌ 撤回失败：${message}`, {
+        description: `当前识别：${displayNumber || qt?.qtNumber || qt?.id || '无报价单号'}`,
+      });
     }
   };
 
@@ -1983,7 +2171,8 @@ export function SalesQuotationManagement({
     console.log('📤 提交审批:', qt);
     
     // 检查是否有报价金额
-    const amount = qt.totalAmount || qt.totalPrice;
+    const financialMetrics = getQuotationProfitMetrics(qt);
+    const amount = financialMetrics.totalAmount || qt.totalAmount || qt.totalPrice;
     if (!amount || amount <= 0) {
       toast.error('❌ 请先核算价格后再提交审批！');
       return;
@@ -1993,16 +2182,19 @@ export function SalesQuotationManagement({
     const governance = deriveQtApprovalGovernance({ ...qt, totalPrice: amount });
     const requiresDirectorReview = governance.requiresDirectorApproval;
     const customerFields = resolveQuotationCustomerFields(qt);
+    const submissionOwner = resolveQuotationOwnerFromQr(qt);
     
     // 🔥 获取主管信息（根据用户区域获取对应主管）
     const managerEmail = getRegionalManager(currentUser?.region);
     const directorEmail = SALES_DIRECTOR_EMAIL; // 销售总监：王强
     
     // 🔥 产品摘要
-    const productCount = qt.items.length;
+    const productCount = Array.isArray(qt.items) ? qt.items.length : 0;
     const productSummary = productCount === 1
       ? `${qt.items[0].productName} × ${qt.items[0].quantity} ${qt.items[0].unit}`
-      : `${qt.items[0].productName} × ${qt.items[0].quantity} ${qt.items[0].unit} 等 ${productCount} 项产品`;
+      : productCount > 1
+        ? `${qt.items[0].productName} × ${qt.items[0].quantity} ${qt.items[0].unit} 等 ${productCount} 项产品`
+        : '未命名产品';
     
     const structuredApprovalNotes = resolveStructuredApprovalNotes(qt, 'submit');
 
@@ -2024,10 +2216,18 @@ export function SalesQuotationManagement({
         items: qt.items,
         totalPrice: amount,
         totalAmount: amount,
+        totalCost: financialMetrics.totalCost,
+        totalProfit: financialMetrics.totalProfit,
+        profitRate: financialMetrics.profitRate,
         customerEmail: customerFields.customerEmail || qt.customerEmail || '',
         customerName: customerFields.customerName || qt.customerName || '',
         customerCompany: customerFields.customerCompany || qt.customerCompany || '',
         region: customerFields.region || qt.region,
+        salesPerson: submissionOwner.salesPerson || qt.salesPerson || currentUser?.email || '',
+        salesPersonName: submissionOwner.salesPersonName || qt.salesPersonName || currentUser?.name || '',
+        ownerEmail: submissionOwner.salesPerson || qt.ownerEmail || qt.salesPerson || currentUser?.email || '',
+        ownerName: submissionOwner.salesPersonName || qt.salesPersonName || currentUser?.name || '',
+        ownerRole: 'Sales_Rep',
       } as any);
     } catch (e: any) {
       toast.error(`❌ 提交审批失败：${e?.message || 'Supabase 写入失败'}`);
@@ -2045,6 +2245,9 @@ export function SalesQuotationManagement({
       strategicCustomerFlag: governance.category === 'strategic_customer' || Boolean(qt?.strategicCustomerFlag),
       totalPrice: amount,
       totalAmount: amount,
+      totalCost: financialMetrics.totalCost,
+      totalProfit: financialMetrics.totalProfit,
+      profitRate: financialMetrics.profitRate,
       customerEmail: customerFields.customerEmail || qt.customerEmail || '',
       customerName: customerFields.customerName || qt.customerName || '',
       customerCompany: customerFields.customerCompany || qt.customerCompany || '',
@@ -2078,7 +2281,6 @@ export function SalesQuotationManagement({
     try {
       const now = new Date();
       const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      const submissionOwner = resolveQuotationOwnerFromQr(qt);
       const baseRequest = {
         id: qt.id,
         type: 'qt',
@@ -2087,6 +2289,33 @@ export function SalesQuotationManagement({
         relatedDocument: {
           ...qt,
           id: qt.id,
+          totalPrice: amount,
+          totalAmount: amount,
+          totalCost: financialMetrics.totalCost,
+          totalProfit: financialMetrics.totalProfit,
+          profitRate: financialMetrics.profitRate,
+          documentDataSnapshot: {
+            ...(qt.documentDataSnapshot || {}),
+            financialSummary: {
+              amount,
+              totalAmount: amount,
+              totalCost: financialMetrics.totalCost,
+              totalProfit: financialMetrics.totalProfit,
+              profitRate: financialMetrics.profitRate,
+              currency: qt.currency || 'USD',
+            },
+          },
+          documentRenderMeta: {
+            ...(qt.documentRenderMeta || {}),
+            financialSummary: {
+              amount,
+              totalAmount: amount,
+              totalCost: financialMetrics.totalCost,
+              totalProfit: financialMetrics.totalProfit,
+              profitRate: financialMetrics.profitRate,
+              currency: qt.currency || 'USD',
+            },
+          },
           customerEmail: customerFields.customerEmail || qt.customerEmail || '',
           customerName: customerFields.customerName || qt.customerName || '',
           customerCompany: customerFields.customerCompany || qt.customerCompany || '',
@@ -2310,7 +2539,8 @@ export function SalesQuotationManagement({
       try {
         backendQuotation = await salesQuotationService.syncAndSendToCustomerApi(syncPayload, { force: isResend });
       } catch (backendSyncError) {
-        console.warn('⚠️ [SalesQuotationManagement] Laravel 客户门户同步失败，已保留 Supabase 发送状态:', backendSyncError);
+        console.warn('⚠️ [SalesQuotationManagement] 客户门户同步失败:', backendSyncError);
+        throw backendSyncError;
       }
 
       // 合并时：用 API 返回的元数据（customerEmail、id 等），但保留本地 items（业务员改过的价格）
@@ -2440,6 +2670,7 @@ export function SalesQuotationManagement({
     // 先本地创建合同（保证 UI 立即响应），再异步尝试同步到后端
     try {
       const itemsSource = readyQt.items || qt.items || [];
+      const contractCurrency = String(readyQt.currency || 'USD').trim().toUpperCase() || 'USD';
       const items = itemsSource.map((item: any, idx: number) => {
         const normalizedItem = normalizeFlowProductCore(item, idx);
         return {
@@ -2456,7 +2687,7 @@ export function SalesQuotationManagement({
           quantity: normalizedItem.quantity,
           unit: normalizedItem.unit || 'PCS',
           unitPrice: Number(item.salesPrice ?? item.unitPrice ?? item.quotePrice ?? 0),
-          currency: item.currency || readyQt.currency || 'USD',
+          currency: contractCurrency,
           amount: Number(item.salesPrice ?? item.unitPrice ?? item.quotePrice ?? 0) * Number(normalizedItem.quantity || 0),
           deliveryTime: item.leadTime || '',
         };
@@ -2497,7 +2728,7 @@ export function SalesQuotationManagement({
         region: readyQt.region || 'NA',
         products: items,
         totalAmount,
-        currency: readyQt.currency || 'USD',
+        currency: contractCurrency,
         tradeTerms: readyQt.tradeTerms?.incoterms || readyQt.deliveryTerms || 'FOB Xiamen',
         paymentTerms: contractPaymentTerms,
         paymentMode: readyQt.paymentMode || null,
@@ -2562,7 +2793,12 @@ export function SalesQuotationManagement({
 
       // 异步同步到 Supabase（失败不影响前端显示）
       salesQuotationService.updateStatus(qt.id || qt.qtNumber, 'contract_created', {
+        inqNumber: readyQt.inqNumber || '',
+        pushedToContract: true,
+        pushed_to_contract: true,
         pushed_contract_number: sc.contractNumber,
+        pushedContractNumber: sc.contractNumber,
+        pushed_contract_at: new Date().toISOString(),
       }).then(() => {
         loadSalesQuotations();
       }).catch((e: any) => {
@@ -2741,6 +2977,7 @@ export function SalesQuotationManagement({
       startQuotationColumnResize,
       shrinkQuotationColumnToMinimum,
       {
+        hidden: showQuotationView,
         lineHoverClassName: 'group-hover:bg-slate-400',
       },
     );
@@ -2939,6 +3176,12 @@ export function SalesQuotationManagement({
   
   return (
     <div className="flex flex-1 min-h-0 flex-col space-y-4">
+      {/* 🔥 业务链路进度 */}
+      <WorkflowPipelineBanner
+        steps={MAIN_WORKFLOW_STEPS}
+        currentKey="qt"
+        hint="当前：销售报价 → 客户确认后下推合同"
+      />
       {/* 🔥 报价单列表 */}
       <div className="flex flex-1 min-h-0 w-full max-w-full flex-col overflow-visible rounded-lg border border-gray-200 bg-white min-h-[calc(100dvh-360px)]">
         <div className="border-b border-gray-200">
@@ -3180,8 +3423,6 @@ export function SalesQuotationManagement({
                         }
                       : null,
                   ].filter(Boolean) as Array<{ value: string; className: string }>);
-                  const relatedRefsExpanded = expandedRelatedIds.includes(String(qt.id));
-                  
                   return (
                   <TableRow 
                     key={qt.id} 
@@ -3205,97 +3446,58 @@ export function SalesQuotationManagement({
                         {index + 1}
                       </div>
                     </TableCell>
-                    <TableCell className="px-2 align-top overflow-hidden">
-                      <div className="flex flex-col">
-                        <div className="min-h-[20px] flex items-start">
-                          <span className="mr-1 text-[12px] text-slate-500">创</span>
-                          <span className="text-[12px] font-medium text-slate-900">
-                            {formatSalesQuotationDateOnly(
-                              String(qt.createdAt || qt.created_at || '').trim() || null,
-                            )}
-                          </span>
-                        </div>
-                        <div className="min-h-[16px] flex items-start">
-                          <span className="mr-1 text-[12px] text-slate-500">截</span>
-                          <span className="text-[12px] font-medium text-slate-900">
-                            {formatSalesQuotationDateOnly(
-                              String(qt.validUntil || qt.deadline || '').trim() || null,
-                            )}
-                          </span>
-                        </div>
-                        <div className="min-h-[16px] flex items-start">
-                          <span className="mr-1 text-[12px] text-slate-500">交</span>
-                          <span className="text-[12px] font-medium text-slate-900">
-                            {formatSalesQuotationDateOnly(
-                              String(qt.deliveryDate || qt.delivery_date || '').trim() || null,
-                            )}
-                          </span>
-                        </div>
+                    <TableCell className="px-2 align-middle overflow-hidden">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span className="text-[12px] text-slate-500">创</span>
+                        <span className="text-[12px] font-medium text-slate-900">
+                          {formatSalesQuotationDateOnly(
+                            String(qt.createdAt || qt.created_at || '').trim() || null,
+                          )}
+                        </span>
+                        <CompactDetailsPopover
+                          items={[
+                            { label: '截止', value: formatSalesQuotationDateOnly(String(qt.validUntil || qt.deadline || '').trim() || null) },
+                            { label: '交期', value: formatSalesQuotationDateOnly(String(qt.deliveryDate || qt.delivery_date || '').trim() || null) },
+                          ]}
+                        />
                       </div>
                     </TableCell>
-                    <TableCell className="px-2 font-mono font-semibold text-blue-600 cursor-pointer align-top overflow-hidden" onClick={() => handleViewQuotation(qt)}>
-                      <div className="flex flex-col">
-                        <div className="min-h-[20px] flex items-start">
-                          <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} leading-5`} title={qt.qtNumber}>
-                            {qt.qtNumber}
-                          </div>
-                        </div>
-                        <div className="min-h-[16px]">
-                          {relatedRefs.length > 0 ? (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setExpandedRelatedIds((current) =>
-                                  current.includes(String(qt.id))
-                                    ? current.filter((id) => id !== String(qt.id))
-                                    : [...current, String(qt.id)],
-                                );
-                              }}
-                              className={`block text-left ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} font-semibold leading-4 text-slate-500 hover:text-slate-700`}
-                            >
-                              {relatedRefsExpanded ? '收起关联编号' : `展开关联编号 (${relatedRefs.length})`}
-                            </button>
-                          ) : null}
-                        </div>
-                        {relatedRefsExpanded ? (
-                          <div className="mt-1 space-y-1">
-                            {relatedRefs.map((ref) => (
-                              <button
-                                key={`${qt.id}-${ref.value}`}
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  const target = String(ref.value || '').trim();
-                                  if (target.startsWith('QR-')) {
-                                    onNavigateToCostInquiryWithHighlight?.(target);
-                                    return;
-                                  }
-                                  if (target.startsWith('ING-')) {
-                                    onNavigateToInquiryWithHighlight?.(target);
-                                  }
-                                }}
-                                className={`${ref.className} block break-all whitespace-normal leading-4 ${String(ref.value || '').trim().match(/^(QR|ING)-/) ? 'cursor-pointer hover:underline' : 'cursor-default'}`}
-                                title={ref.value}
-                              >
-                                {ref.value}
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
+                    <TableCell className="px-2 font-mono font-semibold text-blue-600 align-middle overflow-hidden">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleViewQuotation(qt)}
+                          className={`min-w-0 truncate whitespace-nowrap text-left ${ERP_LIST_UI_SPEC_V1.primaryTextClass} leading-5 hover:underline`}
+                          title={qt.qtNumber}
+                        >
+                          {qt.qtNumber}
+                        </button>
+                        <CompactDetailsPopover
+                          items={relatedRefs.map((ref) => ({
+                            label: '关联',
+                            value: ref.value,
+                            className: ref.className,
+                            onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+                              event.stopPropagation();
+                              const target = String(ref.value || '').trim();
+                              if (target.startsWith('QR-')) {
+                                onNavigateToCostInquiryWithHighlight?.(target);
+                                return;
+                              }
+                              if (target.startsWith('ING-')) {
+                                onNavigateToInquiryWithHighlight?.(target);
+                              }
+                            },
+                          }))}
+                        />
                       </div>
                     </TableCell>
-                    <TableCell className="px-2 align-top overflow-hidden">
-                      <div className="flex flex-col">
-                        <div className="min-h-[20px] flex items-start">
-                          <Badge variant="outline" className={`h-6 rounded-full px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-700`}>
-                            {formatRegionLabel(qt.region)}
-                          </Badge>
-                        </div>
-                        <div className="min-h-[16px]" />
-                      </div>
+                    <TableCell className="px-2 align-middle overflow-hidden">
+                      <Badge variant="outline" className={`h-6 rounded-full px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-700`}>
+                        {formatRegionLabel(qt.region)}
+                      </Badge>
                     </TableCell>
-                    <TableCell className="px-2 align-top overflow-hidden">
+                    <TableCell className="px-2 align-middle overflow-hidden">
                       {(() => {
                         const company = hasMeaningfulDisplayValue(qt.customerCompany) ? qt.customerCompany : '';
                         const contact = hasMeaningfulDisplayValue(qt.customerName) ? qt.customerName : '';
@@ -3303,79 +3505,89 @@ export function SalesQuotationManagement({
                         const rows = [company, contact, email].filter(Boolean);
 
                         return rows.length > 0 ? (
-                          <div className="flex flex-col">
-                            <div className="min-h-[20px]">
-                              {company ? <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-800 leading-5`} title={company}>{company}</div> : null}
-                            </div>
-                            <div className="min-h-[16px]">
-                              {contact ? <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-600 whitespace-normal leading-4`} title={contact}>{contact}</div> : null}
-                            </div>
-                            <div className="min-h-[16px]">
-                              {email ? <div className={`break-all ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-400 whitespace-normal leading-4`} title={email}>{email}</div> : null}
-                            </div>
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            {company ? <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-800 leading-5`} title={company}>{company}</div> : null}
+                            <CompactDetailsPopover
+                              items={[
+                                { label: '联系人', value: contact, className: 'text-slate-600' },
+                                { label: '邮箱', value: email, className: 'break-all text-slate-500' },
+                              ]}
+                            />
                           </div>
                         ) : (
                           <span className="text-gray-400">-</span>
                         );
                       })()}
                     </TableCell>
-                    <TableCell className="px-2 align-top overflow-hidden">
+                    <TableCell className="px-2 align-middle overflow-hidden">
                       {(() => {
-                        const items = Array.isArray(qt.items) ? qt.items : [];
+                        const items = resolveQuotationItemsForSync(qt, {
+                          effectiveQuotations,
+                          quoteRequirements,
+                        });
                         const first = items[0];
-                        const productName = hasMeaningfulDisplayValue(first?.productName) ? first?.productName : '';
+                        const productName = hasMeaningfulDisplayValue(first?.productName) && !isGenericProductPlaceholder(first?.productName)
+                          ? first?.productName
+                          : '';
                         return (
-                          <div className="flex flex-col">
-                            <div className="min-h-[20px]">
-                              {productName ? (
-                                <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} text-slate-800 leading-5`} title={productName}>
-                                  <span className="font-medium">{productName}</span>
-                                </div>
-                              ) : null}
-                            </div>
-                            <div className="min-h-[16px]">
-                              <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-500 whitespace-normal leading-4`} title={`共 ${Math.max(items.length, 1)} 个产品`}>
-                                共 {Math.max(items.length, 1)} 个产品
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            {productName ? (
+                              <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} text-slate-800 leading-5`} title={productName}>
+                                <span className="font-medium">{productName}</span>
                               </div>
-                            </div>
+                            ) : null}
+                            <CompactDetailsPopover
+                              items={[
+                                { label: '产品', value: `共 ${Math.max(items.length, 1)} 个产品` },
+                              ]}
+                            />
                           </div>
                         );
                       })()}
                     </TableCell>
-                    <TableCell className="px-2 text-right align-top overflow-hidden tabular-nums">
-                      <div className="flex flex-col items-end">
-                        <div className="min-h-[20px] flex w-full items-start justify-end">
-                          <div className={`${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-900 leading-5`}>{qtyDisplay}</div>
-                        </div>
-                        <div className="min-h-[16px]" />
+                    <TableCell className="px-2 text-right align-middle overflow-hidden tabular-nums">
+                      <div className="flex w-full items-center justify-end">
+                        <div className={`${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-900 leading-5`}>{qtyDisplay}</div>
                       </div>
                     </TableCell>
-                    <TableCell className="px-2 text-right align-top overflow-hidden tabular-nums">
-                      <div className="flex flex-col items-end">
-                        <div className="min-h-[20px] flex w-full items-start justify-end">
-                          <div className={`${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-900 leading-5`}>{unitPriceDisplay}</div>
-                        </div>
-                        <div className="min-h-[16px]" />
+                    <TableCell className="px-2 text-right align-middle overflow-hidden tabular-nums">
+                      <div className="flex w-full items-center justify-end">
+                        <div className={`${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-medium text-slate-900 leading-5`}>{unitPriceDisplay}</div>
                       </div>
                     </TableCell>
-                    <TableCell className="px-2 text-right align-top overflow-hidden tabular-nums">
-                      <div className="flex flex-col">
-                        <div className="min-h-[20px]">
-                          <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-bold text-slate-900 leading-5`}>
+                    <TableCell className="px-2 text-right align-middle overflow-hidden tabular-nums">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className={`truncate whitespace-nowrap ${ERP_LIST_UI_SPEC_V1.primaryTextClass} font-bold text-slate-900 leading-5`}>
                           ${financialMetrics.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </div>
                         </div>
-                        <div className="min-h-[16px]">
+                        <CompactDetailsPopover
+                          align="end"
+                          items={[
+                            { label: '成本', value: `$${financialMetrics.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+                            { label: '利润', value: `$${financialMetrics.totalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, className: 'text-emerald-600 font-medium' },
+                            {
+                              label: '利润率',
+                              value: `${financialMetrics.profitRate.toFixed(1)}% (${
+                                (financialMetrics.profitRate / 100) >= 0.2
+                                  ? '优秀'
+                                  : (financialMetrics.profitRate / 100) >= 0.15
+                                    ? '良好'
+                                    : '偏低'
+                              })`,
+                            },
+                          ]}
+                        />
+                        <div className="hidden">
                           <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-slate-500 whitespace-normal leading-4`}>
                             成本: ${financialMetrics.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                         </div>
-                        <div className="min-h-[16px]">
+                        <div className="hidden">
                           <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} text-emerald-600 font-medium whitespace-normal leading-4`}>
                             利润: ${financialMetrics.totalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                         </div>
-                        <div className="min-h-[16px]">
+                        <div className="hidden">
                           <div className={`break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} whitespace-normal leading-4`}>
                             <span className="text-slate-500">利润率: </span>
                             <span
@@ -3404,60 +3616,52 @@ export function SalesQuotationManagement({
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="px-2 text-center align-top overflow-hidden">
-                      <div className="flex flex-col items-center">
-                        <div className="min-h-[20px] flex w-full justify-center">
-                          {qt.approvalStatus === 'rejected' ? (
-                            <button
-                              type="button"
-                              onClick={() => openRejectionCommentDialog(qt, latestRejectionComment)}
-                              className="rounded-full focus:outline-none focus:ring-2 focus:ring-rose-200"
-                              title={latestRejectionComment ? '点击查看主管驳回意见' : '点击查看驳回说明'}
-                            >
-                              {getStatusBadge(qt.approvalStatus)}
-                            </button>
-                          ) : (
-                            getStatusBadge(qt.approvalStatus)
-                          )}
-                        </div>
-                        <div className="min-h-[16px] max-w-full">
-                          {qt.approvalStatus === 'rejected' && latestRejectionComment ? (
-                            <button
-                              type="button"
-                              onClick={() => openRejectionCommentDialog(qt, latestRejectionComment)}
-                              className={`${ERP_LIST_UI_SPEC_V1.secondaryTextClass} inline-flex items-center text-rose-600 hover:text-rose-700 hover:underline`}
-                              title="点击查看主管驳回意见"
-                            >
-                              查看意见
-                            </button>
-                          ) : null}
-                        </div>
+                    <TableCell className="px-2 text-center align-middle overflow-hidden">
+                      <div className="flex items-center justify-center gap-1.5">
+                        {qt.approvalStatus === 'rejected' ? (
+                          <button
+                            type="button"
+                            onClick={() => openRejectionCommentDialog(qt, latestRejectionComment)}
+                            className="rounded-full focus:outline-none focus:ring-2 focus:ring-rose-200"
+                            title={latestRejectionComment ? '点击查看主管驳回意见' : '点击查看驳回说明'}
+                          >
+                            {getStatusBadge(qt.approvalStatus)}
+                          </button>
+                        ) : (
+                          getStatusBadge(qt.approvalStatus)
+                        )}
+                        <CompactDetailsPopover
+                          align="center"
+                          items={[
+                            qt.approvalStatus === 'rejected' && latestRejectionComment ? {
+                              label: '意见',
+                              value: '查看意见',
+                              className: 'text-rose-600',
+                              onClick: () => openRejectionCommentDialog(qt, latestRejectionComment),
+                            } : null,
+                          ].filter(Boolean) as CompactDetailItem[]}
+                        />
                       </div>
                     </TableCell>
-                    <TableCell className="px-2 text-center align-top overflow-hidden">
-                      <div className="flex w-full flex-col items-center">
-                        <div className="min-h-[20px]">
-                          {getCustomerStatusBadge(qt)}
-                        </div>
-                        {(qt.customerStatus === 'rejected' || qt.customerStatus === 'negotiating') && qt.customerResponse?.comment && (
-                          <div className={`min-h-[16px] max-w-full break-words ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} whitespace-normal leading-4 ${qt.customerStatus === 'rejected' ? 'text-red-500' : 'text-orange-500'}`}
-                            title={qt.customerResponse.comment}>
-                            💭 {qt.customerResponse.comment}
-                          </div>
-                        )}
-                        {!(qt.customerStatus === 'rejected' || qt.customerStatus === 'negotiating') && <div className="min-h-[16px]" />}
-                        <div className="min-h-[16px] max-w-full">
-                          {hasGeneratedContract && contractBridgeLabel ? (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenContractFlow(qt)}
-                              className={`${ERP_LIST_UI_SPEC_V1.secondaryTextClass} inline-flex items-center text-indigo-600 hover:text-indigo-700 hover:underline`}
-                              title={existingContractNumber ? `打开销售合同 ${existingContractNumber}` : '打开关联销售合同'}
-                            >
-                              合同：{contractBridgeLabel}
-                            </button>
-                          ) : null}
-                        </div>
+                    <TableCell className="px-2 text-center align-middle overflow-hidden">
+                      <div className="flex w-full items-center justify-center gap-1.5">
+                        {getCustomerStatusBadge(qt)}
+                        <CompactDetailsPopover
+                          align="center"
+                          items={[
+                            (qt.customerStatus === 'rejected' || qt.customerStatus === 'negotiating') && qt.customerResponse?.comment ? {
+                              label: '反馈',
+                              value: qt.customerResponse.comment,
+                              className: qt.customerStatus === 'rejected' ? 'text-red-500' : 'text-orange-500',
+                            } : null,
+                            hasGeneratedContract && contractBridgeLabel ? {
+                              label: '合同',
+                              value: contractBridgeLabel,
+                              className: 'text-indigo-600',
+                              onClick: () => handleOpenContractFlow(qt),
+                            } : null,
+                          ].filter(Boolean) as CompactDetailItem[]}
+                        />
                       </div>
                     </TableCell>
                     <TableCell className="px-2 align-top overflow-hidden">
@@ -3511,7 +3715,7 @@ export function SalesQuotationManagement({
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleWithdraw(qt)}
+                            onClick={() => handleWithdraw({ ...qt, qtNumber: qt.qtNumber || getQuotationDisplayNumber(qt) })}
                             className={`h-7 justify-center gap-1 rounded-full border-amber-300 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-amber-700 hover:bg-amber-50`}
                             title="撤回审批，回到草稿状态，可重新编辑并提交"
                           >
@@ -3570,12 +3774,12 @@ export function SalesQuotationManagement({
                             size="sm"
                             onClick={() => handlePushToContract(qt)}
                             disabled={contractPushBlocked}
-                            className={`h-7 justify-center gap-1 rounded-full bg-emerald-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-white shadow-none hover:bg-emerald-600 disabled:bg-emerald-300 disabled:text-white disabled:opacity-100`}
+                            className={`h-7 justify-center gap-1 rounded-full bg-[#F96302] px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 text-white shadow-none hover:bg-[#e05a02] disabled:bg-slate-300 disabled:text-slate-500 disabled:opacity-100`}
                             title={qt.projectRevisionId
                               ? '项目类报价需先 Lock Final，确认最终 revision 和最终报价后才能生成销售合同'
-                              : '下推生成销售合同'}
+                              : '生成销售合同(SC)，成功后自动跳转到「订单管理」Tab 并高亮新合同'}
                           >
-                            下推合同
+                            下推 → 销售合同
                           </Button>
                         )}
 
@@ -3585,10 +3789,10 @@ export function SalesQuotationManagement({
                             type="button"
                             size="sm"
                             onClick={() => handleOpenContractFlow(qt)}
-                            className={`h-7 justify-center gap-1 rounded-full bg-indigo-500 px-1.5 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-indigo-600`}
-                            title={existingContractNumber ? `打开销售合同 ${existingContractNumber}` : '打开已生成的销售合同并继续流转'}
+                            className={`h-7 justify-center gap-1 rounded-full bg-indigo-500 px-2 ${ERP_LIST_UI_SPEC_V1.secondaryTextClass} leading-4 shadow-none hover:bg-indigo-600`}
+                            title={existingContractNumber ? `查看销售合同 ${existingContractNumber}，在「订单管理」Tab 跟进采购流程` : '打开已生成的销售合同并继续流转'}
                           >
-                            去合同
+                            ✓ 去合同 →
                           </Button>
                         )}
                       </div>
@@ -3635,14 +3839,16 @@ export function SalesQuotationManagement({
           requirementNo={selectedQuotation.qrNumber}
           requirement={selectedQuotation}
           saving={isSavingPriceCalculation}
+          savingAction={priceCalculationAction}
           onClose={() => {
-            if (isSavingPriceCalculation) return;
+            if (isSavingPriceCalculation || priceCalculationAction) return;
             setShowPriceCalculation(false);
             setSelectedQuotation(null);
           }}
-          onSubmit={(quoteData) => {
+          onSubmit={(quoteData, action = 'draft') => {
             const activeQuotation = selectedQuotation;
             if (!activeQuotation || isSavingPriceCalculation) return;
+            setPriceCalculationAction(action);
             setIsSavingPriceCalculation(true);
             setShowPriceCalculation(false);
             setSelectedQuotation(null);
@@ -3651,10 +3857,13 @@ export function SalesQuotationManagement({
                 try {
                   const fallback = mapQuoteDataToQuotationUpdate(quoteData, activeQuotation);
                   const customerFields = resolveQuotationCustomerFields(activeQuotation);
+                  const nextApprovalStatus = action === 'review'
+                    ? String(quoteData?.approvalStatus || quoteData?.status || 'pending_approval')
+                    : 'draft';
                   const optimisticQuotation = {
                     ...activeQuotation,
                     ...fallback,
-                    approvalStatus: 'draft',
+                    approvalStatus: nextApprovalStatus,
                     qtNumber: activeQuotation.qtNumber,
                     qrNumber: activeQuotation.qrNumber,
                     inqNumber: activeQuotation.inqNumber || customerFields.inqNumber,
@@ -3683,19 +3892,20 @@ export function SalesQuotationManagement({
                     source: 'admin',
                     occurredAt: new Date().toISOString(),
                     metadata: {
-                      approvalStatus: 'draft',
+                      approvalStatus: nextApprovalStatus,
                       qtNumber: activeQuotation.qtNumber,
                       qrNumber: activeQuotation.qrNumber,
                       quotation: optimisticQuotation,
                     },
                   });
-                  toast.success('报价草稿已保存');
+                  toast.success(action === 'review' ? '报价已提交复核' : '报价草稿已保存');
                   void loadSalesQuotations();
                 } catch (e: any) {
-                  console.error('❌ 保存报价草稿失败:', e);
-                  toast.error(`保存报价草稿失败：${e?.message || 'Supabase 写入失败'}`);
+                  console.error(action === 'review' ? '❌ 提交报价复核失败:' : '❌ 保存报价草稿失败:', e);
+                  toast.error(`${action === 'review' ? '提交报价复核' : '保存报价草稿'}失败：${e?.message || 'Supabase 写入失败'}`);
                 } finally {
                   setIsSavingPriceCalculation(false);
+                  setPriceCalculationAction(null);
                 }
               })();
             }, 0);

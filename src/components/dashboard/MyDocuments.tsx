@@ -12,7 +12,6 @@ import { PackingListDocument } from '../documents/templates/PackingListDocument'
 import type { CustomerInquiryData } from '../documents/templates/CustomerInquiryDocument';
 import type { QuotationData } from '../documents/templates/QuotationDocument';
 import type { SalesContractData } from '../documents/templates/SalesContractDocument';
-import { resolveUsdSellerBankInfo } from '../../utils/documentBankInfo';
 import type { CommercialInvoiceData } from '../documents/templates/CommercialInvoiceDocument';
 import type { PackingListData } from '../documents/templates/PackingListDocument';
 import html2canvas from 'html2canvas';
@@ -25,6 +24,13 @@ import { useUser } from '../../contexts/UserContext';
 import type { BusinessDomain } from '../../lib/erp-core/types';
 import { resolveDisplayNumber } from '../../lib/erp-core/number-display';
 import { getStoredAdminOrgProfile } from '../../contexts/AdminOrganizationContext';
+import {
+  adaptInquiryToDocumentData,
+  adaptSalesContractToCommercialInvoice,
+  adaptSalesContractToDocumentData,
+  adaptSalesContractToPackingList,
+  adaptSalesQuotationToDocumentData,
+} from '../../utils/documentDataAdapters';
 
 /**
  * 📄 客户文档中心
@@ -45,6 +51,8 @@ interface DocumentItem {
   title: string;
   status: 'draft' | 'sent' | 'confirmed' | 'completed';
   amount?: string;
+  sourceRecord?: any;
+  sourceOrder?: any;
 }
 
 export function MyDocuments() {
@@ -118,6 +126,7 @@ export function MyDocuments() {
         date: String(inq.date || '').slice(0, 10) || new Date(inq.createdAt || Date.now()).toISOString().slice(0, 10),
         title: String(firstProduct),
         status: mapInquiryStatus(inq.status),
+        sourceRecord: inq,
       });
     });
 
@@ -133,6 +142,7 @@ export function MyDocuments() {
         title: `Quotation - ${firstProduct}`,
         status: mapQuotationStatus(qt.customerStatus),
         amount: formatAmount(Number(qt.totalPrice || 0), qt.currency),
+        sourceRecord: qt,
       });
     });
 
@@ -154,6 +164,8 @@ export function MyDocuments() {
         title: `Sales Contract - ${sc.customerCompany || sc.customerName || 'Customer'}`,
         status: scStatus,
         amount,
+        sourceRecord: sc,
+        sourceOrder: order,
       });
 
       if (orderStatus === 'shipped' || orderStatus === 'delivered' || String(sc.status || '').toLowerCase() === 'completed') {
@@ -166,6 +178,8 @@ export function MyDocuments() {
           title: 'Commercial Invoice',
           status: orderStatus === 'delivered' ? 'completed' : 'confirmed',
           amount,
+          sourceRecord: sc,
+          sourceOrder: order,
         });
         result.push({
           id: `pl-${sc.id}`,
@@ -176,6 +190,8 @@ export function MyDocuments() {
           title: 'Packing List',
           status: orderStatus === 'delivered' ? 'completed' : 'confirmed',
           amount,
+          sourceRecord: sc,
+          sourceOrder: order,
         });
       }
     });
@@ -211,6 +227,22 @@ export function MyDocuments() {
 
   // 获取文档数据（示例数据）
   const getDocumentData = (doc: DocumentItem) => {
+    if (doc.type === 'ing' && doc.sourceRecord) {
+      return adaptInquiryToDocumentData(doc.sourceRecord) as CustomerInquiryData;
+    }
+    if (doc.type === 'qt' && doc.sourceRecord) {
+      return adaptSalesQuotationToDocumentData(doc.sourceRecord) as QuotationData;
+    }
+    if (doc.type === 'sc' && doc.sourceRecord) {
+      return adaptSalesContractToDocumentData(doc.sourceRecord) as SalesContractData;
+    }
+    if (doc.type === 'ci' && doc.sourceRecord) {
+      return adaptSalesContractToCommercialInvoice(doc.sourceRecord, doc.sourceOrder) as CommercialInvoiceData;
+    }
+    if (doc.type === 'pl' && doc.sourceRecord) {
+      return adaptSalesContractToPackingList(doc.sourceRecord, doc.sourceOrder) as PackingListData;
+    }
+
     const adminOrg = getStoredAdminOrgProfile();
     const sellerInfo = {
       companyName: String(adminOrg.nameCN || ''),
@@ -344,7 +376,15 @@ export function MyDocuments() {
             tel: sellerInfo.phone,
             email: sellerInfo.email,
             legalRepresentative: String(adminOrg.contactPerson || adminOrg.defaultSignatory || ''),
-            bankInfo: resolveUsdSellerBankInfo(adminOrg, undefined, sellerInfo.companyNameEn || sellerInfo.companyName),
+            bankInfo: {
+              bankName: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
+              accountName: String(usdBank.accountNameEN || usdBank.accountNameCN || sellerInfo.companyNameEn || sellerInfo.companyName),
+              accountNumber: String(usdBank.accountNumber || ''),
+              swiftCode: String(usdBank.swiftCode || ''),
+              bankAddress: String(usdBank.bankAddress || ''),
+              paymentNote: String(usdBank.paymentNote || ''),
+              currency: 'USD',
+            },
           },
           products: baseItems.map((item, index) => ({
             no: index + 1,

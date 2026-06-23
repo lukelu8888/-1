@@ -35,27 +35,27 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-[82px] w-full rounded-xl border px-5 py-4 text-left transition-colors ${
+      className={`min-h-[72px] w-full rounded-lg border px-5 py-4 text-left transition-colors ${
         active
           ? 'shadow-sm'
           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
       }`}
       style={active ? {
-        borderColor: theme?.primaryBorder ?? '#bbf7d0',
-        backgroundColor: theme?.primarySoft ?? '#f0fdf4',
-        color: theme?.primaryText ?? '#1b5e20',
+        borderColor: theme?.primaryBorder ?? '#c7d5e8',
+        backgroundColor: theme?.primarySoft ?? '#f5f9ff',
+        color: theme?.primaryText ?? '#1e3a5f',
       } : undefined}
     >
       <div className="flex items-start gap-3">
         <div
           className={`mt-0.5 shrink-0 ${active ? '' : 'text-slate-400'}`}
-          style={active ? { color: theme?.primary ?? '#2E7D32' } : undefined}
+          style={active ? { color: theme?.primaryText ?? '#34557a' } : undefined}
         >
           {icon}
         </div>
         <div>
-          <p className="text-[14px] font-semibold leading-none tracking-tight">{label}</p>
-          <p className="mt-1.5 text-[11px] leading-5 opacity-80">{description}</p>
+          <p className="text-[13px] font-semibold leading-none tracking-tight">{label}</p>
+          <p className="mt-1.5 text-[12px] leading-5 opacity-80">{description}</p>
         </div>
       </div>
     </button>
@@ -207,14 +207,14 @@ export function CustomerEnterpriseMasterDataCenter({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1880px] space-y-5 px-4 pb-8 xl:px-6 2xl:px-8" style={{ fontFamily: 'var(--hd-font)' }} dir={rtl ? 'rtl' : 'ltr'}>
-      <div className={`relative z-20 flex items-center justify-between gap-4 ${rtl ? 'flex-row-reverse' : ''}`}>
+    <div className="customer-enterprise-center mx-auto w-full max-w-[1880px] space-y-4 px-4 pb-8 xl:px-6 2xl:px-8" style={{ fontFamily: 'var(--hd-font)' }} dir={rtl ? 'rtl' : 'ltr'}>
+      <div className={`relative z-20 flex items-center justify-between gap-4 border-b border-slate-200 pb-4 ${rtl ? 'flex-row-reverse' : ''}`}>
         <div className={`flex items-center gap-3 ${rtl ? 'flex-row-reverse' : ''}`}>
           {onBack && (
             <>
               <button
                 onClick={onBack}
-                className={`flex items-center gap-1.5 text-[13px] text-slate-500 hover:text-slate-800 transition-colors group ${rtl ? 'flex-row-reverse' : ''}`}
+                className={`flex items-center gap-1.5 text-[13px] text-slate-500 transition-colors group hover:text-slate-800 ${rtl ? 'flex-row-reverse' : ''}`}
               >
                 <ArrowLeft className={`w-4 h-4 ${rtl ? 'rotate-180 group-hover:translate-x-0.5' : 'group-hover:-translate-x-0.5'} transition-transform`} />
                 {copy.actions.back}
@@ -267,7 +267,7 @@ export function CustomerEnterpriseMasterDataCenter({
               <div className={`flex items-center gap-1.5 ${rtl ? 'flex-row-reverse justify-end' : ''}`}>
                 <h1 className="text-[16px] font-semibold text-slate-800 leading-tight">{copy.pageTitle}</h1>
               </div>
-              <div className={`flex items-center gap-1 mt-0.5 ${rtl ? 'flex-row-reverse justify-end' : ''}`}>
+              <div className={`mt-0.5 flex items-center gap-1 ${rtl ? 'flex-row-reverse justify-end' : ''}`}>
                 <Languages className="w-3 h-3 text-slate-300" />
                 <p className="text-[11px] text-slate-400">
                   {[
@@ -284,7 +284,7 @@ export function CustomerEnterpriseMasterDataCenter({
         <div className={`relative z-30 flex items-center gap-3 pointer-events-auto ${rtl ? 'flex-row-reverse' : ''}`}>
           <div className="w-[148px] relative z-30 pointer-events-auto">
             <Select value={locale} onValueChange={(value) => updateLocale(value as CustomerMasterDataLocale)}>
-              <SelectTrigger className="h-9 rounded-lg border-slate-200 bg-white text-[13px] text-slate-600">
+            <SelectTrigger className="h-9 rounded-md border-slate-200 bg-white text-[13px] text-slate-600">
                 <div className={`flex items-center gap-2 ${rtl ? 'flex-row-reverse' : ''}`}>
                   <Languages className="h-3.5 w-3.5 text-slate-400" />
                   <SelectValue />
@@ -306,7 +306,7 @@ export function CustomerEnterpriseMasterDataCenter({
                 <button
                   type="button"
                   onClick={triggerCancel}
-                  className={`relative z-30 pointer-events-auto flex items-center gap-1.5 px-4 py-1.5 text-[13px] font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors ${rtl ? 'flex-row-reverse' : ''}`}
+                  className={`relative z-30 pointer-events-auto flex items-center gap-1.5 rounded-md border border-slate-200 px-4 py-1.5 text-[13px] font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 ${rtl ? 'flex-row-reverse' : ''}`}
                 >
                   <X className="h-3.5 w-3.5" />
                   {copy.profile.cancel}
@@ -314,9 +314,9 @@ export function CustomerEnterpriseMasterDataCenter({
                 <button
                   type="button"
                   onClick={triggerSave}
-                  className={`relative z-30 pointer-events-auto flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-medium text-white ${rtl ? 'flex-row-reverse' : ''}`}
+                  className={`relative z-30 pointer-events-auto flex items-center gap-1.5 rounded-md border border-[#16325c] bg-[#16325c] px-4 py-1.5 text-[13px] font-medium text-white ${rtl ? 'flex-row-reverse' : ''}`}
                   style={{
-                    backgroundColor: '#2E7D32',
+                    backgroundColor: '#16325c',
                     color: '#ffffff',
                   }}
                 >
@@ -328,7 +328,7 @@ export function CustomerEnterpriseMasterDataCenter({
               <button
                 type="button"
                 onClick={triggerEdit}
-                className={`relative z-30 pointer-events-auto flex items-center gap-1.5 px-4 py-1.5 text-[13px] font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 transition-colors ${rtl ? 'flex-row-reverse' : ''}`}
+                className={`relative z-30 pointer-events-auto flex items-center gap-1.5 rounded-md border border-slate-200 px-4 py-1.5 text-[13px] font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 ${rtl ? 'flex-row-reverse' : ''}`}
               >
                 <Pencil className="w-3.5 h-3.5" />
                 {copy.actions.edit}
@@ -338,7 +338,8 @@ export function CustomerEnterpriseMasterDataCenter({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
         {tabs.map((tab) => (
           <TabButton
             key={tab.id}
@@ -350,6 +351,7 @@ export function CustomerEnterpriseMasterDataCenter({
             theme={theme}
           />
         ))}
+        </div>
       </div>
 
       {activeTab === 'basic' && (
@@ -379,7 +381,7 @@ export function CustomerEnterpriseMasterDataCenter({
       )}
 
       {activeTab === 'people-center' && (
-        <CustomerContactsAndAccountsCenter copy={copy.contacts} rtl={rtl} />
+        <CustomerContactsAndAccountsCenter copy={copy.contacts} rtl={rtl} locale={locale} />
       )}
     </div>
   );

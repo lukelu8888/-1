@@ -91,12 +91,10 @@ export function ProductDetailModal({
               )}
 
               {/* Price Tag */}
-              {product.price && (
-                <div className="absolute top-4 right-4 bg-[#F96302] text-white px-4 py-2 rounded-lg shadow-lg">
-                  <div className="text-xs opacity-90">Unit Price</div>
-                  <div className="text-2xl font-bold">${product.price.toFixed(2)}</div>
-                </div>
-              )}
+              <div className="absolute top-4 right-4 bg-[#F96302] text-white px-4 py-2 rounded-lg shadow-lg">
+                <div className="text-xs opacity-90">Unit Price</div>
+                <div className="text-2xl font-bold">${Number(product.price || 0).toFixed(2)}</div>
+              </div>
 
               {/* Image Indicator */}
               {productImages.length > 1 && (

@@ -128,7 +128,7 @@ export function CustomerProfile({
       }
     } else {
       // Initialize with user registration data
-      const currentUser = getCurrentUser() as any;
+      const currentUser = getCurrentUser();
       if (currentUser) {
         setProfile(prev => ({
           ...prev,

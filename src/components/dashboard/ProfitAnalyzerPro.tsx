@@ -6,6 +6,7 @@ import { Calculator, Plus, Trash2, Download, BarChart3, TrendingDown, DollarSign
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext';
 import { useUser } from '../../contexts/UserContext';
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import * as kv from '../../supabase/functions/server/kv_store';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -13,18 +14,6 @@ import jsPDF from 'jspdf';
 // 🔥 中国主要港口列表
 const CHINA_PORTS = ['Yantian', 'Guangzhou', 'Shantou', 'Xiamen', 'Fuzhou', 'Ningbo', 'Shanghai', 'Qingdao', 'Dalian'];
 const PROFIT_ANALYSIS_STORAGE_PREFIX = 'profit_analyzer_saved_analyses_v1';
-const profitAnalysisBaseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-880fd43b`;
-
-async function readFunctionError(response: Response) {
-  const rawText = await response.text().catch(() => '');
-  let parsed: any = null;
-  try {
-    parsed = rawText ? JSON.parse(rawText) : null;
-  } catch {
-    parsed = null;
-  }
-  return String(parsed?.error || parsed?.message || rawText || `HTTP ${response.status}`).trim();
-}
 
 interface SupplierData {
   id: string;
@@ -467,18 +456,17 @@ export function ProfitAnalyzerPro({ onNavigate }: ProfitAnalyzerProProps) {
       };
 
       // 保存到后台
-      const response = await fetch(`${profitAnalysisBaseUrl}/save-profit-analysis`, {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-880fd43b/save-profit-analysis`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'apikey': publicAnonKey,
+          'Authorization': `Bearer ${publicAnonKey}`
         },
         body: JSON.stringify(analysisData)
       });
 
       if (!response.ok) {
-        throw new Error(await readFunctionError(response));
+        throw new Error('Failed to save analysis');
       }
 
       alert('✅ Analysis saved successfully!');
@@ -496,15 +484,14 @@ export function ProfitAnalyzerPro({ onNavigate }: ProfitAnalyzerProProps) {
     setShowHistoryModal(true);
     
     try {
-      const response = await fetch(`${profitAnalysisBaseUrl}/get-profit-analyses?userId=${encodeURIComponent(String(user?.email || ''))}`, {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-880fd43b/get-profit-analyses?userId=${user?.email}`, {
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'apikey': publicAnonKey,
+          'Authorization': `Bearer ${publicAnonKey}`
         }
       });
 
       if (!response.ok) {
-        throw new Error(await readFunctionError(response));
+        throw new Error('Failed to load history');
       }
 
       const data = await response.json();

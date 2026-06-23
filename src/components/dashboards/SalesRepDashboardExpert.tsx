@@ -23,11 +23,34 @@ import {
 import { User } from "../../lib/rbac-config";
 import { useState } from "react";
 import { Input } from "../ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { ActionPlaybookDialog } from "./ActionPlaybookDialog"; // 🔥 导入执行手册弹窗
 
 interface SalesRepDashboardExpertProps {
   user: User;
+}
+
+function DashboardNativeSelect({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="h-7 w-full rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-700 outline-none transition-colors hover:border-slate-400 focus:border-slate-500"
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 // 📊 生成业务员个人数据
@@ -891,7 +914,7 @@ export function SalesRepDashboardExpert({ user }: SalesRepDashboardExpertProps) 
   ].filter(Boolean).length;
 
   return (
-    <div className="space-y-2.5 p-2.5 bg-slate-50">
+    <div className="space-y-2.5 p-2.5 bg-slate-50 notranslate" translate="no">
       {/* 🎯 个人业绩横幅 */}
       <div className="rounded-lg p-3.5 bg-slate-800 text-white border border-slate-700">
         <div className="flex items-center justify-between">
@@ -980,110 +1003,104 @@ export function SalesRepDashboardExpert({ user }: SalesRepDashboardExpertProps) 
           {/* 时间范围 */}
           <div className="col-span-1">
             <label className="text-xs text-slate-600 mb-1 block">时间范围</label>
-            <Select value={timeRange} onValueChange={setTimeRange}>
-              <SelectTrigger className="h-7 text-xs border-slate-300">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="today" className="text-xs">今日</SelectItem>
-                <SelectItem value="week" className="text-xs">本周</SelectItem>
-                <SelectItem value="month" className="text-xs">本月</SelectItem>
-                <SelectItem value="quarter" className="text-xs">本季度</SelectItem>
-                <SelectItem value="year" className="text-xs">本年度</SelectItem>
-                <SelectItem value="custom" className="text-xs">自定义</SelectItem>
-              </SelectContent>
-            </Select>
+            <DashboardNativeSelect
+              value={timeRange}
+              onChange={setTimeRange}
+              options={[
+                { value: 'today', label: '今日' },
+                { value: 'week', label: '本周' },
+                { value: 'month', label: '本月' },
+                { value: 'quarter', label: '本季度' },
+                { value: 'year', label: '本年度' },
+                { value: 'custom', label: '自定义' },
+              ]}
+            />
           </div>
 
           {/* 区域筛选 */}
           <div className="col-span-1">
             <label className="text-xs text-slate-600 mb-1 block">区域</label>
-            <Select value={regionFilter} onValueChange={setRegionFilter}>
-              <SelectTrigger className="h-7 text-xs border-slate-300">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">全部区域</SelectItem>
-                <SelectItem value="NA" className="text-xs">北美</SelectItem>
-                <SelectItem value="SA" className="text-xs">南美</SelectItem>
-                <SelectItem value="EA" className="text-xs">欧非</SelectItem>
-              </SelectContent>
-            </Select>
+            <DashboardNativeSelect
+              value={regionFilter}
+              onChange={setRegionFilter}
+              options={[
+                { value: 'all', label: '全部区域' },
+                { value: 'NA', label: '北美' },
+                { value: 'SA', label: '南美' },
+                { value: 'EA', label: '欧非' },
+              ]}
+            />
           </div>
 
           {/* 客户类型 */}
           <div className="col-span-1">
             <label className="text-xs text-slate-600 mb-1 block">客户类型</label>
-            <Select value={customerTypeFilter} onValueChange={setCustomerTypeFilter}>
-              <SelectTrigger className="h-7 text-xs border-slate-300">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">全部类型</SelectItem>
-                <SelectItem value="retailer" className="text-xs">🏪 建材零售商</SelectItem>
-                <SelectItem value="project_contractor" className="text-xs">🏗️ 项目承包商</SelectItem>
-                <SelectItem value="inspection_seeker" className="text-xs">🔍 验货客户</SelectItem>
-                <SelectItem value="agency_seeker" className="text-xs">🤝 中国代理</SelectItem>
-                <SelectItem value="local_manufacturer" className="text-xs">🏭 本土工厂</SelectItem>
-                <SelectItem value="wholesaler" className="text-xs">📦 批发商</SelectItem>
-              </SelectContent>
-            </Select>
+            <DashboardNativeSelect
+              value={customerTypeFilter}
+              onChange={setCustomerTypeFilter}
+              options={[
+                { value: 'all', label: '全部类型' },
+                { value: 'retailer', label: '🏪 建材零售商' },
+                { value: 'project_contractor', label: '🏗️ 项目承包商' },
+                { value: 'inspection_seeker', label: '🔍 验货客户' },
+                { value: 'agency_seeker', label: '🤝 中国代理' },
+                { value: 'local_manufacturer', label: '🏭 本土工厂' },
+                { value: 'wholesaler', label: '📦 批发商' },
+              ]}
+            />
           </div>
 
           {/* 客户来源 */}
           <div className="col-span-1">
             <label className="text-xs text-slate-600 mb-1 block">客户来源</label>
-            <Select value={sourceFilter} onValueChange={setSourceFilter}>
-              <SelectTrigger className="h-7 text-xs border-slate-300">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">全部来源</SelectItem>
-                <SelectItem value="社交媒体" className="text-xs">社交媒体</SelectItem>
-                <SelectItem value="老客户" className="text-xs">老客户</SelectItem>
-                <SelectItem value="展会" className="text-xs">展会</SelectItem>
-                <SelectItem value="客户介绍" className="text-xs">客户介绍</SelectItem>
-                <SelectItem value="海关数据" className="text-xs">海关数据</SelectItem>
-                <SelectItem value="其他" className="text-xs">其他</SelectItem>
-              </SelectContent>
-            </Select>
+            <DashboardNativeSelect
+              value={sourceFilter}
+              onChange={setSourceFilter}
+              options={[
+                { value: 'all', label: '全部来源' },
+                { value: '社交媒体', label: '社交媒体' },
+                { value: '老客户', label: '老客户' },
+                { value: '展会', label: '展会' },
+                { value: '客户介绍', label: '客户介绍' },
+                { value: '海关数据', label: '海关数据' },
+                { value: '其他', label: '其他' },
+              ]}
+            />
           </div>
 
           {/* 客户阶段 */}
           <div className="col-span-1">
             <label className="text-xs text-slate-600 mb-1 block">客户阶段</label>
-            <Select value={stageFilter} onValueChange={setStageFilter}>
-              <SelectTrigger className="h-7 text-xs border-slate-300">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">全部阶段</SelectItem>
-                <SelectItem value="潜在客户" className="text-xs">潜在客户</SelectItem>
-                <SelectItem value="待背调" className="text-xs">待背调</SelectItem>
-                <SelectItem value="背调中" className="text-xs">背调中</SelectItem>
-                <SelectItem value="背调完成" className="text-xs">背调完成</SelectItem>
-                <SelectItem value="已认证" className="text-xs">已认证(BANT)</SelectItem>
-                <SelectItem value="成交客户" className="text-xs">成交客户</SelectItem>
-              </SelectContent>
-            </Select>
+            <DashboardNativeSelect
+              value={stageFilter}
+              onChange={setStageFilter}
+              options={[
+                { value: 'all', label: '全部阶段' },
+                { value: '潜在客户', label: '潜在客户' },
+                { value: '待背调', label: '待背调' },
+                { value: '背调中', label: '背调中' },
+                { value: '背调完成', label: '背调完成' },
+                { value: '已认证', label: '已认证(BANT)' },
+                { value: '成交客户', label: '成交客户' },
+              ]}
+            />
           </div>
 
           {/* 评分等级 */}
           <div className="col-span-1">
             <label className="text-xs text-slate-600 mb-1 block">评分等级</label>
-            <Select value={scoreFilter} onValueChange={setScoreFilter}>
-              <SelectTrigger className="h-7 text-xs border-slate-300">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">全部等级</SelectItem>
-                <SelectItem value="A" className="text-xs">A级(85-100分)</SelectItem>
-                <SelectItem value="B" className="text-xs">B级(60-84分)</SelectItem>
-                <SelectItem value="C" className="text-xs">C级(40-59分)</SelectItem>
-                <SelectItem value="D" className="text-xs">D级(0-39分)</SelectItem>
-                <SelectItem value="unscored" className="text-xs">未评分</SelectItem>
-              </SelectContent>
-            </Select>
+            <DashboardNativeSelect
+              value={scoreFilter}
+              onChange={setScoreFilter}
+              options={[
+                { value: 'all', label: '全部等级' },
+                { value: 'A', label: 'A级(85-100分)' },
+                { value: 'B', label: 'B级(60-84分)' },
+                { value: 'C', label: 'C级(40-59分)' },
+                { value: 'D', label: 'D级(0-39分)' },
+                { value: 'unscored', label: '未评分' },
+              ]}
+            />
           </div>
         </div>
 
