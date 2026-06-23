@@ -7,11 +7,14 @@ import { ProformaInvoiceDocument } from './templates/ProformaInvoiceDocument';
 import { XJDocument } from './templates/XJDocument'; // 🔥 采购询价单
 import { SupplierQuotationDocument } from './templates/SupplierQuotationDocument'; // 🔥 供应商报价单
 import { QuoteRequirementDocument } from './templates/QuoteRequirementDocument'; // 🔥 报价请求单
-import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
 import { QuotationDocument } from './templates/QuotationDocument';
 import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument';
 import { SalesContractViewerPage } from './SalesContractViewerPage'; // 🔥 新页面级 Viewer
-import type { CustomerInquiryData } from './templates/CustomerInquiryDocument';
+import {
+  DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS,
+  prepareCustomerInquiryDocumentData,
+  type CustomerInquiryData,
+} from './templates/CustomerInquiryDocument';
 import type { QuotationData } from './templates/QuotationDocument';
 import type { SalesContractData } from './templates/SalesContractDocument';
 import type { PurchaseOrderData } from './templates/PurchaseOrderDocument';
@@ -22,6 +25,8 @@ import type { ProformaInvoiceData } from './templates/ProformaInvoiceDocument';
 import type { XJData } from './templates/XJDocument'; // 🔥 采购询价单类型
 import type { SupplierQuotationData } from './templates/SupplierQuotationDocument'; // 🔥 供应商报价单类型
 import type { QuoteRequirementDocumentData } from './templates/QuoteRequirementDocument'; // 🔥 报价请求单类型
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
+import { CustomerInquiryDocumentA4Pages } from './templates/paginated/CustomerInquiryDocumentA4';
 
 /**
  * 📄 文档测试页面
@@ -83,7 +88,7 @@ export function DocumentTestPage() {
     requirements: {
       deliveryTime: 'Before March 15, 2026',
       portOfDestination: 'Los Angeles, USA',
-      paymentTerms: 'T/T or L/C at sight',
+      paymentTerms: buildPaymentTermsText('deposit_plus_lc', 'lc_ready'),
       tradeTerms: 'FOB Xiamen or CIF Los Angeles (please quote both)',
       packingRequirements: 'Export carton with wooden pallets, shrink-wrapped for ocean freight',
       certifications: ['UL', 'FCC', 'CE', 'RoHS'],
@@ -91,6 +96,33 @@ export function DocumentTestPage() {
     },
     remarks: 'This is our first order with your company. We are a well-established distributor in the Los Angeles area with 15 years of experience. Quality and on-time delivery are critical to our business. We are looking for a long-term supplier and expect to place regular orders if this trial order is successful. Please provide your best pricing and confirm your production capacity.'
   };
+
+  const ingPreviewTemplateSettings: NonNullable<CustomerInquiryData['templateSettings']> = {
+    productTableColumns: DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS.map((column) => {
+      if (column.key === 'modelNo') {
+        return { ...column, label: 'Model#', widthPercent: 9 };
+      }
+      if (column.key === 'itemNameSpecification') {
+        return { ...column, widthPercent: 28 };
+      }
+      if (column.key === 'targetPrice') {
+        return { ...column, widthPercent: 15 };
+      }
+      if (column.key === 'estimatedValue') {
+        return { ...column, widthPercent: 15 };
+      }
+      return column;
+    }),
+  };
+
+  const ingTemplatePreviewData = prepareCustomerInquiryDocumentData({
+    ...sampleInquiryData,
+    templateSettings: ingPreviewTemplateSettings,
+  });
+
+  const ingCustomerPreviewData = prepareCustomerInquiryDocumentData(sampleInquiryData, {
+    templateSettings: ingPreviewTemplateSettings,
+  });
 
   // 示例数据：销售报价单
   const sampleQuotationData: QuotationData = {
@@ -159,7 +191,7 @@ export function DocumentTestPage() {
     ],
     tradeTerms: {
       incoterms: 'FOB Xiamen, China',
-      paymentTerms: '30% T/T deposit upon order confirmation, 70% T/T before shipment',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
       deliveryTime: '25-30 days after receiving deposit',
       packing: 'Export standard carton with wooden pallets, shrink-wrapped',
       portOfLoading: 'Xiamen Port, China',
@@ -351,7 +383,7 @@ export function DocumentTestPage() {
       totalAmount: 193625.00,
       currency: 'USD',
       tradeTerms: 'FOB Xiamen, China',
-      paymentTerms: '30% T/T deposit upon order confirmation, 70% T/T before shipment',
+          paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
       depositAmount: 58087.50,
       balanceAmount: 135537.50,
       deliveryTime: '35-45 days after receiving deposit',
@@ -533,7 +565,7 @@ export function DocumentTestPage() {
     
     terms: {
       currency: 'USD',
-      paymentTerms: 'T/T 30% 预付，70% 发货前付清',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
       deliveryTerms: 'EXW 工厂交货',
       deliveryAddress: '福建省福州市仓山区金山工业区',
       
@@ -620,7 +652,7 @@ export function DocumentTestPage() {
     ],
     
     terms: {
-      paymentTerms: 'T/T 30% 预付，70% 发货前付清',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
       deliveryTerms: 'EXW 深圳工厂',
       deliveryTime: '收到预付款后15-20天',
       deliveryAddress: '福建省福州市仓山区金山工业区',
@@ -701,7 +733,7 @@ export function DocumentTestPage() {
     
     customerRequirements: {
       deliveryTerms: 'FOB Xiamen 或 CIF Los Angeles（请两种都报价）',
-      paymentTerms: 'T/T 或 L/C 即期',
+      paymentTerms: buildPaymentTermsText('deposit_plus_lc', 'lc_ready'),
       qualityStandard: 'UL, FCC, CE, RoHS认证',
       packaging: '出口纸箱+木托盘，合海运',
       specialRequirements: '需要英文产品说明书和安装指南。优先考虑独立零售包装。'
@@ -990,7 +1022,7 @@ export function DocumentTestPage() {
     remarks: {
       priceTerms: 'Price Term: EX WARE OF XIAMEN',
       containerType: 'Container Type: 1 x in bulk',
-      paymentTerms: 'Term of payment: 100% prepayment before preparation of samples and mass production',
+      paymentTerms: `Term of payment: ${buildPaymentTermsText('lc_100', 'lc_ready')}`,
       portOfLoading: 'Port of Loading: XIAMEN',
       shipmentDate: 'Date of Shipment: MAY 5, 2025',
       others: [
@@ -1044,7 +1076,44 @@ export function DocumentTestPage() {
               </div>
             )}
             {activeDoc === 'ing' && (
-              <CustomerInquiryDocument data={sampleInquiryData} />
+              <div className="mx-auto flex max-w-[1680px] flex-col gap-5">
+                <div className="rounded-2xl border border-slate-600/70 bg-slate-900/70 px-5 py-4 text-slate-100 shadow-[0_20px_45px_rgba(15,23,42,0.28)]">
+                  <div className="text-sm font-semibold">ING 预览一致性检查台</div>
+                  <div className="mt-2 text-sm text-slate-300">
+                    左侧模拟模板中心预览，右侧模拟客户侧弹窗。两边都走真实的 ING A4 组件和统一的数据归一化入口，改模板后可以在这里先做肉眼核对。
+                  </div>
+                </div>
+                <div className="grid gap-5 xl:grid-cols-2">
+                  {[
+                    {
+                      key: 'template-center',
+                      title: '模板中心预览',
+                      description: '直接使用当前模板数据，检查列名、列宽、表头排版。',
+                      data: ingTemplatePreviewData,
+                    },
+                    {
+                      key: 'customer-dialog',
+                      title: '客户侧弹窗预览',
+                      description: '模拟业务数据叠加已发布模板设置后的最终效果。',
+                      data: ingCustomerPreviewData,
+                    },
+                  ].map((panel) => (
+                    <div key={panel.key} className="overflow-hidden rounded-3xl border border-slate-500/60 bg-slate-700/35 shadow-[0_24px_60px_rgba(15,23,42,0.24)]">
+                      <div className="border-b border-slate-500/50 bg-slate-800/75 px-5 py-4 text-slate-50">
+                        <div className="text-base font-semibold">{panel.title}</div>
+                        <div className="mt-1 text-sm text-slate-300">{panel.description}</div>
+                      </div>
+                      <div className="overflow-auto p-5">
+                        <div className="mx-auto flex min-w-[930px] justify-center rounded-2xl bg-[#525659] px-4 py-6">
+                          <div style={{ transform: 'scale(0.58)', transformOrigin: 'top center', width: 'fit-content' }}>
+                            {panel.data ? <CustomerInquiryDocumentA4Pages data={panel.data} /> : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             {activeDoc === 'qt' && (
               <QuotationDocument data={sampleQuotationData} />

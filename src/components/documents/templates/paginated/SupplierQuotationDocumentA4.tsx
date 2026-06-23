@@ -4,6 +4,10 @@ import { A4Page } from '../../a4/A4Page';
 import { A4Block, paginateBlocks } from '../../a4/Paginator';
 import type { SupplierQuotationData } from '../SupplierQuotationDocument';
 
+const BJ_FOOTER_RESERVED_HEIGHT = 64;
+const BJ_PAGE_CONTENT_HEIGHT = 1123 - 40 * 2 - BJ_FOOTER_RESERVED_HEIGHT;
+const BJ_SIGNATURE_ESTIMATED_HEIGHT = 156;
+
 interface SupplierQuotationDocumentA4Props {
   data: SupplierQuotationData;
   showControls?: boolean;
@@ -11,6 +15,11 @@ interface SupplierQuotationDocumentA4Props {
 
 interface SupplierQuotationDocumentA4PagesProps {
   data: SupplierQuotationData;
+  actorOverrides?: {
+    supplierContactPerson?: string;
+    supplierEmail?: string;
+    supplierRemarkBy?: string;
+  } | null;
 }
 
 interface BjTermRow {
@@ -36,10 +45,17 @@ function estimateWrappedLines(text: string, maxCharsPerLine: number) {
     .reduce((sum, count) => sum + count, 0);
 }
 
+function isMeaningfullyDifferent(primary?: string, secondary?: string) {
+  const normalizedPrimary = String(primary || '').trim();
+  const normalizedSecondary = String(secondary || '').trim();
+  if (!normalizedPrimary || !normalizedSecondary) return false;
+  return normalizedPrimary.toLowerCase() !== normalizedSecondary.toLowerCase();
+}
+
 function buildProductRowHeight(product: SupplierQuotationData['products'][number]) {
-  const nameLines = estimateWrappedLines(product.description || '', 14);
-  const specLines = estimateWrappedLines(product.specification || '', 20);
-  return Math.max(72, 18 + nameLines * 14 + specLines * 12);
+  const nameLines = estimateWrappedLines(product.description || '', 24);
+  const specLines = estimateWrappedLines(product.specification || '', 38);
+  return Math.max(72, 20 + nameLines * 13 + specLines * 11);
 }
 
 function buildTermRows(data: SupplierQuotationData): BjTermRow[] {
@@ -59,7 +75,8 @@ function buildTermRows(data: SupplierQuotationData): BjTermRow[] {
 }
 
 function buildTermRowHeight(row: BjTermRow) {
-  return Math.max(28, 10 + estimateWrappedLines(row.value, 46) * 12);
+  const wrappedLines = estimateWrappedLines(row.value, 72);
+  return Math.max(28, 10 + wrappedLines * 12);
 }
 
 export const SupplierQuotationDocumentA4 = forwardRef<HTMLDivElement, SupplierQuotationDocumentA4Props>(
@@ -75,27 +92,70 @@ export const SupplierQuotationDocumentA4 = forwardRef<HTMLDivElement, SupplierQu
 
 SupplierQuotationDocumentA4.displayName = 'SupplierQuotationDocumentA4';
 
-export function SupplierQuotationDocumentA4Pages({ data }: SupplierQuotationDocumentA4PagesProps) {
-  const pages = useMemo(() => buildSupplierQuotationPages(data), [data]);
+export function SupplierQuotationDocumentA4Pages({ data, actorOverrides = null }: SupplierQuotationDocumentA4PagesProps) {
+  const pages = useMemo(() => buildSupplierQuotationPages(data, actorOverrides), [data, actorOverrides]);
   return (
     <>
-      {pages.map((page, index) => (
-        <A4Page key={`bj-page-${index}`} pageNumber={index + 1} totalPages={pages.length}>
-          {page}
-        </A4Page>
-      ))}
+      {pages.map((page, index) => {
+        const isLastPage = index === pages.length - 1;
+
+        return (
+          <A4Page
+            key={`bj-page-${index}`}
+            pageNumber={index + 1}
+            totalPages={pages.length}
+            footerReservedHeight={BJ_FOOTER_RESERVED_HEIGHT}
+            footer={(
+              <div
+                className={`flex min-h-[16px] items-end ${isLastPage ? 'justify-between gap-6 border-t border-[#e5e7eb] pt-3' : 'justify-end'}`}
+              >
+                {isLastPage ? (
+                  <div className="flex-1 text-center text-[11px] leading-6 text-[#374151]">
+                    本报价单一式两份，报价方和询价方各执一份。报价单经双方签字盖章后生效。
+                  </div>
+                ) : null}
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: '#9ca3af',
+                    userSelect: 'none',
+                    flexShrink: 0,
+                  }}
+                >
+                  {`${index + 1} / ${pages.length}`}
+                </div>
+              </div>
+            )}
+          >
+            {page}
+          </A4Page>
+        );
+      })}
     </>
   );
 }
 
-export function buildSupplierQuotationPages(data: SupplierQuotationData): React.ReactNode[] {
+export function buildSupplierQuotationPages(
+  data: SupplierQuotationData,
+  actorOverrides?: {
+    supplierContactPerson?: string;
+    supplierEmail?: string;
+    supplierRemarkBy?: string;
+  } | null,
+): React.ReactNode[] {
   const total = data.products.reduce((sum, p) => sum + p.unitPrice * p.quantity, 0);
   const termRows = buildTermRows(data);
+  const effectiveSupplierContactPerson = actorOverrides?.supplierContactPerson || data.supplier.contactPerson;
+  const effectiveSupplierEmail = actorOverrides?.supplierEmail || data.supplier.email;
+  const effectiveSupplierRemarkBy = actorOverrides?.supplierRemarkBy || data.supplierRemarks?.remarkBy || '';
+  const showSupplierCompanyNameEn = isMeaningfullyDifferent(data.supplier.companyName, data.supplier.companyNameEn);
+  const showSupplierAddressEn = isMeaningfullyDifferent(data.supplier.address, data.supplier.addressEn);
+  const showBuyerNameEn = isMeaningfullyDifferent(data.buyer.name, data.buyer.nameEn);
   const blocks: A4Block[] = [
     {
       type: 'section',
       key: 'header',
-      estimatedHeight: 150,
+      estimatedHeight: 126,
       avoidBreak: true,
       render: () => (
         <div className="mb-3">
@@ -149,7 +209,7 @@ export function buildSupplierQuotationPages(data: SupplierQuotationData): React.
     {
       type: 'section',
       key: 'parties',
-      estimatedHeight: 190,
+      estimatedHeight: 146,
       avoidBreak: true,
       render: () => (
         <table className={tableClass}>
@@ -159,20 +219,20 @@ export function buildSupplierQuotationPages(data: SupplierQuotationData): React.
                 <div className="bg-gray-200 px-2 py-1 font-bold border-b border-gray-400">报价方（供应商）</div>
                 <div className="px-2 py-1.5 space-y-0.5">
                   <div><span className="font-semibold">{data.supplier.companyName}</span></div>
-                  {data.supplier.companyNameEn ? <div className="text-gray-600">{data.supplier.companyNameEn}</div> : null}
+                  {showSupplierCompanyNameEn ? <div className="text-gray-600">{data.supplier.companyNameEn}</div> : null}
                   {data.supplier.supplierCode ? <div><span className="text-gray-600">供应商编号：</span><span className="font-semibold text-blue-600">{data.supplier.supplierCode}</span></div> : null}
                   <div><span className="text-gray-600">地址：</span>{data.supplier.address}</div>
-                  {data.supplier.addressEn ? <div className="text-xs text-gray-600">{data.supplier.addressEn}</div> : null}
+                  {showSupplierAddressEn ? <div className="text-xs text-gray-600">{data.supplier.addressEn}</div> : null}
                   <div><span className="text-gray-600">电话：</span>{data.supplier.tel}</div>
-                  <div><span className="text-gray-600">邮箱：</span>{data.supplier.email}</div>
-                  <div><span className="text-gray-600">联系人：</span>{data.supplier.contactPerson}</div>
+                  <div><span className="text-gray-600">邮箱：</span>{effectiveSupplierEmail}</div>
+                  <div><span className="text-gray-600">联系人：</span>{effectiveSupplierContactPerson}</div>
                 </div>
               </td>
               <td className="border border-gray-400 p-0 w-1/2 align-top">
                 <div className="bg-gray-200 px-2 py-1 font-bold border-b border-gray-400">询价方（客户）</div>
                 <div className="px-2 py-1.5 space-y-0.5">
                   <div><span className="font-semibold">{data.buyer.name}</span></div>
-                  <div className="text-gray-600">{data.buyer.nameEn}</div>
+                  {showBuyerNameEn ? <div className="text-gray-600">{data.buyer.nameEn}</div> : null}
                   <div><span className="text-gray-600">地址：</span>{data.buyer.address}</div>
                   <div><span className="text-gray-600">电话：</span>{data.buyer.tel}</div>
                   <div><span className="text-gray-600">邮箱：</span>{data.buyer.email}</div>
@@ -187,7 +247,7 @@ export function buildSupplierQuotationPages(data: SupplierQuotationData): React.
     {
       type: 'section',
       key: 'intro',
-      estimatedHeight: 56,
+      estimatedHeight: 38,
       avoidBreak: true,
       render: () => (
         <div className="rounded border border-blue-200 bg-blue-50 p-2">
@@ -201,7 +261,7 @@ export function buildSupplierQuotationPages(data: SupplierQuotationData): React.
     {
       type: 'section',
       key: 'inquiry-reference',
-      estimatedHeight: data.inquiryReference ? Math.max(56, 24 + estimateWrappedLines(data.inquiryReference, 72) * 12) : 0,
+      estimatedHeight: data.inquiryReference ? Math.max(38, 16 + estimateWrappedLines(data.inquiryReference, 96) * 9) : 0,
       render: () => data.inquiryReference ? (
         <div className="rounded border border-orange-200 bg-orange-50 p-2">
           <p className="text-xs text-gray-700"><span className="font-semibold text-orange-700">📝 询价说明：</span><span className="ml-1">{data.inquiryReference}</span></p>
@@ -211,9 +271,9 @@ export function buildSupplierQuotationPages(data: SupplierQuotationData): React.
     {
       type: 'table',
       key: 'products',
-      headerHeight: 104,
+      headerHeight: 72,
       rowHeight: (row) => buildProductRowHeight(row),
-      footerHeight: 40,
+      footerHeight: 38,
       rows: data.products,
       renderHeader: () => (
         <>
@@ -289,7 +349,7 @@ export function buildSupplierQuotationPages(data: SupplierQuotationData): React.
             {data.supplierRemarks?.remarkDate ? <span className="text-xs text-blue-600">({data.supplierRemarks.remarkDate})</span> : null}
           </div>
           <div className="whitespace-pre-wrap text-xs leading-relaxed text-gray-800">{data.supplierRemarks?.content}</div>
-          {data.supplierRemarks?.remarkBy ? <div className="mt-2 text-xs text-blue-700">备注人：{data.supplierRemarks.remarkBy}</div> : null}
+          {effectiveSupplierRemarkBy ? <div className="mt-2 text-xs text-blue-700">备注人：{effectiveSupplierRemarkBy}</div> : null}
         </div>
       ),
     });
@@ -298,11 +358,11 @@ export function buildSupplierQuotationPages(data: SupplierQuotationData): React.
   blocks.push({
     type: 'section',
     key: 'signature',
-    estimatedHeight: 170,
+    estimatedHeight: BJ_SIGNATURE_ESTIMATED_HEIGHT,
     avoidBreak: true,
     render: () => (
-      <div>
-        <div className="mt-8 border-t-2 border-gray-300 pt-4">
+      <div className="pb-4">
+        <div className="mt-3 border-t-2 border-gray-300 pt-2">
           <div className="grid grid-cols-2 gap-8">
             <div>
               <p className="mb-2 text-xs text-gray-600">报价方（供应商）</p>
@@ -316,14 +376,11 @@ export function buildSupplierQuotationPages(data: SupplierQuotationData): React.
             </div>
           </div>
         </div>
-        <div className="mt-4 border-t border-gray-200 pt-3">
-          <p className="text-center text-xs text-gray-500">本报价单一式两份，报价方和询价方各执一份。报价单经双方签字盖章后生效。</p>
-        </div>
       </div>
     ),
   });
 
-  return paginateBlocks(blocks).map((page) => (
+  return paginateBlocks(blocks, { pageContentHeight: BJ_PAGE_CONTENT_HEIGHT, orphanThreshold: 80, itemGap: 16 }).map((page) => (
     <div key={`bj-${page.index}`} className="flex h-full flex-col gap-4 text-[12px] leading-5">
       {page.items.map((item) => {
         if (item.type === 'section') return <React.Fragment key={item.key}>{item.render()}</React.Fragment>;

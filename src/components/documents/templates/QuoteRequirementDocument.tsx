@@ -193,14 +193,28 @@ export const buildDefaultQuoteRequirementTextOverrides = (
   footerNote3: '',
 });
 
+const formatDateField = (value: string) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date
+    .toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+    .replace(/\//g, '-');
+};
+
 interface QuoteRequirementDocumentProps {
   data: QuoteRequirementDocumentData;
   layoutConfig?: Partial<QuoteRequirementPreviewLayout>;
   textOverrides?: Partial<QuoteRequirementTextOverrides>;
+  showRelationBanner?: boolean;
 }
 
 export const QuoteRequirementDocument = forwardRef<HTMLDivElement, QuoteRequirementDocumentProps>(
-  ({ data, layoutConfig, textOverrides }, ref) => {
+  ({ data, layoutConfig, textOverrides, showRelationBanner = true }, ref) => {
     const safePurchaseDeptFeedback = forceDesensitizePurchaserFeedbackText(data.purchaseDeptFeedback || '');
     const layout = {
       ...DEFAULT_QUOTE_REQUIREMENT_PREVIEW_LAYOUT,
@@ -210,15 +224,13 @@ export const QuoteRequirementDocument = forwardRef<HTMLDivElement, QuoteRequirem
       ...buildDefaultQuoteRequirementTextOverrides(data),
       ...(textOverrides || {}),
     };
-    
-    // 紧急程度配置
     const urgencyConfig = {
       low: { label: '普通', color: 'text-gray-600', bgColor: 'bg-gray-100' },
       medium: { label: '一般', color: 'text-blue-600', bgColor: 'bg-blue-100' },
       high: { label: '紧急', color: 'text-red-600', bgColor: 'bg-red-100' },
     };
-    
     const urgencyInfo = urgencyConfig[data.urgency];
+    
     return (
       <>
         {/* 🔥 打印专用样式 - A4标准分页支持 */}
@@ -361,31 +373,19 @@ export const QuoteRequirementDocument = forwardRef<HTMLDivElement, QuoteRequirem
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">创建日期</td>
                         <td className="border border-gray-400 px-1.5 py-0.5">
-                          {new Date(data.requirementDate).toLocaleDateString('zh-CN', { 
-                            year: 'numeric', 
-                            month: '2-digit', 
-                            day: '2-digit' 
-                          }).replace(/\//g, '-')}
+                          {formatDateField(data.requirementDate)}
                         </td>
                       </tr>
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">回复截止</td>
                         <td className="border border-gray-400 px-1.5 py-0.5 font-semibold text-orange-600">
-                          {new Date(data.requiredResponseDate).toLocaleDateString('zh-CN', { 
-                            year: 'numeric', 
-                            month: '2-digit', 
-                            day: '2-digit' 
-                          }).replace(/\//g, '-')}
+                          {formatDateField(data.requiredResponseDate)}
                         </td>
                       </tr>
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">要求交期</td>
                         <td className="border border-gray-400 px-1.5 py-0.5 font-semibold text-black">
-                          {new Date(data.requiredDeliveryDate).toLocaleDateString('zh-CN', { 
-                            year: 'numeric', 
-                            month: '2-digit', 
-                            day: '2-digit' 
-                          }).replace(/\//g, '-')}
+                          {formatDateField(data.requiredDeliveryDate)}
                         </td>
                       </tr>
                     </tbody>
@@ -397,16 +397,18 @@ export const QuoteRequirementDocument = forwardRef<HTMLDivElement, QuoteRequirem
               <div className="border-t-2 border-b border-gray-400" style={{ borderTopColor: '#000000', borderTopWidth: '3px' }}></div>
             </div>
 
-            {/* 单据关系和紧急程度 */}
-            <div className="mb-3 flex items-center justify-between bg-blue-50 border border-blue-200 rounded px-3 py-2">
-              <div className="text-xs">
-                <span className="text-gray-600">{texts.sourceInquiryLabel}</span>
-                <span className="font-bold text-blue-600 ml-1">{data.sourceInquiryNo}</span>
+            {showRelationBanner && (
+              <div className="mb-3 flex items-center justify-between rounded border border-blue-200 bg-blue-50 px-3 py-2">
+                <div className="text-xs">
+                  <span className="text-gray-600">{texts.sourceInquiryLabel}</span>
+                  <span className="ml-1 font-bold text-blue-600">{data.sourceInquiryNo}</span>
+                </div>
+                <div className={`rounded-full px-3 py-1 text-xs font-semibold ${urgencyInfo.bgColor} ${urgencyInfo.color}`}>
+                  {texts.urgencyPrefix}
+                  {urgencyInfo.label}
+                </div>
               </div>
-              <div className={`px-3 py-1 rounded-full text-xs font-semibold ${urgencyInfo.bgColor} ${urgencyInfo.color}`}>
-                {texts.urgencyPrefix}{urgencyInfo.label}
-              </div>
-            </div>
+            )}
 
             {/* 客户信息和创建人信息 - 台湾大厂表格风格 */}
             <div className="mb-3">

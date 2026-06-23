@@ -1,8 +1,11 @@
 import React from 'react';
 
+import { A4_FOOTER_SAFE_HEIGHT } from './A4Page';
+
 export interface PaginatorOptions {
   pageContentHeight?: number;
   orphanThreshold?: number;
+  itemGap?: number;
 }
 
 export interface A4SectionBlock {
@@ -52,7 +55,7 @@ export interface PaginatedPage<Row = unknown> {
   items: PaginatedItem<Row>[];
 }
 
-const DEFAULT_PAGE_CONTENT_HEIGHT = 1123 - 40 * 2;
+const DEFAULT_PAGE_CONTENT_HEIGHT = 1123 - 40 * 2 - A4_FOOTER_SAFE_HEIGHT;
 const DEFAULT_ORPHAN_THRESHOLD = 180;
 
 function toHeight<Row>(
@@ -69,6 +72,7 @@ export function paginateBlocks<Row = unknown>(
 ): PaginatedPage<Row>[] {
   const pageContentHeight = options.pageContentHeight ?? DEFAULT_PAGE_CONTENT_HEIGHT;
   const orphanThreshold = options.orphanThreshold ?? DEFAULT_ORPHAN_THRESHOLD;
+  const itemGap = Math.max(0, options.itemGap ?? 0);
 
   const pages: PaginatedPage<Row>[] = [{ index: 1, items: [] }];
   let currentPage = pages[0];
@@ -80,17 +84,21 @@ export function paginateBlocks<Row = unknown>(
     remainingHeight = pageContentHeight;
   };
 
+  const gapBeforeNextItem = () => (currentPage.items.length > 0 ? itemGap : 0);
+
   for (const block of blocks) {
     if (block.type === 'section') {
       const blockHeight = Math.max(0, block.estimatedHeight);
+      const gapHeight = gapBeforeNextItem();
 
       if (
         currentPage.items.length > 0 &&
-        (blockHeight > remainingHeight || (block.avoidBreak !== false && remainingHeight < orphanThreshold))
+        (gapHeight + blockHeight > remainingHeight || (block.avoidBreak !== false && remainingHeight < orphanThreshold))
       ) {
         nextPage();
       }
 
+      remainingHeight -= gapBeforeNextItem();
       currentPage.items.push({
         type: 'section',
         key: block.key,
@@ -106,13 +114,17 @@ export function paginateBlocks<Row = unknown>(
 
     while (rowStartIndex < tableBlock.rows.length) {
       const headerHeight = tableBlock.headerHeight;
-      if (currentPage.items.length > 0 && remainingHeight < headerHeight + 24) {
+      const gapHeight = gapBeforeNextItem();
+      if (currentPage.items.length > 0 && remainingHeight < gapHeight + headerHeight + 24) {
         nextPage();
       }
 
-      const availableAfterHeader = remainingHeight - headerHeight;
+      remainingHeight -= gapBeforeNextItem();
+      let availableAfterHeader = remainingHeight - headerHeight;
       if (availableAfterHeader <= 0) {
         nextPage();
+        remainingHeight -= gapBeforeNextItem();
+        availableAfterHeader = remainingHeight - headerHeight;
       }
 
       let consumedRowsHeight = 0;

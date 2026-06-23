@@ -238,7 +238,7 @@ export function ProductDetailDialog({
         return;
       }
       
-      // All quantities are full cartons, add to cart
+      // All quantities are full cartons, add to inquiry list
       selectedColors.forEach((colorName) => {
         const colorOption = product.colorOptions!.find(c => c.name === colorName);
         if (!colorOption) return;
@@ -267,10 +267,10 @@ export function ProductDetailDialog({
       setOrderQuantity(1);
       handleOpenChange(false);
       
-      toast.success('Products added to cart!', {
+      toast.success('Products added to inquiry list!', {
         description: `${selectedColors.length} color variant(s) added`,
         action: {
-          label: 'View Cart',
+          label: 'View Inquiry List',
           onClick: () => router.navigateTo('cart')
         },
       });
@@ -297,7 +297,7 @@ export function ProductDetailDialog({
         return;
       }
       
-      // Quantity is a full carton, add to cart
+      // Quantity is a full carton, add to inquiry list
       addToCart({
         productName: product.name,
         image: product.image,
@@ -317,10 +317,10 @@ export function ProductDetailDialog({
       setOrderQuantity(1);
       handleOpenChange(false);
       
-      toast.success('Product added to cart!', {
+      toast.success('Product added to inquiry list!', {
         description: `${orderQuantity} pcs added`,
         action: {
-          label: 'View Cart',
+          label: 'View Inquiry List',
           onClick: () => router.navigateTo('cart')
         },
       });
@@ -691,7 +691,7 @@ export function ProductDetailDialog({
                   </div>
                 )}
 
-                {/* Total and Add to Cart */}
+                {/* Total and Add to Inquiry */}
                 <div className="border-t pt-3 space-y-3 sticky bottom-0 bg-white">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Total Price:</span>
@@ -705,7 +705,7 @@ export function ProductDetailDialog({
                     onClick={handleAddToCart}
                     disabled={(product.colorOptions && product.colorOptions.length > 0 && selectedColors.length === 0)}
                   >
-                    Add to Cart
+                    Add to Inquiry
                     {selectedColors.length > 0 && ` (${selectedColors.length} color${selectedColors.length > 1 ? 's' : ''})`}
                   </Button>
 
@@ -800,7 +800,7 @@ export function ProductDetailDialog({
                               </div>
                               <button 
                                 onClick={() => {
-                                  // Add accessory to cart using fullDetails
+                                  // Add accessory to inquiry list using fullDetails
                                   const details = accessoryProduct.fullDetails;
                                   addToCart({
                                     productName: details.name,
@@ -817,17 +817,17 @@ export function ProductDetailDialog({
                                     cbmPerCarton: details.cbmPerCarton,
                                   });
                                   
-                                  toast.success('Accessory added to cart!', {
+                                  toast.success('Accessory added to inquiry list!', {
                                     description: `${accessoryProduct.name} - $${accessoryProduct.price.toFixed(2)}`,
                                     action: {
-                                      label: 'View Cart',
+                                      label: 'View Inquiry List',
                                       onClick: () => router.navigateTo('cart')
                                     },
                                   });
                                 }}
                                 className="w-full text-xs py-1.5 px-2 border border-orange-500 text-orange-600 rounded hover:bg-orange-50 transition-colors mt-auto"
                               >
-                                Add to Cart
+                                Add to Inquiry
                               </button>
                             </div>
                           ))}

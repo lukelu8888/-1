@@ -93,14 +93,6 @@ function buildTermRows(data: QuotationData) {
       value: data.tradeTerms.incoterms,
     },
     {
-      label: 'Payment Terms',
-      value: data.tradeTerms.paymentTerms,
-    },
-    {
-      label: 'Delivery Time',
-      value: data.tradeTerms.deliveryTime,
-    },
-    {
       label: 'Port of Loading',
       value: data.tradeTerms.portOfLoading,
     },
@@ -113,20 +105,28 @@ function buildTermRows(data: QuotationData) {
         ]
       : []),
     {
-      label: 'Packing',
-      value: data.tradeTerms.packing,
+      label: 'Payment Terms',
+      value: data.tradeTerms.paymentTerms,
     },
     {
-      label: 'Quality Warranty',
-      value:
-        data.tradeTerms.warranty ||
-        '12 months from delivery date against manufacturing defects',
+      label: 'Delivery Time',
+      value: data.tradeTerms.deliveryTime,
+    },
+    {
+      label: 'Packing',
+      value: data.tradeTerms.packing,
     },
     {
       label: 'Inspection',
       value:
         data.tradeTerms.inspection ||
         "Seller's factory inspection, buyer has the right to re-inspect upon arrival",
+    },
+    {
+      label: 'Quality Warranty',
+      value:
+        data.tradeTerms.warranty ||
+        '12 months from delivery date against manufacturing defects',
     },
   ];
 }
@@ -395,10 +395,10 @@ export function buildQuotationPages(
               case 'unit':
                 return <td key={column.key} className="border border-gray-300 px-2 text-center" style={cellStyle}>{product.unit}</td>;
               case 'unitPrice':
-                return <td key={column.key} className="border border-gray-300 px-2 text-right" style={cellStyle}>{product.currency} {product.unitPrice.toFixed(2)}</td>;
+                return <td key={column.key} className="border border-gray-300 px-2 text-right" style={cellStyle}>{product.unitPrice.toFixed(2)}</td>;
               case 'amount':
               default:
-                return <td key={column.key} className="border border-gray-300 px-2 text-right font-semibold" style={cellStyle}>{product.currency} {product.amount.toFixed(2)}</td>;
+                return <td key={column.key} className="border border-gray-300 px-2 text-right font-semibold" style={cellStyle}>{product.amount.toFixed(2)}</td>;
             }
           })}
         </tr>
@@ -406,10 +406,10 @@ export function buildQuotationPages(
       renderFooter: () => (
         <tr className="bg-gray-100 font-bold">
           <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 text-right" style={{ paddingTop: `${cellPaddingY + 2}px`, paddingBottom: `${cellPaddingY + 2}px` }}>
-            TOTAL VALUE ({tradeTerm}):
+            TOTAL ({tradeTerm}) {currency} VALUE:
           </td>
           <td className="border border-gray-300 px-2 text-right font-semibold" style={{ paddingTop: `${cellPaddingY + 2}px`, paddingBottom: `${cellPaddingY + 2}px` }}>
-            {currency} {total.toFixed(2)}
+            {total.toFixed(2)}
           </td>
         </tr>
       ),

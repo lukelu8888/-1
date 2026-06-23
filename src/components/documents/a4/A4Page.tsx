@@ -5,6 +5,7 @@ export const A4_WIDTH_PX  = 794;
 export const A4_HEIGHT_PX = 1123;
 export const A4_PAD_H     = 48; // horizontal padding px
 export const A4_PAD_V     = 40; // vertical padding px (top + bottom each)
+export const A4_FOOTER_SAFE_HEIGHT = 36; // reserve space for page number / footer
 
 interface A4PageProps {
   children: React.ReactNode;
@@ -17,6 +18,8 @@ interface A4PageProps {
   header?: React.ReactNode;
   /** Optional footer slot rendered below the padded content area */
   footer?: React.ReactNode;
+  /** Optional reserved footer height for pages with taller footer bands */
+  footerReservedHeight?: number;
 }
 
 export function A4Page({
@@ -26,7 +29,12 @@ export function A4Page({
   totalPages,
   header,
   footer,
+  footerReservedHeight,
 }: A4PageProps) {
+  const reservedFooterSpace = footer || typeof pageNumber === 'number'
+    ? Math.max(A4_FOOTER_SAFE_HEIGHT, footerReservedHeight ?? 0)
+    : 0;
+
   return (
     <section
       data-a4-page
@@ -52,8 +60,8 @@ export function A4Page({
       <div
         style={{
           padding: header
-            ? `12px ${A4_PAD_H}px ${A4_PAD_V}px`
-            : `${A4_PAD_V}px ${A4_PAD_H}px`,
+            ? `12px ${A4_PAD_H}px ${A4_PAD_V + reservedFooterSpace}px`
+            : `${A4_PAD_V}px ${A4_PAD_H}px ${A4_PAD_V + reservedFooterSpace}px`,
           height: '100%',
           boxSizing: 'border-box',
           overflow: 'hidden',
@@ -70,7 +78,7 @@ export function A4Page({
             bottom: 0,
             left: 0,
             right: 0,
-            padding: `0 ${A4_PAD_H}px ${A4_PAD_V / 2}px`,
+            padding: `0 ${A4_PAD_H}px ${Math.max(A4_PAD_V / 2, reservedFooterSpace - 8)}px`,
           }}
         >
           {footer}

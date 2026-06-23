@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import cosunLogo from '../../../../assets/410810351d2b1fef484ded221d682af920f7ac14.png';
-import { A4Page } from '../../a4/A4Page';
+import { A4Page, A4_FOOTER_SAFE_HEIGHT, A4_HEIGHT_PX, A4_PAD_V } from '../../a4/A4Page';
 import { A4Block, paginateBlocks } from '../../a4/Paginator';
 import {
   QuoteRequirementDocumentData,
@@ -11,12 +11,17 @@ import {
 interface QuoteRequirementDocumentA4PagesProps {
   data: QuoteRequirementDocumentData;
   textOverrides?: QuoteRequirementTextOverrides;
+  showRelationBanner?: boolean;
 }
 
-const tableClass = 'w-full border-collapse border-2 border-gray-300 text-xs';
+const QR_FOOTER_RESERVED_HEIGHT = 64;
+const QR_PAGE_CONTENT_HEIGHT = A4_HEIGHT_PX - A4_PAD_V * 2 - A4_FOOTER_SAFE_HEIGHT;
+const QR_SIGNATURE_ESTIMATED_HEIGHT = 176;
+const QR_SIGNATURE_SECTION_GAP = 18;
+const tableClass = 'w-full table-fixed border-separate border-spacing-0 border border-gray-300 text-xs';
 const cellClass = 'border border-gray-300 px-2 py-2 align-top';
 const titleClass = 'font-bold text-base mb-2';
-const BOX_LINES_PER_PAGE = 16;
+const BOX_LINES_PER_PAGE = 10;
 
 function formatDate(value: string) {
   if (!value) return '-';
@@ -38,12 +43,45 @@ function getCurrencySymbol(currency?: string) {
   return currency || '¥';
 }
 
+function resolveDocumentCurrency(products: QuoteRequirementDocumentData['products']) {
+  const resolvedCode =
+    products.find((product) => String(product.currency || '').trim())?.currency?.toUpperCase() || 'USD';
+  return {
+    code: resolvedCode,
+    symbol: getCurrencySymbol(resolvedCode),
+  };
+}
+
 function estimateWrappedLines(text: string, maxCharsPerLine: number) {
   const safe = text || '';
   return safe
     .split(/\r?\n/)
     .map((line) => Math.max(1, Math.ceil(line.length / maxCharsPerLine)))
     .reduce((sum, lineCount) => sum + lineCount, 0);
+}
+
+function normalizeDocumentText(value?: string | number | null) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function buildProductDisplayText(product: QuoteRequirementDocumentData['products'][number]) {
+  const rawName = normalizeDocumentText(product.productName);
+  const rawSpecification = normalizeDocumentText(product.specification);
+  const displayName = rawName.split(/[;；]/)[0]?.trim() || rawName || '-';
+  let displaySpecification = rawSpecification;
+
+  if (displaySpecification && rawName && displaySpecification.startsWith(rawName)) {
+    displaySpecification = displaySpecification.slice(rawName.length).replace(/^[\s;；,，:：-]+/, '').trim();
+  }
+
+  if (displaySpecification && displayName && displaySpecification.startsWith(displayName)) {
+    displaySpecification = displaySpecification.slice(displayName.length).replace(/^[\s;；,，:：-]+/, '').trim();
+  }
+
+  return {
+    productName: displayName,
+    specification: displaySpecification,
+  };
 }
 
 function splitTextIntoChunks(text: string, maxCharsPerLine: number, maxLinesPerChunk: number) {
@@ -79,6 +117,39 @@ function splitTextIntoChunks(text: string, maxCharsPerLine: number, maxLinesPerC
   return chunks;
 }
 
+function splitTextIntoCompactChunks(text: string, maxCharsPerLine: number, maxLinesPerChunk: number) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return [''];
+  }
+
+  const chunks: string[] = [];
+  let currentChunk: string[] = [];
+  let currentLines = 0;
+
+  lines.forEach((line) => {
+    const wrappedLines = Math.max(1, Math.ceil(line.length / maxCharsPerLine));
+    if (currentChunk.length > 0 && currentLines + wrappedLines > maxLinesPerChunk) {
+      chunks.push(currentChunk.join('\n'));
+      currentChunk = [];
+      currentLines = 0;
+    }
+
+    currentChunk.push(line);
+    currentLines += wrappedLines;
+  });
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk.join('\n'));
+  }
+
+  return chunks;
+}
+
 function buildTextSectionBlocks(
   key: string,
   title: string,
@@ -101,18 +172,18 @@ function buildTextSectionBlocks(
   const boxClassName =
     options?.boxClassName ||
     'border border-gray-300 rounded p-4 bg-blue-50 text-xs text-left min-h-[140px] whitespace-pre-wrap break-words leading-7';
-  const chunks = splitTextIntoChunks(content || placeholder, maxCharsPerLine, maxLinesPerChunk);
+  const chunks = splitTextIntoCompactChunks(content || placeholder, maxCharsPerLine, maxLinesPerChunk);
 
   return chunks.map<A4Block>((chunk, index) => ({
     type: 'section',
     key: `${key}-${index}`,
-    estimatedHeight: Math.max(minHeightPx, 56 + estimateWrappedLines(chunk, maxCharsPerLine) * lineHeightPx),
+    estimatedHeight: Math.max(minHeightPx, 42 + estimateWrappedLines(chunk, maxCharsPerLine) * lineHeightPx),
     avoidBreak: options?.minHeightPx ? false : undefined,
     render: () => (
       <section>
         <h3 className={titleClass}>
           {title}
-          {index > 0 ? `（续 ${index + 1}）` : ''}
+          {index > 0 ? '（续）' : ''}
         </h3>
         <div className={boxClassName}>
           {content ? (
@@ -127,10 +198,10 @@ function buildTextSectionBlocks(
 }
 
 function buildProductRowHeight(product: QuoteRequirementDocumentData['products'][number]) {
-  const specificationLines = estimateWrappedLines(product.specification || '', 28);
+  const displayText = buildProductDisplayText(product);
+  const specificationLines = estimateWrappedLines(displayText.specification || '', 34);
   const metaLines = (product.moq ? 1 : 0) + (product.leadTime ? 1 : 0);
-  // Keep the estimate aligned with the actual compact QR table so later sections can flow upward.
-  return Math.max(68, 22 + specificationLines * 12 + metaLines * 14);
+  return Math.max(64, 30 + specificationLines * 15 + metaLines * 16);
 }
 
 function estimatePageItemHeight(
@@ -199,6 +270,7 @@ function appendSectionWithFlow(
 export function buildQuoteRequirementPages(
   data: QuoteRequirementDocumentData,
   textOverrides?: QuoteRequirementTextOverrides,
+  showRelationBanner = true,
 ): React.ReactNode[] {
   const texts = {
     ...buildDefaultQuoteRequirementTextOverrides(data),
@@ -210,6 +282,7 @@ export function buildQuoteRequirementPages(
     high: { label: '紧急', color: 'text-red-600', bgColor: 'bg-red-100' },
   };
   const urgencyInfo = urgencyConfig[data.urgency];
+  const documentCurrency = resolveDocumentCurrency(data.products);
   const blocks: A4Block<QuoteRequirementDocumentData['products'][number]>[] = [
     {
       type: 'section',
@@ -255,24 +328,6 @@ export function buildQuoteRequirementPages(
             </div>
           </div>
           <div className="border-t-2 border-b border-gray-400" style={{ borderTopColor: '#000000', borderTopWidth: '3px' }} />
-        </div>
-      ),
-    },
-    {
-      type: 'section',
-      key: 'relation',
-      estimatedHeight: 50,
-      avoidBreak: true,
-      render: () => (
-        <div className="mb-1 flex items-center justify-between rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
-          <div>
-            <span className="text-gray-600">{texts.sourceInquiryLabel}</span>
-            <span className="ml-1 font-bold text-blue-600">{data.sourceInquiryNo}</span>
-          </div>
-          <div className={`rounded-full px-3 py-1 text-xs font-semibold ${urgencyInfo.bgColor} ${urgencyInfo.color}`}>
-            {texts.urgencyPrefix}
-            {urgencyInfo.label}
-          </div>
         </div>
       ),
     },
@@ -341,6 +396,7 @@ export function buildQuoteRequirementPages(
       renderRow: (product, index) => {
         const totalPrice = product.totalPrice || (product.unitPrice ? product.quantity * product.unitPrice : 0);
         const currencySymbol = getCurrencySymbol(product.currency);
+        const displayText = buildProductDisplayText(product);
 
         return (
           <tr key={`${product.no}-${index}`} style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}>
@@ -360,8 +416,12 @@ export function buildQuoteRequirementPages(
               )}
             </td>
             <td className={cellClass}>
-              <div className="font-semibold break-words">{product.productName}</div>
-              <div className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5 text-gray-600">{product.specification}</div>
+              <div className="font-semibold break-words">{displayText.productName}</div>
+              {displayText.specification ? (
+                <div className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-4 text-gray-600">
+                  {displayText.specification}
+                </div>
+              ) : null}
               {(product.moq || product.leadTime) && (
                 <div className="mt-1 space-y-0.5 text-xs text-blue-600">
                   {product.moq && <div>MOQ: {product.moq} {product.unit}</div>}
@@ -395,7 +455,7 @@ export function buildQuoteRequirementPages(
             <td className="border-2 border-gray-400 px-2 py-2" />
             <td className="border-2 border-gray-400 px-2 py-2" />
             <td className="border-2 border-gray-400 px-2 py-2 text-right text-orange-600">
-              {total > 0 ? `¥${total.toFixed(2)}` : '-'}
+              {total > 0 ? `${documentCurrency.symbol}${total.toFixed(2)}` : '-'}
             </td>
           </tr>
         );
@@ -414,10 +474,12 @@ export function buildQuoteRequirementPages(
       ].join('\n'),
       'space-y-1',
       {
-        minHeightPx: 116,
+        maxCharsPerLine: 46,
+        maxLinesPerChunk: 8,
+        minHeightPx: 72,
         lineHeightPx: 18,
         boxClassName:
-          'border border-gray-300 rounded p-3 bg-blue-50 text-xs text-left min-h-[116px] whitespace-pre-wrap break-words leading-6',
+          'border border-gray-300 rounded p-3 bg-blue-50 text-xs text-left whitespace-pre-wrap break-words leading-6',
       },
     ),
     ...buildTextSectionBlocks(
@@ -427,21 +489,21 @@ export function buildQuoteRequirementPages(
       texts.purchaseFeedbackPlaceholder,
       'text-gray-400 italic',
       {
-        maxCharsPerLine: 34,
-        maxLinesPerChunk: 10,
-        minHeightPx: 84,
+        maxCharsPerLine: 46,
+        maxLinesPerChunk: 8,
+        minHeightPx: 64,
         lineHeightPx: 20,
         boxClassName:
-          'border border-gray-300 rounded p-2 bg-blue-50 text-xs text-left min-h-[64px] whitespace-pre-wrap break-words leading-5',
+          'border border-gray-300 rounded p-2 bg-blue-50 text-xs text-left whitespace-pre-wrap break-words leading-5',
       },
     ),
     {
       type: 'section',
       key: 'signatures-footer-section',
-      estimatedHeight: 232,
+      estimatedHeight: QR_SIGNATURE_ESTIMATED_HEIGHT,
       avoidBreak: true,
       render: () => (
-        <div className="signature-section mt-1">
+        <div className="signature-section mt-1 pb-2">
           <div className="grid grid-cols-3 gap-4">
             <div>
               <h4 className="mb-1 text-sm font-bold">{texts.salesSignatureTitle}</h4>
@@ -474,16 +536,31 @@ export function buildQuoteRequirementPages(
               </div>
             </div>
           </div>
-          <div className="mt-3 border-t border-gray-300 pt-2 text-xs text-gray-500 space-y-0.5">
-            <p>{texts.footerNote1}</p>
-            <p>{texts.footerNote2}</p>
-            <p>{texts.footerNote3}</p>
-          </div>
         </div>
       ),
     },
   ];
-  const pageContentHeight = 1123 - 40 * 2;
+
+  if (showRelationBanner) {
+    blocks.splice(1, 0, {
+      type: 'section',
+      key: 'relation',
+      estimatedHeight: 50,
+      avoidBreak: true,
+      render: () => (
+        <div className="mb-1 flex items-center justify-between rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
+          <div>
+            <span className="text-gray-600">{texts.sourceInquiryLabel}</span>
+            <span className="ml-1 font-bold text-blue-600">{data.sourceInquiryNo}</span>
+          </div>
+          <div className={`rounded-full px-3 py-1 text-xs font-semibold ${urgencyInfo.bgColor} ${urgencyInfo.color}`}>
+            {texts.urgencyPrefix}
+            {urgencyInfo.label}
+          </div>
+        </div>
+      ),
+    });
+  }
   const feedbackBlocks = blocks.filter(
     (block): block is Extract<typeof block, { type: 'section' }> =>
       block.type === 'section' && block.key.startsWith('purchase-feedback-section-'),
@@ -497,16 +574,16 @@ export function buildQuoteRequirementPages(
   });
 
   const pages = paginateBlocks(mainBlocks, {
-    pageContentHeight,
-    orphanThreshold: 140,
+    pageContentHeight: QR_PAGE_CONTENT_HEIGHT,
+    orphanThreshold: 112,
   });
 
   feedbackBlocks.forEach((feedbackBlock, index) => {
-    appendSectionWithFlow(pages, feedbackBlock, blocks, pageContentHeight, index === 0 ? 18 : 10);
+    appendSectionWithFlow(pages, feedbackBlock, blocks, QR_PAGE_CONTENT_HEIGHT, index === 0 ? 18 : 10);
   });
 
   if (signaturesBlock) {
-    appendSectionWithFlow(pages, signaturesBlock, blocks, pageContentHeight, 36);
+    appendSectionWithFlow(pages, signaturesBlock, blocks, QR_PAGE_CONTENT_HEIGHT, QR_SIGNATURE_SECTION_GAP);
   }
 
   return pages.map((page, pageIndex) => (
@@ -530,13 +607,56 @@ export function buildQuoteRequirementPages(
   ));
 }
 
-export function QuoteRequirementDocumentA4Pages({ data, textOverrides }: QuoteRequirementDocumentA4PagesProps) {
-  const pages = useMemo(() => buildQuoteRequirementPages(data, textOverrides), [data, textOverrides]);
+export function QuoteRequirementDocumentA4Pages({
+  data,
+  textOverrides,
+  showRelationBanner = true,
+}: QuoteRequirementDocumentA4PagesProps) {
+  const pages = useMemo(
+    () => buildQuoteRequirementPages(data, textOverrides, showRelationBanner),
+    [data, textOverrides, showRelationBanner],
+  );
+  const texts = useMemo(
+    () => ({
+      ...buildDefaultQuoteRequirementTextOverrides(data),
+      ...(textOverrides || {}),
+    }),
+    [data, textOverrides],
+  );
+  const footerLines = [texts.footerNote1, texts.footerNote2, texts.footerNote3].filter(Boolean);
 
   return (
     <>
       {pages.map((page, index) => (
-        <A4Page key={`qr-a4-page-${index}`} pageNumber={index + 1} totalPages={pages.length}>
+        <A4Page
+          key={`qr-a4-page-${index}`}
+          pageNumber={index + 1}
+          totalPages={pages.length}
+          footerReservedHeight={index === pages.length - 1 && footerLines.length > 0 ? QR_FOOTER_RESERVED_HEIGHT : undefined}
+          footer={
+            index === pages.length - 1 && footerLines.length > 0 ? (
+              <div className="relative">
+                <div className="border-t border-gray-300 pt-2 text-center text-[10px] text-gray-600">
+                  {footerLines.map((line) => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </div>
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    bottom: -2,
+                    fontSize: 11,
+                    color: '#9ca3af',
+                    userSelect: 'none',
+                  }}
+                >
+                  {`${index + 1} / ${pages.length}`}
+                </div>
+              </div>
+            ) : undefined
+          }
+        >
           {page}
         </A4Page>
       ))}

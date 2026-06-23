@@ -91,6 +91,61 @@ export interface PurchaseOrderData {
     contractValidity?: string;  // 合同有效期
     modification?: string;      // 合同变更
     termination?: string;       // 合同终止
+    incoterm?: string;          // 贸易术语
+    portOfLoading?: string;     // 装运港
+    portOfDestination?: string; // 目的港
+    taxTerms?: string;          // 税务/结算条款
+    bankTerms?: string;         // 收款银行条款
+  };
+
+  editForm?: {
+    poNumber?: string;
+    requirementNo?: string;
+    xjNumber?: string;
+    sourceRef?: string;
+    supplierName?: string;
+    supplierCode?: string;
+    supplierContact?: string;
+    supplierPhone?: string;
+    supplierAddress?: string;
+    supplierBankName?: string;
+    supplierBankAccountName?: string;
+    supplierBankAccountNumber?: string;
+    supplierBankSwiftCode?: string;
+    supplierBankAddress?: string;
+    supplierBankCurrency?: string;
+    currency?: string;
+    paymentTerms?: string;
+    deliveryTerms?: string;
+    deliveryAddress?: string;
+    qualityStandard?: string;
+    inspectionMethod?: string;
+    packaging?: string;
+    shippingMarks?: string;
+    deliveryPenalty?: string;
+    qualityPenalty?: string;
+    warrantyPeriod?: string;
+    warrantyTerms?: string;
+    returnPolicy?: string;
+    confidentiality?: string;
+    ipRights?: string;
+    forceMajeure?: string;
+    disputeResolution?: string;
+    applicableLaw?: string;
+    contractValidity?: string;
+    modification?: string;
+    termination?: string;
+    incoterm?: string;
+    portOfLoading?: string;
+    portOfDestination?: string;
+    taxTerms?: string;
+    bankTerms?: string;
+    orderDate?: string;
+    expectedDate?: string;
+    actualDate?: string;
+    status?: string;
+    paymentStatus?: string;
+    remarks?: string;
   };
 
   templateSettings?: {
@@ -160,6 +215,36 @@ export const normalizePurchaseOrderProductTableColumns = (
   });
 };
 
+function buildPurchaseOrderTermRows(terms: PurchaseOrderData['terms']) {
+  return [
+    { no: 1, label: '付款条款', value: terms.paymentTerms },
+    { no: 2, label: '交货条款', value: terms.deliveryTerms },
+    { no: 3, label: '交货地址', value: terms.deliveryAddress },
+    { no: 4, label: '质量标准', value: terms.qualityStandard },
+    { no: 5, label: '验收方式', value: terms.inspectionMethod },
+    { no: 6, label: '包装要求', value: terms.packaging },
+    { no: 7, label: '唛头要求', value: terms.shippingMarks },
+    { no: 8, label: '延期交货违约金', value: terms.deliveryPenalty },
+    { no: 9, label: '质量不符违约金', value: terms.qualityPenalty },
+    { no: 10, label: '质保期', value: terms.warrantyPeriod },
+    { no: 11, label: '质保条款', value: terms.warrantyTerms },
+    { no: 12, label: '退换货政策', value: terms.returnPolicy },
+    { no: 13, label: '保密条款', value: terms.confidentiality },
+    { no: 14, label: '知识产权', value: terms.ipRights },
+    { no: 15, label: '不可抗力', value: terms.forceMajeure },
+    { no: 16, label: '争议解决', value: terms.disputeResolution },
+    { no: 17, label: '适用法律', value: terms.applicableLaw },
+    { no: 18, label: '合同有效期', value: terms.contractValidity },
+    { no: 19, label: '合同变更', value: terms.modification },
+    { no: 20, label: '合同终止', value: terms.termination },
+    { no: 21, label: '贸易术语', value: terms.incoterm },
+    { no: 22, label: '装运港', value: terms.portOfLoading },
+    { no: 23, label: '目的港', value: terms.portOfDestination },
+    { no: 24, label: '税务/结算条款', value: terms.taxTerms },
+    { no: 25, label: '收款银行条款', value: terms.bankTerms },
+  ].filter((row) => String(row.value || '').trim());
+}
+
 interface PurchaseOrderDocumentProps {
   data: PurchaseOrderData;
   layoutConfig?: DocumentLayoutConfig;
@@ -191,6 +276,7 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
     const lineHeight = layoutConfig?.lineHeight ?? 1.5;
     const contentPaddingTop = layoutConfig ? `${layoutConfig.contentPaddingTopMm}mm` : '20mm';
     const contentPaddingBottom = layoutConfig ? `${layoutConfig.contentPaddingBottomMm}mm` : '20mm';
+    const termRows = buildPurchaseOrderTermRows(data.terms);
 
     return (
       <>
@@ -313,14 +399,16 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
         >
           {/* ✅ 内容区域 - 屏幕预览20mm padding，打印时0 padding（margin在@page设置） */}
           <div
-            className="purchase-order-content print:p-0"
+            className="purchase-order-content print:p-0 flex flex-col"
             style={{
               paddingTop: contentPaddingTop,
               paddingBottom: contentPaddingBottom,
               paddingLeft: '20mm',
               paddingRight: '20mm',
+              minHeight: `calc(${documentMinHeight} - ${contentPaddingTop} - ${contentPaddingBottom})`,
             }}
           >
+            <div>
             {/* 页眉 - 台湾大厂紧凑风格 */}
             <div className="mb-3">
               {/* 第一行：Logo + 采购合同标题 + 合同信息 */}
@@ -391,7 +479,6 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                       </div>
                       <div className="px-2 py-1.5 space-y-0.5">
                         <div><span className="font-semibold">{data.buyer.name}</span></div>
-                        <div className="text-gray-600">{data.buyer.nameEn}</div>
                         <div><span className="text-gray-600">地址：</span>{data.buyer.address}</div>
                         <div><span className="text-gray-600">电话：</span>{data.buyer.tel}</div>
                         <div><span className="text-gray-600">邮箱：</span>{data.buyer.email}</div>
@@ -406,9 +493,6 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                       </div>
                       <div className="px-2 py-1.5 space-y-0.5">
                         <div><span className="font-semibold">{data.supplier.companyName}</span></div>
-                        {data.supplier.supplierCode && (
-                          <div><span className="text-gray-600">编码：</span>{data.supplier.supplierCode}</div>
-                        )}
                         <div><span className="text-gray-600">地址：</span>{data.supplier.address}</div>
                         <div><span className="text-gray-600">联系人：</span>{data.supplier.contactPerson}</div>
                         <div><span className="text-gray-600">电话：</span>{data.supplier.tel}</div>
@@ -483,7 +567,7 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                             return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{(product.unitPrice || 0).toFixed(2)}</td>;
                           case 'amount':
                           default:
-                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">{(product.amount || 0).toFixed(2)}</td>;
+                            return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{(product.amount || 0).toFixed(2)}</td>;
                         }
                       })}
                     </tr>
@@ -494,7 +578,7 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                     <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 py-2 text-right">
                       采购总金额（{resolvedCurrency}）：
                     </td>
-                    <td className="border border-gray-300 px-2 py-2 text-right text-base text-black">
+                    <td className="border border-gray-300 px-2 py-2 text-right text-black">
                       {total.toFixed(2)}
                     </td>
                   </tr>
@@ -502,7 +586,7 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
               </table>
             </div>
 
-            {/* 供应商银行收款信息 - 台湾大厂表格风格 */}
+            {/* 供应商银行收款信息 - 固定四列表格，避免出现残缺网格 */}
             {data.supplier.bankInfo && (
               <div className="bank-info-section mb-4">
                 <table className="w-full border-collapse border border-gray-400 text-xs">
@@ -516,48 +600,36 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                   <tbody>
                     <tr>
                       <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 w-[15%] font-semibold">开户银行</td>
-                      <td className="border border-gray-400 px-2 py-1.5 w-[35%]">{data.supplier.bankInfo.bankName}</td>
+                      <td className="border border-gray-400 px-2 py-1.5 w-[35%]">{data.supplier.bankInfo.bankName || '-'}</td>
                       <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 w-[15%] font-semibold">账户名称</td>
-                      <td className="border border-gray-400 px-2 py-1.5 w-[35%]">{data.supplier.bankInfo.accountName}</td>
+                      <td className="border border-gray-400 px-2 py-1.5 w-[35%]">{data.supplier.bankInfo.accountName || '-'}</td>
                     </tr>
                     <tr>
                       <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">银行账号</td>
-                      <td className="border border-gray-400 px-2 py-1.5 font-bold" colSpan={3}>
-                        {data.supplier.bankInfo.accountNumber}
-                      </td>
+                      <td className="border border-gray-400 px-2 py-1.5 font-bold">{data.supplier.bankInfo.accountNumber || '-'}</td>
+                      <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">收款币种</td>
+                      <td className="border border-gray-400 px-2 py-1.5">{data.supplier.bankInfo.currency || resolvedCurrency || '-'}</td>
                     </tr>
-                    {(data.supplier.bankInfo.swiftCode || data.supplier.bankInfo.currency) && (
+                    {(data.supplier.bankInfo.swiftCode || data.supplier.bankInfo.bankAddress) && (
                       <tr>
-                        {data.supplier.bankInfo.swiftCode && (
-                          <>
-                            <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">SWIFT代码</td>
-                            <td className="border border-gray-400 px-2 py-1.5">{data.supplier.bankInfo.swiftCode}</td>
-                          </>
-                        )}
-                        {data.supplier.bankInfo.currency && (
-                          <>
-                            <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">收款币种</td>
-                            <td className="border border-gray-400 px-2 py-1.5">{data.supplier.bankInfo.currency}</td>
-                          </>
-                        )}
+                        <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">SWIFT代码</td>
+                        <td className="border border-gray-400 px-2 py-1.5">{data.supplier.bankInfo.swiftCode || '-'}</td>
+                        <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">银行地址</td>
+                        <td className="border border-gray-400 px-2 py-1.5">{data.supplier.bankInfo.bankAddress || '-'}</td>
                       </tr>
                     )}
-                    {data.supplier.bankInfo.iban && (
+                    {(data.supplier.bankInfo.iban || data.supplier.bankInfo.routingNumber) && (
                       <tr>
                         <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">IBAN号码</td>
-                        <td className="border border-gray-400 px-2 py-1.5" colSpan={3}>{data.supplier.bankInfo.iban}</td>
-                      </tr>
-                    )}
-                    {data.supplier.bankInfo.routingNumber && (
-                      <tr>
+                        <td className="border border-gray-400 px-2 py-1.5">{data.supplier.bankInfo.iban || '-'}</td>
                         <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">路由号码</td>
-                        <td className="border border-gray-400 px-2 py-1.5" colSpan={3}>{data.supplier.bankInfo.routingNumber}</td>
+                        <td className="border border-gray-400 px-2 py-1.5">{data.supplier.bankInfo.routingNumber || '-'}</td>
                       </tr>
                     )}
-                    {data.supplier.bankInfo.bankAddress && (
+                    {data.supplier.bankInfo.paymentNote && (
                       <tr>
-                        <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">银行地址</td>
-                        <td className="border border-gray-400 px-2 py-1.5" colSpan={3}>{data.supplier.bankInfo.bankAddress}</td>
+                        <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">付款备注</td>
+                        <td className="border border-gray-400 px-2 py-1.5" colSpan={3}>{data.supplier.bankInfo.paymentNote}</td>
                       </tr>
                     )}
                   </tbody>
@@ -576,200 +648,19 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                   </tr>
                 </thead>
                 <tbody>
-                  {/* 付款条款 */}
-                  <tr>
-                    <td className="border border-gray-400 px-2 py-1.5">
-                      <span className="font-semibold">1. 付款条款：</span>
-                      <span className="ml-1">{data.terms.paymentTerms}</span>
-                    </td>
-                  </tr>
-                  
-                  {/* 交货条款 */}
-                  <tr>
-                    <td className="border border-gray-400 px-2 py-1.5">
-                      <span className="font-semibold">2. 交货条款：</span>
-                      <span className="ml-1">{data.terms.deliveryTerms}</span>
-                    </td>
-                  </tr>
-                  
-                  {/* 交货地址 */}
-                  <tr>
-                    <td className="border border-gray-400 px-2 py-1.5">
-                      <span className="font-semibold">3. 交货地址：</span>
-                      <span className="ml-1">{data.terms.deliveryAddress}</span>
-                    </td>
-                  </tr>
-                  
-                  {/* 质量标准 */}
-                  <tr>
-                    <td className="border border-gray-400 px-2 py-1.5">
-                      <span className="font-semibold">4. 质量标准：</span>
-                      <span className="ml-1">{data.terms.qualityStandard}</span>
-                    </td>
-                  </tr>
-                  
-                  {/* 验收方式 */}
-                  <tr>
-                    <td className="border border-gray-400 px-2 py-1.5">
-                      <span className="font-semibold">5. 验收方式：</span>
-                      <span className="ml-1">{data.terms.inspectionMethod}</span>
-                    </td>
-                  </tr>
-                  
-                  {/* 包装要求 */}
-                  {data.terms.packaging && (
-                    <tr>
+                  {termRows.map((row) => (
+                    <tr key={`term-${row.no}`}>
                       <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">6. 包装要求：</span>
-                        <span className="ml-1">{data.terms.packaging}</span>
+                        <span className="font-semibold">{row.no}. {row.label}：</span>
+                        <span className="ml-1">{row.value}</span>
                       </td>
                     </tr>
-                  )}
-                  
-                  {/* 唛头要求 */}
-                  {data.terms.shippingMarks && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">7. 唛头要求：</span>
-                        <span className="ml-1">{data.terms.shippingMarks}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 质保期 */}
-                  {data.terms.warrantyPeriod && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">8. 质保期：</span>
-                        <span className="ml-1">{data.terms.warrantyPeriod}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 质保条款 */}
-                  {data.terms.warrantyTerms && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">9. 质保条款：</span>
-                        <span className="ml-1">{data.terms.warrantyTerms}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 退换货政策 */}
-                  {data.terms.returnPolicy && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">10. 退换货政策：</span>
-                        <span className="ml-1">{data.terms.returnPolicy}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 延期交货违约金 */}
-                  {data.terms.deliveryPenalty && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">11. 延期交货违约金：</span>
-                        <span className="ml-1">{data.terms.deliveryPenalty}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 质量不符违约金 */}
-                  {data.terms.qualityPenalty && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">12. 质量不符违约金：</span>
-                        <span className="ml-1">{data.terms.qualityPenalty}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 保密条款 */}
-                  {data.terms.confidentiality && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">13. 保密条款：</span>
-                        <span className="ml-1">{data.terms.confidentiality}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 知识产权 */}
-                  {data.terms.ipRights && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">14. 知识产权：</span>
-                        <span className="ml-1">{data.terms.ipRights}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 不可抗力 */}
-                  {data.terms.forceMajeure && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">15. 不可抗力：</span>
-                        <span className="ml-1">{data.terms.forceMajeure}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 争议解决 */}
-                  {data.terms.disputeResolution && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">16. 争议解决：</span>
-                        <span className="ml-1">{data.terms.disputeResolution}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 适用法律 */}
-                  {data.terms.applicableLaw && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">17. 适用法律：</span>
-                        <span className="ml-1">{data.terms.applicableLaw}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 合同有效期 */}
-                  {data.terms.contractValidity && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">18. 合同有效期：</span>
-                        <span className="ml-1">{data.terms.contractValidity}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 合同变更 */}
-                  {data.terms.modification && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">19. 合同变更：</span>
-                        <span className="ml-1">{data.terms.modification}</span>
-                      </td>
-                    </tr>
-                  )}
-                  
-                  {/* 合同终止 */}
-                  {data.terms.termination && (
-                    <tr>
-                      <td className="border border-gray-400 px-2 py-1.5">
-                        <span className="font-semibold">20. 合同终止：</span>
-                        <span className="ml-1">{data.terms.termination}</span>
-                      </td>
-                    </tr>
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
 
-            {/* 授权签名区域 + 页脚说明 - 作为整体避免分页 */}
+            {/* 授权签名区域 */}
             <div className="signature-section mt-6">
               {/* 签名区域 */}
               <div className="grid grid-cols-2 gap-8 mb-6">
@@ -793,9 +684,6 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                   <h4 className="font-bold mb-4">供应方（盖章）：</h4>
                   <div className="text-sm space-y-3">
                     <p className="font-semibold">{data.supplier.companyName}</p>
-                    {data.supplier.supplierCode && (
-                      <p className="text-xs text-gray-600">供应商编码：{data.supplier.supplierCode}</p>
-                    )}
                     <div className="border-2 border-dashed border-gray-300 rounded p-6 mt-4 bg-gray-50 text-center">
                       <p className="text-xs text-gray-400">公司盖章处</p>
                     </div>
@@ -809,10 +697,24 @@ export const PurchaseOrderDocument = forwardRef<HTMLDivElement, PurchaseOrderDoc
                 </div>
               </div>
 
-              {/* 页脚说明 - 与签名区域一起，不分页 */}
-              <div className="text-xs text-gray-500 text-center border-t border-gray-200 pt-3">
+            </div>
+            </div>
+
+            <div className="mt-auto pt-6 footer-note">
+              <div className="relative border-t border-gray-200 pt-3 text-center text-xs text-gray-500">
                 <p>本采购合同一式两份，采购方和供应方各执一份，双方签章后生效。</p>
-                <p className="mt-1">请供应方签章确认后回扫件至采购方邮箱。</p>
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    bottom: -2,
+                    fontSize: 11,
+                    color: '#9ca3af',
+                    userSelect: 'none',
+                  }}
+                >
+                  1 / 1
+                </div>
               </div>
             </div>
           </div>

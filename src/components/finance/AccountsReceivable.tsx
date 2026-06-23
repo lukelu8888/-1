@@ -46,6 +46,39 @@ export function AccountsReceivable() {
   const { contracts } = useSalesContracts();
   const { clearAllAccountsReceivable } = useFinance(); // 🔥 新增：获取清空方法
   const currentUser = getCurrentUser();
+  const toPositiveNumber = (value: unknown) => {
+    const numeric = Number(value || 0);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  };
+  const resolveExpectedDepositAmount = (params: {
+    totalAmount: number;
+    contract?: any;
+    depositPaymentProof?: any;
+    depositReceiptProof?: any;
+  }) => {
+    const explicitAmount = [
+      params.contract?.depositAmount,
+      params.depositPaymentProof?.amount,
+      params.depositReceiptProof?.actualAmount,
+    ].map(toPositiveNumber).find((amount) => amount > 0);
+    if (explicitAmount) return explicitAmount;
+    return toPositiveNumber(params.totalAmount) * 0.3;
+  };
+  const resolveExpectedBalanceAmount = (params: {
+    totalAmount: number;
+    contract?: any;
+    balancePaymentProof?: any;
+    balanceReceiptProof?: any;
+    depositAmount: number;
+  }) => {
+    const explicitAmount = [
+      params.contract?.balanceAmount,
+      params.balancePaymentProof?.amount,
+      params.balanceReceiptProof?.actualAmount,
+    ].map(toPositiveNumber).find((amount) => amount > 0);
+    if (explicitAmount) return explicitAmount;
+    return Math.max(toPositiveNumber(params.totalAmount) - toPositiveNumber(params.depositAmount), 0);
+  };
   
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -75,28 +108,49 @@ export function AccountsReceivable() {
       const SENT = new Set(['sent_to_customer', 'sent', 'customer_confirmed', 'deposit_uploaded', 'deposit_confirmed']);
       const mapped = contracts
           .filter((c: any) => SENT.has(c.status))
-          .map((c: any) => ({
-            id: c.id,
-            orderNumber: c.contractNumber,
-            customer: c.customerName,
-            customerEmail: c.customerEmail || '',
-            quotationNumber: c.quotationNumber,
-            date: (c.createdAt || '').split('T')[0],
-            totalAmount: c.totalAmount,
-            currency: c.currency || 'USD',
-            status: c.status === 'deposit_uploaded' ? 'Payment Proof Uploaded'
+          .map((c: any) => {
+            const totalAmount = Number(c.totalAmount || 0);
+            const depositExpectedAmount = resolveExpectedDepositAmount({
+              totalAmount,
+              contract: c,
+              depositPaymentProof: c.depositPaymentProof,
+              depositReceiptProof: c.depositReceiptProof,
+            });
+            const balanceExpectedAmount = resolveExpectedBalanceAmount({
+              totalAmount,
+              contract: c,
+              balancePaymentProof: c.balancePaymentProof,
+              balanceReceiptProof: c.balanceReceiptProof,
+              depositAmount: depositExpectedAmount,
+            });
+            return {
+              id: c.id,
+              orderNumber: c.contractNumber,
+              customer: c.customerName,
+              customerEmail: c.customerEmail || '',
+              quotationNumber: c.quotationNumber,
+              date: (c.createdAt || '').split('T')[0],
+              totalAmount,
+              currency: c.currency || 'USD',
+              status: c.status === 'deposit_uploaded' ? 'Payment Proof Uploaded'
               : c.status === 'customer_confirmed' ? 'Awaiting Deposit'
               : c.status === 'deposit_confirmed' ? 'Deposit Received'
               : 'Pending',
-            products: (c.products || []).map((p: any) => ({
-              name: p.productName, quantity: p.quantity, unitPrice: p.unitPrice,
-              totalPrice: (p.quantity || 0) * (p.unitPrice || 0),
-            })),
-            paymentTerms: c.paymentTerms,
-            depositPaymentProof: c.depositPaymentProof,
-            createdFrom: 'sales_contract',
-            createdAt: c.createdAt,
-          }));
+              products: (c.products || []).map((p: any) => ({
+                name: p.productName, quantity: p.quantity, unitPrice: p.unitPrice,
+                totalPrice: (p.quantity || 0) * (p.unitPrice || 0),
+              })),
+              paymentTerms: c.paymentTerms,
+              depositPaymentProof: c.depositPaymentProof,
+              depositReceiptProof: c.depositReceiptProof,
+              balancePaymentProof: c.balancePaymentProof,
+              balanceReceiptProof: c.balanceReceiptProof,
+              depositExpectedAmount,
+              balanceExpectedAmount,
+              createdFrom: 'sales_contract',
+              createdAt: c.createdAt,
+            };
+          });
       setContractBasedOrders(mapped);
     };
     load();
@@ -116,7 +170,29 @@ export function AccountsReceivable() {
     const contextOrders = orders.filter(o => o.orderNumber?.startsWith('SC-'));
     const seen = new Set(contextOrders.map(o => o.orderNumber));
     const extra = contractBasedOrders.filter(o => !seen.has(o.orderNumber));
-    const merged = [...contextOrders, ...extra];
+    const merged = [...contextOrders, ...extra].map((order) => {
+      const linkedContract = contracts.find((contract: any) => contract.contractNumber === order.orderNumber);
+      const totalAmount = Number(order.totalAmount || linkedContract?.totalAmount || 0);
+      const depositExpectedAmount = resolveExpectedDepositAmount({
+        totalAmount,
+        contract: linkedContract,
+        depositPaymentProof: order.depositPaymentProof,
+        depositReceiptProof: order.depositReceiptProof,
+      });
+      const balanceExpectedAmount = resolveExpectedBalanceAmount({
+        totalAmount,
+        contract: linkedContract,
+        balancePaymentProof: order.balancePaymentProof,
+        balanceReceiptProof: order.balanceReceiptProof,
+        depositAmount: depositExpectedAmount,
+      });
+      return {
+        ...order,
+        totalAmount,
+        depositExpectedAmount,
+        balanceExpectedAmount,
+      };
+    });
 
     return merged.filter(order => {
       if (!order.orderNumber?.startsWith('SC-')) return false;
@@ -130,24 +206,20 @@ export function AccountsReceivable() {
       }
       return true;
     });
-  }, [orders, contractBasedOrders, searchTerm]);
+  }, [orders, contractBasedOrders, contracts, searchTerm]);
   
   // 🔥 统计信息
   const stats = useMemo(() => {
     const total = receivableOrders.length;
-    const depositPending = receivableOrders.filter(o => o.depositPaymentProof && !o.depositPaymentProof.status).length;
-    const balancePending = receivableOrders.filter(o => o.balancePaymentProof && !o.balancePaymentProof.status).length;
+    const depositPending = receivableOrders.filter(o => o.depositPaymentProof && !o.depositReceiptProof).length;
+    const balancePending = receivableOrders.filter(o => o.balancePaymentProof && !o.balanceReceiptProof).length;
     const depositReceived = receivableOrders.filter(o => o.depositReceiptProof).length;
     const balanceReceived = receivableOrders.filter(o => o.balanceReceiptProof).length;
     
     // 🔥 计算金额统计
     const totalReceivable = receivableOrders.reduce((sum, o) => sum + o.totalAmount, 0);
-    const depositAmount = receivableOrders
-      .filter(o => o.depositReceiptProof)
-      .reduce((sum, o) => sum + (o.depositReceiptProof?.actualAmount || 0), 0);
-    const balanceAmount = receivableOrders
-      .filter(o => o.balanceReceiptProof)
-      .reduce((sum, o) => sum + (o.balanceReceiptProof?.actualAmount || 0), 0);
+    const depositAmount = receivableOrders.reduce((sum, o) => sum + toPositiveNumber(o.depositExpectedAmount), 0);
+    const balanceAmount = receivableOrders.reduce((sum, o) => sum + toPositiveNumber(o.balanceExpectedAmount), 0);
     
     return {
       total,

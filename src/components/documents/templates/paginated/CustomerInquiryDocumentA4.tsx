@@ -3,8 +3,10 @@ import { A4DocumentViewer } from '../../a4/A4DocumentViewer';
 import { A4Page } from '../../a4/A4Page';
 import { A4Block, paginateBlocks } from '../../a4/Paginator';
 import {
+  buildCustomerInquiryTotalValueLabel,
   getCustomerInquiryRequirementRows,
   normalizeCustomerInquiryProductTableColumns,
+  normalizeCustomerInquiryTypography,
   type CustomerInquiryData,
 } from '../CustomerInquiryDocument';
 
@@ -16,7 +18,7 @@ interface CustomerInquiryDocumentA4Props {
 const sectionTitleClass = 'text-sm font-bold mb-2 text-gray-900';
 const tableClass = 'w-full table-fixed border-collapse text-[12px]';
 const fullWidthTableClass = 'w-full border-collapse table-fixed text-xs';
-const thClass = 'border border-gray-400 px-2 py-2 break-words bg-gray-100 font-semibold';
+const thClass = 'border border-gray-400 bg-gray-100 px-2 py-2 font-semibold align-middle leading-tight';
 const tdClass = 'border border-gray-300 px-2 py-2 align-top';
 
 function formatDate(value: string) {
@@ -30,6 +32,10 @@ function formatRegion(value: CustomerInquiryData['region'] | string) {
   if (value === 'SA') return 'South America';
   if (value === 'EU') return 'Europe & Africa';
   return value;
+}
+
+function renderProductHeaderLabel(label: string, key: string) {
+  return label;
 }
 
 export const CustomerInquiryDocumentA4 = forwardRef<HTMLDivElement, CustomerInquiryDocumentA4Props>(
@@ -52,11 +58,39 @@ interface CustomerInquiryDocumentA4PagesProps {
 
 export function CustomerInquiryDocumentA4Pages({ data }: CustomerInquiryDocumentA4PagesProps) {
   const pages = useMemo(() => buildCustomerInquiryPages(data), [data]);
+  const typography = useMemo(
+    () => normalizeCustomerInquiryTypography(data.templateSettings?.typography),
+    [data.templateSettings?.typography],
+  );
 
   return (
     <>
       {pages.map((page, index) => (
-        <A4Page key={`inq-page-${index}`} pageNumber={index + 1} totalPages={pages.length}>
+        <A4Page
+          key={`inq-page-${index}`}
+          footer={
+            <div className="relative">
+              <div
+                className="text-gray-600 text-center border-t border-gray-300 pt-2"
+                style={{ fontSize: `${typography.footerPt}pt`, fontFamily: typography.footerFontFamily }}
+              >
+                This inquiry will be processed and quoted within 24-48 hours. Thank you for your interest.
+              </div>
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  bottom: -2,
+                  fontSize: 11,
+                  color: '#9ca3af',
+                  userSelect: 'none',
+                }}
+              >
+                {`${index + 1} / ${pages.length}`}
+              </div>
+            </div>
+          }
+        >
           {page}
         </A4Page>
       ))}
@@ -68,10 +102,14 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
   const products = Array.isArray(data.products) ? data.products : [];
   const total = products.reduce((sum, p) => sum + Number(p.quantity || 0) * Number(p.targetPrice || 0), 0);
   const currency = products[0]?.currency || 'USD';
-  const requirementRows = getCustomerInquiryRequirementRows(data, { includeEmpty: true });
+  const totalValueLabel = buildCustomerInquiryTotalValueLabel(data.requirements, currency);
+  const requirementRows = getCustomerInquiryRequirementRows(data);
   const productTableColumns = normalizeCustomerInquiryProductTableColumns(
     data.templateSettings?.productTableColumns,
   );
+  const typography = normalizeCustomerInquiryTypography(data.templateSettings?.typography);
+
+  const footerReservedHeight = 58;
 
   const blocks: A4Block[] = [
     {
@@ -83,10 +121,10 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
         <div className="mb-3">
           <div className="mb-2 flex items-start justify-between">
             <div className="flex-1">
-              <h1 className="text-2xl font-bold tracking-wider text-black">CUSTOMER INQUIRY</h1>
+              <h1 className="font-bold tracking-wider text-black" style={{ fontSize: `${typography.headerTitlePt}pt`, fontFamily: typography.headerTitleFontFamily }}>CUSTOMER INQUIRY</h1>
             </div>
             <div className="w-[240px]">
-              <table className="w-full border-collapse border border-gray-400 text-xs">
+              <table className="w-full border-collapse border border-gray-400" style={{ fontSize: `${typography.headerMetaPt}pt`, fontFamily: typography.headerMetaFontFamily }}>
               <tbody>
                 <tr>
                   <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-100 font-semibold whitespace-nowrap">Inq. No.</td>
@@ -119,15 +157,15 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
             <tbody>
               <tr>
                 <td className="border border-gray-400 p-0 align-top">
-                  <div className="bg-gray-200 px-2 py-1 font-bold border-b border-gray-400">
+                  <div className="bg-gray-200 px-2 py-1 font-bold border-b border-gray-400" style={{ fontSize: `${typography.customerSectionHeaderPt}pt`, fontFamily: typography.customerSectionHeaderFontFamily }}>
                     CUSTOMER INFORMATION
                   </div>
-                  <div className="px-2 py-1.5 space-y-0.5">
+                  <div className="px-2 py-1.5 space-y-0.5" style={{ fontSize: `${typography.customerBodyPt}pt`, fontFamily: typography.customerBodyFontFamily }}>
                     <div><span className="font-semibold">{data.customer.companyName}</span></div>
-                    <div><span className="text-gray-600">Contact:</span> {data.customer.contactPerson}{data.customer.position ? ` (${data.customer.position})` : ''}</div>
-                    <div><span className="text-gray-600">Email:</span> {data.customer.email}</div>
-                    {data.customer.phone && <div><span className="text-gray-600">Tel:</span> {data.customer.phone}</div>}
-                    {data.customer.address && <div><span className="text-gray-600">Address:</span> {data.customer.address}</div>}
+                    <div><span className="text-gray-600">Contact:</span> <span>{data.customer.contactPerson}{data.customer.position ? ` (${data.customer.position})` : ''}</span></div>
+                    <div><span className="text-gray-600">Email:</span> <span>{data.customer.email}</span></div>
+                    {data.customer.phone && <div><span className="text-gray-600">Tel:</span> <span>{data.customer.phone}</span></div>}
+                    {data.customer.address && <div><span className="text-gray-600">Address:</span> <span>{data.customer.address}</span></div>}
                   </div>
                 </td>
               </tr>
@@ -163,9 +201,20 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
                         ? 'text-center'
                         : 'text-left';
 
+                const compactHeaderClass =
+                  column.key === 'no' || column.key === 'modelNo' || column.key === 'unit' || column.key === 'targetPrice' || column.key === 'estimatedValue'
+                    ? 'px-1.5 text-[11px] tracking-tight'
+                    : '';
+                const wrapClass =
+                  column.key === 'no' || column.key === 'unit'
+                    ? 'whitespace-nowrap break-keep'
+                    : column.key === 'quantity' || column.key === 'modelNo'
+                      ? 'whitespace-nowrap break-keep'
+                      : 'whitespace-normal break-words [overflow-wrap:anywhere]';
+
                 return (
-                  <th key={column.key} className={`${thClass} ${column.key === 'quantity' || column.key === 'unit' || column.key === 'targetPrice' || column.key === 'estimatedValue' ? 'whitespace-nowrap break-normal' : ''} ${alignmentClass}`}>
-                    {column.label}
+                  <th key={column.key} className={`${thClass} ${compactHeaderClass} whitespace-nowrap ${alignmentClass}`} style={{ fontSize: `${typography.productHeaderPt}pt`, fontFamily: typography.productHeaderFontFamily }}>
+                    {renderProductHeaderLabel(column.label, column.key)}
                   </th>
                 );
               })}
@@ -180,16 +229,16 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
           <tr key={`${row.no}-${idx}`} style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}>
             {productTableColumns.map((column) => {
               if (column.key === 'no') {
-                return <td key={column.key} className={`${tdClass} text-center`}>{row.no || idx + 1}</td>;
+                return <td key={column.key} className={`${tdClass} text-center`} style={{ fontSize: `${typography.productBodyPt}pt`, fontFamily: typography.productBodyFontFamily }}>{row.no || idx + 1}</td>;
               }
 
               if (column.key === 'modelNo') {
-                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-gray-700">{row.modelNo || '-'}</td>;
+                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-gray-700" style={{ fontSize: `${typography.productBodyPt}pt`, fontFamily: typography.productBodyFontFamily }}>{row.modelNo || '-'}</td>;
               }
 
               if (column.key === 'image') {
                 return (
-                  <td key={column.key} className="border border-gray-300 px-1 py-1 text-center">
+                  <td key={column.key} className="border border-gray-300 px-1 py-1 text-center" style={{ fontSize: `${typography.productBodyPt}pt`, fontFamily: typography.productBodyFontFamily }}>
                     {row.imageUrl ? (
                       <img
                         src={row.imageUrl}
@@ -197,7 +246,7 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
                         className="w-10 h-10 object-cover mx-auto rounded"
                       />
                     ) : (
-                      <div className="w-10 h-10 bg-gray-100 mx-auto rounded flex items-center justify-center text-xs text-gray-400">
+                      <div className="w-10 h-10 bg-gray-100 mx-auto rounded flex items-center justify-center text-gray-400" style={{ fontSize: `${typography.productSpecPt}pt`, fontFamily: typography.productSpecFontFamily }}>
                         N/A
                       </div>
                     )}
@@ -208,30 +257,30 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
               if (column.key === 'itemNameSpecification') {
                 return (
                   <td key={column.key} className="border border-gray-300 px-2 py-2">
-                    <div className="font-semibold text-[#111827]">{row.productName}</div>
-                    {row.specification && <div className="text-xs text-gray-600 mt-0.5">{row.specification}</div>}
+                    <div className="font-semibold text-[#111827]" style={{ fontSize: `${typography.productBodyPt}pt`, fontFamily: typography.productBodyFontFamily }}>{row.productName}</div>
+                    {row.specification && <div className="text-gray-600 mt-0.5" style={{ fontSize: `${typography.productSpecPt}pt`, fontFamily: typography.productSpecFontFamily }}>{row.specification}</div>}
                   </td>
                 );
               }
 
               if (column.key === 'quantity') {
-                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{Number(row.quantity || 0).toLocaleString()}</td>;
+                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right" style={{ fontSize: `${typography.productBodyPt}pt`, fontFamily: typography.productBodyFontFamily }}>{Number(row.quantity || 0).toLocaleString()}</td>;
               }
 
               if (column.key === 'unit') {
-                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{row.unit}</td>;
+                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center" style={{ fontSize: `${typography.productBodyPt}pt`, fontFamily: typography.productBodyFontFamily }}>{row.unit}</td>;
               }
 
               if (column.key === 'targetPrice') {
                 return (
-                  <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">
+                  <td key={column.key} className="border border-gray-300 px-2 py-2 text-right" style={{ fontSize: `${typography.productBodyPt}pt`, fontFamily: typography.productBodyFontFamily }}>
                     {hasPrice ? Number(row.targetPrice || 0).toFixed(2) : '-'}
                   </td>
                 );
               }
 
               return (
-                <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">
+                <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold" style={{ fontSize: `${typography.productSummaryPt}pt`, fontFamily: typography.productSummaryFontFamily }}>
                   {hasPrice ? estimated.toFixed(2) : '-'}
                 </td>
               );
@@ -241,10 +290,10 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
       },
       renderFooter: () => (
         <tr className="bg-gray-100 font-bold">
-          <td className="border border-gray-300 px-2 py-2 text-right" colSpan={Math.max(productTableColumns.length - 1, 1)}>
-            Total Value ({currency}):
+          <td className="border border-gray-300 px-2 py-2 text-right" colSpan={Math.max(productTableColumns.length - 1, 1)} style={{ fontSize: `${typography.productSummaryPt}pt`, fontFamily: typography.productSummaryFontFamily }}>
+            {totalValueLabel}:
           </td>
-          <td className="border border-gray-300 px-2 py-2 text-right font-semibold">{total.toFixed(2)}</td>
+          <td className="border border-gray-300 px-2 py-2 text-right font-semibold" style={{ fontSize: `${typography.productSummaryPt}pt`, fontFamily: typography.productSummaryFontFamily }}>{total.toFixed(2)}</td>
         </tr>
       ),
     },
@@ -257,15 +306,33 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
     avoidBreak: true,
     render: () => (
       <div className="mb-6">
-        <h2 className={sectionTitleClass}>TRADING REQUIREMENTS</h2>
+        <h2 className={sectionTitleClass} style={{ fontSize: `${typography.sectionTitlePt}pt`, fontFamily: typography.sectionTitleFontFamily }}>TRADING REQUIREMENTS</h2>
         <table className={fullWidthTableClass}>
+          <colgroup>
+            <col style={{ width: '4%' }} />
+            <col style={{ width: '21%' }} />
+            <col style={{ width: '75%' }} />
+          </colgroup>
           <tbody>
             {requirementRows.map((row, index) => (
               <tr key={row.label}>
-                <td className="border border-gray-400 px-2 py-1.5 font-semibold bg-gray-100" style={index === 0 ? { width: '25%' } : undefined}>
-                  {row.label}
-                </td>
-                <td className="border border-gray-400 px-2 py-1.5 whitespace-pre-wrap">{row.value || '\u00A0'}</td>
+                {(() => {
+                  const match = String(row.label || '').match(/^(\d+\.)\s*(.*)$/);
+                  const indexLabel = match?.[1] || '';
+                  const cleanIndexLabel = indexLabel.replace(/\.$/, '');
+                  const titleLabel = match?.[2] || row.label;
+                  return (
+                    <>
+                      <td className="border border-gray-400 px-1.5 py-1.5 text-right font-semibold bg-gray-100 align-top" style={{ fontSize: `${typography.requirementIndexPt}pt`, fontFamily: typography.requirementIndexFontFamily }}>
+                        {cleanIndexLabel || '\u00A0'}
+                      </td>
+                      <td className="border border-gray-400 px-2 py-1.5 font-semibold bg-gray-100 align-top" style={{ fontSize: `${typography.requirementLabelPt}pt`, fontFamily: typography.requirementLabelFontFamily }}>
+                        {titleLabel}
+                      </td>
+                    </>
+                  );
+                })()}
+                <td className="border border-gray-400 px-2 py-1.5 whitespace-pre-wrap" style={{ fontSize: `${typography.requirementValuePt}pt`, fontFamily: typography.requirementValueFontFamily }}>{row.value || '\u00A0'}</td>
               </tr>
             ))}
           </tbody>
@@ -274,20 +341,8 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
     ),
   });
 
-  blocks.push({
-    type: 'section',
-    key: 'footer-statement',
-    estimatedHeight: 32,
-    avoidBreak: true,
-    render: () => (
-      <div className="text-xs text-gray-600 text-center border-t border-gray-300 pt-2">
-        This inquiry will be processed and quoted within 24-48 hours. Thank you for your interest.
-      </div>
-    ),
-  });
-
-  return paginateBlocks(blocks).map((page) => (
-    <div key={`inq-${page.index}`} className="flex h-full flex-col text-[12px] leading-5">
+  return paginateBlocks(blocks, { pageContentHeight: 1123 - 40 * 2 - footerReservedHeight }).map((page) => (
+    <div key={`inq-${page.index}`} className="flex h-full flex-col leading-5" style={{ fontSize: `${typography.productBodyPt}pt`, fontFamily: typography.customerBodyFontFamily }}>
       {page.items.map((item) => {
         if (item.type === 'section') {
           return <React.Fragment key={item.key}>{item.render()}</React.Fragment>;
@@ -295,7 +350,7 @@ export function buildCustomerInquiryPages(data: CustomerInquiryData): React.Reac
 
         return (
           <div key={item.key} className="mb-4">
-            <h2 className={sectionTitleClass}>PRODUCT REQUIREMENTS</h2>
+            <h2 className={sectionTitleClass} style={{ fontSize: `${typography.sectionTitlePt}pt` }}>PRODUCT REQUIREMENTS</h2>
             <table className={fullWidthTableClass}>
               {item.renderHeader()}
               <tbody>

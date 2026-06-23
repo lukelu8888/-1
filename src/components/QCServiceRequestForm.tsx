@@ -126,6 +126,7 @@ export function QCServiceRequestForm({ trigger }: QCServiceRequestFormProps) {
           </Button>
         )}
       </DialogTrigger>
+      {open && (
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" lang="en">
         {!submitted ? (
           <>
@@ -372,6 +373,7 @@ export function QCServiceRequestForm({ trigger }: QCServiceRequestFormProps) {
           </div>
         )}
       </DialogContent>
+      )}
     </Dialog>
   );
 }

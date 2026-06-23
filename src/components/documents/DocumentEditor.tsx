@@ -38,6 +38,7 @@ import { SupplierQuotationDocument, SupplierQuotationData } from './templates/Su
 import { QuoteRequirementDocument, QuoteRequirementDocumentData } from './templates/QuoteRequirementDocument';
 import { StatementOfAccountDocument, StatementOfAccountData } from './templates/StatementOfAccountDocument';
 import { CommercialInvoiceDocument, CommercialInvoiceData } from './templates/CommercialInvoiceDocument';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 import { PackingListDocument, PackingListData } from './templates/PackingListDocument';
 import { exportToPDFPrint } from '../../utils/pdfExport';
 
@@ -835,7 +836,7 @@ function getDefaultData(type: DocumentType): DocumentData {
         products: [],
         tradeTerms: {
           incoterms: 'FOB Xiamen',
-          paymentTerms: '30% T/T deposit, 70% before shipment',
+          paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
           deliveryTime: '25-30 days after deposit',
           packing: 'Export carton with pallets',
           portOfLoading: 'Xiamen, China',
@@ -885,7 +886,7 @@ function getDefaultData(type: DocumentType): DocumentData {
           totalAmount: 0,
           currency: 'USD',
           tradeTerms: 'FOB Xiamen',
-          paymentTerms: '30% T/T deposit, 70% before shipment',
+          paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
           deliveryTime: '25-30 days after deposit received',
           portOfLoading: 'Xiamen, China',
           portOfDestination: '',
@@ -929,7 +930,7 @@ function getDefaultData(type: DocumentType): DocumentData {
         },
         products: [],
         terms: {
-          paymentTerms: 'T/T 30% deposit, 70% before shipment',
+          paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
           deliveryTerms: 'FOB',
           deliveryTime: '30 days',
           deliveryAddress: '',

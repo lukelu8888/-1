@@ -4,6 +4,7 @@ import { Button } from '../ui/button';
 import { Download, Printer } from 'lucide-react';
 import { exportToPDF, exportToPDFPrint } from '../../utils/pdfExport';
 import { toast } from 'sonner@2.0.3';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 
 /**
  * 📋 采购询价单预览页面
@@ -70,7 +71,7 @@ const sampleRFQData: XJData = {
   
   terms: {
     currency: 'USD',
-    paymentTerms: 'T/T 30% 预付，70% 发货前付清',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     deliveryTerms: 'EXW 工厂交货',
     deliveryAddress: '福建省福州市仓山区金山工业区',
     

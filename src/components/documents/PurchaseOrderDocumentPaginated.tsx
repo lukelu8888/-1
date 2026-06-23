@@ -266,16 +266,24 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                       <tbody>
                         <tr>
                           <td className="border border-gray-400 px-1.5 py-0.5 w-24 bg-gray-50 font-semibold">开户银行</td>
-                          <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.bankName}</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">账户名称</td>
-                          <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.accountName}</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.bankName || '-'}</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5 w-24 bg-gray-50 font-semibold">账户名称</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.accountName || '-'}</td>
                         </tr>
                         <tr>
                           <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">银行账号</td>
-                          <td className="border border-gray-400 px-1.5 py-0.5 font-mono">{data.supplier.bankInfo.accountNumber}</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5 font-mono">{data.supplier.bankInfo.accountNumber || '-'}</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">收款币种</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.currency || data.terms.currency || '-'}</td>
                         </tr>
+                        {(data.supplier.bankInfo.swiftCode || data.supplier.bankInfo.bankAddress) ? (
+                          <tr>
+                            <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">SWIFT代码</td>
+                            <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.swiftCode || '-'}</td>
+                            <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">银行地址</td>
+                            <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.bankAddress || '-'}</td>
+                          </tr>
+                        ) : null}
                       </tbody>
                     </table>
                   </div>
@@ -335,9 +343,22 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
             )}
 
             {/* 页脚 */}
-            <div className="absolute bottom-3 left-0 right-0 px-[20mm] flex justify-between items-center text-[7pt] text-gray-500">
-              <div>https://www.figma.com/make</div>
-              <div>第 1 页 / 共 {totalPages} 页</div>
+            <div className="absolute bottom-3 left-[20mm] right-[20mm] text-[7pt] text-gray-500">
+              <div className="relative border-t border-gray-300 pt-2 text-center text-[8pt] text-gray-600">
+                本采购合同一式两份，采购方和供应方各执一份，双方签章后生效。
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    bottom: -2,
+                    fontSize: 11,
+                    color: '#9ca3af',
+                    userSelect: 'none',
+                  }}
+                >
+                  {`1 / ${totalPages}`}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -421,16 +442,24 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
                     <tbody>
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 w-24 bg-gray-50 font-semibold">开户银行</td>
-                        <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.bankName}</td>
-                      </tr>
-                      <tr>
-                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">账户名称</td>
-                        <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.accountName}</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.bankName || '-'}</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5 w-24 bg-gray-50 font-semibold">账户名称</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.accountName || '-'}</td>
                       </tr>
                       <tr>
                         <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">银行账号</td>
-                        <td className="border border-gray-400 px-1.5 py-0.5 font-mono">{data.supplier.bankInfo.accountNumber}</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5 font-mono">{data.supplier.bankInfo.accountNumber || '-'}</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">收款币种</td>
+                        <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.currency || data.terms.currency || '-'}</td>
                       </tr>
+                      {(data.supplier.bankInfo.swiftCode || data.supplier.bankInfo.bankAddress) ? (
+                        <tr>
+                          <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">SWIFT代码</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.swiftCode || '-'}</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5 bg-gray-50 font-semibold">银行地址</td>
+                          <td className="border border-gray-400 px-1.5 py-0.5">{data.supplier.bankInfo.bankAddress || '-'}</td>
+                        </tr>
+                      ) : null}
                     </tbody>
                   </table>
                 </div>
@@ -488,9 +517,22 @@ export const PurchaseOrderDocumentPaginated = forwardRef<HTMLDivElement, Purchas
               </div>
 
               {/* 页脚 */}
-              <div className="absolute bottom-3 left-0 right-0 px-[20mm] flex justify-between items-center text-[7pt] text-gray-500">
-                <div>https://www.figma.com/make</div>
-                <div>第 2 页 / 共 {totalPages} 页</div>
+              <div className="absolute bottom-3 left-[20mm] right-[20mm] text-[7pt] text-gray-500">
+                <div className="relative border-t border-gray-300 pt-2 text-center text-[8pt] text-gray-600">
+                  本采购合同一式两份，采购方和供应方各执一份，双方签章后生效。
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      bottom: -2,
+                      fontSize: 11,
+                      color: '#9ca3af',
+                      userSelect: 'none',
+                    }}
+                  >
+                    {`2 / ${totalPages}`}
+                  </div>
+                </div>
               </div>
             </div>
           )}

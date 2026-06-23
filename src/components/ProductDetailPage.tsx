@@ -8,6 +8,7 @@ import { productDetailsData } from '../data/productDetailsData';
 import { useCart } from '../contexts/CartContext';
 import { toast } from 'sonner@2.0.3';
 import { useUser } from '../contexts/UserContext';
+import { directOrderDraftService } from '../lib/services/direct-order-draft/directOrderDraftService';
 
 interface ProductDetailPageProps {
   productKey: string;
@@ -107,46 +108,48 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
   const handleAddToCart = () => {
     const totalCartons = Math.ceil(quantity / product.pcsPerCarton);
     addToCart({
-      id: productKey,
-      name: product.name,
-      price: product.unitPrice,
-      quantity: quantity,
+      productName: product.name,
+      modelNo: product.sku || productKey,
       image: product.image,
+      material: product.material,
+      color: product.color,
+      specification: product.specification,
+      unitPrice: product.unitPrice,
+      quantity,
+      pcsPerCarton: product.pcsPerCarton,
+      cartonGrossWeight: product.cartonGrossWeight,
+      cartonNetWeight: product.cartonNetWeight,
+      cartonSize: product.cartonSize,
+      cbmPerCarton: product.cbmPerCarton,
     });
-    toast.success(`Added ${quantity} pieces (${totalCartons} carton${totalCartons > 1 ? 's' : ''}) to cart`);
+    toast.success(`Added ${quantity} pieces (${totalCartons} carton${totalCartons > 1 ? 's' : ''}) to inquiry list`);
   };
 
   const handleAddToQuotationDraft = () => {
     if (!orderSession) return;
 
-    // Load draft orders
-    const draftsData = localStorage.getItem('draftOrders');
-    if (!draftsData) {
+    const draft = directOrderDraftService.getById(orderSession.orderId);
+    if (!draft) {
       toast.error('Draft order not found');
       return;
     }
 
     try {
-      const drafts = JSON.parse(draftsData);
-      const draftIndex = drafts.findIndex((d: any) => d.id === orderSession.orderId);
-      
-      if (draftIndex === -1) {
-        toast.error('Order not found');
-        return;
-      }
-
-      const draft = drafts[draftIndex];
-      
       // Check if product already exists
       const existingProductIndex = draft.products.findIndex(
         (p: any) => p.name === product.name && p.price === product.unitPrice
       );
 
+      const updatedProducts = [...draft.products];
+
       if (existingProductIndex !== -1) {
         // Product exists, update quantity and ensure image is set
-        draft.products[existingProductIndex].qty += quantity;
-        draft.products[existingProductIndex].image = product.image; // Sync image
-        draft.products[existingProductIndex].itemNumber = productKey; // Sync SKU
+        updatedProducts[existingProductIndex] = {
+          ...updatedProducts[existingProductIndex],
+          qty: updatedProducts[existingProductIndex].qty + quantity,
+          image: product.image,
+          itemNumber: productKey
+        };
         toast.success(`Updated ${product.name} quantity in quotation draft`, {
           action: {
             label: 'View Invoice',
@@ -173,7 +176,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
           itemNumber: product.sku || productKey // Use real SKU from productData
         };
 
-        draft.products.push(newProduct);
+        updatedProducts.push(newProduct);
         toast.success(`Added ${product.name} to quotation draft`, {
           action: {
             label: 'View Invoice',
@@ -185,12 +188,9 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
         });
       }
 
-      // Save updated drafts
-      drafts[draftIndex] = {
-        ...draft,
-        updatedAt: new Date().toISOString()
-      };
-      localStorage.setItem('draftOrders', JSON.stringify(drafts));
+      directOrderDraftService.update(orderSession.orderId, {
+        products: updatedProducts,
+      });
       
       // Trigger custom event to update banner
       window.dispatchEvent(new Event('draftOrderUpdated'));
@@ -298,7 +298,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
 
       {/* Breadcrumb */}
       <div className="border-b bg-gray-50">
-        <div className="mx-auto max-w-7xl px-4 py-3">
+        <div className="cosun-shell py-3">
           <div className="flex items-center gap-2 text-sm">
             <button 
               onClick={(e) => {
@@ -481,7 +481,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
               </div>
             </div>
 
-            {/* Total Price & Add to Cart */}
+            {/* Total Price & Add to Inquiry */}
             <div className="border-t pt-4">
               <div className="flex justify-between items-center mb-4">
                 <span className="text-gray-900 font-medium">Total Price:</span>
@@ -518,7 +518,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
                     variant="outline"
                     className="w-full border-red-600 text-red-600 hover:bg-red-50 py-6 text-lg"
                   >
-                    Add to Cart
+                    Add to Inquiry
                   </Button>
                 </>
               ) : (
@@ -526,7 +526,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
                   onClick={handleAddToCart}
                   className="w-full bg-red-600 hover:bg-red-700 text-white py-6 text-lg"
                 >
-                  Add to Cart
+                  Add to Inquiry
                 </Button>
               )}
             </div>
@@ -732,7 +732,7 @@ export function ProductDetailPage({ productKey, categoryName, subcategoryName, o
                     variant="outline"
                     className="w-full border-orange-600 text-orange-600 hover:bg-orange-50"
                   >
-                    Add to Cart
+                    Add to Inquiry
                   </Button>
                 </div>
               </div>

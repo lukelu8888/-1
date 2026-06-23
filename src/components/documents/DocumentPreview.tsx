@@ -5,6 +5,7 @@ import { Dialog, DialogContent } from '../ui/dialog';
 import { CustomerInquiryDocument, type CustomerInquiryData } from './templates/CustomerInquiryDocument';
 import { QuotationDocument, type QuotationData } from './templates/QuotationDocument';
 import { PurchaseOrderDocument, type PurchaseOrderData } from './templates/PurchaseOrderDocument';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 
 interface DocumentPreviewProps {
   document: {
@@ -74,7 +75,7 @@ export function DocumentPreview({ document, onClose }: DocumentPreviewProps) {
     requirements: {
       deliveryTime: 'Before March 15, 2026',
       portOfDestination: 'Los Angeles, USA',
-      paymentTerms: 'T/T or L/C at sight',
+      paymentTerms: buildPaymentTermsText('deposit_plus_lc', 'lc_ready'),
       tradeTerms: 'FOB Xiamen or CIF Los Angeles',
       packingRequirements: 'Export carton with pallets, shrink-wrapped',
       certifications: ['UL', 'FCC', 'CE'],

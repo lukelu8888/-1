@@ -163,7 +163,7 @@ export function AQLContent() {
           </div>
 
           {/* What is AQL - Enhanced with Tabs */}
-          <div className="mb-10">
+          <div id="aql-table-a" className="mb-10 scroll-mt-28">
             <Card className="border-2 border-gray-200 shadow-lg overflow-hidden">
               <CardContent className="p-0">
                 <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-6">

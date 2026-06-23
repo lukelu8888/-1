@@ -3,8 +3,8 @@ import cosunLogo from '../../../../assets/410810351d2b1fef484ded221d682af920f7ac
 import { A4DocumentViewer } from '../../a4/A4DocumentViewer';
 import { A4Page } from '../../a4/A4Page';
 import { A4Block, paginateBlocks } from '../../a4/Paginator';
-import { DocumentConditionsSection } from '../shared/DocumentConditionsSection';
 import type { XJData } from '../XJDocument';
+import type { DocumentConditionGroup, DocumentConditionItem } from '../../../../types/documentConditions';
 
 interface XJDocumentA4Props {
   data: XJData;
@@ -13,11 +13,20 @@ interface XJDocumentA4Props {
 
 interface XJDocumentA4PagesProps {
   data: XJData;
+  footerContact?: {
+    name?: string;
+    email?: string;
+  } | null;
 }
 
 interface XjTermRow {
   label: string;
   value: string;
+}
+
+interface XjConditionRow {
+  item: DocumentConditionItem;
+  itemIndex: number;
 }
 
 const sectionTitleClass = 'mb-2 text-base font-bold text-black';
@@ -71,7 +80,14 @@ function buildTermsRows(data: XJData): XjTermRow[] {
 }
 
 function buildTermRowHeight(row: XjTermRow) {
-  return Math.max(28, 10 + estimateWrappedLines(row.value, 46) * 12);
+  const wrappedLines = estimateWrappedLines(row.value, 50);
+  return Math.max(36, 16 + wrappedLines * 18);
+}
+
+function buildConditionRowHeight(row: XjConditionRow) {
+  const content = row.item.hint ? `${row.item.value}\n${row.item.hint}` : row.item.value;
+  const wrappedLines = estimateWrappedLines(content, 34);
+  return Math.max(44, 20 + wrappedLines * 20);
 }
 
 export const XJDocumentA4 = forwardRef<HTMLDivElement, XJDocumentA4Props>(
@@ -88,21 +104,58 @@ export const XJDocumentA4 = forwardRef<HTMLDivElement, XJDocumentA4Props>(
 
 XJDocumentA4.displayName = 'XJDocumentA4';
 
-export function XJDocumentA4Pages({ data }: XJDocumentA4PagesProps) {
-  const pages = useMemo(() => buildXJPages(data), [data]);
+export function XJDocumentA4Pages({ data, footerContact = null }: XJDocumentA4PagesProps) {
+  const pages = useMemo(() => buildXJPages(data, footerContact), [data, footerContact]);
 
   return (
     <>
-      {pages.map((page, index) => (
-        <A4Page key={`xj-page-${index}`} pageNumber={index + 1} totalPages={pages.length}>
-          {page}
-        </A4Page>
-      ))}
+      {pages.map((page, index) => {
+        const isLastPage = index === pages.length - 1;
+        const footerName = footerContact?.name || data.buyer.contactPerson;
+        const footerEmail = footerContact?.email || data.buyer.email;
+
+        return (
+          <A4Page
+            key={`xj-page-${index}`}
+            pageNumber={index + 1}
+            totalPages={pages.length}
+            footer={(
+              <div
+                className={`flex min-h-[16px] items-end ${isLastPage ? 'justify-between gap-6 border-t border-[#e5e7eb] pt-3' : 'justify-end'}`}
+              >
+                {isLastPage ? (
+                  <div className="flex-1 text-center text-[11px] leading-6 text-[#374151]">
+                    如有疑问，请及时联系采购联系人：{footerName} | {footerEmail}
+                  </div>
+                ) : null}
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: '#9ca3af',
+                    userSelect: 'none',
+                    flexShrink: 0,
+                  }}
+                >
+                  {`${index + 1} / ${pages.length}`}
+                </div>
+              </div>
+            )}
+          >
+            {page}
+          </A4Page>
+        );
+      })}
     </>
   );
 }
 
-export function buildXJPages(data: XJData): React.ReactNode[] {
+export function buildXJPages(
+  data: XJData,
+  footerContact?: {
+    name?: string;
+    email?: string;
+  } | null,
+): React.ReactNode[] {
   const termRows = buildTermsRows(data);
   const blocks: A4Block[] = [
     {
@@ -254,30 +307,64 @@ export function buildXJPages(data: XJData): React.ReactNode[] {
     },
   ];
 
-  if (data.conditionGroups && data.conditionGroups.length > 0) {
-    const estimatedHeight =
-      64 +
-      data.conditionGroups.reduce((sum, group) => {
-        const titleLines = estimateWrappedLines(`${group.title || ''}${group.titleEn ? ` ${group.titleEn}` : ''}`, 40);
-        const itemLines = group.items.reduce(
-          (itemSum, item) => itemSum + estimateWrappedLines(`${item.label || ''}${item.value ? ` ${item.value}` : ''}`, 52),
-          0,
-        );
-        return sum + titleLines * 20 + itemLines * 18 + 24;
-      }, 0);
+  const visibleConditionGroups = (data.conditionGroups || []).filter(
+    (group): group is DocumentConditionGroup => Array.isArray(group.items) && group.items.length > 0,
+  );
 
+  if (visibleConditionGroups.length > 0) {
     blocks.push({
       type: 'section',
-      key: 'conditions',
-      estimatedHeight,
+      key: 'conditions-title',
+      estimatedHeight: 28,
       render: () => (
-        <DocumentConditionsSection
-          title="询价条件汇总"
-          titleEn="XJ CONDITIONS"
-          groups={data.conditionGroups || []}
-          emptyText="暂无询价条件"
-        />
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-bold text-base">询价条件汇总</h3>
+          <span className="text-[10px] uppercase tracking-wide text-gray-500">XJ CONDITIONS</span>
+        </div>
       ),
+    });
+
+    visibleConditionGroups.forEach((group) => {
+      const rows: XjConditionRow[] = group.items.map((item, index) => ({
+        item,
+        itemIndex: index,
+      }));
+
+      blocks.push({
+        type: 'table',
+        key: `conditions-${group.key}`,
+        headerHeight: 46,
+        rowHeight: (row) => buildConditionRowHeight(row),
+        rows,
+        renderHeader: () => (
+          <thead>
+            <tr className="bg-gray-100">
+              <th className="border border-gray-400 px-2 py-1.5 text-left font-semibold" colSpan={3}>
+                <div className="flex items-center justify-between gap-2">
+                  <span>{group.title}</span>
+                  {group.titleEn ? (
+                    <span className="text-[10px] uppercase tracking-wide text-gray-500">{group.titleEn}</span>
+                  ) : null}
+                </div>
+              </th>
+            </tr>
+          </thead>
+        ),
+        renderRow: (row) => (
+          <tr key={row.item.key} style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}>
+            <td className="w-10 border border-gray-400 px-2 py-1.5 text-center font-semibold text-gray-600">
+              {row.itemIndex + 1}
+            </td>
+            <td className="w-40 border border-gray-400 px-2 py-1.5 font-semibold text-gray-700">
+              {row.item.label}
+            </td>
+            <td className="border border-gray-400 px-2 py-1.5">
+              <div className="whitespace-pre-wrap break-words text-gray-900">{row.item.value}</div>
+              {row.item.hint ? <div className="mt-1 text-[10px] text-blue-600">{row.item.hint}</div> : null}
+            </td>
+          </tr>
+        ),
+      });
     });
   }
 
@@ -306,23 +393,11 @@ export function buildXJPages(data: XJData): React.ReactNode[] {
         </tr>
       ),
     },
-    {
-      type: 'section',
-      key: 'signature',
-      estimatedHeight: 48,
-      avoidBreak: true,
-      render: () => (
-        <section>
-          <div className="mt-6 border-t border-[#e5e7eb] pt-3 text-center text-[11px] text-[#6b7280]">
-            <p>请供应商在收到本询价单后 3 个工作日内确认回复。</p>
-            <p className="mt-1">如有疑问，请及时联系采购联系人：{data.buyer.contactPerson} | {data.buyer.email}</p>
-          </div>
-        </section>
-      ),
-    },
   );
 
-  return paginateBlocks(blocks).map((page) => (
+  const paginatedPages = paginateBlocks(blocks);
+
+  return paginatedPages.map((page) => (
     <div key={`xj-${page.index}`} className="flex h-full flex-col gap-4 text-[12px] leading-5">
       {page.items.map((item) => {
         if (item.type === 'section') {

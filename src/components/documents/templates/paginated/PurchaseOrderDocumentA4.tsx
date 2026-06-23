@@ -9,6 +9,14 @@ import {
   type PurchaseOrderData,
 } from '../PurchaseOrderDocument';
 
+const CG_TERM_WRAP_CHARS = 72;
+const CG_TERM_MIN_HEIGHT = 26;
+const CG_TERM_BASE_HEIGHT = 8;
+const CG_TERM_LINE_HEIGHT = 14;
+const CG_SIGNATURE_ESTIMATED_HEIGHT = 108;
+const CG_TERMS_TITLE = '合同条款';
+const CG_TERMS_CONTINUED_TITLE = '合同条款（续）';
+
 interface PurchaseOrderDocumentA4Props {
   data: PurchaseOrderData;
   showControls?: boolean;
@@ -44,7 +52,46 @@ function estimateWrappedLines(text: string, maxCharsPerLine: number) {
 function buildProductRowHeight(product: PurchaseOrderData['products'][number]) {
   const titleLines = estimateWrappedLines(product.description || '', 18);
   const specLines = estimateWrappedLines(product.specification || '', 26);
-  return Math.max(60, 16 + titleLines * 12 + specLines * 10);
+  return Math.max(56, 15 + titleLines * 11 + specLines * 10);
+}
+
+function buildPurchaseOrderTermRows(terms: PurchaseOrderData['terms']) {
+  return [
+    { no: 1, label: '付款条款', value: terms.paymentTerms },
+    { no: 2, label: '交货条款', value: terms.deliveryTerms },
+    { no: 3, label: '交货地址', value: terms.deliveryAddress },
+    { no: 4, label: '质量标准', value: terms.qualityStandard },
+    { no: 5, label: '验收方式', value: terms.inspectionMethod },
+    { no: 6, label: '包装要求', value: terms.packaging },
+    { no: 7, label: '唛头要求', value: terms.shippingMarks },
+    { no: 8, label: '延期交货违约金', value: terms.deliveryPenalty },
+    { no: 9, label: '质量不符违约金', value: terms.qualityPenalty },
+    { no: 10, label: '质保期', value: terms.warrantyPeriod },
+    { no: 11, label: '质保条款', value: terms.warrantyTerms },
+    { no: 12, label: '退换货政策', value: terms.returnPolicy },
+    { no: 13, label: '保密条款', value: terms.confidentiality },
+    { no: 14, label: '知识产权', value: terms.ipRights },
+    { no: 15, label: '不可抗力', value: terms.forceMajeure },
+    { no: 16, label: '争议解决', value: terms.disputeResolution },
+    { no: 17, label: '适用法律', value: terms.applicableLaw },
+    { no: 18, label: '合同有效期', value: terms.contractValidity },
+    { no: 19, label: '合同变更', value: terms.modification },
+    { no: 20, label: '合同终止', value: terms.termination },
+    { no: 21, label: '贸易术语', value: terms.incoterm },
+    { no: 22, label: '装运港', value: terms.portOfLoading },
+    { no: 23, label: '目的港', value: terms.portOfDestination },
+    { no: 24, label: '税务/结算条款', value: terms.taxTerms },
+    { no: 25, label: '收款银行条款', value: terms.bankTerms },
+  ].filter((row) => String(row.value || '').trim());
+}
+
+function buildTermRowHeight(text: string) {
+  const wrappedLines = estimateWrappedLines(text || '', CG_TERM_WRAP_CHARS);
+  return Math.max(CG_TERM_MIN_HEIGHT, CG_TERM_BASE_HEIGHT + wrappedLines * CG_TERM_LINE_HEIGHT);
+}
+
+function getPurchaseOrderTermsTitle(startIndex: number) {
+  return startIndex > 0 ? CG_TERMS_CONTINUED_TITLE : CG_TERMS_TITLE;
 }
 
 export const PurchaseOrderDocumentA4 = forwardRef<HTMLDivElement, PurchaseOrderDocumentA4Props>(
@@ -62,11 +109,35 @@ PurchaseOrderDocumentA4.displayName = 'PurchaseOrderDocumentA4';
 
 export function PurchaseOrderDocumentA4Pages({ data }: PurchaseOrderDocumentA4PagesProps) {
   const pages = useMemo(() => buildPurchaseOrderPages(data), [data]);
+  const footerNote = '本采购合同一式两份，采购方和供应方各执一份，双方签章后生效。';
 
   return (
     <>
       {pages.map((page, index) => (
-        <A4Page key={`po-page-${index}`} pageNumber={index + 1} totalPages={pages.length}>
+        <A4Page
+          key={`po-page-${index}`}
+          pageNumber={index + 1}
+          totalPages={pages.length}
+          footer={
+            <div className="relative">
+              <div className="border-t border-gray-300 pt-2 text-center text-[10px] text-gray-600">
+                {footerNote}
+              </div>
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  bottom: -2,
+                  fontSize: 11,
+                  color: '#9ca3af',
+                  userSelect: 'none',
+                }}
+              >
+                {`${index + 1} / ${pages.length}`}
+              </div>
+            </div>
+          }
+        >
           {page}
         </A4Page>
       ))}
@@ -90,12 +161,13 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
     (productCurrencies.length === 1 ? productCurrencies[0] : '') ||
     (bankCurrency && !bankCurrency.includes('/') ? bankCurrency : '') ||
     'CNY';
+  const termRows = buildPurchaseOrderTermRows(data.terms || ({} as PurchaseOrderData['terms']));
 
   const blocks: A4Block[] = [
     {
       type: 'section',
       key: 'header',
-      estimatedHeight: 140,
+      estimatedHeight: 130,
       avoidBreak: true,
       render: () => (
         <div className="mb-3">
@@ -132,7 +204,7 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
     {
       type: 'section',
       key: 'parties',
-      estimatedHeight: 160,
+      estimatedHeight: 146,
       avoidBreak: true,
       render: () => (
         <table className={tableClass}>
@@ -142,7 +214,6 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
                 <div className="border-b border-gray-400 bg-gray-200 px-2 py-1 font-bold">采购方（买方）</div>
                 <div className="space-y-0.5 px-2 py-1.5">
                   <div><span className="font-semibold">{data.buyer.name}</span></div>
-                  <div className="text-gray-700">{data.buyer.nameEn}</div>
                   <div><span className="text-black">地址：</span>{data.buyer.address}</div>
                   <div><span className="text-black">电话：</span>{data.buyer.tel}</div>
                   <div><span className="text-black">邮箱：</span>{data.buyer.email}</div>
@@ -153,7 +224,6 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
                 <div className="border-b border-gray-400 bg-gray-200 px-2 py-1 font-bold">供应商（卖方）</div>
                 <div className="space-y-0.5 px-2 py-1.5">
                   <div><span className="font-semibold">{data.supplier.companyName}</span></div>
-                  {data.supplier.supplierCode ? <div><span className="text-black">编码：</span>{data.supplier.supplierCode}</div> : null}
                   <div><span className="text-black">地址：</span>{data.supplier.address}</div>
                   <div><span className="text-black">联系人：</span>{data.supplier.contactPerson}</div>
                   <div><span className="text-black">电话：</span>{data.supplier.tel}</div>
@@ -168,9 +238,9 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
     {
       type: 'table',
       key: 'items',
-      headerHeight: 90,
+      headerHeight: 80,
       rowHeight: (row) => buildProductRowHeight(row),
-      footerHeight: 44,
+      footerHeight: 40,
       rows: products,
       renderHeader: () => (
         <thead>
@@ -226,7 +296,7 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
                 return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{toMoney(Number(row.unitPrice || 0))}</td>;
               case 'amount':
               default:
-                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">{toMoney(Number(row.amount || 0))}</td>;
+                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{toMoney(Number(row.amount || 0))}</td>;
             }
           })}
         </tr>
@@ -236,7 +306,7 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
           <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 py-2 text-right">
             采购总金额（{currency}）：
           </td>
-          <td className="border border-gray-300 px-2 py-2 text-right text-base text-black">{toMoney(total)}</td>
+          <td className="border border-gray-300 px-2 py-2 text-right text-black">{toMoney(total)}</td>
         </tr>
       ),
     },
@@ -246,7 +316,7 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
     blocks.push({
       type: 'section',
       key: 'bank',
-      estimatedHeight: 150,
+      estimatedHeight: 122,
       avoidBreak: true,
       render: () => (
         <section>
@@ -269,6 +339,28 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
                 <td className={thClass}>收款币种</td>
                 <td className={tdClass}>{data.supplier.bankInfo?.currency || currency}</td>
               </tr>
+              {(data.supplier.bankInfo?.swiftCode || data.supplier.bankInfo?.bankAddress) ? (
+                <tr>
+                  <td className={thClass}>SWIFT代码</td>
+                  <td className={tdClass}>{data.supplier.bankInfo?.swiftCode || '-'}</td>
+                  <td className={thClass}>银行地址</td>
+                  <td className={tdClass}>{data.supplier.bankInfo?.bankAddress || '-'}</td>
+                </tr>
+              ) : null}
+              {(data.supplier.bankInfo?.iban || data.supplier.bankInfo?.routingNumber) ? (
+                <tr>
+                  <td className={thClass}>IBAN号码</td>
+                  <td className={tdClass}>{data.supplier.bankInfo?.iban || '-'}</td>
+                  <td className={thClass}>路由号码</td>
+                  <td className={tdClass}>{data.supplier.bankInfo?.routingNumber || '-'}</td>
+                </tr>
+              ) : null}
+              {data.supplier.bankInfo?.paymentNote ? (
+                <tr>
+                  <td className={thClass}>付款备注</td>
+                  <td className={tdClass} colSpan={3}>{data.supplier.bankInfo.paymentNote}</td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </section>
@@ -278,54 +370,42 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
 
   blocks.push(
     {
-      type: 'section',
+      type: 'table',
       key: 'terms',
-      estimatedHeight: 180,
-      avoidBreak: true,
-      render: () => (
-        <section>
-          <table className={tableClass}>
-            <thead>
-              <tr className="bg-gray-200">
-                <th className="border border-gray-400 px-2 py-1.5 text-left font-bold">合同条款</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className={tdClass}><span className="font-semibold">1. 付款条款：</span><span className="ml-1">{data.terms.paymentTerms}</span></td>
-              </tr>
-              <tr>
-                <td className={tdClass}><span className="font-semibold">2. 交货条款：</span><span className="ml-1">{data.terms.deliveryTerms}</span></td>
-              </tr>
-              <tr>
-                <td className={tdClass}><span className="font-semibold">3. 交货地址：</span><span className="ml-1">{data.terms.deliveryAddress}</span></td>
-              </tr>
-              <tr>
-                <td className={tdClass}><span className="font-semibold">4. 质量标准：</span><span className="ml-1">{data.terms.qualityStandard}</span></td>
-              </tr>
-              <tr>
-                <td className={tdClass}><span className="font-semibold">5. 验收方式：</span><span className="ml-1">{data.terms.inspectionMethod}</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+      headerHeight: 32,
+      rowHeight: (row) => buildTermRowHeight(`${row.no}. ${row.label}：${row.value}`),
+      rows: termRows,
+      renderHeader: () => (
+        <thead>
+          <tr className="bg-gray-200">
+            <th className="border border-gray-400 px-2 py-1.5 text-left font-bold">合同条款</th>
+          </tr>
+        </thead>
+      ),
+      renderRow: (row) => (
+        <tr key={`term-${row.no}`}>
+          <td className={tdClass}>
+            <span className="font-semibold">{row.no}. {row.label}：</span>
+            <span className="ml-1">{row.value}</span>
+          </td>
+        </tr>
       ),
     },
     {
       type: 'section',
       key: 'sign',
-      estimatedHeight: 160,
+      estimatedHeight: CG_SIGNATURE_ESTIMATED_HEIGHT,
       avoidBreak: true,
       render: () => (
         <section>
           <h2 className={sectionTitleClass}>签章</h2>
           <div className="grid grid-cols-2 gap-8">
-            <div className="rounded border border-[#cbd5e1] p-3">
-              <div className="mb-16 font-semibold">采购方盖章：</div>
+            <div className="rounded border border-[#cbd5e1] p-2.5">
+              <div className="mb-9 font-semibold">采购方盖章：</div>
               <div className="text-[12px] text-[#6b7280]">日期：________________</div>
             </div>
-            <div className="rounded border border-[#cbd5e1] p-3">
-              <div className="mb-16 font-semibold">供应商盖章：</div>
+            <div className="rounded border border-[#cbd5e1] p-2.5">
+              <div className="mb-9 font-semibold">供应商盖章：</div>
               <div className="text-[12px] text-[#6b7280]">日期：________________</div>
             </div>
           </div>
@@ -335,14 +415,38 @@ export function buildPurchaseOrderPages(data: PurchaseOrderData): React.ReactNod
   );
 
   return paginateBlocks(blocks).map((page) => (
-    <div key={`po-${page.index}`} className="flex h-full flex-col gap-4 text-[12px] leading-5">
+    <div key={`po-${page.index}`} className="flex h-full flex-col text-[12px] leading-5">
       {page.items.map((item) => {
         if (item.type === 'section') {
-          return <React.Fragment key={item.key}>{item.render()}</React.Fragment>;
+          return (
+            <div key={item.key} className="mb-3 last:mb-0">
+              {item.render()}
+            </div>
+          );
+        }
+
+        if (item.key.startsWith('terms-')) {
+          return (
+            <section key={item.key} className="mb-3 last:mb-0">
+              <table className={tableClass}>
+                <thead>
+                  <tr className="bg-gray-200">
+                    <th className="border border-gray-400 px-2 py-1.5 text-left font-bold">
+                      {getPurchaseOrderTermsTitle(item.startIndex)}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {item.rows.map((row, index) => item.renderRow(row, item.startIndex + index))}
+                  {item.showFooter && item.renderFooter?.()}
+                </tbody>
+              </table>
+            </section>
+          );
         }
 
         return (
-          <section key={item.key}>
+          <section key={item.key} className="mb-3 last:mb-0">
             <h2 className={sectionTitleClass}>采购明细：</h2>
             <table className={productTableClass}>
               {item.renderHeader()}

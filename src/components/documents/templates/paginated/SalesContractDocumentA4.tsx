@@ -209,18 +209,18 @@ export function buildSalesContractPages(data: SalesContractData): React.ReactNod
               case 'unit':
                 return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{product.unit}</td>;
               case 'unitPrice':
-                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{product.currency} {product.unitPrice.toFixed(2)}</td>;
+                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{product.unitPrice.toFixed(2)}</td>;
               case 'amount':
               default:
-                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">{product.currency} {product.amount.toFixed(2)}</td>;
+                return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">{product.amount.toFixed(2)}</td>;
             }
           })}
         </tr>
       ),
       renderFooter: () => (
         <tr className="bg-gray-100 font-bold">
-          <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 py-2 text-right">Total Value ({tradeTerm}):</td>
-          <td className="border border-gray-300 px-2 py-2 text-right font-semibold">{data.terms.currency} {total.toFixed(2)}</td>
+          <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 py-2 text-right">Total ({tradeTerm}) {data.terms.currency} Value:</td>
+          <td className="border border-gray-300 px-2 py-2 text-right font-semibold">{total.toFixed(2)}</td>
         </tr>
       ),
     },

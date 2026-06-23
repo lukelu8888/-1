@@ -20,6 +20,7 @@ import {
 } from '../../lib/services/document-template-service';
 import { A4PageContainer } from './A4PageContainer';
 import { SalesContractDocument } from './templates/SalesContractDocument';
+import { resolveUsdSellerBankInfo } from '../../utils/documentBankInfo';
 import { StatementOfAccountDocument } from './templates/StatementOfAccountDocument';
 import { CommercialInvoiceDocument } from './templates/CommercialInvoiceDocument';
 import { PackingListDocument } from './templates/PackingListDocument';
@@ -28,6 +29,7 @@ import { CustomerInquiryDocument } from './templates/CustomerInquiryDocument';
 import { QuotationDocument } from './templates/QuotationDocument';
 import { PurchaseOrderDocument } from './templates/PurchaseOrderDocument';
 import { getStoredAdminOrgProfile } from '../../contexts/AdminOrganizationContext';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -392,7 +394,7 @@ function getSampleDataForTemplate(templateId: string): any {
   ];
   const quotationTradeTerms = {
     incoterms: 'FOB XIAMEN',
-    paymentTerms: 'T/T, 30% deposit, 70% before shipment',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     deliveryTime: 'Within 30 days after receiving deposit',
     packing: 'Export standard carton packing',
     portOfLoading: 'Xiamen, China',
@@ -406,6 +408,7 @@ function getSampleDataForTemplate(templateId: string): any {
     email: companyEmail,
     phone: companyTel,
   };
+  const usdSellerBankInfo = resolveUsdSellerBankInfo(adminOrg, undefined, companyNameEn || companyNameCn);
 
   // 根据不同模板返回对应的示例数据
   switch (templateId) {
@@ -429,7 +432,7 @@ function getSampleDataForTemplate(templateId: string): any {
         requirements: {
           deliveryTime: 'Before March 15, 2026',
           portOfDestination: 'Los Angeles, USA',
-          paymentTerms: 'T/T or L/C at sight',
+          paymentTerms: buildPaymentTermsText('deposit_plus_lc', 'lc_ready'),
           tradeTerms: 'FOB Xiamen',
           certifications: ['UL', 'FCC']
         }
@@ -463,15 +466,7 @@ function getSampleDataForTemplate(templateId: string): any {
         seller: {
           ...commonData.company,
           legalRepresentative: String(adminOrg.contactPerson || adminOrg.defaultSignatory || ''),
-          bankInfo: {
-            bankName: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
-            accountName: String(usdBank.accountNameEN || usdBank.accountNameCN || companyNameEn || companyNameCn),
-            accountNumber: String(usdBank.accountNumber || ''),
-            swiftCode: String(usdBank.swiftCode || ''),
-            bankAddress: String(usdBank.bankAddress || ''),
-            currency: 'USD',
-            paymentNote: String(usdBank.paymentNote || ''),
-          },
+          bankInfo: resolveUsdSellerBankInfo(adminOrg, undefined, companyNameEn || companyNameCn),
         },
         buyer: {
           companyName: commonData.customer.companyName,
@@ -665,16 +660,16 @@ function getSampleDataForTemplate(templateId: string): any {
         totalCurrency: 'USD',
         priceTerms: 'FOB XIAMEN',
         bankInfo: {
-          beneficiary: String(usdBank.accountNameEN || usdBank.accountNameCN || companyNameEn || companyNameCn),
+          beneficiary: usdSellerBankInfo.accountName,
           beneficiaryAddress: companyAddressEn || companyAddressCn,
-          accountNo: String(usdBank.accountNumber || ''),
-          bank: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
-          bankAddress: String(usdBank.bankAddress || ''),
-          swiftCode: String(usdBank.swiftCode || ''),
+          accountNo: usdSellerBankInfo.accountNumber,
+          bank: usdSellerBankInfo.bankName,
+          bankAddress: usdSellerBankInfo.bankAddress,
+          swiftCode: usdSellerBankInfo.swiftCode,
         },
         remarks: {
           priceTerms: 'Price Term: FOB XIAMEN',
-          paymentTerms: 'Term of payment: 30% deposit, 70% before shipment',
+          paymentTerms: `Term of payment: ${buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment')}`,
           portOfLoading: 'Port of Loading: XIAMEN',
           shipmentDate: 'Date of Shipment: WITHIN 30 DAYS AFTER RECEIVING DEPOSIT',
         }
@@ -688,12 +683,12 @@ function getSampleDataForTemplate(templateId: string): any {
         periodEnd: '2025-12-31',
         company: {
           ...commonData.company,
-          accountName: String(usdBank.accountNameEN || usdBank.accountNameCN || commonData.company.nameEn || commonData.company.name || ''),
-          bankName: String(usdBank.bankNameEN || usdBank.bankNameCN || ''),
-          accountNumber: String(usdBank.accountNumber || ''),
-          swiftCode: String(usdBank.swiftCode || ''),
-          bankAddress: String(usdBank.bankAddress || ''),
-          paymentNote: String(usdBank.paymentNote || ''),
+          accountName: usdSellerBankInfo.accountName,
+          bankName: usdSellerBankInfo.bankName,
+          accountNumber: usdSellerBankInfo.accountNumber,
+          swiftCode: usdSellerBankInfo.swiftCode,
+          bankAddress: usdSellerBankInfo.bankAddress,
+          paymentNote: usdSellerBankInfo.paymentNote,
         },
         customer: {
           customerCode: 'CUST-NA-001',

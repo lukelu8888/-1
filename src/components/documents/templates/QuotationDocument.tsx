@@ -384,10 +384,10 @@ export const QuotationDocument = forwardRef<HTMLDivElement, QuotationDocumentPro
                         case 'unit':
                           return <td key={column.key} className="border border-gray-300 px-2 py-2 text-center">{product.unit}</td>;
                         case 'unitPrice':
-                          return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{product.currency} {product.unitPrice.toFixed(2)}</td>;
+                          return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right">{product.unitPrice.toFixed(2)}</td>;
                         case 'amount':
                         default:
-                          return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">{product.currency} {product.amount.toFixed(2)}</td>;
+                          return <td key={column.key} className="border border-gray-300 px-2 py-2 text-right font-semibold">{product.amount.toFixed(2)}</td>;
                       }
                     })}
                   </tr>
@@ -396,10 +396,10 @@ export const QuotationDocument = forwardRef<HTMLDivElement, QuotationDocumentPro
               <tfoot>
                 <tr className="bg-gray-100 font-bold">
                   <td colSpan={Math.max(productTableColumns.length - 1, 1)} className="border border-gray-300 px-2 py-2 text-right">
-                    TOTAL VALUE ({tradeTerm}):
+                    TOTAL ({tradeTerm}) {currency} VALUE:
                   </td>
                   <td className="border border-gray-300 px-2 py-2 text-right font-semibold">
-                    {currency} {total.toFixed(2)}
+                    {total.toFixed(2)}
                   </td>
                 </tr>
               </tfoot>
@@ -431,26 +431,6 @@ export const QuotationDocument = forwardRef<HTMLDivElement, QuotationDocumentPro
                   </td>
                 </tr>
                 
-                {/* Payment Terms */}
-                <tr>
-                  <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                    Payment Terms
-                  </td>
-                  <td className="border border-gray-400 px-2 py-1.5">
-                    {quotationData.tradeTerms.paymentTerms}
-                  </td>
-                </tr>
-                
-                {/* Delivery Time */}
-                <tr>
-                  <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                    Delivery Time
-                  </td>
-                  <td className="border border-gray-400 px-2 py-1.5">
-                    {quotationData.tradeTerms.deliveryTime}
-                  </td>
-                </tr>
-                
                 {/* Port of Loading */}
                 <tr>
                   <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
@@ -472,6 +452,26 @@ export const QuotationDocument = forwardRef<HTMLDivElement, QuotationDocumentPro
                     </td>
                   </tr>
                 )}
+
+                {/* Payment Terms */}
+                <tr>
+                  <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
+                    Payment Terms
+                  </td>
+                  <td className="border border-gray-400 px-2 py-1.5">
+                    {quotationData.tradeTerms.paymentTerms}
+                  </td>
+                </tr>
+
+                {/* Delivery Time */}
+                <tr>
+                  <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
+                    Delivery Time
+                  </td>
+                  <td className="border border-gray-400 px-2 py-1.5">
+                    {quotationData.tradeTerms.deliveryTime}
+                  </td>
+                </tr>
                 
                 {/* Packing */}
                 <tr>
@@ -483,16 +483,6 @@ export const QuotationDocument = forwardRef<HTMLDivElement, QuotationDocumentPro
                   </td>
                 </tr>
                 
-                {/* Quality Warranty */}
-                <tr>
-                  <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
-                    Quality Warranty
-                  </td>
-                  <td className="border border-gray-400 px-2 py-1.5">
-                    {quotationData.tradeTerms.warranty || '12 months from delivery date against manufacturing defects'}
-                  </td>
-                </tr>
-                
                 {/* Inspection */}
                 <tr>
                   <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
@@ -500,6 +490,16 @@ export const QuotationDocument = forwardRef<HTMLDivElement, QuotationDocumentPro
                   </td>
                   <td className="border border-gray-400 px-2 py-1.5">
                     {quotationData.tradeTerms.inspection || "Seller's factory inspection, buyer has the right to re-inspect upon arrival"}
+                  </td>
+                </tr>
+
+                {/* Quality Warranty */}
+                <tr>
+                  <td className="border border-gray-400 px-2 py-1.5 bg-gray-100 font-semibold">
+                    Quality Warranty
+                  </td>
+                  <td className="border border-gray-400 px-2 py-1.5">
+                    {quotationData.tradeTerms.warranty || '12 months from delivery date against manufacturing defects'}
                   </td>
                 </tr>
               </tbody>

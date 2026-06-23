@@ -1,510 +1,509 @@
-import { useLanguage } from '../contexts/LanguageContext';
-import { useRouter } from '../contexts/RouterContext';
-import { CheckCircle2, Shield, FileCheck, Users, Award, Target, Microscope, ClipboardCheck, Gamepad2, Cpu, Zap, Lightbulb, Shirt, Watch, Armchair, Package, AlertCircle, TrendingUp, Calculator, List, ChevronDown, ChevronUp } from 'lucide-react';
-import { Button } from './ui/button';
-import { Card, CardContent } from './ui/card';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
-import { QCServiceRequestForm } from './QCServiceRequestForm';
-import { AQLContent } from './AQLContent';
 import { useState } from 'react';
-import qcProductionLineImg from 'figma:asset/96ce897684bf626f176c96b9ce387073b6485b82.png';
-import qcPackagingImg from 'figma:asset/26367985c980ce30b777ba7adde790055c901cb7.png';
-import qcElectronicsTestImg from 'figma:asset/9f6ce029d040cf60e23a103732b61615c3bba3e2.png';
-import qcLabTestImg from 'figma:asset/f3d557c4db1f8e6758ad3b445050bc79712a44d7.png';
-import certificateImg from 'figma:asset/10750d4fe5459959d5f7e17851160e90519488f9.png';
+import {
+  AlertCircle,
+  ArrowRight,
+  Armchair,
+  Calculator,
+  CheckCircle2,
+  ClipboardCheck,
+  Cpu,
+  Eye,
+  FileCheck,
+  Gamepad2,
+  Lightbulb,
+  Package,
+  Shield,
+  Shirt,
+  Truck,
+  Watch,
+  Zap,
+} from 'lucide-react';
+import { useRouter } from '../contexts/RouterContext';
+import { AQLContent } from './AQLContent';
+import { QCServiceRequestForm } from './QCServiceRequestForm';
+import { Button } from './ui/button';
 import qcHeroImg from 'figma:asset/8b8f9232f60a2046628bfa02ab68d1e507203f48.png';
+import qcProductImg from 'figma:asset/3b125683eb3b428987bfb96d06a1a120a650267e.png';
+import qcPackingImg from 'figma:asset/b3d077ae61f60718774042148488db58fe0fef8b.png';
+import qcLoadingImg from 'figma:asset/e3f17a67e02946dc6667a2ab1d9a0e3e4b5c74d4.png';
 
-export function QCMaster() {
-  const { t } = useLanguage();
-  const { navigateTo } = useRouter();
-  const [showAQLTable, setShowAQLTable] = useState(false);
+const inspectionMoments = [
+  ['Before final payment', 'Check whether goods match order, samples, photos, packing, and quantity before balance release.'],
+  ['Before shipment', 'Use AQL sampling and product checkpoints to decide whether goods can leave the factory.'],
+  ['During production', 'Catch visible issues before the full batch is finished.'],
+  ['During loading', 'Confirm cartons, container condition, loading photos, and shipment preparation.'],
+  ['After issues appear', 'Follow supplier correction, re-check evidence, and keep the record traceable.'],
+];
 
-  const features = [
-    {
-      icon: Shield,
-      title: t.qcMaster.features.comprehensive,
-      description: t.qcMaster.features.comprehensiveDesc,
-    },
-    {
-      icon: Microscope,
-      title: t.qcMaster.features.inspection,
-      description: t.qcMaster.features.inspectionDesc,
-    },
-    {
-      icon: FileCheck,
-      title: t.qcMaster.features.documentation,
-      description: t.qcMaster.features.documentationDesc,
-    },
-    {
-      icon: Users,
-      title: t.qcMaster.features.team,
-      description: t.qcMaster.features.teamDesc,
-    },
-  ];
+const inspectionScope = [
+  'Product appearance and workmanship',
+  'Function, size, material, color, and finish',
+  'Quantity, accessories, spare parts, and assortment',
+  'Packaging, labels, barcodes, manuals, and carton marks',
+  'Order, sample, drawing, photo, and checklist conformity',
+  'Loading status, container condition, and shipment documents',
+];
 
-  const services = [
-    {
-      title: t.qcMaster.services.preProduction,
-      items: [
-        t.qcMaster.services.preProductionItems.factoryAudit,
-        t.qcMaster.services.preProductionItems.sampleApproval,
-        t.qcMaster.services.preProductionItems.materialVerification,
-      ],
-      image: qcElectronicsTestImg,
-    },
-    {
-      title: t.qcMaster.services.duringProduction,
-      items: [
-        t.qcMaster.services.duringProductionItems.processMonitoring,
-        t.qcMaster.services.duringProductionItems.qualityChecks,
-        t.qcMaster.services.duringProductionItems.progressReports,
-      ],
-      image: qcProductionLineImg,
-    },
-    {
-      title: t.qcMaster.services.preShipment,
-      items: [
-        t.qcMaster.services.preShipmentItems.finalInspection,
-        t.qcMaster.services.preShipmentItems.packagingVerification,
-        t.qcMaster.services.preShipmentItems.quantityCheck,
-      ],
-      image: qcPackagingImg,
-    },
-  ];
+const reportOutputs = [
+  'On-site photos and videos',
+  'AQL sample size and acceptance result',
+  'Critical / major / minor defect notes',
+  'Quantity and packing verification',
+  'Release, hold, or rework suggestion',
+  'ERP and customer workspace record',
+];
 
-  const standards = [
-    'ISO 9001',
-    'ASTM Standards',
-    'EN Standards',
-    'GB Standards',
-    'ANSI Standards',
-    'CE Certification',
-  ];
+const aqlSteps = [
+  ['Lot size', 'Confirm shipment quantity and inspection level.'],
+  ['Sample size', 'Use ISO 2859-1 / ANSI Z1.4 tables or calculator.'],
+  ['Defect class', 'Separate critical, major, and minor defects.'],
+  ['Decision', 'Compare accept/reject numbers and advise next action.'],
+];
 
-  const benefits = [
-    {
-      icon: Target,
-      title: t.qcMaster.benefits.defectReduction,
-      description: t.qcMaster.benefits.defectReductionDesc,
-    },
-    {
-      icon: Award,
-      title: t.qcMaster.benefits.compliance,
-      description: t.qcMaster.benefits.complianceDesc,
-    },
-    {
-      icon: ClipboardCheck,
-      title: t.qcMaster.benefits.transparency,
-      description: t.qcMaster.benefits.transparencyDesc,
-    },
-    {
-      icon: Shield,
-      title: t.qcMaster.benefits.riskMitigation,
-      description: t.qcMaster.benefits.riskMitigationDesc,
-    },
-  ];
+const inspectionTypes = [
+  'Factory audit',
+  'During production check',
+  'Pre-shipment inspection',
+  'Loading supervision',
+  'Re-inspection',
+  'Issue follow-up',
+];
+
+const requestEvidence = [
+  {
+    title: 'Product or sample',
+    text: 'Photos, drawings, model, material, finish, size, or function points.',
+    image: qcProductImg,
+    icon: Package,
+  },
+  {
+    title: 'Packing and labels',
+    text: 'Carton marks, barcode, manual, accessories, quantity, and packing list.',
+    image: qcPackingImg,
+    icon: ClipboardCheck,
+  },
+  {
+    title: 'Shipment status',
+    text: 'Supplier, order, delivery date, loading plan, container, or shipment photos.',
+    image: qcLoadingImg,
+    icon: Truck,
+  },
+];
+
+const standardCategories = [
+  { title: 'Toys', codes: 'ASTM F963 / EN71 / ISO 8124', icon: Gamepad2, page: 'toysinspection', color: 'text-pink-700 bg-pink-50' },
+  { title: 'Electronics', codes: 'IEC 60335 / IEC 62368 / RoHS', icon: Cpu, page: 'electronicsinspection', color: 'text-indigo-700 bg-indigo-50' },
+  { title: 'Appliances', codes: 'IEC 60335-1 / GB 4706.1', icon: Zap, page: 'appliancesinspection', color: 'text-orange-700 bg-orange-50' },
+  { title: 'Lighting', codes: 'IEC 60598 / UL 153', icon: Lightbulb, page: 'lightinginspection', color: 'text-yellow-700 bg-yellow-50' },
+  { title: 'Textiles', codes: 'ASTM D2054 / AATCC 8', icon: Shirt, page: 'textilesinspection', color: 'text-purple-700 bg-purple-50' },
+  { title: 'Shoes', codes: 'SATRA TM / ISO 20871', icon: Watch, page: 'shoesinspection', color: 'text-cyan-700 bg-cyan-50' },
+  { title: 'Furniture', codes: 'EN 12520 / ASTM F2057', icon: Armchair, page: 'furnitureinspection', color: 'text-emerald-700 bg-emerald-50' },
+  { title: 'Packaging', codes: 'ISO 2248 / ASTM D4169', icon: Package, page: 'packaginginspection', color: 'text-teal-700 bg-teal-50' },
+];
+
+type AQLPreviewCell = { type: 'arrow' | 'num'; val: string; colspan?: number };
+
+const aqlPreviewRows: Array<{ code: string; size: number; cells: AQLPreviewCell[] }> = [
+  { code: 'A', size: 2, cells: [...Array(10).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }] },
+  { code: 'B', size: 3, cells: [...Array(9).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }] },
+  { code: 'C', size: 5, cells: [...Array(8).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }] },
+  { code: 'D', size: 8, cells: [...Array(7).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }] },
+  { code: 'E', size: 13, cells: [...Array(6).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }] },
+  { code: 'F', size: 20, cells: [...Array(5).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }] },
+  { code: 'G', size: 32, cells: [...Array(4).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }] },
+  { code: 'H', size: 50, cells: [...Array(3).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }] },
+  { code: 'J', size: 80, cells: [...Array(2).fill({ type: 'arrow', val: '↓', colspan: 2 }), { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }, { type: 'num', val: '10' }, { type: 'num', val: '11' }] },
+  { code: 'K', size: 125, cells: [{ type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }, { type: 'num', val: '10' }, { type: 'num', val: '11' }, { type: 'num', val: '14' }, { type: 'num', val: '15' }] },
+  { code: 'L', size: 200, cells: [{ type: 'num', val: '0' }, { type: 'num', val: '1' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }, { type: 'num', val: '10' }, { type: 'num', val: '11' }, { type: 'num', val: '14' }, { type: 'num', val: '15' }, { type: 'num', val: '21' }, { type: 'num', val: '22' }] },
+  { code: 'M', size: 315, cells: [{ type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }, { type: 'num', val: '10' }, { type: 'num', val: '11' }, { type: 'num', val: '14' }, { type: 'num', val: '15' }, { type: 'num', val: '21' }, { type: 'num', val: '22' }, { type: 'arrow', val: '↑', colspan: 2 }] },
+  { code: 'N', size: 500, cells: [{ type: 'arrow', val: '↓', colspan: 2 }, { type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }, { type: 'num', val: '10' }, { type: 'num', val: '11' }, { type: 'num', val: '14' }, { type: 'num', val: '15' }, { type: 'num', val: '21' }, { type: 'num', val: '22' }, { type: 'arrow', val: '↑', colspan: 2 }, { type: 'arrow', val: '↑', colspan: 2 }] },
+  { code: 'P', size: 800, cells: [{ type: 'num', val: '1' }, { type: 'num', val: '2' }, { type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }, { type: 'num', val: '10' }, { type: 'num', val: '11' }, { type: 'num', val: '14' }, { type: 'num', val: '15' }, { type: 'num', val: '21' }, { type: 'num', val: '22' }, { type: 'arrow', val: '↑', colspan: 2 }, ...Array(2).fill({ type: 'arrow', val: '↑', colspan: 2 })] },
+  { code: 'Q', size: 1250, cells: [{ type: 'num', val: '2' }, { type: 'num', val: '3' }, { type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }, { type: 'num', val: '10' }, { type: 'num', val: '11' }, { type: 'num', val: '14' }, { type: 'num', val: '15' }, { type: 'num', val: '21' }, { type: 'num', val: '22' }, { type: 'arrow', val: '↑', colspan: 2 }, ...Array(3).fill({ type: 'arrow', val: '↑', colspan: 2 })] },
+  { code: 'R', size: 2000, cells: [{ type: 'num', val: '3' }, { type: 'num', val: '4' }, { type: 'num', val: '5' }, { type: 'num', val: '6' }, { type: 'num', val: '7' }, { type: 'num', val: '8' }, { type: 'num', val: '10' }, { type: 'num', val: '11' }, { type: 'num', val: '14' }, { type: 'num', val: '15' }, { type: 'num', val: '21' }, { type: 'num', val: '22' }, { type: 'arrow', val: '↑', colspan: 2 }, ...Array(4).fill({ type: 'arrow', val: '↑', colspan: 2 })] },
+];
+
+function AQLTableBPreview() {
+  const highlightedGroup = 3;
+  const renderCells = (cells: AQLPreviewCell[]) => {
+    let colIndex = 0;
+    return cells.map((cell, idx) => {
+      const currentColIndex = colIndex;
+      const aqlGroup = Math.floor(currentColIndex / 2);
+      const highlighted = aqlGroup === highlightedGroup;
+      colIndex += cell.colspan || 1;
+
+      return (
+        <td
+          key={idx}
+          colSpan={cell.colspan || 1}
+          className={`border border-gray-300 px-2 py-1 text-center ${highlighted ? 'bg-red-600 text-white' : cell.type === 'arrow' ? 'text-gray-400' : 'text-gray-900'}`}
+        >
+          {cell.val}
+        </td>
+      );
+    });
+  };
 
   return (
-    <section id="qc-master" className="bg-gradient-to-b from-white to-gray-50">
-      {/* Hero Banner with Background Image */}
-      <div className="relative h-[400px] md:h-[500px] lg:h-[600px] overflow-hidden">
-        {/* Background Image */}
-        <div 
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${qcHeroImg})` }}
-        >
-          {/* Dark Overlay for better text readability */}
-          <div className="absolute inset-0 bg-black/40"></div>
-        </div>
-        
-        {/* Content */}
-        <div className="relative h-full flex items-center justify-center px-4">
-          <div className="text-center max-w-4xl mx-auto">
-            <div className="inline-block px-4 py-2 bg-white/90 text-red-600 rounded-full mb-6">
-              <span className="flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                QC Master
-              </span>
-            </div>
-            <h1 className="text-white mb-6 text-4xl md:text-5xl lg:text-6xl">
-              {t.qcMaster.title}
-            </h1>
-            <p className="text-white/90 text-lg md:text-xl max-w-3xl mx-auto">
-              {t.qcMaster.subtitle}
-            </p>
-          </div>
+    <div className="rounded-md bg-white p-5 shadow-2xl" style={{ width: 1240 }}>
+      <div className="mb-5">
+        <h3 className="mb-3 text-xl font-black text-gray-950">Table B</h3>
+        <p className="text-base leading-7 text-gray-700">
+          Locate Row L (the required sample size of 200) In compliance with AQL 2.5, no more than 10 units from a sample size of 200 may fail the inspection.
+        </p>
+      </div>
+      <div className="mb-5 flex justify-center">
+        <div className="rounded-full bg-red-600 px-8 py-3 text-base font-black text-white">
+          Single sampling plans for normal inspection
         </div>
       </div>
-
-      <div className="mx-auto max-w-7xl px-4 py-16">
-        {/* Table of Contents */}
-        <div className="mb-16">
-          <Card className="border-2 border-blue-200 shadow-lg bg-gradient-to-br from-blue-50 to-white">
-            <CardContent className="p-8 md:p-10">
-              <div className="flex items-center justify-center gap-3 mb-6">
-                <List className="h-6 w-6 text-blue-600" />
-                <h2 className="text-gray-900 text-center">Table of Contents</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto">
-                <a 
-                  href="#qc-services" 
-                  className="flex items-center gap-3 p-4 bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 hover:shadow-md transition-all group"
-                >
-                  <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                    <span>1</span>
-                  </div>
-                  <span className="text-gray-700 group-hover:text-blue-600 transition-colors">Our QC Services</span>
-                </a>
-                <a 
-                  href="#inspection-framework" 
-                  className="flex items-center gap-3 p-4 bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 hover:shadow-md transition-all group"
-                >
-                  <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                    <span>2</span>
-                  </div>
-                  <span className="text-gray-700 group-hover:text-blue-600 transition-colors">Quality Inspection Framework</span>
-                </a>
-                <a 
-                  href="#aql-standards" 
-                  className="flex items-center gap-3 p-4 bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 hover:shadow-md transition-all group"
-                >
-                  <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                    <span>3</span>
-                  </div>
-                  <span className="text-gray-700 group-hover:text-blue-600 transition-colors">AQL Standards & Calculator</span>
-                </a>
-                <a 
-                  href="#why-choose-us" 
-                  className="flex items-center gap-3 p-4 bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 hover:shadow-md transition-all group"
-                >
-                  <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                    <span>4</span>
-                  </div>
-                  <span className="text-gray-700 group-hover:text-blue-600 transition-colors">Why Choose Us</span>
-                </a>
-                <a 
-                  href="#compliance-standards" 
-                  className="flex items-center gap-3 p-4 bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 hover:shadow-md transition-all group"
-                >
-                  <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                    <span>5</span>
-                  </div>
-                  <span className="text-gray-700 group-hover:text-blue-600 transition-colors">Compliance Standards</span>
-                </a>
-                <a 
-                  href="#request-service" 
-                  className="flex items-center gap-3 p-4 bg-white rounded-lg border-2 border-gray-200 hover:border-red-500 hover:shadow-md transition-all group"
-                >
-                  <div className="flex items-center justify-center w-8 h-8 bg-red-100 rounded-full text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
-                    <span>6</span>
-                  </div>
-                  <span className="text-gray-700 group-hover:text-red-600 transition-colors">Request QC Service</span>
-                </a>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* 1. Our QC Services */}
-        <div id="qc-services" className="mb-16 scroll-mt-20">
-          <h2 className="text-gray-900 text-center mb-12">
-            {t.qcMaster.featuresTitle}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {features.map((feature, index) => (
-              <Card key={index} className="border-2 hover:border-blue-500 transition-all hover:shadow-lg">
-                <CardContent className="p-6">
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-                    <feature.icon className="h-6 w-6 text-blue-600" />
-                  </div>
-                  <h3 className="text-gray-900 mb-3">{feature.title}</h3>
-                  <p className="text-gray-600 text-sm leading-relaxed">
-                    {feature.description}
-                  </p>
-                </CardContent>
-              </Card>
+      <div className="overflow-hidden">
+        <table className="w-full border-collapse text-sm" style={{ minWidth: 1180 }}>
+          <thead>
+            <tr className="border-b-2 border-gray-300 bg-white">
+              <th rowSpan={2} className="border border-gray-300 px-3 py-2 text-center font-black leading-tight text-gray-950">Sample<br />Size<br />Code<br />Letter</th>
+              <th rowSpan={2} className="border border-gray-300 px-3 py-2 text-center font-black leading-tight text-gray-950">Sample<br />Size</th>
+              <th colSpan={22} className="border border-gray-300 bg-gray-50 px-3 py-2 text-center font-black text-gray-950">Acceptable Quality Levels (Normal Inspection)</th>
+            </tr>
+            <tr className="bg-white">
+              {['0.065', '0.10', '0.15', '0.25', '0.40', '0.65', '1.0', '1.5', '2.5', '4.0', '6.5'].map((value, index) => (
+                <th key={value} colSpan={2} className={`border border-gray-300 px-2 py-2 text-center text-red-600 ${index === highlightedGroup ? 'bg-red-600 text-white' : ''}`}>
+                  {value}
+                </th>
+              ))}
+            </tr>
+            <tr className="bg-gray-50">
+              <th className="border border-gray-300 px-3 py-1" />
+              <th className="border border-gray-300 px-3 py-1" />
+              {Array.from({ length: 22 }, (_, i) => (
+                <th key={i} className={`border border-gray-300 px-2 py-1 text-center font-black ${Math.floor(i / 2) === highlightedGroup ? 'bg-red-600 text-white' : 'text-gray-700'}`}>
+                  {i % 2 === 0 ? 'Ac' : 'Re'}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {aqlPreviewRows.map((row, rowIdx) => (
+              <tr key={row.code} className={Math.floor(rowIdx / 3) % 2 === 0 ? 'bg-gray-100' : 'bg-white'}>
+                <td className="border border-gray-300 px-3 py-1 text-center font-black text-gray-950">{row.code}</td>
+                <td className="border border-gray-300 px-3 py-1 text-center text-gray-950">{row.size}</td>
+                {renderCells(row.cells)}
+              </tr>
             ))}
-          </div>
-        </div>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
-        {/* 2. Quality Inspection Framework Section */}
-        <div id="inspection-framework" className="mb-16 scroll-mt-20">
-          <div className="bg-gradient-to-br from-blue-50 via-white to-blue-50 rounded-2xl shadow-lg border-2 border-blue-100 p-8 md:p-12">
-            <div className="text-center mb-10">
-              <h2 className="text-gray-900 mb-4">Quality Inspection Framework</h2>
-              <div className="max-w-4xl mx-auto">
-                <p className="text-gray-700 leading-relaxed">
-                  COSUN inspection procedures strictly follow the international{' '}
-                  <span className="text-blue-600">AQL sampling framework</span>{' '}
-                  (ANSI/ASQC Z1.4 / BS 6001 / DIN 40080 / ISO 2859 / NFX 06-022), while product-specific inspections are carried out based on relevant international and regional standards, including but not limited to:
-                </p>
+export function QCMaster() {
+  const { navigateTo } = useRouter();
+  const [showAQLDetails, setShowAQLDetails] = useState(false);
+
+  const openAQLStandard = () => {
+    setShowAQLDetails(true);
+    window.setTimeout(() => {
+      document.getElementById('aql-table-a')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 80);
+  };
+
+  return (
+    <section
+      id="qc-master"
+      className="overflow-x-hidden bg-white text-gray-950"
+      style={{ maxWidth: '100vw', overflowY: 'visible' }}
+    >
+      <section className="relative isolate bg-gray-950 text-white">
+        <img
+          src={qcHeroImg}
+          alt="COSUN on-site quality inspection"
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{ filter: 'brightness(0.55) saturate(0.9)', objectPosition: 'center center' }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-gray-950/86 via-gray-950/54 to-gray-950/34" />
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-950/10 via-transparent to-gray-950/50" />
+        <div className="cosun-shell relative flex min-h-[560px] items-center py-12">
+          <div className="min-w-0 lg:max-w-[560px]">
+            <h1 className="max-w-3xl text-4xl font-black leading-[0.98] tracking-normal sm:text-5xl md:text-[60px]">
+              Your Eyes in the Supply Chain
+            </h1>
+            <p className="mt-5 max-w-2xl text-base font-semibold leading-7 text-white/92 md:text-xl">
+              COSUN checks products, packaging, quantity, labels, AQL sampling results, and loading status
+              before goods leave the factory.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button onClick={() => navigateTo('login')} className="h-12 bg-red-600 px-6 text-base font-semibold hover:bg-red-700" style={{ width: 'min(100%, 230px)' }}>
+                Book an Inspection
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                onClick={openAQLStandard}
+                variant="outline"
+                className="h-12 border-white/60 bg-gray-950/70 px-6 text-base font-semibold text-white backdrop-blur-sm hover:!bg-gray-950/85 hover:!text-white"
+                style={{ width: 'min(100%, 230px)' }}
+              >
+                View AQL Standard
+              </Button>
+            </div>
+          </div>
+
+          <div className="pointer-events-none absolute right-0 min-w-0 -translate-y-1/2" style={{ top: '74%' }}>
+            <div className="ml-auto overflow-hidden rounded-md" style={{ width: 620, height: 430 }}>
+              <div style={{ width: 1240, transform: 'scale(0.42)', transformOrigin: 'top left' }}>
+                <AQLTableBPreview />
               </div>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Toys */}
-              <Card 
-                className="bg-white border-2 border-gray-200 hover:border-pink-400 hover:shadow-md transition-all overflow-hidden cursor-pointer h-full"
-                onClick={() => navigateTo('toysinspection')}
-              >
-                <CardContent className="p-5 h-full">
-                  <div className="text-center h-full flex flex-col">
-                    <div className="flex justify-center mb-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-pink-500 to-pink-600 rounded-lg flex items-center justify-center">
-                        <Gamepad2 className="h-5 w-5 text-white" />
-                      </div>
-                    </div>
-                    <h4 className="text-gray-900 mb-2">Toys</h4>
-                    <ul className="space-y-0.5 text-sm text-gray-600 mb-3 flex-grow">
-                      <li>ASTM F963</li>
-                      <li>EN71</li>
-                      <li>ISO 8124</li>
-                    </ul>
-                    <div className="text-xs text-emerald-600 font-medium">
-                      Click for detailed standards →
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Electronics */}
-              <Card 
-                className="bg-white border-2 border-gray-200 hover:border-indigo-400 hover:shadow-md transition-all overflow-hidden cursor-pointer h-full"
-                onClick={() => navigateTo('electronicsinspection')}
-              >
-                <CardContent className="p-5 h-full">
-                  <div className="text-center h-full flex flex-col">
-                    <div className="flex justify-center mb-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg flex items-center justify-center">
-                        <Cpu className="h-5 w-5 text-white" />
-                      </div>
-                    </div>
-                    <h4 className="text-gray-900 mb-2">Electronics</h4>
-                    <ul className="space-y-0.5 text-sm text-gray-600 mb-3 flex-grow">
-                      <li>IEC 60335</li>
-                      <li>IEC 60950</li>
-                      <li>IEC 62368</li>
-                      <li>RoHS</li>
-                    </ul>
-                    <div className="text-xs text-emerald-600 font-medium">
-                      Click for detailed standards →
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Appliances */}
-              <Card 
-                className="bg-white border-2 border-gray-200 hover:border-orange-400 hover:shadow-md transition-all overflow-hidden cursor-pointer h-full"
-                onClick={() => navigateTo('appliancesinspection')}
-              >
-                <CardContent className="p-5 h-full">
-                  <div className="text-center h-full flex flex-col">
-                    <div className="flex justify-center mb-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center">
-                        <Zap className="h-5 w-5 text-white" />
-                      </div>
-                    </div>
-                    <h4 className="text-gray-900 mb-2">Appliances</h4>
-                    <ul className="space-y-0.5 text-sm text-gray-600 mb-3 flex-grow">
-                      <li>IEC 60335-1</li>
-                      <li>GB 4706.1</li>
-                    </ul>
-                    <div className="text-xs text-emerald-600 font-medium">
-                      Click for detailed standards →
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Lighting */}
-              <Card 
-                className="bg-white border-2 border-gray-200 hover:border-yellow-400 hover:shadow-md transition-all overflow-hidden cursor-pointer h-full"
-                onClick={() => navigateTo('lightinginspection')}
-              >
-                <CardContent className="p-5 h-full">
-                  <div className="text-center h-full flex flex-col">
-                    <div className="flex justify-center mb-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-lg flex items-center justify-center">
-                        <Lightbulb className="h-5 w-5 text-white" />
-                      </div>
-                    </div>
-                    <h4 className="text-gray-900 mb-2">Lighting</h4>
-                    <ul className="space-y-0.5 text-sm text-gray-600 mb-3 flex-grow">
-                      <li>IEC 60598</li>
-                      <li>UL 153</li>
-                    </ul>
-                    <div className="text-xs text-emerald-600 font-medium">
-                      Click for detailed standards →
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Textiles & Garments */}
-              <Card 
-                className="bg-white border-2 border-gray-200 hover:border-purple-400 hover:shadow-md transition-all overflow-hidden cursor-pointer h-full"
-                onClick={() => navigateTo('textilesinspection')}
-              >
-                <CardContent className="p-5 h-full">
-                  <div className="text-center h-full flex flex-col">
-                    <div className="flex justify-center mb-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center">
-                        <Shirt className="h-5 w-5 text-white" />
-                      </div>
-                    </div>
-                    <h4 className="text-gray-900 mb-2">Textiles & Garments</h4>
-                    <ul className="space-y-0.5 text-sm text-gray-600 mb-3 flex-grow">
-                      <li>ASTM D2054</li>
-                      <li>AATCC 8</li>
-                    </ul>
-                    <div className="text-xs text-emerald-600 font-medium">
-                      Click for detailed standards →
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Shoes */}
-              <Card 
-                className="bg-white border-2 border-gray-200 hover:border-cyan-400 hover:shadow-md transition-all overflow-hidden cursor-pointer h-full"
-                onClick={() => navigateTo('shoesinspection')}
-              >
-                <CardContent className="p-5 h-full">
-                  <div className="text-center h-full flex flex-col">
-                    <div className="flex justify-center mb-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-lg flex items-center justify-center">
-                        <Watch className="h-5 w-5 text-white" />
-                      </div>
-                    </div>
-                    <h4 className="text-gray-900 mb-2">Shoes</h4>
-                    <ul className="space-y-0.5 text-sm text-gray-600 mb-3 flex-grow">
-                      <li>SATRA TM</li>
-                      <li>ISO 20871</li>
-                    </ul>
-                    <div className="text-xs text-emerald-600 font-medium">
-                      Click for detailed standards →
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Furniture */}
-              <Card 
-                className="bg-white border-2 border-gray-200 hover:border-emerald-400 hover:shadow-md transition-all cursor-pointer overflow-hidden h-full"
-                onClick={() => navigateTo('furnitureinspection')}
-              >
-                <CardContent className="p-5 h-full">
-                  <div className="text-center h-full flex flex-col">
-                    <div className="flex justify-center mb-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center">
-                        <Armchair className="h-5 w-5 text-white" />
-                      </div>
-                    </div>
-                    <h4 className="text-gray-900 mb-2">Furniture</h4>
-                    <ul className="space-y-0.5 text-sm text-gray-600 mb-3 flex-grow">
-                      <li>EN 12520</li>
-                      <li>ASTM F2057</li>
-                    </ul>
-                    <div className="text-xs text-emerald-600 font-medium">
-                      Click for detailed standards →
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Packaging */}
-              <Card 
-                className="bg-white border-2 border-gray-200 hover:border-teal-400 hover:shadow-md transition-all overflow-hidden cursor-pointer h-full"
-                onClick={() => navigateTo('packaginginspection')}
-              >
-                <CardContent className="p-5 h-full">
-                  <div className="text-center h-full flex flex-col">
-                    <div className="flex justify-center mb-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-teal-500 to-teal-600 rounded-lg flex items-center justify-center">
-                        <Package className="h-5 w-5 text-white" />
-                      </div>
-                    </div>
-                    <h4 className="text-gray-900 mb-2">Packaging</h4>
-                    <ul className="space-y-0.5 text-sm text-gray-600 mb-3 flex-grow">
-                      <li>ISO 2248</li>
-                      <li>ASTM D4169</li>
-                    </ul>
-                    <div className="text-xs text-emerald-600 font-medium">
-                      Click for detailed standards →
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Bottom Note */}
-            <div className="mt-8 text-center">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 rounded-full">
-                <Shield className="h-4 w-4 text-blue-600" />
-                <span className="text-sm text-blue-700">
-                  International Standards Compliance Guaranteed
-                </span>
+            <div className="overflow-x-auto rounded-md md:hidden">
+              <div style={{ transform: 'scale(0.56)', transformOrigin: 'top left', width: 1240 }}>
+                <AQLTableBPreview />
               </div>
             </div>
           </div>
         </div>
+      </section>
 
-        {/* 3. AQL (Acceptable Quality Limit) Comprehensive Section */}
-        <div id="aql-standards" className="mb-16 scroll-mt-20">
-          <AQLContent />
-        </div>
-
-        {/* 4. Why Choose Us */}
-        <div id="why-choose-us" className="mb-16 scroll-mt-20">
-          <h2 className="text-gray-900 text-center mb-12">
-            {t.qcMaster.benefitsTitle}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {benefits.map((benefit, index) => (
-              <div key={index} className="bg-white rounded-xl shadow-sm border-2 p-6 hover:border-blue-500 transition-all hover:shadow-lg">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center mb-4">
-                  <benefit.icon className="h-6 w-6 text-white" />
+      <section className="border-b border-gray-200 bg-white py-8">
+        <div className="cosun-shell">
+          <div className="grid gap-3 lg:grid-cols-5">
+            {inspectionMoments.map(([title, text], index) => (
+              <div key={title} className="rounded-md border border-gray-200 bg-gray-50 p-4">
+                <div className="mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-sm font-black text-white">
+                  {index + 1}
                 </div>
-                <h3 className="text-gray-900 mb-3">{benefit.title}</h3>
-                <p className="text-gray-600 text-sm leading-relaxed">
-                  {benefit.description}
-                </p>
+                <h3 className="text-sm font-black text-gray-950">{title}</h3>
+                <p className="mt-2 text-xs font-semibold leading-5 text-gray-600">{text}</p>
               </div>
             ))}
           </div>
         </div>
+      </section>
 
-        {/* 5. Compliance Standards */}
-        <div id="compliance-standards" className="mb-16 scroll-mt-20">
-          <div className="bg-white rounded-2xl shadow-sm border p-8 md:p-12">
-            <h2 className="text-gray-900 text-center mb-8">
-              {t.qcMaster?.standardsTitle || 'Quality Standards We Follow'}
-            </h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-              {standards.map((standard, index) => (
+      <section className="bg-gray-50 py-12">
+        <div className="cosun-shell">
+          <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-red-700">Inspection desk</p>
+              <h2 className="text-2xl font-black leading-tight md:text-3xl">
+                We inspect the risk points customers actually use to decide whether to pay, ship, or hold.
+              </h2>
+              <p className="mt-4 text-base font-semibold leading-7 text-gray-600">
+                The inspection is based on your order, sample, drawing, photos, product checklist, packaging
+                requirement, or AQL level. When problems are found, COSUN can also coordinate correction and re-check.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-md border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex items-center gap-3">
+                  <Eye className="h-5 w-5 text-red-700" />
+                  <h3 className="text-lg font-black text-gray-950">What we check</h3>
+                </div>
+                <div className="space-y-3">
+                  {inspectionScope.map((item) => (
+                    <div key={item} className="flex gap-2 text-sm font-semibold leading-5 text-gray-700">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex items-center gap-3">
+                  <FileCheck className="h-5 w-5 text-red-700" />
+                  <h3 className="text-lg font-black text-gray-950">What customers receive</h3>
+                </div>
+                <div className="space-y-3">
+                  {reportOutputs.map((item) => (
+                    <div key={item} className="flex gap-2 text-sm font-semibold leading-5 text-gray-700">
+                      <ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="aql-decision" className="py-12 text-white" style={{ backgroundColor: '#111827' }}>
+        <div className="cosun-shell">
+          <div>
+            <div className="max-w-4xl">
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-red-200">AQL decision standard</p>
+              <h2 className="text-2xl font-black leading-tight md:text-3xl">
+                AQL is not a separate article. It is the rule behind the inspection decision.
+              </h2>
+              <p className="mt-4 text-sm font-semibold leading-6 text-gray-300">
+                COSUN retains the current AQL tables and calculator, and uses AQL sampling to connect lot size,
+                sample size, defect class, acceptance number, and final release advice.
+              </p>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {aqlSteps.map(([title, text], index) => (
                 <div
-                  key={index}
-                  className="bg-gray-50 rounded-lg p-4 text-center border-2 border-transparent hover:border-blue-500 transition-all"
+                  key={title}
+                  className="rounded-md border border-white/10 p-4"
+                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.07)' }}
                 >
-                  <p className="text-gray-900">{standard}</p>
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-[0.08em] text-red-200">AQL step {index + 1}</span>
+                    <Calculator className="h-4 w-4 text-red-200" />
+                  </div>
+                  <h3 className="font-black text-white">{title}</h3>
+                  <p className="mt-2 text-sm font-semibold leading-5 text-gray-300">{text}</p>
                 </div>
               ))}
             </div>
           </div>
-        </div>
 
-        {/* 6. CTA Section */}
-        <div id="request-service" className="bg-gradient-to-r from-blue-600 to-blue-500 rounded-2xl p-8 md:p-12 text-white text-center">
-          <h2 className="text-white mb-4">
-            {t.qcMaster.ctaTitle}
-          </h2>
-          <p className="text-white/90 mb-8 max-w-2xl mx-auto">
-            {t.qcMaster.ctaDesc}
-          </p>
-          <QCServiceRequestForm />
+          <div className="mt-8 flex flex-col gap-4 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="max-w-3xl text-sm font-semibold leading-6 text-gray-300">
+              Common setup: Critical defects AQL 0, Major defects AQL 2.5, Minor defects AQL 4.0.
+              Final values can be adjusted by product risk, order requirement, and customer market.
+            </p>
+            <Button
+              onClick={() => setShowAQLDetails((value) => !value)}
+              className="h-10 bg-red-600 px-5 font-semibold text-white hover:bg-red-700"
+            >
+              {showAQLDetails ? 'Hide Full AQL Tables' : 'Open Full AQL Tables'}
+            </Button>
+          </div>
         </div>
-      </div>
+      </section>
+
+      {showAQLDetails && (
+        <section className="bg-white py-12">
+          <div className="cosun-shell">
+            <AQLContent />
+          </div>
+        </section>
+      )}
+
+      <section className="bg-white py-12">
+        <div className="cosun-shell">
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-red-700">Product standards library</p>
+              <h2 className="text-2xl font-black leading-tight md:text-3xl">AQL plus product-specific standards.</h2>
+            </div>
+            <p className="max-w-2xl text-sm font-semibold leading-6 text-gray-600">
+              AQL answers how many pieces to inspect and how to judge defect tolerance. Category standards help define what to inspect for each product type.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {standardCategories.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.title}
+                  type="button"
+                  onClick={() => navigateTo(item.page)}
+                  className="rounded-md border border-gray-200 bg-gray-50 p-4 text-left transition hover:border-red-300 hover:bg-white hover:shadow-sm"
+                >
+                  <div className={`mb-4 flex h-10 w-10 items-center justify-center rounded-md ${item.color}`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <h3 className="font-black text-gray-950">{item.title}</h3>
+                  <p className="mt-2 text-xs font-semibold leading-5 text-gray-600">{item.codes}</p>
+                  <p className="mt-3 text-xs font-black uppercase tracking-[0.08em] text-red-700">Detailed standards</p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-gray-50 py-12">
+        <div className="cosun-shell">
+          <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
+            <div className="rounded-md border border-gray-200 bg-white p-6 shadow-sm">
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-red-700">Visible follow-up</p>
+              <h2 className="text-2xl font-black leading-tight">We do not only report defects. We help close the loop.</h2>
+              <div className="mt-6 grid gap-3 md:grid-cols-3">
+                {[
+                  ['Find', 'Record defects with photos, location, quantity, and severity.'],
+                  ['Push', 'Coordinate supplier correction, replacement, sorting, or rework evidence.'],
+                  ['Track', 'Keep inspection reports, issue history, and follow-up files in the customer workspace.'],
+                ].map(([title, text]) => (
+                  <div key={title} className="rounded-md bg-gray-50 p-4">
+                    <h3 className="font-black text-gray-950">{title}</h3>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-gray-600">{text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-md border border-red-100 bg-red-50 p-6">
+              <div className="mb-4 flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-red-700" />
+                <h3 className="text-lg font-black text-gray-950">What you can send</h3>
+              </div>
+              <div className="space-y-3 text-sm font-semibold leading-6 text-gray-700">
+                <p>Order number, supplier contact, product photos, sample requirements, packing list, inspection checklist, AQL level, or shipment date.</p>
+                <p>COSUN can arrange inspection, apply the right sampling rule, report findings, and follow the supplier response before shipment.</p>
+              </div>
+              <div className="mt-5 flex items-center gap-2 text-sm font-black text-red-700">
+                <Truck className="h-4 w-4" />
+                Before goods leave the factory, make the decision visible.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="request-service" className="border-t border-gray-200 bg-white py-12">
+        <div className="cosun-shell">
+          <div className="grid gap-8 lg:grid-cols-[0.78fr_1.22fr] lg:items-center">
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-red-700">Request QC service</p>
+              <h2 className="text-2xl font-black leading-tight text-gray-950 md:text-3xl">
+                Send the real order details. COSUN turns them into an inspection brief.
+              </h2>
+              <p className="mt-4 text-base font-semibold leading-7 text-gray-600">
+                You can submit a supplier, sample photo, product link, packing requirement, shipment date, or AQL level. We check the physical goods, packaging, quantity, labels, and loading status before the decision is made.
+              </p>
+              <div className="mt-6">
+                <QCServiceRequestForm
+                  trigger={
+                    <Button size="lg" className="bg-red-600 px-6 font-black text-white hover:bg-red-700">
+                      Request QC Service
+                      <ArrowRight className="ml-2 h-5 w-5" />
+                    </Button>
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3 lg:col-span-3">
+              {requestEvidence.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.title} className="overflow-hidden rounded-md border border-gray-200 bg-gray-50 shadow-sm">
+                    <div className="relative aspect-[4/3] overflow-hidden bg-gray-200">
+                      <img src={item.image} alt={item.title} className="h-full w-full object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-gray-950/65 via-transparent to-transparent" />
+                      <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded bg-white/95 px-3 py-2 text-xs font-black text-gray-950 shadow-sm">
+                        <Icon className="h-4 w-4 text-red-600" />
+                        {item.title}
+                      </div>
+                    </div>
+                    <p className="p-4 text-sm font-semibold leading-6 text-gray-600">{item.text}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
     </section>
   );
 }
