@@ -3,6 +3,7 @@ import { Dialog, DialogContent } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Printer, Download, FileText } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 
 interface QuotationPreviewProps {
   open: boolean;
@@ -33,7 +34,10 @@ export default function QuotationPreview({ open, onOpenChange, data }: Quotation
     moq: data.moq || data.fullQuoteData?.moq || 1000,
     leadTime: data.leadTime || data.fullQuoteData?.leadTime || 30,
     validityDays: data.validityDays || data.fullQuoteData?.validityDays || 30,
-    paymentTerms: data.paymentTerms || data.fullQuoteData?.paymentTerms || 'T/T 30% deposit, 70% before shipment',
+    paymentTerms:
+      data.paymentTerms
+      || data.fullQuoteData?.paymentTerms
+      || buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     baseCost: data.baseCost || data.fullQuoteData?.baseCost || 8.50,
     profitMargin: data.profitMargin || data.fullQuoteData?.profitMargin || 15,
     taxRate: data.taxRate || data.fullQuoteData?.taxRate || 13,

@@ -19,8 +19,6 @@ export default function PurchaseOrderDocument({ orderData, onClose }: PurchaseOr
   const poData = {
     poNumber: orderData?.id || 'PO-2025-001156',
     poDate: '2025-01-25',
-    xjNumber: 'XJ-2025-001045',
-    quotationNumber: 'COSUN-Q-202501000234',
     buyerCompany: 'COSUN采购部',
     buyerContact: '张经理',
     buyerPhone: '+86-591-8888-8888',
@@ -517,8 +515,6 @@ export default function PurchaseOrderDocument({ orderData, onClose }: PurchaseOr
               </div>
               <div style={{ fontSize: '10px', color: '#000', marginTop: '3px' }}>
                 <div>订单日期：{poData.poDate}</div>
-                <div>询价编号：{poData.xjNumber}</div>
-                <div>报价编号：{poData.quotationNumber}</div>
               </div>
             </div>
           </div>

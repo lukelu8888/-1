@@ -21,6 +21,7 @@ import jsPDF from 'jspdf';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
 import { generateBJNumber, nextBJNumber } from '../../utils/xjNumberGenerator'; // 🔥 BJ编号生成器
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 
 /**
  * 🔥 供应商视角：询价报价管理
@@ -75,7 +76,7 @@ export default function SupplierQuotations() {
     leadTime: '',
     moq: '',
     validityDays: '30',
-    paymentTerms: 'T/T 30% deposit, 70% before shipment',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     remarks: ''
   });
 

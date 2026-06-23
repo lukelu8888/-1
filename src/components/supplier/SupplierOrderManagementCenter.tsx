@@ -1,13 +1,14 @@
 // 🔥 供应商订单管理中心 - 台湾大厂专业版
 // 整合：询价 → 报价 → 在制订单 → 历史订单
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Checkbox } from '../ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -17,11 +18,15 @@ import {
   ArrowRight, TrendingUp, DollarSign, Calendar, Truck, Factory,
   Trash2, CheckSquare, FileCheck, Send, Archive, BarChart3, RefreshCw,
   Settings, TrendingDown, Receipt, Users, Activity, Percent, AlertTriangle,
-  ChevronRight, Circle, X as XIcon
+  ChevronDown, ChevronRight, Circle, X as XIcon, ShoppingCart
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '../../contexts/UserContext';
+import { useOrganization } from '../../contexts/OrganizationContext';
+import { getStoredAdminOrgProfile } from '../../contexts/AdminOrganizationContext';
 import { useXJs } from '../../contexts/XJContext';
+import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext';
+import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import XJDocumentViewer from './XJDocumentViewer';
 import SupplierQuotationDocumentViewer from './SupplierQuotationDocumentViewer';
 import SupplierQuotationEditor from './SupplierQuotationEditor';
@@ -32,8 +37,18 @@ import {
   type SupplierQuotationItem,
 } from '../../utils/createQuotationFromXJ';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { inferSupplierDocumentLanguage, resolveFlowProductDisplay } from '../../utils/documentDataAdapters';
 import { supplierQuotationService, templateCenterService } from '../../lib/supabaseService';
 import { suppliersDatabase } from '../../data/suppliersData'; // 🔥 导入供应商数据库
+import type { PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument';
+import { PurchaseOrderDocumentA4Pages } from '../documents/templates/paginated/PurchaseOrderDocumentA4';
+import { ProcurementDocumentViewerShell } from '../admin/purchase-order/ProcurementDocumentViewerShell';
+import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport';
+import { purchaseOrderExecutionStatusService } from '../../lib/services/purchaseOrderExecutionStatusService';
+import {
+  SUPPLIER_DOCUMENT_PREVIEW_BODY_CLASS,
+  SUPPLIER_DOCUMENT_PREVIEW_INNER_CLASS,
+} from './documentPreviewStandards';
 
 // 🔥 统计数据接口
 interface OrderStats {
@@ -54,33 +69,198 @@ interface ProductSummary {
   quantityUnit: string;
 }
 
+const EMPTY_DISPLAY_TOKENS = new Set(['', '-', '—', 'N/A', 'NA', 'NULL', 'UNDEFINED']);
+const SUPPLIER_PORTAL_CUSTOMER_PLACEHOLDERS = new Set(['COSUN采购', 'COSUN贸易', '福建高盛达富建材有限公司']);
+
 export default function SupplierOrderManagementCenter() {
   const { user } = useUser();
+  const { org } = useOrganization();
   const { xjs, getXJsBySupplier, updateXJ, addQuoteToXJ, refreshMineFromBackend } = useXJs();
+  const { purchaseOrders, updatePurchaseOrder } = usePurchaseOrders();
+  const { requirements } = useQuoteRequirements();
   const HIDDEN_XJ_IDS_KEY = 'supplierHiddenXJIds';
   const HIDDEN_QUOTATION_IDS_KEY = 'supplierHiddenQuotationIds';
   
   // 🔥 获取完整的供应商信息（从suppliersDatabase）
   const supplierInfo = useMemo(() => {
     if (!user?.email) return null;
-    
-    // 从数据库中查找匹配的供应商
+
     const supplier = suppliersDatabase.find(s => s.email === user.email);
-    
-    if (supplier) {
-      return supplier;
-    }
-    
-    // 如果找不到，返回基础信息
+    const mergedName = org?.name && org.name !== '供应商公司'
+      ? org.name
+      : supplier?.name || user.company || user.name || '供应商';
+    const mergedNameEn = org?.nameEn && org.nameEn !== 'Supplier Co.'
+      ? org.nameEn
+      : supplier?.nameEn || mergedName;
+    const mergedAddress = org?.address || supplier?.address || user.address || '供应商地址';
+    const mergedPhone = org?.phone || supplier?.phone || user.phone || '';
+    const mergedContact = org?.contactPerson || supplier?.contact || user.name || '联系人';
+    const mergedCompany = mergedName;
+    const domesticHint = [
+      mergedName,
+      mergedNameEn,
+      mergedAddress,
+      supplier?.region,
+      user.company,
+      user.address,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const isDomesticSupplier = /中国|广东|浙江|福建|江苏|上海|山东|东莞|佛山|温州|济南|宁波|杭州|深圳|苏州|china|guangdong|zhejiang|fujian|jiangsu|shanghai|shandong/i.test(domesticHint);
+
     return {
+      ...(supplier || {}),
       email: user.email,
-      name: user.company || user.name || '供应商',
-      company: user.company || '供应商公司',
-      contact: user.name || '联系人',
-      phone: user.phone || '',
-      address: user.address || '供应商地址'
+      name: mergedName,
+      nameEn: mergedNameEn,
+      company: mergedCompany,
+      contact: mergedContact,
+      phone: mergedPhone,
+      address: mergedAddress,
+      locale: isDomesticSupplier ? 'zh-CN' : (supplier as any)?.locale,
+      countryCode: isDomesticSupplier ? 'CN' : (supplier as any)?.countryCode,
+      isDomesticSupplier,
     };
-  }, [user]);
+  }, [org?.address, org?.contactPerson, org?.name, org?.nameEn, org?.phone, user]);
+
+  const currentSupplierIdentity = useMemo(() => {
+    const normalizeEmail = (value: unknown) => String(value || '').trim().toLowerCase();
+    const normalizeCode = (value: unknown) => String(value || '').trim().toUpperCase();
+    const normalizeName = (value: unknown) => String(value || '').trim();
+
+    return {
+      emails: new Set(
+        [
+          user?.email,
+          supplierInfo?.email,
+        ]
+          .map(normalizeEmail)
+          .filter(Boolean),
+      ),
+      codes: new Set(
+        [
+          (supplierInfo as any)?.code,
+          user?.company,
+        ]
+          .map(normalizeCode)
+          .filter(Boolean),
+      ),
+      names: new Set(
+        [
+          supplierInfo?.name,
+          (supplierInfo as any)?.company,
+          user?.company,
+          user?.name,
+        ]
+          .map(normalizeName)
+          .filter(Boolean),
+      ),
+    };
+  }, [supplierInfo, user?.company, user?.email, user?.name]);
+
+  const issuerFallbackName = useMemo(() => {
+    const adminOrg = getStoredAdminOrgProfile();
+    return (
+      String(adminOrg?.nameCN || '').trim() ||
+      String(adminOrg?.nameEN || '').trim() ||
+      'COSUN采购'
+    );
+  }, []);
+
+  const normalizeDisplayText = (
+    value: unknown,
+    options: { ignoreSupplierPortalDefaults?: boolean } = {},
+  ) => {
+    const text = String(value ?? '').trim();
+    if (!text) return '';
+    if (EMPTY_DISPLAY_TOKENS.has(text.toUpperCase())) return '';
+    if (options.ignoreSupplierPortalDefaults && SUPPLIER_PORTAL_CUSTOMER_PLACEHOLDERS.has(text)) {
+      return '';
+    }
+    return text;
+  };
+
+  const pickDisplayText = (
+    values: unknown[],
+    options: { ignoreSupplierPortalDefaults?: boolean } = {},
+  ) => {
+    for (const value of values) {
+      const normalized = normalizeDisplayText(value, options);
+      if (normalized) return normalized;
+    }
+    return '';
+  };
+
+  const supplierProductLanguage = useMemo<'zh' | 'en'>(() => {
+    return inferSupplierDocumentLanguage({
+      supplierCountryCode: (supplierInfo as any)?.countryCode,
+      supplierLocale: (supplierInfo as any)?.locale,
+      supplierRegion: (supplierInfo as any)?.region,
+      supplierAddress: (supplierInfo as any)?.address || user?.address,
+      supplierName: supplierInfo?.name || (supplierInfo as any)?.company || user?.company,
+      isDomesticSupplier: (supplierInfo as any)?.isDomesticSupplier,
+      supplierProfile: supplierInfo,
+      supplier: supplierInfo,
+    });
+  }, [supplierInfo, user?.address, user?.company]);
+
+  const supplierUiLanguage = supplierProductLanguage;
+  const supplierUiCopy = useMemo(() => ({
+    overviewSecondary: supplierUiLanguage === 'zh' ? '订单总览' : 'Overview',
+    xjSecondaryLabel: supplierUiLanguage === 'zh' ? '采购询价' : 'Quotation Request',
+    qtSecondaryLabel: supplierUiLanguage === 'zh' ? '报价单' : 'Quotation',
+    activeSecondaryLabel: supplierUiLanguage === 'zh' ? '进行中' : 'Active',
+    historySecondaryLabel: supplierUiLanguage === 'zh' ? '已完成' : 'History',
+    view: supplierUiLanguage === 'zh' ? '查看' : 'View',
+    delete: supplierUiLanguage === 'zh' ? '删除' : 'Delete',
+    pendingQuote: supplierUiLanguage === 'zh' ? '待报价' : 'Pending Quote',
+    pushed: supplierUiLanguage === 'zh' ? '已下推' : 'Pushed',
+    pushQuote: supplierUiLanguage === 'zh' ? '下推报价' : 'Push Quote',
+    orderOverviewDashboard: supplierUiLanguage === 'zh' ? '订单总览看板' : 'Order Overview Dashboard',
+    weeklyTrend: supplierUiLanguage === 'zh' ? '每周趋势' : 'Weekly Trend',
+    categoryDistribution: supplierUiLanguage === 'zh' ? '类别分布' : 'Category Distribution',
+    finalExecution: supplierUiLanguage === 'zh' ? '可执行版本' : 'Final Execution',
+    historicalRevision: supplierUiLanguage === 'zh' ? '历史修订版本' : 'Historical Revision',
+    supplierHistoryOrders: supplierUiLanguage === 'zh' ? '供应商历史订单' : 'Supplier Historical Orders',
+  }), [supplierUiLanguage]);
+
+  const matchesCurrentSupplier = React.useCallback((record: any) => {
+    const emailCandidates = [
+      record?.supplierEmail,
+      record?.supplier_email,
+      record?.createdBy,
+      record?.created_by,
+      record?.operatorEmail,
+      record?.operator_email,
+    ]
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean);
+    if (emailCandidates.some((value) => currentSupplierIdentity.emails.has(value))) {
+      return true;
+    }
+
+    const codeCandidates = [
+      record?.supplierCode,
+      record?.supplier_code,
+      record?.supplierCompanyId,
+      record?.supplier_company_id,
+    ]
+      .map((value) => String(value || '').trim().toUpperCase())
+      .filter(Boolean);
+    if (codeCandidates.some((value) => currentSupplierIdentity.codes.has(value))) {
+      return true;
+    }
+
+    const nameCandidates = [
+      record?.supplierName,
+      record?.supplier_name,
+      record?.supplierCompany,
+      record?.supplier_company,
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    return nameCandidates.some((value) => currentSupplierIdentity.names.has(value));
+  }, [currentSupplierIdentity]);
   
   // 🔥 供应商报价单 — Supabase-first
   const [supplierQuotations, setSupplierQuotations] = useState<SupplierQuotation[]>([]);
@@ -90,8 +270,16 @@ export default function SupplierOrderManagementCenter() {
     if (!user?.email) return;
     const load = async () => {
       try {
-        const rows = await supplierQuotationService.getBySupplierEmail(user.email);
-        setSupplierQuotations(Array.isArray(rows) ? (rows as SupplierQuotation[]) : []);
+        const directRows = await supplierQuotationService.getBySupplierEmail(user.email);
+        const directList = Array.isArray(directRows) ? (directRows as SupplierQuotation[]) : [];
+        if (directList.length > 0) {
+          setSupplierQuotations(directList.filter(matchesCurrentSupplier));
+          return;
+        }
+
+        const allRows = await supplierQuotationService.getAll();
+        const allList = Array.isArray(allRows) ? (allRows as SupplierQuotation[]) : [];
+        setSupplierQuotations(allList.filter(matchesCurrentSupplier));
       } catch (e: any) {
         console.warn('⚠️ [SupplierOrderMgmt] 加载报价单失败:', e?.message);
       }
@@ -99,7 +287,7 @@ export default function SupplierOrderManagementCenter() {
     void load();
     const interval = setInterval(load, 10000); // 每10秒刷新
     return () => clearInterval(interval);
-  }, [user?.email]);
+  }, [matchesCurrentSupplier, user?.email]);
   
   // Tab状态
   const [activeTab, setActiveTab] = useState<'overview' | 'xj' | 'qt' | 'active-orders' | 'history'>('overview');
@@ -123,6 +311,11 @@ export default function SupplierOrderManagementCenter() {
   const [quotationDocumentViewerOpen, setQuotationDocumentViewerOpen] = useState(false);
   const [quotationEditorOpen, setQuotationEditorOpen] = useState(false);
   const [selectedQuotation, setSelectedQuotation] = useState<any>(null);
+  const [purchaseOrderViewerOpen, setPurchaseOrderViewerOpen] = useState(false);
+  const [selectedSupplierOrder, setSelectedSupplierOrder] = useState<any>(null);
+  const [exportingPurchaseOrder, setExportingPurchaseOrder] = useState(false);
+  const [activeOrderActionKey, setActiveOrderActionKey] = useState<string | null>(null);
+  const purchaseOrderDocumentRef = useRef<HTMLDivElement>(null);
   
   // 核算报价弹窗状态（editingQuotationId 驱动，quotationEditorOpen 已在上方声明）
   const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
@@ -139,6 +332,158 @@ export default function SupplierOrderManagementCenter() {
     setQuotationEditorOpen(false);
     setEditingQuotationId(null);
   };
+
+  const selectedSupplierOrderDocumentData = useMemo<PurchaseOrderData | null>(() => {
+    if (!selectedSupplierOrder) return null;
+    return (
+      selectedSupplierOrder.documentDataSnapshot ||
+      selectedSupplierOrder.document_data_snapshot ||
+      selectedSupplierOrder.rawPO?.documentDataSnapshot ||
+      selectedSupplierOrder.rawPO?.document_data_snapshot ||
+      null
+    ) as PurchaseOrderData | null;
+  }, [selectedSupplierOrder]);
+
+  const selectedSupplierOrderTemplateLabel = useMemo(() => {
+    if (!selectedSupplierOrderDocumentData) return '默认采购合同模板';
+    return selectedSupplierOrderDocumentData.templateSettings?.productTableColumns?.length
+      ? '统一采购合同模板'
+      : '默认采购合同模板';
+  }, [selectedSupplierOrderDocumentData]);
+
+  const openPurchaseOrderViewer = React.useCallback((order: any) => {
+    setSelectedSupplierOrder(order);
+    setPurchaseOrderViewerOpen(true);
+  }, []);
+
+  const applySupplierOrderExecutionUpdate = React.useCallback(async (
+    order: any,
+    payload: Record<string, any>,
+    successMessage: string,
+  ) => {
+    if (!order?.id) return;
+
+    const actionKey = `${order.id}:${payload.executionStatus || payload.action || 'update'}`;
+    try {
+      setActiveOrderActionKey(actionKey);
+      await purchaseOrderExecutionStatusService.upsertByPurchaseOrderId(order.id, payload);
+      await updatePurchaseOrder(order.id, {
+        ...payload,
+        updatedDate: new Date().toISOString(),
+      });
+      toast.success(successMessage);
+    } catch (error) {
+      console.error('更新供应商执行状态失败:', error);
+      toast.error(error instanceof Error ? error.message : '更新执行状态失败');
+    } finally {
+      setActiveOrderActionKey(null);
+    }
+  }, [updatePurchaseOrder]);
+
+  const handleSupplierConfirmOrder = React.useCallback(async (order: any) => {
+    const now = new Date().toISOString();
+    await applySupplierOrderExecutionUpdate(order, {
+      executionStatus: 'supplier_confirmed',
+      supplierConfirmedAt: now,
+      supplierReplyNotes: `${String(user?.name || supplierInfo?.contact || supplierInfo?.name || '供应商').trim()} 已确认接单`,
+    }, '已确认接单');
+  }, [applySupplierOrderExecutionUpdate, supplierInfo?.contact, supplierInfo?.name, user?.name]);
+
+  const handleSupplierRejectOrder = React.useCallback(async (order: any) => {
+    if (!window.confirm(`确认拒绝接收订单 ${order?.poNumber || order?.cgNumber || ''} 吗？`)) return;
+    const now = new Date().toISOString();
+    await applySupplierOrderExecutionUpdate(order, {
+      supplierRejectedAt: now,
+      supplierReplyNotes: `${String(user?.name || supplierInfo?.contact || supplierInfo?.name || '供应商').trim()} 已拒绝接单`,
+    }, '已记录拒绝接单');
+  }, [applySupplierOrderExecutionUpdate, supplierInfo?.contact, supplierInfo?.name, user?.name]);
+
+  const handleSupplierSubmitSelfInspection = React.useCallback(async (order: any) => {
+    await applySupplierOrderExecutionUpdate(order, {
+      executionStatus: 'supplier_self_inspection_submitted',
+      supplierSelfInspectionStatus: 'submitted',
+    }, '已提交自检');
+  }, [applySupplierOrderExecutionUpdate]);
+
+  const handleSupplierMarkFinishedGoods = React.useCallback(async (order: any) => {
+    const now = new Date().toISOString();
+    await applySupplierOrderExecutionUpdate(order, {
+      executionStatus: 'finished_goods_ready',
+      finishedGoodsConfirmedAt: now,
+    }, '已确认完货');
+  }, [applySupplierOrderExecutionUpdate]);
+
+  const resolveSupplierExecutionStage = React.useCallback((order: any) => {
+    const explicitExecutionStatus = String(order.executionStatus || '').trim();
+    const procurementRequestStatus = String(order.procurementRequestStatus || '').trim();
+    const poStatus = String(order.status || '').trim();
+    const supplierSelfInspectionStatus = String(order.supplierSelfInspectionStatus || '').trim().toLowerCase();
+
+    if (order.finishedGoodsConfirmedAt) return 'finished_goods_ready';
+    if (supplierSelfInspectionStatus === 'submitted') return 'supplier_self_inspection_submitted';
+    if (order.supplierConfirmedAt) return 'supplier_confirmed';
+    if (order.supplierRejectedAt) return 'supplier_rejected';
+
+    if ([
+      'supplier_pending_confirmation',
+      'supplier_confirmed',
+      'sampling',
+      'in_production',
+      'supplier_self_inspection_pending',
+      'supplier_self_inspection_submitted',
+      'qc_pending',
+      'qc_passed',
+      'qc_failed',
+      'finished_goods_ready',
+      'awaiting_loading',
+      'loaded',
+      'shipped',
+      'completed',
+    ].includes(explicitExecutionStatus)) {
+      return explicitExecutionStatus;
+    }
+
+    if (procurementRequestStatus === 'pushed_supplier') {
+      return 'supplier_pending_confirmation';
+    }
+
+    if (poStatus === 'producing') {
+      return 'in_production';
+    }
+
+    return '';
+  }, []);
+
+  const getSupplierOrderActionConfig = React.useCallback((order: any) => {
+    const executionStatus = resolveSupplierExecutionStage(order);
+    switch (executionStatus) {
+      case 'supplier_pending_confirmation':
+        return [
+          { key: 'confirm', label: '确认接单', onClick: () => handleSupplierConfirmOrder(order) },
+          { key: 'reject', label: '拒绝接单', onClick: () => handleSupplierRejectOrder(order), variant: 'outline' as const },
+        ];
+      case 'supplier_confirmed':
+      case 'sampling':
+      case 'in_production':
+      case 'supplier_self_inspection_pending':
+        return [
+          { key: 'self-inspection', label: '提交自检', onClick: () => handleSupplierSubmitSelfInspection(order) },
+        ];
+      case 'supplier_self_inspection_submitted':
+      case 'qc_passed':
+        return [
+          { key: 'finished-goods', label: '确认完货', onClick: () => handleSupplierMarkFinishedGoods(order) },
+        ];
+      default:
+        return [];
+    }
+  }, [
+    handleSupplierConfirmOrder,
+    handleSupplierMarkFinishedGoods,
+    handleSupplierRejectOrder,
+    handleSupplierSubmitSelfInspection,
+    resolveSupplierExecutionStage,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -180,9 +525,12 @@ export default function SupplierOrderManagementCenter() {
 
   // 批量选择
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [expandedOrderIds, setExpandedOrderIds] = useState<string[]>([]);
+  const [expandedRFQIds, setExpandedRFQIds] = useState<string[]>([]);
   const [hiddenXJIds, setHiddenXJIds] = useState<Set<string>>(new Set());
   const [hiddenQuotationIds, setHiddenQuotationIds] = useState<Set<string>>(new Set());
   const hasManualHideInSessionRef = React.useRef(false);
+  const supplierLinkageBackfillAttemptedRef = React.useRef<Set<string>>(new Set());
 
   const formatCompactUtcMinute = React.useCallback((raw: string | undefined) => {
     if (!raw) return '—';
@@ -280,31 +628,103 @@ export default function SupplierOrderManagementCenter() {
     setSelectedIds([]);
   }, [hiddenQuotationIds, persistHiddenQuotationIds]);
 
+  const clearHiddenQuotationIdsForCurrentSupplier = React.useCallback(() => {
+    const next = new Set<string>();
+    setHiddenQuotationIds(next);
+    persistHiddenQuotationIds(next);
+  }, [persistHiddenQuotationIds]);
+
   // 统一行内产品展示：只显示代表产品 + 总产品数 + 总数量
   const summarizeProducts = React.useCallback((products?: any[], fallback?: any): ProductSummary => {
     const list = Array.isArray(products) ? products.filter(Boolean) : [];
     if (list.length > 0) {
       const first = list[0] || {};
+      const normalizedFirst = resolveFlowProductDisplay(first, supplierProductLanguage);
       const totalQuantity = list.reduce((sum, p) => sum + (Number(p?.quantity) || 0), 0);
       const uniqueUnits = Array.from(new Set(list.map(p => String(p?.unit || '').trim()).filter(Boolean)));
       const quantityUnit = uniqueUnits.length === 1 ? uniqueUnits[0] : 'PCS';
       return {
-        representativeName: first.productName || first.description || 'N/A',
+        representativeName: normalizedFirst.productName || first.productName || first.description || 'N/A',
         representativeModel: getFormalBusinessModelNo(first) || '',
-        representativeSpec: first.specification || '',
+        representativeSpec: normalizedFirst.specification || first.specification || '',
         productCount: list.length,
         totalQuantity,
         quantityUnit,
       };
     }
+    const normalizedFallback = fallback ? resolveFlowProductDisplay(fallback, supplierProductLanguage) : null;
     return {
-      representativeName: fallback?.productName || 'N/A',
+      representativeName: normalizedFallback?.productName || fallback?.productName || 'N/A',
       representativeModel: getFormalBusinessModelNo(fallback) || '',
-      representativeSpec: fallback?.specification || '',
+      representativeSpec: normalizedFallback?.specification || fallback?.specification || '',
       productCount: 1,
       totalQuantity: Number(fallback?.quantity) || 0,
       quantityUnit: fallback?.unit || 'PCS',
     };
+  }, [supplierProductLanguage]);
+
+  const normalizeSupplierProduct = React.useCallback((product: any) => {
+    return resolveFlowProductDisplay(product, supplierProductLanguage);
+  }, [supplierProductLanguage]);
+
+  const getOrderItemsForDisplay = React.useCallback((order: any) => {
+    const directItems = Array.isArray(order?.items) ? order.items.filter(Boolean) : [];
+    if (directItems.length > 0) return directItems;
+
+    const snapshot = order?.documentDataSnapshot || order?.document_data_snapshot || {};
+    const snapshotItems = [
+      ...(Array.isArray(snapshot?.items) ? snapshot.items : []),
+      ...(Array.isArray(snapshot?.products) ? snapshot.products : []),
+      ...(Array.isArray(snapshot?.productList) ? snapshot.productList : []),
+    ].filter(Boolean);
+
+    return snapshotItems;
+  }, []);
+
+  const toggleOrderExpanded = React.useCallback((orderId: string) => {
+    setExpandedOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    );
+  }, []);
+
+  const toggleRFQExpanded = React.useCallback((xjId: string) => {
+    setExpandedRFQIds((prev) =>
+      prev.includes(xjId) ? prev.filter((id) => id !== xjId) : [...prev, xjId]
+    );
+  }, []);
+
+  const setRFQExpanded = React.useCallback((xjId: string, expanded: boolean) => {
+    setExpandedRFQIds((prev) => {
+      const exists = prev.includes(xjId);
+      if (expanded && !exists) return [...prev, xjId];
+      if (!expanded && exists) return prev.filter((id) => id !== xjId);
+      return prev;
+    });
+  }, []);
+
+  const formatBusinessDate = React.useCallback((raw: string | undefined) => {
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return raw;
+    return new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  }, []);
+
+  const formatBusinessDateTime = React.useCallback((raw: string | undefined) => {
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return raw;
+    return new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(d);
   }, []);
 
   const formatExecutionBaseline = React.useCallback((doc: any) => {
@@ -354,6 +774,162 @@ export default function SupplierOrderManagementCenter() {
     );
   }, [resolveProjectExecutionBaseline]);
 
+  const supplierPortalOrders = useMemo(() => {
+    if (!user?.email) return [];
+
+    const normalizedEmail = String(user.email || '').trim().toLowerCase();
+    const supplierNames = new Set(
+      [
+        supplierInfo?.name,
+        supplierInfo?.company,
+        user?.company,
+        user?.name,
+      ]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    );
+
+    return purchaseOrders.filter((po) => {
+      const documentType = String(po.documentType || '').trim().toUpperCase();
+      const poNumber = String(po.poNumber || '').trim().toUpperCase();
+      const supplierEmail = String((po as any).supplierEmail || '').trim().toLowerCase();
+      const supplierCode = String(po.supplierCode || '').trim().toLowerCase();
+      const supplierName = String(po.supplierName || '').trim();
+      const belongsToSupplier =
+        supplierEmail === normalizedEmail ||
+        supplierCode === normalizedEmail ||
+        supplierNames.has(supplierName);
+
+      const isSupplierOrder =
+        documentType === 'CG' ||
+        poNumber.startsWith('CG-') ||
+        Boolean(po.parentRequestPoNumber);
+
+      return belongsToSupplier && isSupplierOrder;
+    });
+  }, [purchaseOrders, supplierInfo?.company, supplierInfo?.name, user?.company, user?.email, user?.name]);
+
+  const activeSupplierOrders = useMemo(() => {
+    return supplierPortalOrders.filter((po) => {
+      const executionStatus = resolveSupplierExecutionStage(po);
+      const poStatus = String(po.status || '').trim();
+
+      if (['completed', 'cancelled'].includes(poStatus)) return false;
+      if (['completed', 'shipped'].includes(executionStatus)) return false;
+
+      return [
+        'supplier_pending_confirmation',
+        'supplier_confirmed',
+        'supplier_rejected',
+        'sampling',
+        'in_production',
+        'supplier_self_inspection_pending',
+        'supplier_self_inspection_submitted',
+        'qc_pending',
+        'qc_passed',
+        'qc_failed',
+        'finished_goods_ready',
+        'awaiting_loading',
+        'loaded',
+      ].includes(executionStatus);
+    });
+  }, [resolveSupplierExecutionStage, supplierPortalOrders]);
+
+  const historySupplierOrders = useMemo(() => {
+    return supplierPortalOrders.filter((po) => {
+      const executionStatus = resolveSupplierExecutionStage(po);
+      const poStatus = String(po.status || '').trim();
+      return ['completed', 'cancelled'].includes(poStatus) || ['shipped', 'completed'].includes(executionStatus);
+    });
+  }, [resolveSupplierExecutionStage, supplierPortalOrders]);
+
+  const getSupplierOrderStatusBadge = React.useCallback((order: any) => {
+    const executionStatus = resolveSupplierExecutionStage(order);
+    const poStatus = String(order.status || '').trim();
+
+    switch (executionStatus) {
+      case 'supplier_pending_confirmation':
+        return { label: '待确认接单', className: 'bg-yellow-100 text-yellow-800 border-yellow-300' };
+      case 'supplier_confirmed':
+        return { label: '已确认接单', className: 'bg-green-100 text-green-800 border-green-300' };
+      case 'supplier_rejected':
+        return { label: '已拒绝接单', className: 'bg-rose-100 text-rose-800 border-rose-300' };
+      case 'sampling':
+        return { label: '产前样处理中', className: 'bg-sky-100 text-sky-800 border-sky-300' };
+      case 'in_production':
+        return { label: '生产中', className: 'bg-blue-100 text-blue-800 border-blue-300' };
+      case 'supplier_self_inspection_pending':
+        return { label: '待提交自检', className: 'bg-cyan-100 text-cyan-800 border-cyan-300' };
+      case 'supplier_self_inspection_submitted':
+        return { label: '已提交自检', className: 'bg-teal-100 text-teal-800 border-teal-300' };
+      case 'qc_pending':
+        return { label: '待验货', className: 'bg-violet-100 text-violet-800 border-violet-300' };
+      case 'qc_passed':
+        return { label: '验货通过', className: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+      case 'qc_failed':
+        return { label: '验货异常', className: 'bg-rose-100 text-rose-800 border-rose-300' };
+      case 'finished_goods_ready':
+        return { label: '成品待出货', className: 'bg-indigo-100 text-indigo-800 border-indigo-300' };
+      case 'awaiting_loading':
+        return { label: '待装柜', className: 'bg-orange-100 text-orange-800 border-orange-300' };
+      case 'loaded':
+        return { label: '已装柜', className: 'bg-lime-100 text-lime-800 border-lime-300' };
+      case 'shipped':
+        return { label: '已发货', className: 'bg-slate-100 text-slate-800 border-slate-300' };
+      case 'completed':
+        return { label: '已完成', className: 'bg-purple-100 text-purple-800 border-purple-300' };
+      default:
+        if (poStatus === 'cancelled') {
+          return { label: '已取消', className: 'bg-red-100 text-red-800 border-red-300' };
+        }
+        if (poStatus === 'completed') {
+          return { label: '已完成', className: 'bg-purple-100 text-purple-800 border-purple-300' };
+        }
+        if (poStatus === 'producing') {
+          return { label: '生产中', className: 'bg-blue-100 text-blue-800 border-blue-300' };
+        }
+        if (poStatus === 'confirmed') {
+          return { label: '已确认', className: 'bg-green-100 text-green-800 border-green-300' };
+        }
+        return { label: '待处理', className: 'bg-gray-100 text-gray-800 border-gray-300' };
+    }
+  }, [resolveSupplierExecutionStage]);
+
+  const getSupplierOrderProgress = React.useCallback((order: any) => {
+    const executionStatus = resolveSupplierExecutionStage(order);
+    switch (executionStatus) {
+      case 'supplier_pending_confirmation':
+        return 5;
+      case 'supplier_confirmed':
+        return 15;
+      case 'supplier_rejected':
+        return 0;
+      case 'sampling':
+        return 30;
+      case 'in_production':
+        return 60;
+      case 'supplier_self_inspection_pending':
+        return 75;
+      case 'supplier_self_inspection_submitted':
+        return 85;
+      case 'qc_pending':
+        return 90;
+      case 'qc_passed':
+        return 95;
+      case 'finished_goods_ready':
+        return 97;
+      case 'awaiting_loading':
+        return 98;
+      case 'loaded':
+        return 99;
+      case 'shipped':
+      case 'completed':
+        return 100;
+      default:
+        return String(order.status || '').trim() === 'producing' ? 60 : 0;
+    }
+  }, [resolveSupplierExecutionStage]);
+
   // 🔥 获取当前供应商的询价单
   const myXJs = useMemo(() => {
     if (!user?.email) {
@@ -361,7 +937,8 @@ export default function SupplierOrderManagementCenter() {
       return [];
     }
     console.log('🔍 [供应商订单管理中心] 正在获取采购询价，供应商邮箱:', user.email);
-    const result = getXJsBySupplier(user.email);
+    const directResult = getXJsBySupplier(user.email);
+    const result = directResult.length > 0 ? directResult : xjs.filter(matchesCurrentSupplier);
     console.log('📦 [供应商订单管理中心] 获取到的采购询价数量:', result.length);
     if (result.length > 0) {
       console.log('  - 采购询价详情:', result.map(r => ({
@@ -372,7 +949,7 @@ export default function SupplierOrderManagementCenter() {
       })));
     }
     return result;
-  }, [xjs, user?.email, getXJsBySupplier]);
+  }, [getXJsBySupplier, matchesCurrentSupplier, xjs, user?.email]);
 
   const syncXJQuoteFromBJ = React.useCallback(async (quotation: any, bjStatus: 'draft' | 'submitted' | 'accepted' | 'rejected' | 'completed') => {
     const relatedXJ = myXJs.find(r =>
@@ -406,18 +983,1106 @@ export default function SupplierOrderManagementCenter() {
   const findActiveQuotationForXJ = React.useCallback((xj: any, quotationList?: any[]) => {
     const xjKey = getXJRefKey(xj);
     if (!xjKey) return undefined;
-    const currentUser = String(user?.email || '').trim().toLowerCase();
     const list = Array.isArray(quotationList) ? quotationList : supplierQuotations;
     return list.find((q: any) => {
       const qKey = String(q?.sourceXJ || q?.xjNo || q?.xjNumber || '').trim();
       const byRef = qKey !== '' && qKey === xjKey;
-      if (!byRef) return false;
-      const bySupplierEmail = String(q?.supplierEmail || '').trim().toLowerCase() === currentUser;
-      const byCreatedBy = String(q?.createdBy || '').trim().toLowerCase() === currentUser;
-      const bySupplierCode = String(q?.supplierCode || '').trim().toLowerCase() === currentUser;
-      return bySupplierEmail || byCreatedBy || bySupplierCode;
+      return byRef && matchesCurrentSupplier(q);
     });
-  }, [getXJRefKey, supplierQuotations, user?.email]);
+  }, [getXJRefKey, matchesCurrentSupplier, supplierQuotations]);
+
+  const getSingleSupplierMainlineFallback = React.useCallback((order: any) => {
+    const renderMeta = order?.documentRenderMeta || order?.document_render_meta || {};
+    const supplierPortalLinkage = renderMeta?.supplierPortalLinkage || {};
+    const snapshot = order?.documentDataSnapshot || order?.document_data_snapshot || {};
+    const editForm = snapshot?.editForm || {};
+    const parentPoNumber = String(order?.parentRequestPoNumber || '').trim();
+    const parentRequest = parentPoNumber
+      ? purchaseOrders.find((po) => String(po?.poNumber || '').trim() === parentPoNumber)
+      : null;
+    const parentSnapshot = parentRequest?.documentDataSnapshot || parentRequest?.document_data_snapshot || {};
+    const parentEditForm = parentSnapshot?.editForm || {};
+
+    const internalInquiryRefs = [
+      order?.xjNumber,
+      order?.sourceRef,
+      editForm?.xjNumber,
+      editForm?.sourceRef,
+      parentRequest?.xjNumber,
+      parentRequest?.sourceRef,
+      parentEditForm?.xjNumber,
+      parentEditForm?.sourceRef,
+      parentSnapshot?.xjNumber,
+      parentSnapshot?.sourceRef,
+      supplierPortalLinkage?.sourceInquiryNumber,
+    ]
+      .map((value) => String(value || '').trim().toUpperCase())
+      .filter((value) => /^ING-/i.test(value));
+
+    if (internalInquiryRefs.length === 0) {
+      return { xj: null, quotation: null, internalInquiryRefs: [] as string[] };
+    }
+
+    const visibleXjs = myXJs.filter((xj: any) => {
+      return [xj?.supplierXjNo, xj?.xjNumber]
+        .map((value) => String(value || '').trim())
+        .some((value) => /^XJ-/i.test(value));
+    });
+
+    if (visibleXjs.length !== 1) {
+      return { xj: null, quotation: null, internalInquiryRefs };
+    }
+
+    const xj = visibleXjs[0];
+    const quotation = findActiveQuotationForXJ(xj)
+      || supplierQuotations.filter((item: any) => {
+        return [item?.quotationNo, item?.bjNumber, item?.quotationNumber]
+          .map((value) => String(value || '').trim())
+          .some((value) => /^BJ-/i.test(value));
+      })[0]
+      || null;
+
+    return { xj, quotation, internalInquiryRefs };
+  }, [findActiveQuotationForXJ, myXJs, purchaseOrders, supplierQuotations]);
+
+  const findRequirementForSupplierOrder = React.useCallback((order: any) => {
+    const parentPoNumber = String(order?.parentRequestPoNumber || '').trim();
+    const parentRequest = parentPoNumber
+      ? purchaseOrders.find((po) => String(po?.poNumber || '').trim() === parentPoNumber)
+      : null;
+    const parentSnapshot = parentRequest?.documentDataSnapshot || parentRequest?.document_data_snapshot || {};
+    const parentEditForm = parentSnapshot?.editForm || {};
+    const requirementNo = String(
+      order?.requirementNo ||
+      order?.requirementNumber ||
+      order?.sourceQRNumber ||
+      order?.qrNumber ||
+      parentRequest?.requirementNo ||
+      parentRequest?.requirementNumber ||
+      parentRequest?.sourceQRNumber ||
+      parentRequest?.qrNumber ||
+      parentEditForm?.requirementNo ||
+      parentEditForm?.requirementNumber ||
+      parentEditForm?.qrNumber ||
+      parentSnapshot?.requirementNo ||
+      parentSnapshot?.requirementNumber ||
+      parentSnapshot?.qrNumber ||
+      ''
+    ).trim();
+    const matchedByRequirementNo = requirementNo
+      ? requirements.find((requirement) => String(
+          requirement?.requirementNo ||
+          requirement?.requirementNumber ||
+          requirement?.qrNumber ||
+          ''
+        ).trim() === requirementNo) || null
+      : null;
+    if (matchedByRequirementNo) return matchedByRequirementNo;
+
+    const candidateRefs = [
+      order?.xjNumber,
+      order?.sourceRef,
+      order?.sourceInquiryNumber,
+      order?.sourceQRNumber,
+      order?.qrNumber,
+      parentRequest?.xjNumber,
+      parentRequest?.sourceRef,
+      parentRequest?.sourceInquiryNumber,
+      parentRequest?.sourceQRNumber,
+      parentRequest?.qrNumber,
+      parentEditForm?.xjNumber,
+      parentEditForm?.sourceRef,
+      parentEditForm?.sourceInquiryNumber,
+      parentEditForm?.sourceQRNumber,
+      parentSnapshot?.xjNumber,
+      parentSnapshot?.sourceRef,
+      parentSnapshot?.sourceInquiryNumber,
+      parentSnapshot?.sourceQRNumber,
+    ]
+      .map((value) => String(value || '').trim().toUpperCase())
+      .filter(Boolean);
+
+    if (candidateRefs.length === 0) return null;
+
+    const matchedBySourceRef = requirements.find((requirement) => {
+      const refs = [
+        requirement?.sourceInquiryNumber,
+        requirement?.sourceRef,
+        requirement?.sourceSoNumber,
+        requirement?.requirementNo,
+        requirement?.requirementNumber,
+        requirement?.qrNumber,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+      return refs.some((ref) => candidateRefs.includes(ref));
+    }) || null;
+    if (matchedBySourceRef) return matchedBySourceRef;
+
+    const matchedXj = myXJs.find((xj) => {
+      const refs = [
+        xj?.supplierXjNo,
+        xj?.xjNumber,
+        xj?.sourceRef,
+        xj?.sourceInquiryNumber,
+        xj?.sourceQRNumber,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+      return refs.some((ref) => candidateRefs.includes(ref));
+    });
+    if (!matchedXj) return null;
+
+    const fallbackRequirementNo = String(
+      matchedXj?.requirementNo ||
+      matchedXj?.sourceQRNumber ||
+      ''
+    ).trim();
+    if (String(order?.poNumber || '').trim() === 'CG-260409-0001') {
+      console.log('🔎 [SupplierOrderMgmt][CG需求回溯]', JSON.stringify({
+        poNumber: order?.poNumber,
+        candidateRefs,
+        matchedBySourceRef: matchedBySourceRef ? {
+          requirementNo: matchedBySourceRef?.requirementNo,
+          sourceInquiryNumber: matchedBySourceRef?.sourceInquiryNumber,
+          sourceSoNumber: matchedBySourceRef?.sourceSoNumber,
+        } : null,
+        matchedXj: matchedXj ? {
+          supplierXjNo: matchedXj?.supplierXjNo,
+          xjNumber: matchedXj?.xjNumber,
+          sourceInquiryNumber: matchedXj?.sourceInquiryNumber,
+          sourceRef: matchedXj?.sourceRef,
+          sourceQRNumber: matchedXj?.sourceQRNumber,
+          requirementNo: matchedXj?.requirementNo,
+        } : null,
+        fallbackRequirementNo,
+      }, null, 2));
+    }
+    if (!fallbackRequirementNo) return null;
+
+    return requirements.find((requirement) => String(
+      requirement?.requirementNo ||
+      requirement?.requirementNumber ||
+      requirement?.qrNumber ||
+      ''
+    ).trim() === fallbackRequirementNo) || null;
+  }, [myXJs, purchaseOrders, requirements]);
+
+  const findRequirementForXJ = React.useCallback((xj: any) => {
+    const requirementNo = String(
+      xj?.requirementNo ||
+      xj?.sourceQRNumber ||
+      xj?.documentData?.requirementNo ||
+      xj?.documentDataSnapshot?.requirementNo ||
+      ''
+    ).trim();
+
+    if (requirementNo) {
+      const directMatched = requirements.find((requirement) => String(
+        requirement?.requirementNo ||
+        requirement?.requirementNumber ||
+        requirement?.qrNumber ||
+        ''
+      ).trim() === requirementNo) || null;
+      if (directMatched) return directMatched;
+    }
+
+    const candidateRefs = [
+      xj?.supplierXjNo,
+      xj?.xjNumber,
+      xj?.sourceInquiryNumber,
+      xj?.sourceRef,
+      xj?.sourceQRNumber,
+      xj?.documentData?.sourceInquiryNumber,
+      xj?.documentData?.sourceRef,
+      xj?.documentDataSnapshot?.sourceInquiryNumber,
+      xj?.documentDataSnapshot?.sourceRef,
+    ]
+      .map((value) => String(value || '').trim().toUpperCase())
+      .filter(Boolean);
+
+    if (candidateRefs.length === 0) return null;
+
+    return requirements.find((requirement) => {
+      const refs = [
+        requirement?.sourceInquiryNumber,
+        requirement?.sourceRef,
+        requirement?.sourceSoNumber,
+        requirement?.requirementNo,
+        requirement?.requirementNumber,
+        requirement?.qrNumber,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+      return refs.some((ref) => candidateRefs.includes(ref));
+    }) || null;
+  }, [requirements]);
+
+  const getRequirementCustomerIdentity = React.useCallback((requirement: any) => {
+    if (!requirement) return { name: '', company: '' };
+
+    const snapshotCustomer =
+      requirement?.documentDataSnapshot?.customer ||
+      requirement?.document_data_snapshot?.customer ||
+      {};
+    const requirementCustomer = requirement?.customer || {};
+    const sourceInquiry = requirement?.sourceInquiry || requirement?.source_inquiry || {};
+    const sourceBuyer = sourceInquiry?.buyerInfo || sourceInquiry?.buyer_info || {};
+
+    const company = pickDisplayText([
+      requirementCustomer?.companyName,
+      snapshotCustomer?.companyName,
+      requirement?.customerCompany,
+      requirement?.customerName,
+      requirement?.buyerInfo?.companyName,
+      requirement?.buyerCompany,
+      sourceBuyer?.companyName,
+      sourceInquiry?.buyerCompany,
+    ]);
+
+    const name = pickDisplayText([
+      company,
+      requirementCustomer?.contactPerson,
+      snapshotCustomer?.contactPerson,
+      requirement?.customerName,
+      requirement?.buyerInfo?.contactPerson,
+      sourceBuyer?.contactPerson,
+    ]);
+
+    return {
+      name,
+      company: company || name,
+    };
+  }, []);
+
+  const getCustomerIdentityForXJ = React.useCallback((xj: any) => {
+    const xjDocument = xj?.documentData || {};
+    const xjSnapshot = xj?.documentDataSnapshot || xj?.document_data_snapshot || {};
+    const xjBuyer =
+      xjDocument?.buyer ||
+      xjSnapshot?.buyer ||
+      {};
+    const xjCustomer = xjDocument?.customer || xjSnapshot?.customer || {};
+    const xjBuyerInfo = xjDocument?.buyerInfo || xj?.buyerInfo || {};
+
+    const company = pickDisplayText([
+      xjBuyer?.name,
+      xjBuyer?.companyName,
+      xj?.buyerCompany,
+      xjBuyerInfo?.companyName,
+      issuerFallbackName,
+    ]);
+
+    const name = pickDisplayText([
+      xjBuyer?.contactPerson,
+      xj?.buyerContact,
+      xjBuyerInfo?.contactPerson,
+      xjBuyer?.name,
+      xjBuyer?.companyName,
+      xj?.buyerCompany,
+      issuerFallbackName,
+      company,
+    ]);
+
+    return {
+      name,
+      company: company || name,
+    };
+  }, [issuerFallbackName]);
+
+  const findXJForQuotation = React.useCallback((quotation: any) => {
+    const quotationRefs = [
+      quotation?.sourceXJ,
+      quotation?.sourceXJNumber,
+      quotation?.xjNo,
+      quotation?.xjNumber,
+      quotation?.sourceXJId,
+      quotation?.quoteData?.xjNo,
+      quotation?.quoteData?.xjNumber,
+      quotation?.sourceQR,
+      quotation?.requirementNo,
+    ]
+      .map((value) => String(value || '').trim().toUpperCase())
+      .filter(Boolean);
+
+    if (quotationRefs.length === 0) return null;
+
+    return myXJs.find((xj) => {
+      const refs = [
+        xj?.id,
+        xj?.supplierXjNo,
+        xj?.xjNumber,
+        xj?.sourceInquiryNumber,
+        xj?.sourceRef,
+        xj?.sourceQRNumber,
+        xj?.requirementNo,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+      return refs.some((ref) => quotationRefs.includes(ref));
+    }) || null;
+  }, [myXJs]);
+
+  const getCustomerIdentityForQuotation = React.useCallback((quotation: any) => {
+    const matchedXj = findXJForQuotation(quotation);
+    const matchedRequirement = matchedXj
+      ? findRequirementForXJ(matchedXj)
+      : requirements.find((requirement) => String(
+          requirement?.requirementNo ||
+          requirement?.requirementNumber ||
+          requirement?.qrNumber ||
+          ''
+        ).trim() === String(
+          quotation?.sourceQR ||
+          quotation?.requirementNo ||
+          quotation?.quoteData?.sourceQR ||
+          ''
+        ).trim()) || null;
+
+    const flowIdentity = matchedXj
+      ? getCustomerIdentityForXJ(matchedXj)
+      : getRequirementCustomerIdentity(matchedRequirement);
+
+    const quoteData = quotation?.quoteData || {};
+    const company = pickDisplayText([
+      flowIdentity.company,
+      quotation?.buyerCompany,
+      quoteData?.buyerCompany,
+      issuerFallbackName,
+      quotation?.customerCompany,
+      quoteData?.customerCompany,
+      quotation?.customerName,
+      quoteData?.customerName,
+    ]);
+
+    const name = pickDisplayText([
+      flowIdentity.name,
+      quotation?.buyerContact,
+      quoteData?.buyerContact,
+      company,
+      issuerFallbackName,
+      quotation?.customerName,
+      quoteData?.customerName,
+      quotation?.customerContact,
+      quoteData?.customerContact,
+    ]);
+
+    return {
+      name,
+      company: company || name,
+    };
+  }, [findRequirementForXJ, findXJForQuotation, getCustomerIdentityForXJ, getRequirementCustomerIdentity, issuerFallbackName, requirements]);
+
+  const getSupplierOrderTraceRefs = React.useCallback((order: any) => {
+    const refs = new Set<string>();
+    const pushRef = (value: unknown) => {
+      const normalized = String(value || '').trim().toUpperCase();
+      if (normalized) refs.add(normalized);
+    };
+
+    const renderMeta = order?.documentRenderMeta || order?.document_render_meta || {};
+    const linkage = renderMeta?.procurementLinkage || {};
+    const supplierPortalLinkage = renderMeta?.supplierPortalLinkage || {};
+    const snapshot = order?.documentDataSnapshot || order?.document_data_snapshot || {};
+    const editForm = snapshot?.editForm || {};
+    const matchedRequirement = findRequirementForSupplierOrder(order);
+    const linkedBjList = String(matchedRequirement?.purchaserFeedback?.linkedBJ || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const linkedXjList = String(matchedRequirement?.purchaserFeedback?.linkedXJ || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    pushRef(order?.poNumber);
+    pushRef(order?.cgNumber);
+    pushRef(order?.requirementNo);
+    pushRef(order?.parentRequestPoNumber);
+    pushRef(order?.xjNumber);
+    pushRef(order?.xjId);
+    pushRef(order?.sourceRef);
+    pushRef(order?.sourceSONumber);
+    pushRef(order?.salesContractNumber);
+    pushRef(order?.quotationNumber);
+    pushRef(order?.selectedBjId);
+    pushRef(order?.selectedQuote?.quotationNo);
+    pushRef(order?.selectedQuote?.quotationNumber);
+    pushRef(order?.selectedQuote?.bjNumber);
+    pushRef(order?.selectedQuote?.sourceXJ);
+    pushRef(order?.selectedQuote?.sourceXJNumber);
+    pushRef(order?.selectedQuote?.xjNumber);
+    pushRef(linkage?.sourceRef);
+    pushRef(linkage?.sourceSONumber);
+    pushRef(linkage?.salesContractNumber);
+    pushRef(linkage?.quotationNumber);
+    pushRef(supplierPortalLinkage?.supplierXjNo);
+    pushRef(supplierPortalLinkage?.supplierBjNo);
+    pushRef(supplierPortalLinkage?.supplierQuotationId);
+    pushRef(editForm?.poNumber);
+    pushRef(editForm?.requirementNo);
+    pushRef(editForm?.xjNumber);
+    pushRef(editForm?.sourceRef);
+    pushRef(editForm?.supplierQuotationNo);
+    pushRef(matchedRequirement?.requirementNo);
+    pushRef(matchedRequirement?.sourceRef);
+    pushRef(matchedRequirement?.sourceInquiryNumber);
+    linkedBjList.forEach(pushRef);
+    linkedXjList.forEach(pushRef);
+    (matchedRequirement?.purchaserFeedback?.products || []).forEach((product: any) => {
+      pushRef(product?.sourcePricing?.sourceDocumentNo);
+      pushRef(product?.sourcePricing?.supplierQuotationNo);
+    });
+
+    return refs;
+  }, [findRequirementForSupplierOrder]);
+
+  const getSupplierQuoteCandidates = React.useCallback((order: any) => {
+    const refs = getSupplierOrderTraceRefs(order);
+    const preferredSupplierCode = String(order?.supplierCode || '').trim().toUpperCase();
+    const preferredSupplierEmail = String(order?.supplierEmail || '').trim().toLowerCase();
+    const statusWeight = (status: unknown) => {
+      const normalized = String(status || '').trim().toLowerCase();
+      if (normalized === 'accepted' || normalized === 'approved' || normalized === 'completed') return 0;
+      if (normalized === 'submitted' || normalized === 'quoted') return 1;
+      if (normalized === 'draft') return 2;
+      return 3;
+    };
+
+    const candidates = supplierQuotations.filter((quotation: any) => {
+      if (hiddenQuotationIds.has(String(quotation?.id || ''))) return false;
+      const quotationSupplierCode = String(quotation?.supplierCode || '').trim().toUpperCase();
+      const quotationSupplierEmail = String(quotation?.supplierEmail || quotation?.createdBy || '').trim().toLowerCase();
+
+      if (
+        preferredSupplierCode &&
+        preferredSupplierCode !== 'TBD' &&
+        quotationSupplierCode &&
+        quotationSupplierCode !== preferredSupplierCode
+      ) {
+        return false;
+      }
+
+      if (
+        preferredSupplierEmail &&
+        quotationSupplierEmail &&
+        quotationSupplierEmail !== preferredSupplierEmail
+      ) {
+        return false;
+      }
+
+      const quotationRefs = [
+        quotation?.id,
+        quotation?.quotationNo,
+        quotation?.bjNumber,
+        quotation?.quotationNumber,
+        quotation?.sourceXJ,
+        quotation?.sourceXJNumber,
+        quotation?.xjNo,
+        quotation?.xjNumber,
+        quotation?.sourceQR,
+        quotation?.requirementNo,
+        quotation?.sourceXJId,
+        quotation?.quoteData?.sourceQR,
+        quotation?.quoteData?.xjNo,
+        quotation?.quoteData?.xjNumber,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+
+      return quotationRefs.some((ref) => refs.has(ref));
+    });
+
+    return candidates.sort((a: any, b: any) => {
+      const weightDiff = statusWeight(a?.status) - statusWeight(b?.status);
+      if (weightDiff !== 0) return weightDiff;
+      const aTime = Date.parse(String(a?.submittedDate || a?.quotationDate || a?.quotedDate || a?.updatedAt || 0));
+      const bTime = Date.parse(String(b?.submittedDate || b?.quotationDate || b?.quotedDate || b?.updatedAt || 0));
+      return bTime - aTime;
+    });
+  }, [getSupplierOrderTraceRefs, hiddenQuotationIds, supplierQuotations]);
+
+  const pickSupplierVisibleNumber = React.useCallback((values: unknown[], kind: 'cg' | 'xj' | 'bj') => {
+    const patterns = {
+      cg: /^CG-/i,
+      xj: /^XJ-/i,
+      bj: /^BJ-/i,
+    } as const;
+    return values
+      .map((value) => String(value || '').trim())
+      .find((value) => patterns[kind].test(value)) || '';
+  }, []);
+
+  const getRFQPushState = React.useCallback((xj: any) => {
+    const activeQuotation = findActiveQuotationForXJ(xj);
+    const normalizedStatus = String(xj?.status || '').trim().toLowerCase();
+    const quotationHints = [
+      xj?.supplierQuotationNo,
+      xj?.quotationNo,
+      xj?.quotedPrice,
+      xj?.quotedDate,
+      Array.isArray(xj?.quotes) ? xj.quotes.length : 0,
+    ];
+    const hasQuotationEvidence = quotationHints.some((value) => {
+      if (typeof value === 'number') return value > 0;
+      return String(value || '').trim() !== '';
+    });
+    const isPushed = Boolean(
+      activeQuotation ||
+      normalizedStatus === 'quoted' ||
+      normalizedStatus === 'submitted' ||
+      hasQuotationEvidence
+    );
+
+    return {
+      activeQuotation,
+      isPushed,
+      badgeLabel: isPushed ? supplierUiCopy.pushed : supplierUiCopy.pendingQuote,
+      badgeClassName: isPushed
+        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+        : 'bg-amber-100 text-amber-800 border-amber-300',
+      actionLabel: isPushed ? supplierUiCopy.pushed : supplierUiCopy.pushQuote,
+      actionClassName: isPushed
+        ? 'h-8 px-3 text-xs font-medium border-emerald-300 text-emerald-700 bg-emerald-50 cursor-not-allowed opacity-75'
+        : 'h-8 px-3 text-xs font-medium border-amber-300 text-amber-700 hover:bg-amber-50',
+    };
+  }, [findActiveQuotationForXJ, supplierUiCopy.pendingQuote, supplierUiCopy.pushQuote, supplierUiCopy.pushed]);
+
+  const getSupplierVisibleRFQNumbers = React.useCallback((xj: any) => {
+    const pushState = getRFQPushState(xj);
+    const related: Array<{ label: string; value: string }> = [];
+    const supplierXjNo = pickSupplierVisibleNumber([
+      xj?.supplierXjNo,
+      xj?.xjNumber,
+    ], 'xj');
+    const supplierBjNo = pickSupplierVisibleNumber([
+      pushState.activeQuotation?.quotationNo,
+      pushState.activeQuotation?.bjNumber,
+      xj?.supplierQuotationNo,
+      xj?.quotationNo,
+    ], 'bj');
+
+    if (supplierXjNo) related.push({ label: '询价单号', value: supplierXjNo });
+    if (supplierBjNo) related.push({ label: '报价单号', value: supplierBjNo });
+
+    return related;
+  }, [getRFQPushState, pickSupplierVisibleNumber]);
+
+  const getFormalSupplierPortalLinkage = React.useCallback((order: any) => {
+    const renderMeta = order?.documentRenderMeta || order?.document_render_meta || {};
+    const supplierPortalLinkage = renderMeta?.supplierPortalLinkage || {};
+    const snapshot = order?.documentDataSnapshot || order?.document_data_snapshot || {};
+    const editForm = snapshot?.editForm || {};
+    const parentPoNumber = String(order?.parentRequestPoNumber || '').trim();
+    const parentRequest = parentPoNumber
+      ? purchaseOrders.find((po) => String(po?.poNumber || '').trim() === parentPoNumber)
+      : null;
+    const parentSnapshot = parentRequest?.documentDataSnapshot || parentRequest?.document_data_snapshot || {};
+    const parentEditForm = parentSnapshot?.editForm || {};
+    const candidateRefs = [
+      order?.xjNumber,
+      order?.sourceRef,
+      order?.sourceInquiryNumber,
+      order?.sourceQRNumber,
+      order?.qrNumber,
+      editForm?.xjNumber,
+      editForm?.sourceRef,
+      editForm?.sourceInquiryNumber,
+      editForm?.sourceQRNumber,
+      parentRequest?.xjNumber,
+      parentRequest?.sourceRef,
+      parentRequest?.sourceInquiryNumber,
+      parentRequest?.sourceQRNumber,
+      parentRequest?.qrNumber,
+      parentEditForm?.xjNumber,
+      parentEditForm?.sourceRef,
+      parentEditForm?.sourceInquiryNumber,
+      parentEditForm?.sourceQRNumber,
+      parentSnapshot?.xjNumber,
+      parentSnapshot?.sourceRef,
+      parentSnapshot?.sourceInquiryNumber,
+      parentSnapshot?.sourceQRNumber,
+    ]
+      .map((value) => String(value || '').trim().toUpperCase())
+      .filter(Boolean);
+    const directMatchedXj = myXJs.find((xj) => {
+      const refs = [
+        xj?.supplierXjNo,
+        xj?.xjNumber,
+        xj?.sourceInquiryNumber,
+        xj?.sourceRef,
+        xj?.sourceQRNumber,
+        xj?.requirementNo,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+      return refs.some((ref) => candidateRefs.includes(ref));
+    }) || null;
+    const directMatchedQuotation = directMatchedXj
+      ? (findActiveQuotationForXJ(directMatchedXj) || supplierQuotations.find((quotation: any) => {
+          const refs = [
+            quotation?.sourceXJ,
+            quotation?.sourceXJNumber,
+            quotation?.xjNumber,
+            quotation?.sourceXJId,
+            quotation?.id,
+          ]
+            .map((value) => String(value || '').trim().toUpperCase())
+            .filter(Boolean);
+          const xjRefs = [
+            directMatchedXj?.supplierXjNo,
+            directMatchedXj?.xjNumber,
+            directMatchedXj?.id,
+          ]
+            .map((value) => String(value || '').trim().toUpperCase())
+            .filter(Boolean);
+          return refs.some((ref) => xjRefs.includes(ref));
+        }) || null)
+      : null;
+    const matchedRequirement = findRequirementForSupplierOrder(order);
+    const shouldDebugLinkage = String(order?.poNumber || '').trim() === 'CG-260409-0001';
+    if (shouldDebugLinkage) {
+      console.log('🔎 [SupplierOrderMgmt][CG主线调试]', {
+        poNumber: order?.poNumber,
+        requirementNo: order?.requirementNo,
+        parentRequestPoNumber: order?.parentRequestPoNumber,
+        parentRequestRequirementNo: parentRequest?.requirementNo,
+        xjNumber: order?.xjNumber,
+        selectedBjId: order?.selectedBjId,
+        supplierPortalLinkage,
+        editForm: {
+          requirementNo: editForm?.requirementNo,
+          xjNumber: editForm?.xjNumber,
+          supplierQuotationNo: editForm?.supplierQuotationNo,
+        },
+        matchedRequirement: matchedRequirement ? {
+          requirementNo: matchedRequirement?.requirementNo,
+          sourceInquiryNumber: matchedRequirement?.sourceInquiryNumber,
+          sourceSoNumber: matchedRequirement?.sourceSoNumber,
+          linkedBJ: matchedRequirement?.purchaserFeedback?.linkedBJ,
+          linkedXJ: matchedRequirement?.purchaserFeedback?.linkedXJ,
+          feedbackProducts: (matchedRequirement?.purchaserFeedback?.products || []).map((product: any) => ({
+            supplierQuotationNo: product?.sourcePricing?.supplierQuotationNo,
+            sourceDocumentNo: product?.sourcePricing?.sourceDocumentNo,
+          })),
+        } : null,
+        directMatchedXj: directMatchedXj ? {
+          supplierXjNo: directMatchedXj?.supplierXjNo,
+          xjNumber: directMatchedXj?.xjNumber,
+          requirementNo: directMatchedXj?.requirementNo,
+          sourceInquiryNumber: directMatchedXj?.sourceInquiryNumber,
+          sourceQRNumber: directMatchedXj?.sourceQRNumber,
+          supplierQuotationNo: directMatchedXj?.supplierQuotationNo,
+        } : null,
+        directMatchedQuotation: directMatchedQuotation ? {
+          quotationNo: directMatchedQuotation?.quotationNo,
+          bjNumber: directMatchedQuotation?.bjNumber,
+          sourceXJ: directMatchedQuotation?.sourceXJ,
+        } : null,
+      });
+      console.log('🔎 [SupplierOrderMgmt][CG-XJ纯文本]', JSON.stringify({
+        poNumber: order?.poNumber,
+        candidateRefs,
+        myXJs: myXJs.map((xj: any) => ({
+          supplierXjNo: xj?.supplierXjNo,
+          xjNumber: xj?.xjNumber,
+          sourceInquiryNumber: xj?.sourceInquiryNumber,
+          sourceRef: xj?.sourceRef,
+          sourceQRNumber: xj?.sourceQRNumber,
+          requirementNo: xj?.requirementNo,
+          supplierQuotationNo: xj?.supplierQuotationNo,
+          status: xj?.status,
+        })),
+        directMatchedXj: directMatchedXj ? {
+          supplierXjNo: directMatchedXj?.supplierXjNo,
+          xjNumber: directMatchedXj?.xjNumber,
+          sourceInquiryNumber: directMatchedXj?.sourceInquiryNumber,
+          sourceRef: directMatchedXj?.sourceRef,
+          sourceQRNumber: directMatchedXj?.sourceQRNumber,
+          requirementNo: directMatchedXj?.requirementNo,
+          supplierQuotationNo: directMatchedXj?.supplierQuotationNo,
+        } : null,
+        directMatchedQuotation: directMatchedQuotation ? {
+          quotationNo: directMatchedQuotation?.quotationNo,
+          bjNumber: directMatchedQuotation?.bjNumber,
+          sourceXJ: directMatchedQuotation?.sourceXJ,
+          sourceXJNumber: directMatchedQuotation?.sourceXJNumber,
+        } : null,
+      }, null, 2));
+    }
+    if (!matchedRequirement && !directMatchedXj && !directMatchedQuotation) return null;
+
+    const linkedBjList = String(matchedRequirement?.purchaserFeedback?.linkedBJ || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const linkedXjList = String(matchedRequirement?.purchaserFeedback?.linkedXJ || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const feedbackSupplierQuotationNos = (matchedRequirement?.purchaserFeedback?.products || [])
+      .flatMap((product: any) => [
+        product?.sourcePricing?.supplierQuotationNo,
+        product?.sourcePricing?.sourceDocumentNo,
+      ])
+      .map((value: unknown) => String(value || '').trim())
+      .filter(Boolean);
+    const mainlineBjRefs = new Set(
+      [...linkedBjList, ...feedbackSupplierQuotationNos]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean),
+    );
+    const mainlineXjRefs = new Set(
+      [
+        ...linkedXjList,
+        matchedRequirement?.sourceInquiryNumber,
+        matchedRequirement?.sourceRef,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean),
+    );
+    const requirementNo = String(
+      matchedRequirement?.requirementNo ||
+      directMatchedXj?.requirementNo ||
+      directMatchedXj?.sourceQRNumber ||
+      ''
+    ).trim().toUpperCase();
+
+    const strictQuotationCandidates = supplierQuotations
+      .filter((quotation: any) => {
+        if (hiddenQuotationIds.has(String(quotation?.id || ''))) return false;
+        const refs = [
+          quotation?.id,
+          quotation?.quotationNo,
+          quotation?.bjNumber,
+          quotation?.quotationNumber,
+          quotation?.sourceXJ,
+          quotation?.sourceXJNumber,
+          quotation?.xjNo,
+          quotation?.xjNumber,
+          quotation?.requirementNo,
+          quotation?.sourceQR,
+          quotation?.quoteData?.sourceQR,
+          quotation?.quoteData?.xjNo,
+          quotation?.quoteData?.xjNumber,
+        ]
+          .map((value) => String(value || '').trim().toUpperCase())
+          .filter(Boolean);
+
+        return refs.some((ref) => mainlineBjRefs.has(ref) || mainlineXjRefs.has(ref) || (requirementNo && ref === requirementNo));
+      })
+      .sort((a: any, b: any) => {
+        const getPriority = (quotation: any) => {
+          const quotationNo = String(
+            quotation?.quotationNo ||
+            quotation?.bjNumber ||
+            quotation?.quotationNumber ||
+            '',
+          ).trim().toUpperCase();
+          const sourceXj = String(
+            quotation?.sourceXJ ||
+            quotation?.sourceXJNumber ||
+            quotation?.xjNumber ||
+            '',
+          ).trim().toUpperCase();
+          if (quotationNo && mainlineBjRefs.has(quotationNo)) return 0;
+          if (sourceXj && mainlineXjRefs.has(sourceXj)) return 1;
+          if (String(quotation?.requirementNo || '').trim().toUpperCase() === requirementNo) return 2;
+          return 3;
+        };
+        const priorityDiff = getPriority(a) - getPriority(b);
+        if (priorityDiff !== 0) return priorityDiff;
+        const aTime = Date.parse(String(a?.submittedDate || a?.quotationDate || a?.quotedDate || a?.updatedAt || 0));
+        const bTime = Date.parse(String(b?.submittedDate || b?.quotationDate || b?.quotedDate || b?.updatedAt || 0));
+        return bTime - aTime;
+      });
+
+    const { xj: singleMainlineFallbackXj, quotation: singleMainlineFallbackQuotation, internalInquiryRefs } =
+      getSingleSupplierMainlineFallback(order);
+
+    const matchedQuotation = strictQuotationCandidates[0]
+      || directMatchedQuotation
+      || singleMainlineFallbackQuotation
+      || getSupplierQuoteCandidates(order)[0]
+      || null;
+    const strictXjCandidates = myXJs
+      .filter((xj: any) => {
+        const refs = [
+          xj?.id,
+          xj?.supplierXjNo,
+          xj?.xjNumber,
+          xj?.requirementNo,
+          xj?.sourceQRNumber,
+          xj?.sourceInquiryNumber,
+          xj?.sourceRef,
+        ]
+          .map((value) => String(value || '').trim().toUpperCase())
+          .filter(Boolean);
+        return refs.some((ref) => (
+          mainlineXjRefs.has(ref) ||
+          (requirementNo && ref === requirementNo) ||
+          ref === String(
+            matchedQuotation?.sourceXJ ||
+            matchedQuotation?.sourceXJNumber ||
+            matchedQuotation?.xjNumber ||
+            '',
+          ).trim().toUpperCase()
+        ));
+      })
+      .sort((a: any, b: any) => {
+        const getPriority = (xj: any) => {
+          const supplierXjNo = String(xj?.supplierXjNo || '').trim().toUpperCase();
+          const sourceInquiry = String(xj?.sourceInquiryNumber || xj?.sourceRef || '').trim().toUpperCase();
+          if (supplierXjNo && mainlineXjRefs.has(supplierXjNo)) return 0;
+          if (sourceInquiry && mainlineXjRefs.has(sourceInquiry)) return 1;
+          if (String(xj?.requirementNo || '').trim().toUpperCase() === requirementNo) return 2;
+          return 3;
+        };
+        return getPriority(a) - getPriority(b);
+      });
+
+    const matchedXj = strictXjCandidates[0]
+      || directMatchedXj
+      || singleMainlineFallbackXj
+      || null;
+    if (shouldDebugLinkage) {
+      console.log('🔎 [SupplierOrderMgmt][CG候选命中]', {
+        poNumber: order?.poNumber,
+        mainlineBjRefs: Array.from(mainlineBjRefs),
+        mainlineXjRefs: Array.from(mainlineXjRefs),
+        internalInquiryRefs,
+        strictQuotationCandidates: strictQuotationCandidates.map((quotation: any) => ({
+          id: quotation?.id,
+          quotationNo: quotation?.quotationNo,
+          bjNumber: quotation?.bjNumber,
+          sourceXJ: quotation?.sourceXJ,
+          requirementNo: quotation?.requirementNo,
+          supplierCode: quotation?.supplierCode,
+          supplierEmail: quotation?.supplierEmail,
+          status: quotation?.status,
+        })),
+        strictXjCandidates: strictXjCandidates.map((xj: any) => ({
+          id: xj?.id,
+          supplierXjNo: xj?.supplierXjNo,
+          xjNumber: xj?.xjNumber,
+          requirementNo: xj?.requirementNo,
+          sourceQRNumber: xj?.sourceQRNumber,
+          supplierCode: xj?.supplierCode,
+          supplierEmail: xj?.supplierEmail,
+          status: xj?.status,
+          supplierQuotationNo: xj?.supplierQuotationNo,
+        })),
+        matchedQuotation: matchedQuotation ? {
+          id: matchedQuotation?.id,
+          quotationNo: matchedQuotation?.quotationNo,
+          bjNumber: matchedQuotation?.bjNumber,
+          sourceXJ: matchedQuotation?.sourceXJ,
+          requirementNo: matchedQuotation?.requirementNo,
+        } : null,
+        matchedXj: matchedXj ? {
+          id: matchedXj?.id,
+          supplierXjNo: matchedXj?.supplierXjNo,
+          xjNumber: matchedXj?.xjNumber,
+          requirementNo: matchedXj?.requirementNo,
+          supplierQuotationNo: matchedXj?.supplierQuotationNo,
+        } : null,
+        singleMainlineFallbackXj: singleMainlineFallbackXj ? {
+          id: singleMainlineFallbackXj?.id,
+          supplierXjNo: singleMainlineFallbackXj?.supplierXjNo,
+          xjNumber: singleMainlineFallbackXj?.xjNumber,
+          supplierQuotationNo: singleMainlineFallbackXj?.supplierQuotationNo,
+        } : null,
+        singleMainlineFallbackQuotation: singleMainlineFallbackQuotation ? {
+          id: singleMainlineFallbackQuotation?.id,
+          quotationNo: singleMainlineFallbackQuotation?.quotationNo,
+          bjNumber: singleMainlineFallbackQuotation?.bjNumber,
+          sourceXJ: singleMainlineFallbackQuotation?.sourceXJ,
+        } : null,
+      });
+    }
+    const supplierBjNo = pickSupplierVisibleNumber([
+      supplierPortalLinkage?.supplierBjNo,
+      editForm?.supplierQuotationNo,
+      directMatchedQuotation?.quotationNo,
+      directMatchedQuotation?.bjNumber,
+      matchedQuotation?.quotationNo,
+      matchedQuotation?.bjNumber,
+      matchedQuotation?.quotationNumber,
+      matchedXj?.supplierQuotationNo,
+      findActiveQuotationForXJ(matchedXj || {}, strictQuotationCandidates)?.quotationNo,
+    ], 'bj');
+    const supplierXjNo = pickSupplierVisibleNumber([
+      supplierPortalLinkage?.supplierXjNo,
+      editForm?.xjNumber,
+      directMatchedXj?.supplierXjNo,
+      matchedXj?.supplierXjNo,
+      matchedQuotation?.sourceXJ,
+      matchedQuotation?.sourceXJNumber,
+      matchedQuotation?.xjNumber,
+    ], 'xj');
+
+    if (!supplierBjNo && !supplierXjNo) return null;
+
+    return {
+      supplierXjNo: supplierXjNo || null,
+      supplierBjNo: supplierBjNo || null,
+      supplierQuotationId: String(matchedQuotation?.id || supplierPortalLinkage?.supplierQuotationId || '').trim() || null,
+      supplierCode: String(order?.supplierCode || matchedQuotation?.supplierCode || supplierPortalLinkage?.supplierCode || '').trim() || null,
+    };
+  }, [findActiveQuotationForXJ, findRequirementForSupplierOrder, getSingleSupplierMainlineFallback, getSupplierQuoteCandidates, hiddenQuotationIds, myXJs, pickSupplierVisibleNumber, supplierQuotations]);
+
+  const getSupplierVisibleRelatedNumbers = React.useCallback((order: any) => {
+    const traceRefs = getSupplierOrderTraceRefs(order);
+    const matchedQuotation = getSupplierQuoteCandidates(order)[0];
+    const formalLinkage = getFormalSupplierPortalLinkage(order);
+    const fallbackMainline = getSingleSupplierMainlineFallback(order);
+    const matchedXj = myXJs.find((xj) => {
+      const xjRefs = [
+        xj?.id,
+        xj?.supplierXjNo,
+        xj?.xjNumber,
+        xj?.requirementNo,
+        xj?.sourceQRNumber,
+        xj?.sourceInquiryNumber,
+        xj?.sourceRef,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+
+      return xjRefs.some((ref) => traceRefs.has(ref));
+    });
+
+    const related: Array<{ label: string; value: string }> = [];
+    const cgNo = String(order?.poNumber || order?.cgNumber || '').trim();
+    const renderMeta = order?.documentRenderMeta || order?.document_render_meta || {};
+    const supplierPortalLinkage = renderMeta?.supplierPortalLinkage || {};
+    const snapshot = order?.documentDataSnapshot || order?.document_data_snapshot || {};
+    const editForm = snapshot?.editForm || {};
+    const supplierXjNo = pickSupplierVisibleNumber([
+      formalLinkage?.supplierXjNo,
+      fallbackMainline?.xj?.supplierXjNo,
+      fallbackMainline?.xj?.xjNumber,
+      supplierPortalLinkage?.supplierXjNo,
+      editForm?.xjNumber,
+      matchedXj?.supplierXjNo,
+      matchedQuotation?.sourceXJ,
+      matchedQuotation?.sourceXJNumber,
+    ], 'xj');
+    const supplierBjNo = pickSupplierVisibleNumber([
+      formalLinkage?.supplierBjNo,
+      fallbackMainline?.quotation?.quotationNo,
+      fallbackMainline?.quotation?.bjNumber,
+      fallbackMainline?.xj?.supplierQuotationNo,
+      supplierPortalLinkage?.supplierBjNo,
+      editForm?.supplierQuotationNo,
+      matchedQuotation?.quotationNo,
+      matchedQuotation?.bjNumber,
+      matchedQuotation?.quotationNumber,
+      matchedXj?.supplierQuotationNo,
+      findActiveQuotationForXJ(matchedXj || {})?.quotationNo,
+    ], 'bj');
+
+    if (cgNo) related.push({ label: '订单号', value: cgNo });
+    if (supplierXjNo) related.push({ label: '询价号', value: supplierXjNo });
+    if (supplierBjNo) related.push({ label: '报价号', value: supplierBjNo });
+
+    return related;
+  }, [findActiveQuotationForXJ, getFormalSupplierPortalLinkage, getSingleSupplierMainlineFallback, getSupplierOrderTraceRefs, getSupplierQuoteCandidates, myXJs, pickSupplierVisibleNumber]);
+
+  const findXJForSupplierOrder = React.useCallback((order: any) => {
+    const traceRefs = getSupplierOrderTraceRefs(order);
+    const matchedXj = myXJs.find((xj) => {
+      const refs = [
+        xj?.id,
+        xj?.supplierXjNo,
+        xj?.xjNumber,
+        xj?.requirementNo,
+        xj?.sourceQRNumber,
+        xj?.sourceInquiryNumber,
+        xj?.sourceRef,
+      ]
+        .map((value) => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+      return refs.some((ref) => traceRefs.has(ref));
+    });
+
+    if (matchedXj) return matchedXj;
+    return getSingleSupplierMainlineFallback(order)?.xj || null;
+  }, [getSingleSupplierMainlineFallback, getSupplierOrderTraceRefs, myXJs]);
+
+  const getCustomerIdentityForOrder = React.useCallback((order: any) => {
+    const matchedRequirement = findRequirementForSupplierOrder(order);
+    const matchedXj = findXJForSupplierOrder(order);
+    const matchedQuotation = getSupplierQuoteCandidates(order)[0] || null;
+
+    const requirementIdentity = getRequirementCustomerIdentity(matchedRequirement);
+    const xjIdentity = matchedXj ? getCustomerIdentityForXJ(matchedXj) : { name: '', company: '' };
+    const quotationIdentity = matchedQuotation ? getCustomerIdentityForQuotation(matchedQuotation) : { name: '', company: '' };
+
+    const snapshot = order?.documentDataSnapshot || order?.document_data_snapshot || {};
+    const snapshotCustomer = snapshot?.customer || {};
+    const directCustomer = order?.customer || {};
+
+    const company = pickDisplayText([
+      xjIdentity.company,
+      quotationIdentity.company,
+      order?.buyerCompany,
+      issuerFallbackName,
+      directCustomer?.companyName,
+      snapshotCustomer?.companyName,
+      order?.customerCompany,
+      order?.customerName,
+      requirementIdentity.company,
+    ]);
+
+    const name = pickDisplayText([
+      xjIdentity.name,
+      quotationIdentity.name,
+      order?.buyerContact,
+      company,
+      issuerFallbackName,
+      directCustomer?.contactPerson,
+      snapshotCustomer?.contactPerson,
+      order?.customerName,
+      order?.buyerContact,
+      requirementIdentity.name,
+    ]);
+
+    return {
+      name,
+      company: company || name,
+    };
+  }, [
+    findRequirementForSupplierOrder,
+    findXJForSupplierOrder,
+    getCustomerIdentityForQuotation,
+    getCustomerIdentityForXJ,
+    getRequirementCustomerIdentity,
+    getSupplierQuoteCandidates,
+    issuerFallbackName,
+  ]);
+
+  React.useEffect(() => {
+    if (!supplierPortalOrders.length) return;
+    supplierPortalOrders.forEach((order) => {
+      const orderKey = String(order?.id || order?.poNumber || '').trim();
+      if (!orderKey || supplierLinkageBackfillAttemptedRef.current.has(orderKey)) return;
+      supplierLinkageBackfillAttemptedRef.current.add(orderKey);
+    });
+  }, [supplierPortalOrders]);
+
+  const getSupplierNumberAccentClass = React.useCallback((label: string) => {
+    switch (label) {
+      case '订单号':
+        return 'text-blue-600';
+      case '询价号':
+        return 'text-violet-600';
+      case '报价号':
+        return 'text-emerald-600';
+      default:
+        return 'text-slate-700';
+    }
+  }, []);
 
   const rollbackXJAfterQuotationDelete = React.useCallback(async (deletedRows: any[], remainingRows: any[]) => {
     if (!Array.isArray(deletedRows) || deletedRows.length === 0) return;
@@ -491,6 +2156,32 @@ export default function SupplierOrderManagementCenter() {
     });
   }, [hiddenQuotationIds, supplierQuotations, user?.email]);
 
+  const recoverableQuotations = useMemo(() => {
+    if (!user?.email) return [];
+    const current = String(user.email || '').trim().toLowerCase();
+    return supplierQuotations.filter((q: any) => {
+      const bySupplierEmail = String(q?.supplierEmail || '').trim().toLowerCase() === current;
+      const byCreatedBy = String(q?.createdBy || '').trim().toLowerCase() === current;
+      const bySupplierCode = String(q?.supplierCode || '').trim().toLowerCase() === current;
+      return bySupplierEmail || byCreatedBy || bySupplierCode;
+    });
+  }, [supplierQuotations, user?.email]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'qt') return;
+    if (!hiddenQuotationIds.size) return;
+    if (myQuotations.length > 0) return;
+    if (recoverableQuotations.length === 0) return;
+    clearHiddenQuotationIdsForCurrentSupplier();
+    toast.info('检测到我的报价被全部隐藏，已自动恢复显示');
+  }, [
+    activeTab,
+    hiddenQuotationIds,
+    myQuotations.length,
+    recoverableQuotations.length,
+    clearHiddenQuotationIdsForCurrentSupplier,
+  ]);
+
   // 🔥 统计数据
   const stats: OrderStats = useMemo(() => {
     // 待报价的采购询价（未提交报价的）
@@ -502,16 +2193,14 @@ export default function SupplierOrderManagementCenter() {
     // 已提交报价单
     const submittedQuotations = myQuotations.filter(q => q.status === 'submitted' || q.status === 'accepted');
 
-    // 在制订单（这里简化处理，实际应该从订单数据中获取）
-    const activeOrders = categorizedRFQs.accepted.length;
+    // 在制订单：供应商真实采购订单（CG）
+    const activeOrders = activeSupplierOrders.length;
 
-    // 已完成订单
-    const completedOrders = myQuotations.filter(q => q.status === 'completed');
+    // 已完成订单：供应商真实采购订单历史
+    const completedOrders = historySupplierOrders;
 
     // 总订单金额
-    const totalValue = myQuotations
-      .filter(q => q.status === 'accepted' || q.status === 'completed')
-      .reduce((sum, q) => sum + (q.totalAmount || 0), 0);
+    const totalValue = supplierPortalOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
 
     return {
       pendingRFQs,
@@ -521,7 +2210,7 @@ export default function SupplierOrderManagementCenter() {
       completedOrders: completedOrders.length,
       totalValue
     };
-  }, [categorizedRFQs, myQuotations, user?.email]);
+  }, [activeSupplierOrders.length, categorizedRFQs, historySupplierOrders, myQuotations, supplierPortalOrders]);
 
   // 🔥 概览Tab状态
   const [overviewTab, setOverviewTab] = useState<'summary' | 'conversion' | 'analysis'>('summary');
@@ -533,7 +2222,7 @@ export default function SupplierOrderManagementCenter() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">订单全盘</h2>
-          <p className="text-sm text-slate-500 mt-1">Order Overview Dashboard</p>
+          <p className="text-sm text-slate-500 mt-1">{supplierUiCopy.orderOverviewDashboard}</p>
         </div>
         <div className="flex items-center gap-3">
           <Select defaultValue="month">
@@ -669,7 +2358,7 @@ export default function SupplierOrderManagementCenter() {
               <CardHeader>
                 <CardTitle className="text-base flex items-center justify-between">
                   <span>每周业务趋势</span>
-                  <span className="text-xs text-slate-500 font-normal">Weekly Trend</span>
+                  <span className="text-xs text-slate-500 font-normal">{supplierUiCopy.weeklyTrend}</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -737,7 +2426,7 @@ export default function SupplierOrderManagementCenter() {
               <CardHeader>
                 <CardTitle className="text-base flex items-center justify-between">
                   <span>产品类别分布</span>
-                  <span className="text-xs text-slate-500 font-normal">Category Distribution</span>
+                  <span className="text-xs text-slate-500 font-normal">{supplierUiCopy.categoryDistribution}</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -895,11 +2584,11 @@ export default function SupplierOrderManagementCenter() {
         </div>
 
         {/* 表格 */}
-        <Card>
-          <Table>
+        <Card className="rounded-none border-x-0 border-t-0 shadow-none">
+          <Table className="border-collapse text-sm">
             <TableHeader>
-              <TableRow className="bg-slate-50">
-                <TableHead className="w-12">
+              <TableRow className="border-b-2 border-slate-200 bg-slate-50 hover:bg-slate-50">
+                <TableHead className="w-12 h-auto px-3 py-2.5 text-left">
                   <Checkbox 
                     checked={selectedIds.length === pendingRFQs.length && pendingRFQs.length > 0}
                     onCheckedChange={() => {
@@ -911,20 +2600,24 @@ export default function SupplierOrderManagementCenter() {
                     }}
                   />
                 </TableHead>
-                <TableHead className="w-16">序号</TableHead>
-                <TableHead className="w-40">询价单号</TableHead>
-                <TableHead>产品信息</TableHead>
-                <TableHead className="w-28 text-right">数量</TableHead>
-                <TableHead className="w-32">截止日期</TableHead>
-                <TableHead className="w-24">状态</TableHead>
-                <TableHead className="w-40 text-center">操作</TableHead>
+                <TableHead className="w-16 h-auto px-3 py-2.5 text-sm font-semibold text-slate-900">序号</TableHead>
+                <TableHead className="w-44 h-auto px-3 py-2.5 text-sm font-semibold text-slate-900">日期</TableHead>
+                <TableHead className="w-40 h-auto px-3 py-2.5 text-sm font-semibold text-slate-900">询价单号</TableHead>
+                <TableHead className="w-36 h-auto px-3 py-2.5 text-sm font-semibold text-slate-900">客户名称</TableHead>
+                <TableHead className="h-auto px-3 py-2.5 text-sm font-semibold text-slate-900">产品信息</TableHead>
+                <TableHead className="w-28 h-auto px-3 py-2.5 text-sm font-semibold text-slate-900">数量</TableHead>
+                <TableHead className="w-24 h-auto px-3 py-2.5 text-sm font-semibold text-slate-900">状态</TableHead>
+                <TableHead className="w-40 h-auto px-3 py-2.5 text-sm font-semibold text-slate-900">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {pendingRFQs.length > 0 ? (
-                pendingRFQs.map((xj, index) => (
-                  <TableRow key={xj.id} className="hover:bg-slate-50">
-                    <TableCell>
+                pendingRFQs.map((xj, index) => {
+                  const customerIdentity = getCustomerIdentityForXJ(xj);
+
+                  return (
+                  <TableRow key={xj.id} className="hover:bg-slate-50/80">
+                    <TableCell className="px-3 py-2.5">
                       <Checkbox 
                         checked={selectedIds.includes(xj.id)}
                         onCheckedChange={() => {
@@ -936,142 +2629,192 @@ export default function SupplierOrderManagementCenter() {
                         }}
                       />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-3 py-2.5">
                       <span className="text-sm text-slate-600">{index + 1}</span>
                     </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-blue-600">{xj.supplierXjNo || xj.xjNumber}</p>
-                        <p className="text-xs text-slate-500">{formatCompactUtcMinute(xj.createdDate)}</p>
-                        {(() => {
-                          const boundVersion = getXJBoundVersion(xj);
-                          const isLatest = Boolean(
-                            boundVersion &&
-                            latestXjPublishedVersion &&
-                            boundVersion === latestXjPublishedVersion,
-                          );
-                          if (!boundVersion) {
-                            return (
-                              <Badge className="mt-1 bg-rose-100 text-rose-700 border-rose-300">
-                                未绑定模板版本
-                              </Badge>
-                            );
-                          }
-                          return (
-                            <div className="mt-1 flex flex-wrap items-center gap-1">
-                              <Badge className="bg-orange-100 text-orange-700 border-orange-300">
-                                {boundVersion}
-                              </Badge>
-                              {latestXjPublishedVersion ? (
-                                <Badge
-                                  className={
-                                    isLatest
-                                      ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
-                                      : 'bg-amber-100 text-amber-700 border-amber-300'
-                                  }
+                    <TableCell className="px-3 py-2.5">
+                      {(() => {
+                        const dateEntries = [
+                          {
+                            label: '创',
+                            value: xj.submittedDate || xj.createdDate || xj.createdAt || xj.updatedAt,
+                          },
+                          {
+                            label: '截',
+                            value: xj.quotationDeadline,
+                          },
+                        ].filter((entry) => String(entry.value || '').trim());
+                        const primaryDate = dateEntries[0];
+                        const secondaryDates = dateEntries.slice(1);
+
+                        if (!primaryDate) {
+                          return <span className="text-sm text-slate-300">—</span>;
+                        }
+
+                        return (
+                          <div className="flex items-center gap-1.5 whitespace-nowrap">
+                            <span className="text-sm font-semibold text-slate-500">{primaryDate.label}</span>
+                            <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                              {formatBusinessDate(primaryDate.value).replace(/\//g, '-')}
+                            </span>
+                            {secondaryDates.length > 0 && (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                                    aria-label="展开日期"
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    <ChevronDown className="h-3 w-3" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  align="start"
+                                  side="bottom"
+                                  sideOffset={6}
+                                  className="z-[80] w-auto rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg"
                                 >
-                                  {isLatest ? '已映射最新' : `最新 ${latestXjPublishedVersion}`}
-                                </Badge>
-                              ) : null}
-                            </div>
-                          );
-                        })()}
-                        {formatExecutionBaseline(xj) && (
-                          <p className="text-xs text-purple-600 font-mono mt-1">{formatExecutionBaseline(xj)}</p>
-                        )}
-                        {resolveProjectExecutionBaseline(xj)?.projectRevisionId && (
-                          <Badge className={`mt-1 ${isFinalExecutionReady(xj)
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                            : 'bg-amber-100 text-amber-800 border-amber-300'
-                          }`}>
-                            {isFinalExecutionReady(xj) ? 'Final Baseline' : 'Revision Quote'}
-                          </Badge>
-                        )}
-                      </div>
+                                  <div className="inline-flex flex-col gap-1 whitespace-nowrap">
+                                    {secondaryDates.map((entry) => (
+                                      <div key={`${xj.id}-${entry.label}-${entry.value}`} className="flex items-baseline gap-2 text-sm leading-5">
+                                        <span className="w-[18px] shrink-0 font-semibold text-slate-500">{entry.label}</span>
+                                        <span className="font-semibold text-slate-900 tabular-nums">
+                                          {formatBusinessDate(entry.value).replace(/\//g, '-')}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      {(() => {
+                        const relatedNumbers = getSupplierVisibleRFQNumbers(xj);
+                        const primaryNumber = relatedNumbers[0] || null;
+                        const secondaryNumbers = relatedNumbers.slice(1);
+                        const rfqKey = String(xj.id);
+                        const isExpanded = expandedRFQIds.includes(rfqKey);
+
+                        return (
+                          <div className="flex min-w-[180px] items-center gap-1.5 whitespace-nowrap">
+                            <span className="font-mono text-[13px] font-semibold leading-5 text-blue-600">
+                              {primaryNumber?.value || xj.supplierXjNo || xj.xjNumber}
+                            </span>
+                            {secondaryNumbers.length > 0 && (
+                              <Popover open={isExpanded} onOpenChange={(open) => setRFQExpanded(rfqKey, open)}>
+                                <PopoverTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                                    aria-label="展开关联编号"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                    }}
+                                  >
+                                    <ChevronDown className="h-3 w-3" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  align="start"
+                                  side="bottom"
+                                  sideOffset={6}
+                                  className="z-[80] w-auto min-w-0 max-w-none rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg"
+                                >
+                                  <div className="inline-flex flex-col gap-0.5 whitespace-nowrap">
+                                    {secondaryNumbers.map((item) => (
+                                      <p key={`${rfqKey}-${item.label}-${item.value}`} className={`text-xs font-semibold font-mono ${getSupplierNumberAccentClass(item.label)}`}>
+                                        {item.value}
+                                      </p>
+                                    ))}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <span
+                        className="block truncate text-[13px] font-medium text-slate-800"
+                        title={customerIdentity.company || customerIdentity.name || '—'}
+                      >
+                        {customerIdentity.company || customerIdentity.name || '—'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
                       {(() => {
                         const s = summarizeProducts(xj.products, xj);
                         return (
-                          <p className="text-sm font-medium text-slate-900 leading-tight truncate">
+                          <p className="truncate text-[13px] font-medium leading-5 text-slate-800">
                             {s.representativeName}（共 {s.productCount} 个产品）
                           </p>
                         );
                       })()}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="px-3 py-2.5 tabular-nums">
                       {(() => {
                         const s = summarizeProducts(xj.products, xj);
                         return (
                           <>
-                            <span className="text-sm font-medium">{s.totalQuantity.toLocaleString()}</span>
-                            <span className="text-xs text-slate-500 ml-1">{s.quantityUnit}</span>
+                            <span className="text-[13px] font-medium text-slate-700">{s.totalQuantity.toLocaleString()}</span>
+                            <span className="ml-1 text-[11px] uppercase text-slate-400">{s.quantityUnit}</span>
                           </>
                         );
                       })()}
                     </TableCell>
-                    <TableCell>
-                      <span className="text-sm text-slate-600">{xj.quotationDeadline}</span>
-                    </TableCell>
-                    <TableCell>
+                    <TableCell className="px-3 py-2.5">
                       {(() => {
-                        // 以 BJ 实际数据为准，避免 XJ 历史 quotes 残留导致状态不回滚
-                        const activeQuotation = findActiveQuotationForXJ(xj);
-                        if (activeQuotation) {
-                          return (
-                            <Badge className="bg-green-100 text-green-800 border-green-300">
-                              已下推
-                            </Badge>
-                          );
-                        } else {
-                          return (
-                            <Badge className="bg-orange-100 text-orange-800 border-orange-300">
-                              待报价
-                            </Badge>
-                          );
-                        }
+                        const pushState = getRFQPushState(xj);
+                        return (
+                          <Badge className={`${pushState.badgeClassName} text-[12px] font-medium`}>
+                            {pushState.badgeLabel}
+                          </Badge>
+                        );
                       })()}
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-center gap-1">
+                    <TableCell className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5">
                         {xj.documentData && (
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 px-2 text-xs"
+                            className="h-8 px-3 text-xs font-medium"
                             onClick={() => {
                               setSelectedItem(xj);
                               setDocumentViewerOpen(true);
                             }}
                           >
-                            <FileText className="w-3 h-3 mr-1" />
-                            查看
+                            {supplierUiCopy.view}
                           </Button>
                         )}
                         {/* 🔥 根据是否已下推报价显示不同按钮 */}
                         {(() => {
-                          const existingQuotation = findActiveQuotationForXJ(xj);
+                          const pushState = getRFQPushState(xj);
+                          const existingQuotation = pushState.activeQuotation;
                           
-                          if (existingQuotation) {
-                            // 已下推报价，显示"已下推"状态按钮（禁用）
+                          if (pushState.isPushed) {
                             return (
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-7 px-2 text-xs border-green-300 text-green-700 bg-green-50 cursor-not-allowed opacity-75"
+                                className={pushState.actionClassName}
                                 disabled
                               >
-                                <CheckCircle2 className="w-3 h-3 mr-1" />
-                                已下推
+                                {pushState.actionLabel}
                               </Button>
                             );
                           } else {
-                            // 未下推报价，显示"下推报价"按钮
                             return (
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-7 px-2 text-xs border-orange-300 text-orange-700 hover:bg-orange-50"
+                                className={pushState.actionClassName}
                                 onClick={async () => {
                             // 🔥 下推报价 - 自动创建报价单并跳转到我的报价
                             try {
@@ -1175,8 +2918,7 @@ export default function SupplierOrderManagementCenter() {
                             }
                           }}
                         >
-                          <Send className="w-3 h-3 mr-1" />
-                          下推报价
+                          {supplierUiCopy.pushQuote}
                         </Button>
                             );
                           }
@@ -1184,23 +2926,23 @@ export default function SupplierOrderManagementCenter() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-2 text-xs text-red-600 hover:text-red-700"
+                          className="h-8 px-3 text-xs font-medium text-red-600 hover:text-red-700"
                           onClick={() => {
                             if (!window.confirm(`确定删除客户需求 ${xj.supplierXjNo || xj.xjNumber} 吗？\n\n仅从当前供应商视图移除，不影响采购端与数据库数据。`)) return;
                             hideXJsForCurrentSupplier([xj.id]);
                             toast.success('已从当前视图删除');
                           }}
                         >
-                          <Trash2 className="w-3 h-3 mr-1" />
-                          删除
+                          {supplierUiCopy.delete}
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))
+                );
+                })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-32 text-center">
+                  <TableCell colSpan={9} className="h-32 text-center">
                     <div className="flex flex-col items-center justify-center text-slate-400">
                       <FileText className="w-12 h-12 mb-2" />
                       <p className="text-sm">暂无待报价询价单</p>
@@ -1288,25 +3030,25 @@ export default function SupplierOrderManagementCenter() {
                     }}
                   />
                 </th>
-                <th className="w-36 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">报价单号</th>
-                <th className="w-8  px-2 py-2.5 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider">版本</th>
-                <th className="w-28 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">客户名称</th>
-                <th className="w-44 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap hidden xl:table-cell">客户公司</th>
-                <th className="w-36 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap hidden lg:table-cell">关联询价单</th>
-                <th className="w-24 px-3 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">数量</th>
-                <th className="w-28 px-3 py-2.5 text-right text-[11px] font-semibold text-slate-600 uppercase tracking-wider">单价</th>
-                <th className="w-10 px-1 py-2.5 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider hidden lg:table-cell">币种</th>
+                <th className="w-16 px-3 py-2.5 text-left text-sm font-semibold text-slate-900 whitespace-nowrap">序号</th>
+                <th className="w-44 px-3 py-2.5 text-left text-sm font-semibold text-slate-900 whitespace-nowrap">日期</th>
+                <th className="w-36 px-3 py-2.5 text-left text-sm font-semibold text-slate-900 whitespace-nowrap">报价单号</th>
+                <th className="w-28 px-3 py-2.5 text-left text-sm font-semibold text-slate-900 whitespace-nowrap">客户名称</th>
+                <th className="w-44 px-3 py-2.5 text-left text-sm font-semibold text-slate-900 whitespace-nowrap hidden xl:table-cell">客户公司</th>
+                <th className="w-24 px-3 py-2.5 text-left text-sm font-semibold text-slate-900">数量</th>
+                <th className="w-28 px-3 py-2.5 text-left text-sm font-semibold text-slate-900">单价</th>
+                <th className="w-10 px-1 py-2.5 text-left text-sm font-semibold text-slate-900 hidden lg:table-cell">币种</th>
                 {/* 报价金额 – focal column */}
-                <th className="w-32 px-3 py-2.5 text-right text-[11px] font-semibold text-slate-900 uppercase tracking-wider whitespace-nowrap">报价金额 ↕</th>
-                <th className="w-24 px-3 py-2.5 text-center text-[11px] font-semibold text-slate-400 uppercase tracking-wider hidden md:table-cell">报价日期 ↕</th>
-                <th className="w-20 px-3 py-2.5 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">状态</th>
-                <th className="w-56 px-3 py-2.5 text-right text-[11px] font-semibold text-slate-400 uppercase tracking-wider">操作</th>
+                <th className="w-32 px-3 py-2.5 text-left text-sm font-semibold text-slate-900 whitespace-nowrap">报价金额 ↕</th>
+                <th className="w-20 px-3 py-2.5 text-left text-sm font-semibold text-slate-900">状态</th>
+                <th className="w-56 px-3 py-2.5 text-left text-sm font-semibold text-slate-900">操作</th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-slate-100">
               {myQuotations.length > 0 ? (
-                myQuotations.map((quotation) => {
+                myQuotations.map((quotation, index) => {
+                  const customerIdentity = getCustomerIdentityForQuotation(quotation);
                   // ── pre-compute helpers ──────────────────────────────────
                   const items: any[] = quotation.items ?? [];
                   const currency = quotation.currency || items[0]?.currency || 'CNY';
@@ -1352,7 +3094,6 @@ export default function SupplierOrderManagementCenter() {
                           ? 'bg-blue-50/60'
                           : 'hover:bg-slate-50/80'
                       }`}
-                      style={{ height: 52 }}
                     >
                       {/* Checkbox */}
                       <td className="px-3">
@@ -1368,47 +3109,148 @@ export default function SupplierOrderManagementCenter() {
                         />
                       </td>
 
-                      {/* 报价单号 – clickable, primary identifier */}
-                      <td className="px-3 whitespace-nowrap">
-                        <button
-                          className="font-mono text-[13px] font-semibold text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 transition-colors"
-                          onClick={() => {
-                            setSelectedQuotation(quotation);
-                            setQuotationDocumentViewerOpen(true);
-                          }}
-                        >
-                          {quotation.quotationNo}
-                        </button>
+                      {/* 序号 */}
+                      <td className="px-3 text-left whitespace-nowrap">
+                        <span className="text-sm text-slate-600">{index + 1}</span>
                       </td>
 
-                      {/* 版本 */}
-                      <td className="px-2 text-center">
-                        <span className="text-[11px] font-medium text-slate-400 tabular-nums">v{quotation.version}</span>
+                      {/* 日期 */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {(() => {
+                          const dateEntries = [
+                            {
+                              label: '创',
+                              value: quotation.quotationDate || quotation.createdDate || quotation.createdAt,
+                            },
+                            {
+                              label: '截',
+                              value: quotation.validUntil,
+                            },
+                            {
+                              label: '提',
+                              value: quotation.submittedDate,
+                            },
+                          ].filter((entry) => String(entry.value || '').trim());
+
+                          if (dateEntries.length === 0) {
+                            return <span className="text-sm text-slate-300">—</span>;
+                          }
+
+                          const primaryDate = dateEntries[0];
+                          const secondaryDates = dateEntries.slice(1);
+
+                          return (
+                            <div className="flex items-center gap-1.5 whitespace-nowrap">
+                              <span className="text-sm font-semibold text-slate-500">{primaryDate.label}</span>
+                              <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                                {formatBusinessDate(String(primaryDate.value)).replace(/\//g, '-')}
+                              </span>
+                              {secondaryDates.length > 0 && (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                                      aria-label="展开日期"
+                                      onClick={(event) => event.stopPropagation()}
+                                    >
+                                      <ChevronDown className="h-3 w-3" />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent
+                                    align="start"
+                                    side="bottom"
+                                    sideOffset={6}
+                                    className="z-[80] w-auto rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg"
+                                  >
+                                    <div className="inline-flex flex-col gap-1 whitespace-nowrap">
+                                      {secondaryDates.map((entry) => (
+                                        <div key={`${quotation.id}-${entry.label}`} className="flex items-baseline gap-2 text-sm leading-5">
+                                          <span className="w-[18px] shrink-0 font-semibold text-slate-500">{entry.label}</span>
+                                          <span className="font-semibold text-slate-900 tabular-nums">
+                                            {formatBusinessDate(String(entry.value)).replace(/\//g, '-')}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+
+                      {/* 报价单号 – clickable, primary identifier */}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {(() => {
+                          const relatedNumbers = [
+                            quotation.sourceXJ ? { label: '关联询价单', value: quotation.sourceXJ } : null,
+                          ].filter(Boolean) as Array<{ label: string; value: string }>;
+
+                          return (
+                            <div className="flex items-center gap-1.5 whitespace-nowrap">
+                              <button
+                                className="font-mono text-[13px] font-semibold text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 transition-colors"
+                                onClick={() => {
+                                  setSelectedQuotation(quotation);
+                                  setQuotationDocumentViewerOpen(true);
+                                }}
+                              >
+                                {quotation.quotationNo}
+                              </button>
+                              {relatedNumbers.length > 0 && (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                                      aria-label="展开关联编号"
+                                      onClick={(event) => event.stopPropagation()}
+                                    >
+                                      <ChevronDown className="h-3 w-3" />
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent
+                                    align="start"
+                                    side="bottom"
+                                    sideOffset={6}
+                                    className="z-[80] w-auto min-w-0 max-w-none rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg"
+                                  >
+                                    <div className="inline-flex flex-col gap-1 whitespace-nowrap">
+                                      {relatedNumbers.map((item) => (
+                                        <div key={`${quotation.id}-${item.label}-${item.value}`} className="flex items-baseline gap-2 text-sm leading-5">
+                                          <span className="font-semibold text-slate-500">{item.label}</span>
+                                          <span className="font-mono text-xs font-semibold text-blue-600">
+                                            {item.value}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* 客户名称 */}
-                      <td className="px-3 max-w-[112px]">
-                        <span className="text-[13px] font-medium text-slate-800 truncate block" title={quotation.customerName}>
-                          {quotation.customerName || '—'}
+                      <td className="px-3 py-2.5 max-w-[112px]">
+                        <span className="text-[13px] font-medium text-slate-800 truncate block" title={customerIdentity.company || customerIdentity.name || '—'}>
+                          {customerIdentity.company || customerIdentity.name || '—'}
                         </span>
                       </td>
 
                       {/* 客户公司（响应式隐藏 < xl） */}
-                      <td className="px-3 max-w-[176px] hidden xl:table-cell">
-                        <span className="text-[12px] text-slate-500 truncate block" title={quotation.customerCompany}>
-                          {quotation.customerCompany || '—'}
-                        </span>
-                      </td>
-
-                      {/* 关联询价单（响应式隐藏 < lg） */}
-                      <td className="px-3 hidden lg:table-cell">
-                        <span className="font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                          {quotation.sourceXJ || '—'}
+                      <td className="px-3 py-2.5 max-w-[176px] hidden xl:table-cell">
+                        <span className="text-[12px] text-slate-500 truncate block" title={customerIdentity.name || customerIdentity.company || '—'}>
+                          {customerIdentity.name || customerIdentity.company || '—'}
                         </span>
                       </td>
 
                       {/* 数量 – L3 */}
-                      <td className="px-3 text-right whitespace-nowrap tabular-nums">
+                      <td className="px-3 py-2.5 text-left whitespace-nowrap tabular-nums">
                         {items.length === 0 ? (
                           <span className="text-[13px] text-slate-300">—</span>
                         ) : (
@@ -1424,7 +3266,7 @@ export default function SupplierOrderManagementCenter() {
                       </td>
 
                       {/* 单价 – L2: same size as qty, stronger color */}
-                      <td className="px-3 text-right whitespace-nowrap tabular-nums">
+                      <td className="px-3 py-2.5 text-left whitespace-nowrap tabular-nums">
                         <span className="text-[13px] font-semibold text-slate-700">
                           {unitPriceDisplay === '—' ? (
                             <span className="font-normal text-slate-300">—</span>
@@ -1435,12 +3277,12 @@ export default function SupplierOrderManagementCenter() {
                       </td>
 
                       {/* 币种（响应式隐藏 < lg） */}
-                      <td className="px-1 text-center hidden lg:table-cell">
+                      <td className="px-1 py-2.5 text-left hidden lg:table-cell">
                         <span className="text-[10px] font-medium text-slate-400 tracking-wide">{currency}</span>
                       </td>
 
                       {/* 报价金额 – L1 FOCAL COLUMN */}
-                      <td className="px-3 text-right whitespace-nowrap tabular-nums">
+                      <td className="px-3 py-2.5 text-left whitespace-nowrap tabular-nums">
                         {totalDisplay ? (
                           <span className="text-[15px] font-bold text-slate-900">
                             {symbol}{totalDisplay}
@@ -1450,15 +3292,8 @@ export default function SupplierOrderManagementCenter() {
                         )}
                       </td>
 
-                      {/* 报价日期（响应式隐藏 < md） */}
-                      <td className="px-3 text-center whitespace-nowrap hidden md:table-cell">
-                        <span className="text-[12px] text-slate-500 tabular-nums font-mono">
-                          {quotation.quotationDate || '—'}
-                        </span>
-                      </td>
-
                       {/* 状态 badge – dot + label */}
-                      <td className="px-3">
+                      <td className="px-3 py-2.5">
                         <span className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${st.text} whitespace-nowrap`}>
                           <span className={`inline-block w-1.5 h-1.5 rounded-full ${st.dot} flex-shrink-0`} />
                           {st.label}
@@ -1466,8 +3301,8 @@ export default function SupplierOrderManagementCenter() {
                       </td>
 
                       {/* 操作 */}
-                      <td className="px-3">
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
                         {/* 查看文档 */}
                         <Button
                           size="sm"
@@ -1478,7 +3313,6 @@ export default function SupplierOrderManagementCenter() {
                             setQuotationDocumentViewerOpen(true);
                           }}
                         >
-                          <Eye className="w-3.5 h-3.5" />
                           查看
                         </Button>
 
@@ -1489,7 +3323,6 @@ export default function SupplierOrderManagementCenter() {
                             className="h-8 px-3 text-xs font-medium bg-orange-500 hover:bg-orange-600 text-white gap-1.5 shadow-sm"
                             onClick={() => openQuotationEditor(quotation.id)}
                           >
-                            <Calculator className="w-3.5 h-3.5" />
                             核算报价
                           </Button>
                         ) : quotation.status === 'submitted' ? (
@@ -1509,7 +3342,6 @@ export default function SupplierOrderManagementCenter() {
                               toast.info('已撤回为草稿，可重新核算报价');
                             }}
                           >
-                            <Calculator className="w-3.5 h-3.5" />
                             重新核算
                           </Button>
                         ) : null}
@@ -1568,61 +3400,11 @@ export default function SupplierOrderManagementCenter() {
                                 );
                               }}
                             >
-                              <Send className="w-3.5 h-3.5" />
                               提交报价
                             </Button>
                           );
                         })()}
 
-                        {/* 下载 – icon only */}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                          title="下载报价单"
-                          onClick={() => {
-                            toast.info(
-                              <div className="space-y-1">
-                                <p className="font-semibold">📥 准备下载报价单</p>
-                                <p className="text-sm">报价单号: {quotation.quotationNo}</p>
-                              </div>,
-                              { duration: 2000 }
-                            );
-                            setTimeout(() => {
-                              const printContent = document.createElement('div');
-                              printContent.innerHTML = `
-                                <div style="font-family: Arial, sans-serif; padding: 20px;">
-                                  <h2>供应商报价单</h2>
-                                  <p><strong>报价单号:</strong> ${quotation.quotationNo}</p>
-                                  <p><strong>客户:</strong> ${quotation.customerName}</p>
-                                  <p><strong>报价日期:</strong> ${quotation.quotationDate}</p>
-                                  <p><strong>有效期至:</strong> ${quotation.validUntil}</p>
-                                  <hr/>
-                                  <h3>产品清单</h3>
-                                  ${quotation.items.map((item: any) => `
-                                    <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd;">
-                                      <p><strong>${item.productName}</strong></p>
-                                      <p>型号: ${getFormalBusinessModelNo(item)}</p>
-                                      <p>数量: ${item.quantity} ${item.unit}</p>
-                                      <p>单价: ¥${item.unitPrice || 0}</p>
-                                      <p>金额: ¥${item.amount || 0}</p>
-                                    </div>
-                                  `).join('')}
-                                  <hr/>
-                                  <h3 style="text-align: right;">总金额: ¥${quotation.totalAmount?.toLocaleString()}</h3>
-                                </div>
-                              `;
-                              const printWindow = window.open('', '', 'width=800,height=600');
-                              if (printWindow) {
-                                printWindow.document.write(printContent.innerHTML);
-                                printWindow.document.close();
-                                printWindow.print();
-                              }
-                            }, 300);
-                          }}
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </Button>
                         </div>
                       </td>
                     </tr>
@@ -1651,7 +3433,7 @@ export default function SupplierOrderManagementCenter() {
 
   // 🔥 渲染在制订单列表
   const renderActiveOrders = () => {
-    const activeOrders = categorizedRFQs.accepted;
+    const activeOrders = activeSupplierOrders;
 
     return (
       <div className="space-y-4">
@@ -1673,17 +3455,42 @@ export default function SupplierOrderManagementCenter() {
                 </TableHead>
                 <TableHead className="w-16">序号</TableHead>
                 <TableHead className="w-40">订单号</TableHead>
+                <TableHead className="w-36">客户名称</TableHead>
                 <TableHead>产品信息</TableHead>
                 <TableHead className="w-32">生产进度</TableHead>
                 <TableHead className="w-32">预计交期</TableHead>
                 <TableHead className="w-24">状态</TableHead>
-                <TableHead className="w-32 text-center">操作</TableHead>
+                <TableHead className="w-64">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {activeOrders.length > 0 ? (
-                activeOrders.map((order, index) => (
-                  <TableRow key={order.id} className="hover:bg-slate-50">
+                activeOrders.map((order, index) => {
+                  const displayItems = getOrderItemsForDisplay(order);
+                  const summary = summarizeProducts(displayItems, order);
+                  const statusBadge = getSupplierOrderStatusBadge(order);
+                  const progress = getSupplierOrderProgress(order);
+                  const actionButtons = getSupplierOrderActionConfig(order);
+                  const customerIdentity = getCustomerIdentityForOrder(order);
+                  const relatedNumbers = getSupplierVisibleRelatedNumbers(order);
+                  const primaryNumber = relatedNumbers[0] || null;
+                  const secondaryNumbers = relatedNumbers.slice(1);
+                  const orderNumberDetails = [
+                    ...secondaryNumbers,
+                    formatExecutionBaseline(order)
+                      ? { label: '执行基线', value: formatExecutionBaseline(order) || '' }
+                      : null,
+                    resolveProjectExecutionBaseline(order)?.projectRevisionId
+                      ? {
+                          label: '版本状态',
+                          value: isFinalExecutionReady(order) ? '可执行版本' : '非最终版本',
+                        }
+                      : null,
+                  ].filter(Boolean) as Array<{ label: string; value: string }>;
+
+                  return (
+                  <React.Fragment key={order.id}>
+                  <TableRow className="hover:bg-slate-50">
                     <TableCell>
                       <Checkbox 
                         checked={selectedIds.includes(order.id)}
@@ -1699,65 +3506,113 @@ export default function SupplierOrderManagementCenter() {
                     <TableCell>
                       <span className="text-sm text-slate-600">{index + 1}</span>
                     </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-blue-600">{order.xjNumber}</p>
-                        <p className="text-xs text-slate-500">{formatCompactUtcMinute(order.createdDate)}</p>
-                        {formatExecutionBaseline(order) && (
-                          <p className="text-xs text-purple-600 font-mono mt-1">{formatExecutionBaseline(order)}</p>
-                        )}
-                        {resolveProjectExecutionBaseline(order)?.projectRevisionId && (
-                          <Badge className={`mt-1 ${isFinalExecutionReady(order)
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                            : 'bg-amber-100 text-amber-800 border-amber-300'
-                          }`}>
-                            {isFinalExecutionReady(order) ? '可执行版本' : '非最终版本'}
-                          </Badge>
+                    <TableCell className="py-2.5">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span className="font-mono text-[13px] font-semibold text-blue-600">
+                          {primaryNumber?.value || order.poNumber || order.cgNumber || order.xjNumber}
+                        </span>
+                        {orderNumberDetails.length > 0 && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                                aria-label="展开关联编号"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <ChevronDown className="h-3 w-3" />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              align="start"
+                              side="bottom"
+                              sideOffset={6}
+                              className="z-[80] w-auto min-w-0 max-w-none rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg"
+                            >
+                              <div className="inline-flex flex-col gap-1 whitespace-nowrap">
+                                {orderNumberDetails.map((item) => (
+                                  <div key={`${order.id}-${item.label}-${item.value}`} className="flex items-baseline gap-2 text-sm leading-5">
+                                    <span className="font-semibold text-slate-500">{item.label}</span>
+                                    <span className={`font-mono text-xs font-semibold ${getSupplierNumberAccentClass(item.label)}`}>
+                                      {item.value}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
                         )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      {(() => {
-                        const s = summarizeProducts(order.products, order);
-                        return (
+                      <span
+                        className="text-sm font-medium text-slate-900 truncate block"
+                        title={customerIdentity.company || customerIdentity.name || '—'}
+                      >
+                        {customerIdentity.company || customerIdentity.name || '—'}
+                      </span>
+                    </TableCell>
+                    <TableCell>
                           <p className="text-sm font-medium text-slate-900 leading-tight truncate">
-                            {s.representativeName}（共 {s.productCount} 个产品 · {s.totalQuantity.toLocaleString()} {s.quantityUnit}）
+                            {summary.representativeName}（共 {summary.productCount} 个产品）
                           </p>
-                        );
-                      })()}
+                          <p className="text-xs text-slate-500 mt-1">
+                            总数量：{summary.totalQuantity.toLocaleString()} {summary.quantityUnit}
+                          </p>
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-slate-600">生产中</span>
-                          <span className="font-medium text-blue-600">60%</span>
+                          <span className="text-slate-600">{statusBadge.label}</span>
+                          <span className="font-medium text-blue-600">{progress}%</span>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-1.5">
-                          <div className="bg-blue-600 h-1.5 rounded-full" style={{ width: '60%' }}></div>
+                          <div className="bg-blue-600 h-1.5 rounded-full" style={{ width: `${progress}%` }}></div>
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm text-slate-600">{order.expectedDate}</span>
+                      <span className="text-sm text-slate-600">{formatBusinessDate(order.expectedDate || order.expectedDeliveryDate || order.estimatedCompletionDate)}</span>
                     </TableCell>
                     <TableCell>
-                      <Badge className="bg-green-100 text-green-800 border-green-300">
-                        生产中
-                      </Badge>
+                          <Badge className={statusBadge.className}>
+                            {statusBadge.label}
+                          </Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center justify-center gap-1">
-                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
-                          <Eye className="w-3 h-3 mr-1" />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {actionButtons.map((action) => {
+                          const actionKey = `${order.id}:${action.key}`;
+                          return (
+                            <Button
+                              key={action.key}
+                              size="sm"
+                              variant={action.variant || 'default'}
+                              className="h-7 px-2 text-xs"
+                              disabled={activeOrderActionKey === actionKey}
+                              onClick={action.onClick}
+                            >
+                              {activeOrderActionKey === actionKey ? '处理中...' : action.label}
+                            </Button>
+                          );
+                        })}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => openPurchaseOrderViewer(order)}
+                        >
                           详情
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))
+                  </React.Fragment>
+                  );
+                })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-32 text-center">
+                  <TableCell colSpan={9} className="h-32 text-center">
                     <div className="flex flex-col items-center justify-center text-slate-400">
                       <Package className="w-12 h-12 mb-2" />
                       <p className="text-sm">暂无在制订单</p>
@@ -1774,7 +3629,7 @@ export default function SupplierOrderManagementCenter() {
 
   // 🔥 渲染历史订单列表
   const renderHistoryOrders = () => {
-    const completedOrders = myQuotations.filter(q => q.status === 'completed');
+    const completedOrders = historySupplierOrders;
 
     return (
       <div className="space-y-4">
@@ -1796,17 +3651,38 @@ export default function SupplierOrderManagementCenter() {
                 </TableHead>
                 <TableHead className="w-16">序号</TableHead>
                 <TableHead className="w-40">订单号</TableHead>
-                <TableHead className="w-36">客户</TableHead>
+                <TableHead className="w-36">客户名称</TableHead>
                 <TableHead>产品信息</TableHead>
-                <TableHead className="w-32 text-right">订单金额</TableHead>
+                <TableHead className="w-32">订单金额</TableHead>
                 <TableHead className="w-32">完成日期</TableHead>
-                <TableHead className="w-32 text-center">操作</TableHead>
+                <TableHead className="w-32">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {completedOrders.length > 0 ? (
-                completedOrders.map((order, index) => (
-                  <TableRow key={order.id} className="hover:bg-slate-50">
+                completedOrders.map((order, index) => {
+                  const displayItems = getOrderItemsForDisplay(order);
+                  const summary = summarizeProducts(displayItems, order);
+                  const customerIdentity = getCustomerIdentityForOrder(order);
+                  const relatedNumbers = getSupplierVisibleRelatedNumbers(order);
+                  const primaryNumber = relatedNumbers[0] || null;
+                  const secondaryNumbers = relatedNumbers.slice(1);
+                  const orderNumberDetails = [
+                    ...secondaryNumbers,
+                    formatExecutionBaseline(order)
+                      ? { label: '执行基线', value: formatExecutionBaseline(order) || '' }
+                      : null,
+                    resolveProjectExecutionBaseline(order)?.projectRevisionId
+                      ? {
+                          label: '版本状态',
+                          value: isFinalExecutionReady(order) ? supplierUiCopy.finalExecution : supplierUiCopy.historicalRevision,
+                        }
+                      : null,
+                  ].filter(Boolean) as Array<{ label: string; value: string }>;
+
+                  return (
+                  <React.Fragment key={order.id}>
+                  <TableRow className="hover:bg-slate-50">
                     <TableCell>
                       <Checkbox 
                         checked={selectedIds.includes(order.id)}
@@ -1822,60 +3698,87 @@ export default function SupplierOrderManagementCenter() {
                     <TableCell>
                       <span className="text-sm text-slate-600">{index + 1}</span>
                     </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-blue-600">{order.quotationNo}</p>
-                        <p className="text-xs text-slate-500">{order.quotationDate}</p>
-                        {formatExecutionBaseline(order) && (
-                          <p className="text-xs text-purple-600 font-mono mt-1">{formatExecutionBaseline(order)}</p>
-                        )}
-                        {resolveProjectExecutionBaseline(order)?.projectRevisionId && (
-                          <Badge className={`mt-1 ${isFinalExecutionReady(order)
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                            : 'bg-amber-100 text-amber-800 border-amber-300'
-                          }`}>
-                            {isFinalExecutionReady(order) ? 'Final Execution' : 'Historical Revision'}
-                          </Badge>
+                    <TableCell className="py-2.5">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span className="font-mono text-[13px] font-semibold text-blue-600">
+                          {primaryNumber?.value || order.poNumber || order.cgNumber || '历史订单'}
+                        </span>
+                        {orderNumberDetails.length > 0 && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                                aria-label="展开关联编号"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <ChevronDown className="h-3 w-3" />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              align="start"
+                              side="bottom"
+                              sideOffset={6}
+                              className="z-[80] w-auto min-w-0 max-w-none rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg"
+                            >
+                              <div className="inline-flex flex-col gap-1 whitespace-nowrap">
+                                {orderNumberDetails.map((item) => (
+                                  <div key={`${order.id}-history-${item.label}-${item.value}`} className="flex items-baseline gap-2 text-sm leading-5">
+                                    <span className="font-semibold text-slate-500">{item.label}</span>
+                                    <span className={`font-mono text-xs font-semibold ${getSupplierNumberAccentClass(item.label)}`}>
+                                      {item.value}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
                         )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{order.customerName}</p>
-                        <p className="text-xs text-slate-500">{order.customerCompany}</p>
-                      </div>
+                      <p
+                        className="text-sm font-medium text-slate-900 truncate"
+                        title={customerIdentity.company || customerIdentity.name || '—'}
+                      >
+                        {customerIdentity.company || customerIdentity.name || '—'}
+                      </p>
                     </TableCell>
                     <TableCell>
-                      {(() => {
-                        const s = summarizeProducts(order.items, order);
-                        return (
                           <p className="text-sm font-medium text-slate-900 leading-tight truncate">
-                            {s.representativeName}（共 {s.productCount} 个产品）
+                            {summary.representativeName}（共 {summary.productCount} 个产品）
                           </p>
-                        );
-                      })()}
+                          <p className="text-xs text-slate-500 mt-1">
+                            总数量：{summary.totalQuantity.toLocaleString()} {summary.quantityUnit}
+                          </p>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell>
                       <span className="text-sm font-semibold text-slate-900">
-                        ¥{order.totalAmount?.toLocaleString() || 0}
+                        {(order.currency || 'CNY') === 'USD' ? '$' : (order.currency || 'CNY') === 'EUR' ? '€' : '¥'}{order.totalAmount?.toLocaleString() || 0}
                       </span>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm text-slate-600">{formatCompactUtcMinute(order.createdDate)}</span>
+                      <span className="text-sm text-slate-600">{formatBusinessDate(order.updatedAt || order.updatedDate || order.actualDate || order.createdDate || order.createdAt)}</span>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center justify-center gap-1">
-                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
-                          <Eye className="w-3 h-3 mr-1" />
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => openPurchaseOrderViewer(order)}
+                        >
                           查看
                         </Button>
                         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs">
-                          <Download className="w-3 h-3" />
+                          下载
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))
+                  </React.Fragment>
+                  );
+                })
               ) : (
                 <TableRow>
                   <TableCell colSpan={8} className="h-32 text-center">
@@ -1925,35 +3828,35 @@ export default function SupplierOrderManagementCenter() {
             <LayoutGrid className="w-4 h-4" />
             <div className="text-left">
               <p className="text-sm font-medium">概览</p>
-              <p className="text-xs opacity-75">Overview</p>
+              <p className="text-xs opacity-75">{supplierUiCopy.overviewSecondary}</p>
             </div>
           </TabsTrigger>
           <TabsTrigger value="xj" className="gap-2 py-2.5 data-[state=active]:bg-white">
             <FileText className="w-4 h-4" />
             <div className="text-left">
               <p className="text-sm font-medium">客户需求</p>
-              <p className="text-xs opacity-75">采购询价 · {stats.pendingRFQs}</p>
+              <p className="text-xs opacity-75">{supplierUiCopy.xjSecondaryLabel} · {stats.pendingRFQs}</p>
             </div>
           </TabsTrigger>
           <TabsTrigger value="qt" className="gap-2 py-2.5 data-[state=active]:bg-white">
             <Calculator className="w-4 h-4" />
             <div className="text-left">
               <p className="text-sm font-medium">我的报价</p>
-              <p className="text-xs opacity-75">Quotation · {myQuotations.length}</p>
+              <p className="text-xs opacity-75">{supplierUiCopy.qtSecondaryLabel} · {myQuotations.length}</p>
             </div>
           </TabsTrigger>
           <TabsTrigger value="active-orders" className="gap-2 py-2.5 data-[state=active]:bg-white">
             <Factory className="w-4 h-4" />
             <div className="text-left">
               <p className="text-sm font-medium">在制订单</p>
-              <p className="text-xs opacity-75">Active · {stats.activeOrders}</p>
+              <p className="text-xs opacity-75">{supplierUiCopy.activeSecondaryLabel} · {stats.activeOrders}</p>
             </div>
           </TabsTrigger>
           <TabsTrigger value="history" className="gap-2 py-2.5 data-[state=active]:bg-white">
             <Archive className="w-4 h-4" />
             <div className="text-left">
               <p className="text-sm font-medium">历史订单</p>
-              <p className="text-xs opacity-75">History · {stats.completedOrders}</p>
+              <p className="text-xs opacity-75">{supplierUiCopy.historySecondaryLabel} · {stats.completedOrders}</p>
             </div>
           </TabsTrigger>
         </TabsList>
@@ -1979,16 +3882,13 @@ export default function SupplierOrderManagementCenter() {
         </TabsContent>
       </Tabs>
 
-      {/* 文档查看对话框 */}
-      <Dialog open={documentViewerOpen} onOpenChange={setDocumentViewerOpen}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>询价单文档</DialogTitle>
-            <DialogDescription>完整的询价单文档，包含产品清单、商务条款和技术要求</DialogDescription>
-          </DialogHeader>
-          {selectedItem && <XJDocumentViewer xj={selectedItem} />}
-        </DialogContent>
-      </Dialog>
+      {selectedItem && (
+        <XJDocumentViewer
+          open={documentViewerOpen}
+          onClose={() => setDocumentViewerOpen(false)}
+          xj={selectedItem}
+        />
+      )}
 
       {/* 详情对话框 */}
       <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
@@ -2006,7 +3906,9 @@ export default function SupplierOrderManagementCenter() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-600">客户</p>
-                  <p className="font-medium">{selectedItem.customerName}</p>
+                  <p className="font-medium">
+                    {getCustomerIdentityForQuotation(selectedItem).company || getCustomerIdentityForQuotation(selectedItem).name || '—'}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-600">报价日期</p>
@@ -2037,11 +3939,13 @@ export default function SupplierOrderManagementCenter() {
               <div className="border-t pt-4">
                 <h4 className="font-semibold mb-3">产品清单</h4>
                 <div className="space-y-2">
-                  {selectedItem.items?.map((item: any, idx: number) => (
+                  {selectedItem.items?.map((item: any, idx: number) => {
+                    const normalized = normalizeSupplierProduct(item);
+                    return (
                     <div key={idx} className="bg-slate-50 p-3 rounded border">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-medium">{item.productName}</p>
+                          <p className="font-medium">{normalized.productName || item.productName}</p>
                           <p className="text-xs text-slate-500">{getFormalBusinessModelNo(item)}</p>
                         </div>
                         <div className="text-right">
@@ -2052,7 +3956,8 @@ export default function SupplierOrderManagementCenter() {
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -2069,6 +3974,65 @@ export default function SupplierOrderManagementCenter() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* 报价单文档查看器 – 独立 DocumentModal（可拖动、A4分页） */}
+      {selectedSupplierOrderDocumentData ? (
+        <ProcurementDocumentViewerShell
+          open={purchaseOrderViewerOpen}
+          onClose={() => setPurchaseOrderViewerOpen(false)}
+          title="采购订单"
+          subtitle={selectedSupplierOrderDocumentData.poNo}
+          templateLabel={selectedSupplierOrderTemplateLabel}
+          icon={<ShoppingCart className="h-6 w-6" />}
+          bodyClassName={SUPPLIER_DOCUMENT_PREVIEW_BODY_CLASS}
+          innerClassName={SUPPLIER_DOCUMENT_PREVIEW_INNER_CLASS}
+          actions={(
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={exportingPurchaseOrder}
+                onClick={async () => {
+                  if (!purchaseOrderDocumentRef.current) return;
+                  setExportingPurchaseOrder(true);
+                  try {
+                    const filename = generatePDFFilename('Purchase_Order', selectedSupplierOrderDocumentData.poNo);
+                    await exportToPDF(purchaseOrderDocumentRef.current, filename);
+                    toast.success('采购订单PDF导出成功！');
+                  } catch (error) {
+                    toast.error('PDF导出失败，请重试');
+                    console.error('Purchase order PDF export error:', error);
+                  } finally {
+                    setExportingPurchaseOrder(false);
+                  }
+                }}
+              >
+                <Download className="h-4 w-4" />
+                下载PDF
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={exportingPurchaseOrder}
+                onClick={async () => {
+                  if (!purchaseOrderDocumentRef.current) return;
+                  const filename = generatePDFFilename('Purchase_Order', selectedSupplierOrderDocumentData.poNo);
+                  await exportToPDFPrint(purchaseOrderDocumentRef.current, filename);
+                }}
+              >
+                <Printer className="h-4 w-4" />
+                打印
+              </Button>
+            </>
+          )}
+        >
+          <div ref={purchaseOrderDocumentRef}>
+            <PurchaseOrderDocumentA4Pages data={selectedSupplierOrderDocumentData} />
+          </div>
+        </ProcurementDocumentViewerShell>
+      ) : null}
 
       {/* 报价单文档查看器 – 独立 DocumentModal（可拖动、A4分页） */}
       {selectedQuotation && (
@@ -2145,7 +4109,7 @@ export default function SupplierOrderManagementCenter() {
                 <div className="min-w-0 flex-1">
                   <div className="text-[15px] font-semibold leading-tight text-slate-800">核算报价</div>
                   <div className="mt-0.5 text-[12px] text-slate-400">
-                    {selectedQuotation.quotationNo} · {selectedQuotation.customerName || 'COSUN采购'}
+                    {selectedQuotation.quotationNo} · {getCustomerIdentityForQuotation(selectedQuotation).company || getCustomerIdentityForQuotation(selectedQuotation).name || issuerFallbackName}
                   </div>
                 </div>
                 <button

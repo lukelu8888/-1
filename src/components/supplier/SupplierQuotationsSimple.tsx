@@ -750,21 +750,13 @@ export default function SupplierQuotationsSimple() {
         </DialogContent>
       </Dialog>
 
-      {/* 文档查看器对话框 */}
-      <Dialog open={documentViewerOpen} onOpenChange={setDocumentViewerOpen}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>询价单文档 - {documentRFQ?.xjNumber}</DialogTitle>
-            <DialogDescription>
-              完整的询价单文档，包含产品清单、商务条款和技术要求
-            </DialogDescription>
-          </DialogHeader>
-          
-          {documentRFQ && (
-            <XJDocumentViewer xj={documentRFQ} />
-          )}
-        </DialogContent>
-      </Dialog>
+      {documentRFQ && (
+        <XJDocumentViewer
+          open={documentViewerOpen}
+          onClose={() => setDocumentViewerOpen(false)}
+          xj={documentRFQ}
+        />
+      )}
     </div>
   );
 }

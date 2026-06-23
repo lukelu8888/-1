@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { AlertCircle, Calculator, DollarSign, Clock, Package } from 'lucide-react';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 
 interface SimpleQuoteFormProps {
   xj: any;
@@ -23,7 +24,7 @@ export function SimpleQuoteForm({ xj, initialData, onSubmit, onCancel }: SimpleQ
     leadTime: initialData?.leadTime || '',
     moq: initialData?.moq || '',
     validityDays: initialData?.validityDays || '30',
-    paymentTerms: initialData?.paymentTerms || 'T/T 30% deposit, 70% before shipment',
+    paymentTerms: initialData?.paymentTerms || buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     remarks: initialData?.remarks || ''
   });
 

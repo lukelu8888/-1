@@ -674,61 +674,71 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
           <span className="font-semibold text-amber-900 text-sm">报价条件设置</span>
           <span className="text-xs text-amber-600 ml-1">（两种报价方式均需先设置）</span>
         </div>
-        <div className="p-3 bg-white">
-          <div className="grid grid-cols-3 gap-x-6 gap-y-3">
+        <div className="p-3 bg-white space-y-3">
 
-            {/* 报价模式 */}
-            <div className="col-span-3">
-              <div className="mb-1"><FieldLabel tip="选择向买方报价时使用的国际贸易术语（Incoterms）和货币。不同术语决定了哪些费用由卖方承担，直接影响报价金额。" formula={"EXW：工厂交货，买方承担所有费用\nFOB：卖方负责到出口港装船\nCIF：卖方负责运费+保险到目的港"}>报价模式（贸易术语 + 货币）</FieldLabel></div>
-              <div className="flex gap-2 flex-wrap">
-                {(Object.keys(QUOTE_MODE_LABELS) as QuoteMode[]).map(mode => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setQuoteMode(mode)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                      quoteMode === mode
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
-                    }`}
-                  >
-                    {QUOTE_MODE_LABELS[mode]}
-                  </button>
-                ))}
-              </div>
+          {/* 报价模式（贸易术语） */}
+          <div>
+            <div className="mb-1.5">
+              <FieldLabel tip="选择向买方报价时使用的国际贸易术语（Incoterms）和货币。不同术语决定了哪些费用由卖方承担，直接影响报价金额。" formula={"EXW：工厂交货，买方承担所有费用\nFOB：卖方负责到出口港装船\nCIF：卖方负责运费+保险到目的港"}>
+                报价模式（贸易术语 + 货币）
+              </FieldLabel>
             </div>
+            <div className="flex gap-2 flex-wrap">
+              {(Object.keys(QUOTE_MODE_LABELS) as QuoteMode[]).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setQuoteMode(mode)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                    quoteMode === mode
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                  }`}
+                >
+                  {QUOTE_MODE_LABELS[mode]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 增值税率 / 退税 / 汇率 */}
+          <div className="grid grid-cols-3 gap-4 pt-3 border-t border-slate-100">
 
             {/* 增值税率 */}
             <div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 mb-1.5">
                 <Percent className="w-3 h-3 text-slate-500" />
-                <FieldLabel tip="增值税（VAT）是中国境内销售商品时征收的流转税。成本录入时使用含税价，系统自动推导不含税价。出口时可申请退税。" formula={"不含税价 = 含税价 ÷ (1 + 税率)\n常见税率：一般货物13%，建材/农产品9%，服务6%"}>增值税率 (VAT)</FieldLabel>
+                <FieldLabel tip="增值税（VAT）是中国境内销售商品时征收的流转税。成本录入时使用含税价，系统自动推导不含税价。出口时可申请退税。" formula={"不含税价 = 含税价 ÷ (1 + 税率)\n常见税率：一般货物13%，建材/农产品9%，服务6%"}>
+                  增值税率 (VAT)
+                </FieldLabel>
               </div>
-              <div className="flex gap-1 mt-1">
+              <div className="flex gap-1">
                 {[13, 9, 6].map(r => (
                   <button key={r} type="button"
                     onClick={() => setTax(t => ({ ...t, vatRate: r }))}
-                    className={`flex-1 py-1 text-xs rounded border ${tax.vatRate === r ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'}`}
+                    className={`flex-1 py-1.5 text-xs rounded border font-medium ${tax.vatRate === r ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'}`}
                   >{r}%</button>
                 ))}
                 <div className="relative flex-1">
                   <Input type="number" value={tax.vatRate} onChange={e => setTax(t => ({ ...t, vatRate: n(e.target.value) }))}
-                    className="h-7 text-xs text-center" step="1" min="0" max="17" />
+                    className="h-8 text-xs text-center" step="1" min="0" max="17" />
                 </div>
               </div>
-              <p className="text-[10px] text-slate-400 mt-0.5">一般货物13%，建材/农产品9%，服务6%</p>
+              <p className="text-[10px] text-slate-400 mt-1">一般货物13%，建材/农产品9%，服务6%</p>
             </div>
 
             {/* 出口退税 */}
             <div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 mb-1.5">
                 <RefreshCw className="w-3 h-3 text-slate-500" />
-                <FieldLabel tip="出口退税是国家对出口商品退还已缴纳增值税的政策，降低出口成本、提升竞争力。退税率因商品 HS 编码不同而异，部分商品（如木材、矿产）不享受退税。" formula={"退税额 = 出厂不含税价 × 退税率\n退税后净成本 = 出厂含税价 − 退税额\n（退税率 ≤ 增值税率，最高与增值税率相同）"}>出口退税率</FieldLabel>
+                <FieldLabel tip="出口退税是国家对出口商品退还已缴纳增值税的政策，降低出口成本、提升竞争力。退税率因商品 HS 编码不同而异，部分商品（如木材、矿产）不享受退税。" formula={"退税额 = 出厂不含税价 × 退税率\n退税后净成本 = 出厂含税价 − 退税额\n（退税率 ≤ 增值税率，最高与增值税率相同）"}>
+                  出口退税率
+                </FieldLabel>
               </div>
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex items-center gap-2">
                 <button type="button"
                   onClick={() => setTax(t => ({ ...t, hasExportRebate: !t.hasExportRebate }))}
-                  className={`px-2 py-1 text-xs rounded border transition-colors ${tax.hasExportRebate ? 'bg-green-600 text-white border-green-600' : 'bg-white text-slate-500 border-slate-300'}`}
+                  className={`px-3 py-1.5 text-xs rounded border font-medium transition-colors whitespace-nowrap ${tax.hasExportRebate ? 'bg-green-600 text-white border-green-600' : 'bg-white text-slate-500 border-slate-300'}`}
                 >
                   {tax.hasExportRebate ? '✓ 享受退税' : '✗ 不退税'}
                 </button>
@@ -737,13 +747,13 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
                     {[13, 9, 5, 0].map(r => (
                       <button key={r} type="button"
                         onClick={() => setTax(t => ({ ...t, exportRebateRate: r }))}
-                        className={`flex-1 py-1 text-xs rounded border ${tax.exportRebateRate === r ? 'bg-green-600 text-white border-green-600' : 'bg-white text-slate-600 border-slate-300 hover:border-green-400'}`}
+                        className={`flex-1 py-1.5 text-xs rounded border ${tax.exportRebateRate === r ? 'bg-green-600 text-white border-green-600' : 'bg-white text-slate-600 border-slate-300 hover:border-green-400'}`}
                       >{r}%</button>
                     ))}
                   </div>
                 )}
               </div>
-              <p className="text-[10px] text-slate-400 mt-0.5">
+              <p className="text-[10px] text-slate-400 mt-1">
                 {tax.hasExportRebate
                   ? `退税额 = 不含税价 × ${tax.exportRebateRate}%，降低出口成本`
                   : '部分商品（如木材、矿产）不享受退税'}
@@ -752,25 +762,27 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
 
             {/* 汇率 */}
             <div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 mb-1.5">
                 <Globe className="w-3 h-3 text-slate-500" />
-                <FieldLabel tip="人民币兑外币的汇率，用于将人民币成本换算为美元/欧元报价。建议使用当日中国银行中间价，汇率波动会直接影响外币报价的利润。" formula={"FOB(USD) = FOB完全成本(CNY) ÷ USD汇率\nCIF(USD) = FOB(USD) + 海运费 + 保险费"}>汇率设置</FieldLabel>
+                <FieldLabel tip="人民币兑外币的汇率，用于将人民币成本换算为美元/欧元报价。建议使用当日中国银行中间价，汇率波动会直接影响外币报价的利润。" formula={"FOB(USD) = FOB完全成本(CNY) ÷ USD汇率\nCIF(USD) = FOB(USD) + 海运费 + 保险费"}>
+                  汇率设置
+                </FieldLabel>
               </div>
-              <div className="grid grid-cols-2 gap-1 mt-1">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <div className="text-[10px] text-slate-500 mb-0.5">USD/CNY</div>
+                  <div className="text-[10px] text-slate-500 mb-1">USD/CNY</div>
                   <Input type="number" value={tax.usdRate}
                     onChange={e => setTax(t => ({ ...t, usdRate: n(e.target.value) }))}
-                    className="h-7 text-xs" step="0.01" min="1" />
+                    className="h-8 text-xs" step="0.01" min="1" />
                 </div>
                 <div>
-                  <div className="text-[10px] text-slate-500 mb-0.5">EUR/CNY</div>
+                  <div className="text-[10px] text-slate-500 mb-1">EUR/CNY</div>
                   <Input type="number" value={tax.eurRate}
                     onChange={e => setTax(t => ({ ...t, eurRate: n(e.target.value) }))}
-                    className="h-7 text-xs" step="0.01" min="1" />
+                    className="h-8 text-xs" step="0.01" min="1" />
                 </div>
               </div>
-              <p className="text-[10px] text-slate-400 mt-0.5">请填写当日银行中间价</p>
+              <p className="text-[10px] text-slate-400 mt-1">请填写当日银行中间价</p>
             </div>
 
           </div>
@@ -838,11 +850,12 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
                   {/* ── 简单报价面板 ── */}
                   {pricingMode === 'simple' && (
                     <div className="space-y-3">
-                      {/* 第一行：成本输入 + 税务推导 + 毛利率 + 建议报价 */}
-                      <div className="flex flex-wrap gap-3 items-end">
 
-                        {/* 出厂含税成本 */}
-                        <div className="w-44 shrink-0">
+                      {/* 主要输入：4 列网格 */}
+                      <div className="grid grid-cols-4 gap-3">
+
+                        {/* Col 1: 出厂含税成本 */}
+                        <div>
                           <FieldLabel
                             tip="您知道的该产品出厂含税成本价（含原材料、人工、制造、包装等所有成本，含增值税）。系统会根据报价条件自动推导净成本和报价。"
                             formula="出厂含税成本 = 所有成本项之和（含增值税）"
@@ -862,28 +875,10 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
                           </div>
                         </div>
 
-                        {/* 税务推导（只读展示，有成本时才显示） */}
-                        {n(simpleCosts[item.id]) > 0 && (
-                          <div className="flex gap-2 items-end">
-                            <div className="text-[11px] text-slate-400 pb-2.5 shrink-0">→ 税务推导</div>
-                            {[
-                              { label: '不含税价', val: `¥${fmt(sc.exwExcl)}`, bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-700' },
-                              { label: tax.hasExportRebate ? `退税 ×${tax.exportRebateRate}%` : '退税额', val: tax.hasExportRebate ? `+¥${fmt(sc.rebate)}` : '¥0', bg: 'bg-green-50', border: 'border-green-200', text: tax.hasExportRebate ? 'text-green-700' : 'text-slate-400' },
-                              { label: '净成本', val: `¥${fmt(sc.netCost)}`, bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700' },
-                            ].map(({ label, val, bg, border, text }) => (
-                              <div key={label} className={`${bg} ${border} border rounded-lg px-3 py-1.5 text-center min-w-[72px]`}>
-                                <div className="text-[10px] text-slate-400">{label}</div>
-                                <div className={`text-xs font-bold ${text}`}>{val}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* 利润率类型 + 目标值 */}
-                        <div className="shrink-0 space-y-1.5">
-                          {/* 类型切换 */}
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-slate-500 shrink-0 font-medium">定价方式</span>
+                        {/* Col 2: 定价方式 + 目标值 */}
+                        <div>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className="text-[11px] text-slate-500 font-medium whitespace-nowrap">定价方式</span>
                             <div className="flex rounded border border-slate-300 overflow-hidden text-xs font-medium">
                               <button type="button" onClick={() => setMarginType('markup')}
                                 className={`px-3 py-1 transition-colors ${marginType === 'markup' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
@@ -895,13 +890,6 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
                               </button>
                             </div>
                           </div>
-                          {/* 公式说明 */}
-                          <div className={`text-[10px] leading-tight px-2 py-1 rounded border ${marginType === 'markup' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-purple-50 border-purple-200 text-purple-700'}`}>
-                            {marginType === 'markup'
-                              ? <>加成率 = (售价−成本)÷<strong>成本</strong>　售价 = 成本×(1+加成率)　无上限</>
-                              : <>毛利率 = (售价−成本)÷<strong>售价</strong>　售价 = 成本÷(1−毛利率)　必须&lt;100%</>}
-                          </div>
-                          {/* 输入框 */}
                           <FieldLabel
                             tip={marginType === 'markup'
                               ? '【加成率 Markup Rate】= (售价 - 成本) ÷ 成本\n加成率无上限：100%=翻倍，200%=三倍。\n与毛利率换算：毛利率 = 加成率 ÷ (1 + 加成率)'
@@ -917,20 +905,18 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
                             value={targetMargins[item.id] || ''}
                             onChange={e => {
                               const raw = e.target.value;
-                              // 毛利率模式：实时阻止 ≥ 100 的输入
                               if (marginType === 'gross' && n(raw) >= 100) {
                                 toast.error('毛利率不能等于或大于100%（公式无解）', { id: 'gm-limit' });
                                 return;
                               }
                               setTargetMargins(p => ({ ...p, [item.id]: raw }));
                             }}
-                            placeholder={marginType === 'markup' ? '100' : '50'}
-                            className={`h-9 text-sm font-semibold w-28 ${sc.grossMarginError ? 'border-red-400 bg-red-50' : ''}`}
+                            placeholder={marginType === 'markup' ? '20' : '50'}
+                            className={`mt-1 h-9 text-sm font-semibold w-full ${sc.grossMarginError ? 'border-red-400 bg-red-50' : ''}`}
                             step="0.5" min="0"
                           />
-                          {/* 换算提示 */}
                           {n(simpleCosts[item.id]) > 0 && n(targetMargins[item.id]) > 0 && !sc.grossMarginError && (
-                            <div className="text-[10px] text-slate-500">
+                            <div className="text-[10px] text-slate-400 mt-0.5">
                               {marginType === 'markup'
                                 ? `≈ 毛利率 ${(n(targetMargins[item.id]) / (100 + n(targetMargins[item.id])) * 100).toFixed(1)}%`
                                 : `≈ 加成率 ${(n(targetMargins[item.id]) / (100 - n(targetMargins[item.id])) * 100).toFixed(1)}%`}
@@ -938,8 +924,8 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
                           )}
                         </div>
 
-                        {/* 建议报价 */}
-                        <div className="w-52 shrink-0">
+                        {/* Col 3: 建议报价 */}
+                        <div>
                           <FieldLabel
                             tip={marginType === 'markup' ? '售价 = 成本 × (1 + 加成率)' : '售价 = 成本 ÷ (1 − 毛利率)'}
                             formula={marginType === 'markup'
@@ -969,94 +955,101 @@ export default function SupplierQuotationEditor({ quotation, onSave, onCancel }:
                             </div>
                           )}
                         </div>
+
+                        {/* Col 4: 实际报价 * */}
+                        <div>
+                          <FieldLabel tip="最终向买方报出的实际单价。可手动输入或点击左侧「应用」填入建议价。">
+                            实际报价 * ({currencyCode})
+                          </FieldLabel>
+                          <div className="relative mt-1">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">{currencySymbol}</span>
+                            <Input
+                              type="number"
+                              value={itemPrices[item.id] || ''}
+                              onChange={e => setItemPrices(p => ({ ...p, [item.id]: e.target.value }))}
+                              placeholder="0.00"
+                              className="h-9 text-sm font-bold pl-5 border-2 border-orange-300 bg-orange-50"
+                              step="0.01" min="0"
+                            />
+                          </div>
+                        </div>
                       </div>
 
-                      {/* 实际报价 + 利润分析 */}
-                      <div className="bg-slate-50 rounded-lg p-3 space-y-2">
-                        {/* 第一行：实际报价输入 */}
-                        <div className="flex items-end gap-3">
-                          <div className="w-56 shrink-0">
-                            <FieldLabel tip="最终向买方报出的实际单价。可手动输入或点击上方「应用」填入建议价。">
-                              实际报价 * ({currencyCode})
-                            </FieldLabel>
-                            <div className="relative mt-1">
-                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">{currencySymbol}</span>
-                              <Input
-                                type="number"
-                                value={itemPrices[item.id] || ''}
-                                onChange={e => setItemPrices(p => ({ ...p, [item.id]: e.target.value }))}
-                                placeholder="0.00"
-                                className="h-9 text-sm font-bold pl-5 border-2 border-orange-300 bg-orange-50"
-                                step="0.01" min="0"
-                              />
-                            </div>
-                          </div>
-                          <div className="text-xs text-slate-400 pb-2">← 填写后查看下方利润分析</div>
+                      {/* 税务推导（inline 一行，有成本时才显示） */}
+                      {n(simpleCosts[item.id]) > 0 && (
+                        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs flex-wrap">
+                          <span className="text-slate-500 font-medium shrink-0">→ 税务推导</span>
+                          <span className="text-slate-600">不含税价 <strong className="text-slate-800">¥{fmt(sc.exwExcl)}</strong></span>
+                          <span className="text-slate-300">|</span>
+                          <span className={tax.hasExportRebate ? 'text-green-700' : 'text-slate-400'}>
+                            {tax.hasExportRebate ? `退税 +¥${fmt(sc.rebate)}` : '不退税 ¥0.00'}
+                          </span>
+                          <span className="text-slate-300">|</span>
+                          <span className="text-orange-700 font-medium">净成本 ¥{fmt(sc.netCost)}</span>
                         </div>
-                        {/* 第二行：利润分析五格（严格财务定义） */}
-                        <div className="grid grid-cols-5 gap-2">
-                          {(() => {
-                            const effectivePrice = price > 0 ? price : sc.suggested;
-                            const profit = effectivePrice - sc.fullCost;
-                            // 毛利率（Gross Margin）= (售价 - 成本) ÷ 售价
-                            const grossMgn = sc.actualGrossMargin;
-                            // 加成率（Markup Rate）= (售价 - 成本) ÷ 成本
-                            const markupRate = sc.actualMarkupRate;
-                            const profitColor = profit >= 0 ? 'green' : 'red';
-                            const grossColor = grossMgn >= 15 ? 'green' : grossMgn >= 8 ? 'yellow' : 'red';
-                            const markupColor = markupRate >= 20 ? 'green' : markupRate >= 10 ? 'yellow' : 'red';
-                            return [
-                              {
-                                label: '完全成本',
-                                val: `${currencySymbol}${fmt(sc.fullCost)}`,
-                                sub: '报价下限',
-                                color: 'slate',
-                                tip: '完全成本 = 出厂含税价（EXW）或退税后净成本（FOB/CIF），是报价的绝对下限。',
-                              },
-                              {
-                                label: '单件利润',
-                                val: `${currencySymbol}${fmt(profit)}`,
-                                sub: '售价 − 成本',
-                                color: profitColor,
-                                tip: '单件利润 = 实际报价 − 完全成本',
-                              },
-                              {
-                                label: '加成率',
-                                val: `${markupRate.toFixed(1)}%`,
-                                sub: '利润 ÷ 成本',
-                                color: markupColor,
-                                tip: '【加成率 Markup Rate】= (售价 − 成本) ÷ 成本\n无上限，100%=翻倍，200%=三倍',
-                              },
-                              {
-                                label: '毛利率',
-                                val: `${grossMgn.toFixed(1)}%`,
-                                sub: '利润 ÷ 售价',
-                                color: grossColor,
-                                tip: '【毛利率 Gross Margin】= (售价 − 成本) ÷ 售价\n财务报表口径，必须 < 100%',
-                              },
-                              {
-                                label: '总利润',
-                                val: `${currencySymbol}${fmt(profit * item.quantity)}`,
-                                sub: `× ${item.quantity} ${item.unit}`,
-                                color: profitColor,
-                                tip: '总利润 = 单件利润 × 数量',
-                              },
-                            ].map(({ label, val, sub, color, tip }) => (
-                              <TooltipProvider key={label}>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div className={`bg-${color}-50 border border-${color}-200 rounded-lg p-2.5 cursor-help`}>
-                                      <div className="text-[10px] text-slate-500 mb-1">{label}</div>
-                                      <div className={`text-sm font-bold text-${color}-700 truncate`}>{val}</div>
-                                      <div className="text-[10px] text-slate-400 mt-0.5 truncate">{sub}</div>
-                                    </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-[220px] text-xs whitespace-pre-line">{tip}</TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            ));
-                          })()}
-                        </div>
+                      )}
+
+                      {/* 利润分析（5 格） */}
+                      <div className="grid grid-cols-5 gap-2">
+                        {(() => {
+                          const effectivePrice = price > 0 ? price : sc.suggested;
+                          const profit = effectivePrice - sc.fullCost;
+                          const grossMgn = sc.actualGrossMargin;
+                          const markupRate = sc.actualMarkupRate;
+                          const profitColor = profit >= 0 ? 'green' : 'red';
+                          const grossColor = grossMgn >= 15 ? 'green' : grossMgn >= 8 ? 'yellow' : 'red';
+                          const markupColor = markupRate >= 20 ? 'green' : markupRate >= 10 ? 'yellow' : 'red';
+                          return [
+                            {
+                              label: '完全成本',
+                              val: `${currencySymbol}${fmt(sc.fullCost)}`,
+                              sub: '报价下限',
+                              color: 'slate',
+                              tip: '完全成本 = 出厂含税价（EXW）或退税后净成本（FOB/CIF），是报价的绝对下限。',
+                            },
+                            {
+                              label: '单件利润',
+                              val: `${currencySymbol}${fmt(profit)}`,
+                              sub: '售价 − 成本',
+                              color: profitColor,
+                              tip: '单件利润 = 实际报价 − 完全成本',
+                            },
+                            {
+                              label: '加成率',
+                              val: `${markupRate.toFixed(1)}%`,
+                              sub: '利润 ÷ 成本',
+                              color: markupColor,
+                              tip: '【加成率 Markup Rate】= (售价 − 成本) ÷ 成本\n无上限，100%=翻倍，200%=三倍',
+                            },
+                            {
+                              label: '毛利率',
+                              val: `${grossMgn.toFixed(1)}%`,
+                              sub: '利润 ÷ 售价',
+                              color: grossColor,
+                              tip: '【毛利率 Gross Margin】= (售价 − 成本) ÷ 售价\n财务报表口径，必须 < 100%',
+                            },
+                            {
+                              label: '总利润',
+                              val: `${currencySymbol}${fmt(profit * item.quantity)}`,
+                              sub: `× ${item.quantity} ${item.unit}`,
+                              color: profitColor,
+                              tip: '总利润 = 单件利润 × 数量',
+                            },
+                          ].map(({ label, val, sub, color, tip }) => (
+                            <TooltipProvider key={label}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className={`bg-${color}-50 border border-${color}-200 rounded-lg p-2.5 cursor-help`}>
+                                    <div className="text-[10px] text-slate-500 mb-1">{label}</div>
+                                    <div className={`text-sm font-bold text-${color}-700 truncate`}>{val}</div>
+                                    <div className="text-[10px] text-slate-400 mt-0.5 truncate">{sub}</div>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-[220px] text-xs whitespace-pre-line">{tip}</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          ));
+                        })()}
                       </div>
                     </div>
                   )}

@@ -1,11 +1,30 @@
-import React from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
+import React, { useMemo } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { Package, Factory, TrendingUp, DollarSign, Clock, CheckCircle, AlertCircle, FileCheck, ArrowRight, Calendar } from 'lucide-react';
+import { Package, Factory, TrendingUp, DollarSign, CheckCircle, AlertCircle, FileCheck, ArrowRight, Calendar } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { useOrganization } from '../../contexts/OrganizationContext';
+import { useUser } from '../../contexts/UserContext';
+import { resolveSupplierPortalLanguage } from '../../utils/supplierPortalLanguage';
 
 export default function SupplierOverview() {
+  const { org } = useOrganization();
+  const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
   const stats = [
     {
       title: '活跃订单',
@@ -36,8 +55,8 @@ export default function SupplierOverview() {
     },
     {
       title: '预计收入',
-      value: '$248,500',
-      unit: 'USD',
+      value: portalLanguage === 'zh' ? '¥248,500' : '$248,500',
+      unit: portalLanguage === 'zh' ? '元' : 'USD',
       change: '+18%',
       icon: DollarSign,
       color: 'text-emerald-600',
@@ -58,7 +77,7 @@ export default function SupplierOverview() {
       product: 'LED面板灯 600x600mm',
       quantity: '5,000',
       unit: '件',
-      value: '$45,000',
+      value: portalLanguage === 'zh' ? '¥45,000' : '$45,000',
       status: 'pending_confirmation',
       statusLabel: '待确认',
       dueDate: '2024-12-15',
@@ -68,7 +87,7 @@ export default function SupplierOverview() {
       product: 'LED筒灯 9W',
       quantity: '10,000',
       unit: '件',
-      value: '$32,000',
+      value: portalLanguage === 'zh' ? '¥32,000' : '$32,000',
       status: 'in_production',
       statusLabel: '生产中',
       dueDate: '2024-12-10',
@@ -79,7 +98,7 @@ export default function SupplierOverview() {
       product: 'LED轨道灯 20W',
       quantity: '3,000',
       unit: '件',
-      value: '$28,500',
+      value: portalLanguage === 'zh' ? '¥28,500' : '$28,500',
       status: 'quality_check',
       statusLabel: '质检中',
       dueDate: '2024-12-05',

@@ -1,16 +1,23 @@
-import React, { useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
-import { Search, Filter, CheckCircle, XCircle, Clock, Eye, Download, MessageSquare, Calendar, Package2, DollarSign, FileText } from 'lucide-react';
+import { Search, Filter, CheckCircle, XCircle, Clock, Eye, Download, MessageSquare, Calendar, Package2, DollarSign, FileText, Printer, ShoppingCart } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { toast } from 'sonner@2.0.3';
-import PurchaseOrderDocument from './PurchaseOrderDocument';
 import { usePurchaseOrders } from '../../contexts/PurchaseOrderContext';
 import { shipmentWorkflowSummaryService } from '../../lib/supabaseService';
+import type { PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument';
+import { PurchaseOrderDocumentA4Pages } from '../documents/templates/paginated/PurchaseOrderDocumentA4';
+import { ProcurementDocumentViewerShell } from '../admin/purchase-order/ProcurementDocumentViewerShell';
+import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport';
+import {
+  SUPPLIER_DOCUMENT_PREVIEW_BODY_CLASS,
+  SUPPLIER_DOCUMENT_PREVIEW_INNER_CLASS,
+} from './documentPreviewStandards';
 
 /**
  * 🔥 供应商视角：客户订单管理
@@ -28,7 +35,9 @@ export default function CustomerOrders() {
   const [documentDialogOpen, setDocumentDialogOpen] = useState(false);
   const [deliveryDate, setDeliveryDate] = useState('');
   const [rejectReason, setRejectReason] = useState('');
+  const [exportingDocument, setExportingDocument] = useState(false);
   const [workflowSummaryMap, setWorkflowSummaryMap] = React.useState<Record<string, any>>({});
+  const documentRef = useRef<HTMLDivElement>(null);
   
   // 🔥 从Context获取客户订单数据（Admin端的采购订单）
   const { purchaseOrders: allPurchaseOrders, updatePurchaseOrder } = usePurchaseOrders();
@@ -97,7 +106,7 @@ export default function CustomerOrders() {
       
       return {
         id: po.poNumber,
-        salesOrderId: po.sourceRef || 'N/A',
+        salesOrderId: '-',
         date: po.orderDate,
         customer: 'COSUN', // 🔥 供应商视角：客户就是COSUN（福建高盛达富建材）
         product: firstItem?.productName || '多产品订单',
@@ -116,6 +125,22 @@ export default function CustomerOrders() {
       };
     });
   }, [supplierCustomerOrders]);
+
+  const selectedOrderDocumentData = useMemo<PurchaseOrderData | null>(() => {
+    if (!selectedOrder?.rawPO) return null;
+    return (
+      selectedOrder.rawPO.documentDataSnapshot ||
+      selectedOrder.rawPO.document_data_snapshot ||
+      null
+    ) as PurchaseOrderData | null;
+  }, [selectedOrder]);
+
+  const selectedOrderTemplateLabel = useMemo(() => {
+    if (!selectedOrderDocumentData) return '默认采购合同模板';
+    return selectedOrderDocumentData.templateSettings?.productTableColumns?.length
+      ? '统一采购合同模板'
+      : '默认采购合同模板';
+  }, [selectedOrderDocumentData]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -358,7 +383,7 @@ export default function CustomerOrders() {
             <TableHeader>
               <TableRow className="bg-gray-50">
                 <TableHead className="h-9 w-32" style={{ fontSize: '12px' }}>客户订单号</TableHead>
-                <TableHead className="h-9 w-28" style={{ fontSize: '12px' }}>客户销售单</TableHead>
+                <TableHead className="h-9 w-28" style={{ fontSize: '12px' }}>关联编号</TableHead>
                 <TableHead className="h-9" style={{ fontSize: '12px' }}>产品信息</TableHead>
                 <TableHead className="h-9 w-32" style={{ fontSize: '12px' }}>客户</TableHead>
                 <TableHead className="h-9 w-24 text-right" style={{ fontSize: '12px' }}>数量</TableHead>
@@ -493,7 +518,7 @@ export default function CustomerOrders() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4 border rounded-lg p-4 bg-gray-50">
                 <div>
-                  <p className="text-xs text-gray-500 mb-1">客户销售订单号</p>
+                  <p className="text-xs text-gray-500 mb-1">关联编号</p>
                   <p className="text-sm font-medium">{selectedOrder.salesOrderId}</p>
                 </div>
                 <div>
@@ -620,21 +645,63 @@ export default function CustomerOrders() {
         </DialogContent>
       </Dialog>
 
-      {/* 订单文档对话框 - 全屏 */}
-      <Dialog open={documentDialogOpen} onOpenChange={setDocumentDialogOpen}>
-        <DialogContent className="max-w-[100vw] w-full h-full max-h-screen p-0">
-          <DialogHeader className="sr-only">
-            <DialogTitle>客户订单文档</DialogTitle>
-            <DialogDescription>订单号：{selectedOrder?.id}</DialogDescription>
-          </DialogHeader>
-          {selectedOrder && (
-            <PurchaseOrderDocument 
-              orderData={selectedOrder} 
-              onClose={() => setDocumentDialogOpen(false)}
-            />
+      {selectedOrderDocumentData ? (
+        <ProcurementDocumentViewerShell
+          open={documentDialogOpen}
+          onClose={() => setDocumentDialogOpen(false)}
+          title="采购订单"
+          subtitle={selectedOrderDocumentData.poNo}
+          templateLabel={selectedOrderTemplateLabel}
+          icon={<ShoppingCart className="h-6 w-6" />}
+          bodyClassName={SUPPLIER_DOCUMENT_PREVIEW_BODY_CLASS}
+          innerClassName={SUPPLIER_DOCUMENT_PREVIEW_INNER_CLASS}
+          actions={(
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={exportingDocument}
+                onClick={async () => {
+                  if (!documentRef.current) return;
+                  setExportingDocument(true);
+                  try {
+                    const filename = generatePDFFilename('Purchase_Order', selectedOrderDocumentData.poNo);
+                    await exportToPDF(documentRef.current, filename);
+                    toast.success('采购订单PDF导出成功！');
+                  } catch (error) {
+                    toast.error('PDF导出失败，请重试');
+                    console.error('PDF export error:', error);
+                  } finally {
+                    setExportingDocument(false);
+                  }
+                }}
+              >
+                <Download className="h-4 w-4" />
+                下载PDF
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={exportingDocument}
+                onClick={async () => {
+                  if (!documentRef.current) return;
+                  const filename = generatePDFFilename('Purchase_Order', selectedOrderDocumentData.poNo);
+                  await exportToPDFPrint(documentRef.current, filename);
+                }}
+              >
+                <Printer className="h-4 w-4" />
+                打印
+              </Button>
+            </>
           )}
-        </DialogContent>
-      </Dialog>
+        >
+          <div ref={documentRef}>
+            <PurchaseOrderDocumentA4Pages data={selectedOrderDocumentData} />
+          </div>
+        </ProcurementDocumentViewerShell>
+      ) : null}
     </div>
   );
 }

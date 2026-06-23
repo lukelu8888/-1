@@ -12,7 +12,7 @@
  *   File → data-URI → OrganizationContext.userProfile.avatarUrl
  *   Header UserMenu re-renders immediately via context (no page reload).
  */
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import {
   ArrowLeft, Camera, Check, Mail,
   Pencil, Shield, Tag, User, X,
@@ -20,6 +20,11 @@ import {
 import { useOrganization } from '../../contexts/OrganizationContext';
 import { useUser } from '../../contexts/UserContext';
 import { toast } from 'sonner';
+import {
+  resolveSupplierPortalLanguage,
+  resolveSupplierPortalRoleLabel,
+  resolveSupplierPortalTypeLabel,
+} from '../../utils/supplierPortalLanguage';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Mode = 'view' | 'edit';
@@ -120,8 +125,23 @@ interface UserProfileProps {
 }
 
 export default function UserProfile({ onBack }: UserProfileProps) {
-  const { userProfile, updateUserProfile, uploadUserAvatar } = useOrganization();
+  const { org, userProfile, updateUserProfile, uploadUserAvatar } = useOrganization();
   const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
 
   // ── State machine ────────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>('view');
@@ -203,11 +223,8 @@ export default function UserProfile({ onBack }: UserProfileProps) {
   const isEdit = mode === 'edit';
   const displayName = userProfile.name || '—';
   const displayEmail = user?.email || userProfile.email || '—';
-  const displayRole = user?.role || user?.userRole || userProfile.role || 'Supplier';
-  const displayType =
-    user?.type === 'supplier' || user?.type === 'manufacturer'
-      ? 'Supplier Portal'
-      : user?.type || 'Supplier';
+  const displayRole = resolveSupplierPortalRoleLabel(user?.role || user?.userRole || userProfile.role || 'Supplier', portalLanguage);
+  const displayType = resolveSupplierPortalTypeLabel(user?.type || 'supplier', portalLanguage);
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -233,7 +250,7 @@ export default function UserProfile({ onBack }: UserProfileProps) {
             </div>
             <div>
               <h1 className="text-[15px] font-semibold text-slate-800 leading-tight">个人资料</h1>
-              <p className="text-[11px] text-slate-400">User Profile</p>
+              <p className="text-[11px] text-slate-400">{portalLanguage === 'zh' ? '账户与头像' : 'User Profile'}</p>
             </div>
           </div>
         </div>
@@ -270,7 +287,7 @@ export default function UserProfile({ onBack }: UserProfileProps) {
       </div>
 
       {/* ── Section 1: Avatar ─────────────────────────────────────────────── */}
-      <Section title="头像 · Avatar">
+      <Section title={portalLanguage === 'zh' ? '头像' : 'Avatar'}>
         <div className="py-4 flex items-center gap-6">
           {/* Avatar */}
           <div className="relative flex-shrink-0">
@@ -331,7 +348,7 @@ export default function UserProfile({ onBack }: UserProfileProps) {
       <div className="h-4" />
 
       {/* ── Section 2: Account info ───────────────────────────────────────── */}
-      <Section title="账户信息 · Account">
+      <Section title={portalLanguage === 'zh' ? '账户信息' : 'Account'}>
         {/* Display name – editable */}
         <FieldRow label="显示名称" icon={<User className="w-3.5 h-3.5" />}>
           {isEdit ? (

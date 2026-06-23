@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { Input } from '../../ui/input';
@@ -10,6 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { toast } from 'sonner@2.0.3';
 import { industryTemplates } from '../../../data/industryTemplates';
+import { useOrganization } from '../../../contexts/OrganizationContext';
+import { useUser } from '../../../contexts/UserContext';
+import { resolveSupplierPortalLanguage } from '../../../utils/supplierPortalLanguage';
 
 /**
  * 🔥 供应商视角：客户管理
@@ -18,6 +21,23 @@ import { industryTemplates } from '../../../data/industryTemplates';
  * - 包含客户档案、联系人、收货地址、合作历史等
  */
 export default function CustomerManagement() {
+  const { org } = useOrganization();
+  const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
   const [searchTerm, setSearchTerm] = useState('');
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -44,12 +64,12 @@ export default function CustomerManagement() {
   );
 
   const [customerTypeOptions, setCustomerTypeOptions] = useState([
-    'Distributor',
-    'Retailer',
-    'Wholesaler',
-    'Manufacturer',
-    'End User',
-    'Agent'
+    '经销商',
+    '零售商',
+    '批发商',
+    '制造商',
+    '终端客户',
+    '代理商'
   ]);
 
   const customerLevelOptions = ['VIP', 'A', 'B', 'C'];
@@ -73,9 +93,9 @@ export default function CustomerManagement() {
       companyName: '福建高盛达富建材有限公司',
       companyNameEn: 'FUJIAN GOSUNDA FU BUILDING MATERIALS CO., LTD.',
       country: '中国',
-      region: 'Asia Pacific',
-      industry: 'Building Materials Trading',
-      type: 'Distributor', // 经销商类型
+      region: '亚太地区',
+      industry: '建材贸易',
+      type: '经销商',
       level: 'VIP', // 客户等级
       status: 'active',
       
@@ -120,7 +140,7 @@ export default function CustomerManagement() {
         firstOrderDate: '2023-06-15',
         totalOrders: 156,
         totalAmount: 2450000,
-        currency: 'USD',
+        currency: 'CNY',
         avgOrderValue: 15705,
         lastOrderDate: '2024-12-15',
         outstandingAmount: 125000,
@@ -150,9 +170,9 @@ export default function CustomerManagement() {
     companyName: '',
     companyNameEn: '',
     country: '',
-    region: 'Asia Pacific',
+    region: '亚太地区',
     industry: '',
-    type: 'Distributor',
+    type: '经销商',
     level: 'C',
     status: 'potential',
     contactName: '',
@@ -170,6 +190,46 @@ export default function CustomerManagement() {
     notes: ''
   });
 
+  const getVisibleCustomerName = (customer: { companyName?: string; companyNameEn?: string }) =>
+    portalLanguage === 'zh'
+      ? (customer.companyName || customer.companyNameEn || '')
+      : (customer.companyNameEn || customer.companyName || '');
+
+  const getVisibleCustomerAlias = (customer: { companyName?: string; companyNameEn?: string }) => {
+    const alias = portalLanguage === 'zh' ? customer.companyNameEn : customer.companyName;
+    return alias && alias !== getVisibleCustomerName(customer) ? alias : '';
+  };
+
+  const formatCustomerListAmount = (amount: number, currency?: string) => {
+    const normalizedCurrency = String(currency || 'USD').toUpperCase();
+    if (portalLanguage === 'zh' && normalizedCurrency === 'CNY') {
+      return amount >= 10000
+        ? `¥${(amount / 10000).toFixed(1)}万`
+        : `¥${amount.toFixed(0)}`;
+    }
+    return `$${(amount / 1000).toFixed(1)}K`;
+  };
+
+  const formatCustomerDetailAmount = (amount: number, currency?: string) => {
+    const normalizedCurrency = String(currency || 'USD').toUpperCase();
+    if (portalLanguage === 'zh' && normalizedCurrency === 'CNY') {
+      return amount >= 10000
+        ? `¥${(amount / 10000).toFixed(2)}万`
+        : `¥${amount.toFixed(0)}`;
+    }
+    return `$${(amount / 1000000).toFixed(2)}M ${normalizedCurrency}`;
+  };
+
+  const formatCustomerShortAmount = (amount: number, currency?: string) => {
+    const normalizedCurrency = String(currency || 'USD').toUpperCase();
+    if (portalLanguage === 'zh' && normalizedCurrency === 'CNY') {
+      return amount >= 10000
+        ? `¥${(amount / 10000).toFixed(1)}万`
+        : `¥${amount.toFixed(0)}`;
+    }
+    return `$${(amount / 1000).toFixed(1)}K`;
+  };
+
   // 🔥 重置新增表单
   const resetNewCustomerForm = () => {
     setNewCustomerForm({
@@ -177,9 +237,9 @@ export default function CustomerManagement() {
       companyName: '',
       companyNameEn: '',
       country: '',
-      region: 'Asia Pacific',
+      region: '亚太地区',
       industry: '',
-      type: 'Distributor',
+      type: '经销商',
       level: 'C',
       status: 'potential',
       contactName: '',
@@ -602,8 +662,10 @@ export default function CustomerManagement() {
                     </TableCell>
                     <TableCell className="py-3" style={{ fontSize: '13px' }}>
                       <div>
-                        <p className="font-medium text-gray-900">{customer.companyName}</p>
-                        <p className="text-xs text-gray-500">{customer.companyNameEn}</p>
+                        <p className="font-medium text-gray-900">{getVisibleCustomerName(customer)}</p>
+                        {getVisibleCustomerAlias(customer) && (
+                          <p className="text-xs text-gray-500">{getVisibleCustomerAlias(customer)}</p>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell className="py-3" style={{ fontSize: '13px' }}>
@@ -639,10 +701,10 @@ export default function CustomerManagement() {
                     <TableCell className="py-3 text-right" style={{ fontSize: '13px' }}>
                       <div>
                         <p className="font-bold text-green-600">
-                          ${(customer.businessData.totalAmount / 1000).toFixed(1)}K
+                          {formatCustomerListAmount(customer.businessData.totalAmount, customer.businessData.currency)}
                         </p>
                         <p className="text-xs text-gray-500">
-                          平均 ${(customer.businessData.avgOrderValue / 1000).toFixed(1)}K
+                          平均 {formatCustomerShortAmount(customer.businessData.avgOrderValue, customer.businessData.currency)}
                         </p>
                       </div>
                     </TableCell>
@@ -699,7 +761,7 @@ export default function CustomerManagement() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="w-5 h-5 text-orange-600" />
-              客户详情 - {selectedCustomer?.companyName}
+              客户详情 - {selectedCustomer ? getVisibleCustomerName(selectedCustomer) : ''}
             </DialogTitle>
             <DialogDescription>
               客户代码：{selectedCustomer?.code} | 等级：{selectedCustomer?.level}
@@ -737,13 +799,15 @@ export default function CustomerManagement() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-3">
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">公司名称（中文）</p>
-                      <p className="text-sm font-medium">{selectedCustomer.companyName}</p>
+                      <p className="text-xs text-gray-500 mb-1">公司名称</p>
+                      <p className="text-sm font-medium">{getVisibleCustomerName(selectedCustomer)}</p>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">公司名称（英文）</p>
-                      <p className="text-sm font-medium">{selectedCustomer.companyNameEn}</p>
-                    </div>
+                    {getVisibleCustomerAlias(selectedCustomer) && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">{portalLanguage === 'zh' ? '英文名称' : '中文名称'}</p>
+                        <p className="text-sm font-medium">{getVisibleCustomerAlias(selectedCustomer)}</p>
+                      </div>
+                    )}
                     <div>
                       <p className="text-xs text-gray-500 mb-1">国家/地区</p>
                       <p className="text-sm font-medium">{selectedCustomer.country} / {selectedCustomer.region}</p>
@@ -775,7 +839,9 @@ export default function CustomerManagement() {
                 <div>
                   <p className="text-xs text-gray-500 mb-1">公司地址</p>
                   <p className="text-sm font-medium">{selectedCustomer.address}</p>
-                  <p className="text-sm text-gray-600 mt-1">{selectedCustomer.addressEn}</p>
+                  {portalLanguage !== 'zh' && selectedCustomer.addressEn && (
+                    <p className="text-sm text-gray-600 mt-1">{selectedCustomer.addressEn}</p>
+                  )}
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 mb-1">备注</p>
@@ -865,15 +931,15 @@ export default function CustomerManagement() {
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1">累计销售额</p>
-                      <p className="text-sm font-medium">${(selectedCustomer.businessData.totalAmount / 1000000).toFixed(2)}M {selectedCustomer.businessData.currency}</p>
+                      <p className="text-sm font-medium">{formatCustomerDetailAmount(selectedCustomer.businessData.totalAmount, selectedCustomer.businessData.currency)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1">待收账款</p>
-                      <p className="text-sm font-medium">${(selectedCustomer.businessData.outstandingAmount / 1000).toFixed(0)}K</p>
+                      <p className="text-sm font-medium">{formatCustomerShortAmount(selectedCustomer.businessData.outstandingAmount, selectedCustomer.businessData.currency)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1">信用额度</p>
-                      <p className="text-sm font-medium">${(selectedCustomer.businessData.creditLimit / 1000).toFixed(0)}K</p>
+                      <p className="text-sm font-medium">{formatCustomerShortAmount(selectedCustomer.businessData.creditLimit, selectedCustomer.businessData.currency)}</p>
                     </div>
                   </div>
 
@@ -888,7 +954,7 @@ export default function CustomerManagement() {
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1">平均订单值</p>
-                      <p className="text-sm font-medium">${(selectedCustomer.businessData.avgOrderValue / 1000).toFixed(1)}K</p>
+                      <p className="text-sm font-medium">{formatCustomerShortAmount(selectedCustomer.businessData.avgOrderValue, selectedCustomer.businessData.currency)}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1">最后订单日期</p>
@@ -1641,7 +1707,7 @@ export default function CustomerManagement() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">公司名称：</span>
-                <span className="text-sm font-medium">{selectedCustomer.companyName}</span>
+                <span className="text-sm font-medium">{getVisibleCustomerName(selectedCustomer)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">主要联系人：</span>

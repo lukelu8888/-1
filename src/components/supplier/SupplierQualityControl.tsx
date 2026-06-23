@@ -1,18 +1,38 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Shield, Truck, FileText, Eye } from 'lucide-react';
 import DeliveryNotes from './DeliveryNotes';
 import DeliveryNoteDocument from './DeliveryNoteDocument';
+import { useOrganization } from '../../contexts/OrganizationContext';
+import { useUser } from '../../contexts/UserContext';
+import { resolveSupplierPortalLanguage } from '../../utils/supplierPortalLanguage';
 
 export default function SupplierQualityControl() {
+  const { org } = useOrganization();
+  const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
   const [activeTab, setActiveTab] = useState('quality');
   const [showDocument, setShowDocument] = useState(false);
   const [selectedNote, setSelectedNote] = useState<any>(null);
 
   // Tab配置
   const tabs = [
-    { id: 'quality', label: '品质管理', enLabel: 'Quality Control', icon: Shield },
-    { id: 'delivery', label: '交期追踪', enLabel: 'Delivery Schedule', icon: Truck },
-    { id: 'delivery-notes', label: '送货单', enLabel: 'Delivery Notes', icon: FileText },
+    { id: 'quality', label: '品质管理', secondaryLabel: portalLanguage === 'zh' ? '质检结果与报告' : 'Quality Control', icon: Shield },
+    { id: 'delivery', label: '交期追踪', secondaryLabel: portalLanguage === 'zh' ? '交付计划与进度' : 'Delivery Schedule', icon: Truck },
+    { id: 'delivery-notes', label: '送货单', secondaryLabel: portalLanguage === 'zh' ? '出货单据与打印' : 'Delivery Notes', icon: FileText },
   ];
 
   // 品质数据
@@ -272,7 +292,7 @@ export default function SupplierQualityControl() {
                 <Icon className="w-4 h-4" />
                 <div className="text-left">
                   <div style={{ fontSize: '13px', fontWeight: 500 }}>{tab.label}</div>
-                  <div style={{ fontSize: '11px', opacity: 0.75 }}>{tab.enLabel}</div>
+                  <div style={{ fontSize: '11px', opacity: 0.75 }}>{tab.secondaryLabel}</div>
                 </div>
               </button>
             );

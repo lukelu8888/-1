@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Button } from './ui/button';
 import { LayoutDashboard, Package, Factory, FileText, MessageSquare, DollarSign, LogOut, Calculator, Shield, ChevronLeft, ChevronRight, User, Bell, Beaker, Building2, Boxes, Truck, Layers, Settings, ClipboardList, GripVertical, ChevronDown, UserCircle } from 'lucide-react';
 import SupplierOverview from './supplier/SupplierOverview';
@@ -24,9 +24,13 @@ import OrganizationProfile from './supplier/OrganizationProfile';
 import UserProfile from './supplier/UserProfile';
 import { UserAvatar } from './supplier/UserProfile';
 import { Badge } from './ui/badge';
-import { getCurrentUser } from '../data/authorizedUsers';
+import { getCurrentUser } from '../utils/dataIsolation';
 import { isIndustryInitialized } from '../data/industryTemplates';
 import { useOrganization } from '../contexts/OrganizationContext';
+import {
+  resolveSupplierPortalLanguage,
+  resolveSupplierPortalRoleLabel,
+} from '../utils/supplierPortalLanguage';
 
 interface SupplierDashboardProps {
   onLogout: () => void | Promise<void>;
@@ -36,7 +40,7 @@ interface SupplierDashboardProps {
 interface MenuItem {
   id: string;
   label: string;
-  enLabel: string;
+  secondaryLabel: string;
   icon: any;
   highlight?: boolean;
   badge?: number;
@@ -44,6 +48,22 @@ interface MenuItem {
 
 export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) {
   const { org, userProfile } = useOrganization();
+  const currentUser = getCurrentUser() as any;
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: currentUser?.name,
+      company: currentUser?.company,
+      address: currentUser?.address,
+      type: currentUser?.type,
+      role: currentUser?.role,
+      userRole: currentUser?.userRole,
+    },
+  }), [currentUser?.address, currentUser?.company, currentUser?.name, currentUser?.role, currentUser?.type, currentUser?.userRole, org?.address, org?.name, org?.nameEn]);
 
   const [activeTab, setActiveTab] = useState(() => {
     const savedTab = localStorage.getItem('supplierDashboardActiveTab');
@@ -83,10 +103,15 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const currentUser = getCurrentUser();
   // Use org context name, fall back to authorized user data
   const companyName = org.name !== '供应商公司' ? org.name : (currentUser?.company || '供应商公司');
   const companyShortName = companyName.length > 6 ? companyName.substring(0, 6) + '...' : companyName;
+  const companyPortalLabel = portalLanguage === 'zh' ? '供应商门户' : 'Supplier Portal';
+  const companyIdentityLabel = portalLanguage === 'zh' ? '供应商账户' : 'Supplier';
+  const resolvedUserRoleLabel = resolveSupplierPortalRoleLabel(
+    String(userProfile.role || currentUser?.role || currentUser?.userRole || 'supplier'),
+    portalLanguage,
+  );
 
   // 🔥 检查是否需要显示行业初始化向导
   useEffect(() => {
@@ -103,20 +128,21 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
   }, [activeTab]);
 
   // 🔥 默认菜单项配置
-  const defaultMenuItems: MenuItem[] = [
-    { id: 'overview', label: '工作台', enLabel: 'Dashboard', icon: LayoutDashboard },
-    { id: 'order-management-center', label: '订单管理中心', enLabel: 'Order Management Center', icon: ClipboardList },
-    { id: 'sample-management', label: '样品管理', enLabel: 'Sample Management', icon: Beaker },
-    { id: 'production', label: '生产管理', enLabel: 'Production', icon: Factory },
-    { id: 'quality-control', label: '品质交期', enLabel: 'QC & Delivery', icon: Shield },
-    { id: 'technical-center', label: '技术中心', enLabel: 'Technical Center', icon: Layers },
-    { id: 'financial', label: '财务中心', enLabel: 'Financial', icon: DollarSign },
-    { id: 'resource-center', label: '资源中心', enLabel: 'Resource Center', icon: Building2 },
-    { id: 'documents', label: '文档中心', enLabel: 'Documents', icon: FileText },
-    { id: 'documents-workflow', label: '订单流程文档', enLabel: 'Order Workflow', icon: FileText }, // 🔥 V2极致紧凑版
-    { id: 'messages', label: '消息通讯', enLabel: 'Messages', icon: MessageSquare, badge: 2 },
-    { id: 'category-management', label: '产品类别管理', enLabel: 'Category Management', icon: Settings },
-  ];
+  const defaultMenuItems: MenuItem[] = useMemo(() => ([
+    { id: 'overview', label: '工作台', secondaryLabel: portalLanguage === 'zh' ? '工作总览' : 'Dashboard', icon: LayoutDashboard },
+    { id: 'order-management-center', label: '订单管理中心', secondaryLabel: portalLanguage === 'zh' ? '订单全流程' : 'Order Management Center', icon: ClipboardList },
+    { id: 'customer-orders', label: '客户订单 (CG)', secondaryLabel: portalLanguage === 'zh' ? '采购订单确认' : 'Customer Orders (CG)', icon: Package },
+    { id: 'sample-management', label: '样品管理', secondaryLabel: portalLanguage === 'zh' ? '送样与留样' : 'Sample Management', icon: Beaker },
+    { id: 'production', label: '生产管理', secondaryLabel: portalLanguage === 'zh' ? '排产与执行' : 'Production', icon: Factory },
+    { id: 'quality-control', label: '品质交期', secondaryLabel: portalLanguage === 'zh' ? '品质与交付' : 'QC & Delivery', icon: Shield },
+    { id: 'technical-center', label: '技术中心', secondaryLabel: portalLanguage === 'zh' ? '图纸与资料' : 'Technical Center', icon: Layers },
+    { id: 'financial', label: '财务中心', secondaryLabel: portalLanguage === 'zh' ? '对账与结算' : 'Financial', icon: DollarSign },
+    { id: 'resource-center', label: '资源中心', secondaryLabel: portalLanguage === 'zh' ? '客户与物流' : 'Resource Center', icon: Building2 },
+    { id: 'documents', label: '文档中心', secondaryLabel: portalLanguage === 'zh' ? '单证与模板' : 'Documents', icon: FileText },
+    { id: 'documents-workflow', label: '订单流程文档', secondaryLabel: portalLanguage === 'zh' ? '节点协同文档' : 'Order Workflow', icon: FileText },
+    { id: 'messages', label: '消息通讯', secondaryLabel: portalLanguage === 'zh' ? '站内消息' : 'Messages', icon: MessageSquare, badge: 2 },
+    { id: 'category-management', label: '产品类别管理', secondaryLabel: portalLanguage === 'zh' ? '品类与模板' : 'Category Management', icon: Settings },
+  ]), [portalLanguage]);
 
   // 🔥 从localStorage读取菜单排序，如果没有则使用默认顺序
   const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
@@ -156,6 +182,17 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
     console.log('📋 [SupplierDashboard] 使用默认菜单顺序');
     return defaultMenuItems;
   });
+
+  useEffect(() => {
+    setMenuItems((prev) => {
+      const orderedIds = prev.map((item) => item.id);
+      const ordered = orderedIds
+        .map((id) => defaultMenuItems.find((item) => item.id === id))
+        .filter((item): item is MenuItem => item !== undefined);
+      const appended = defaultMenuItems.filter((item) => !orderedIds.includes(item.id));
+      return [...ordered, ...appended];
+    });
+  }, [defaultMenuItems]);
 
   // 🔥 保存菜单顺序到localStorage
   const saveMenuOrder = (items: MenuItem[]) => {
@@ -232,6 +269,8 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
         return <CategoryManagement />; // 🔥 产品类别管理
       case 'order-management-center':
         return <SupplierOrderManagementCenter />;
+      case 'customer-orders':
+        return <CustomerOrders />;
       case 'organization-profile':
         return <OrganizationProfile onBack={goBack} />;
       case 'user-profile':
@@ -267,7 +306,7 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
               {org.logoUrl ? (
                 <img
                   src={org.logoUrl}
-                  alt="Company Logo"
+                  alt={portalLanguage === 'zh' ? '公司标识' : 'Company Logo'}
                   className="w-9 h-9 rounded object-contain bg-white flex-shrink-0 border border-slate-600"
                 />
               ) : (
@@ -277,7 +316,7 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-white truncate group-hover:text-orange-300 transition-colors" style={{ fontSize: '13px', fontWeight: 600 }} title={companyName}>{companyShortName}</p>
-                <p className="text-slate-400 truncate" style={{ fontSize: '10px' }}>Supplier Portal</p>
+                <p className="text-slate-400 truncate" style={{ fontSize: '10px' }}>{companyPortalLabel}</p>
               </div>
             </div>
           ) : (
@@ -336,7 +375,7 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
                         <>
                           <div className="flex-1 text-left min-w-0">
                             <p className="truncate" style={{ fontSize: '13px', fontWeight: 500 }}>{item.label}</p>
-                            <p className="text-xs opacity-75 truncate">{item.enLabel}</p>
+                            <p className="text-xs opacity-75 truncate">{item.secondaryLabel}</p>
                           </div>
                           {item.badge && (
                             <Badge variant="destructive" className="h-5 min-w-5 px-1.5 text-xs">
@@ -412,7 +451,7 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
               title="公司信息"
             >
               <p className="text-gray-900" style={{ fontSize: '13px', fontWeight: 500 }}>{companyName}</p>
-              <p className="text-gray-500" style={{ fontSize: '11px' }}>Supplier</p>
+              <p className="text-gray-500" style={{ fontSize: '11px' }}>{companyIdentityLabel}</p>
             </button>
 
             {/* Bell */}
@@ -434,7 +473,7 @@ export default function SupplierDashboard({ onLogout }: SupplierDashboardProps) 
                 />
                 <div className="hidden sm:block text-left">
                   <p className="text-gray-900" style={{ fontSize: '13px', fontWeight: 500 }}>{userProfile.name}</p>
-                  <p className="text-gray-500" style={{ fontSize: '11px' }}>{userProfile.role}</p>
+                  <p className="text-gray-500" style={{ fontSize: '11px' }}>{resolvedUserRoleLabel}</p>
                 </div>
                 <ChevronDown className="w-3.5 h-3.5 text-gray-400 hidden sm:block" />
               </button>

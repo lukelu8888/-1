@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { Input } from '../../ui/input';
@@ -10,6 +10,9 @@ import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { toast } from 'sonner@2.0.3';
+import { useOrganization } from '../../../contexts/OrganizationContext';
+import { useUser } from '../../../contexts/UserContext';
+import { resolveSupplierPortalLanguage } from '../../../utils/supplierPortalLanguage';
 
 /**
  * 🔥 供应商视角：物流公司管理
@@ -19,6 +22,23 @@ import { toast } from 'sonner@2.0.3';
  * - 物流商评级和运费管理
  */
 export default function LogisticsManagement() {
+  const { org } = useOrganization();
+  const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
@@ -134,7 +154,7 @@ export default function LogisticsManagement() {
       status: 'active',
       
       contact: {
-        name: 'Johnson Manager',
+        name: 'Johnson 经理',
         phone: '+1-800-463-3339',
         mobile: '+86-137-0000-3333',
         email: 'johnson.wang@fedex.com',
@@ -485,10 +505,30 @@ export default function LogisticsManagement() {
 
   const filteredLogistics = logisticsPartners.filter(logistics => {
     const matchSearch = logistics.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                       logistics.nameEn.toLowerCase().includes(searchTerm.toLowerCase()) ||
                        logistics.code.toLowerCase().includes(searchTerm.toLowerCase());
     const matchType = filterType === 'all' || logistics.type === filterType;
     return matchSearch && matchType;
   });
+
+  const getVisibleLogisticsName = (logistics: any) => (
+    portalLanguage === 'zh'
+      ? (logistics.name || logistics.nameEn || logistics.code)
+      : (logistics.nameEn || logistics.name || logistics.code)
+  );
+
+  const getVisibleLogisticsSubName = (logistics: any) => {
+    if (portalLanguage === 'zh') return '';
+    return logistics.name || '';
+  };
+
+  const formatLogisticsAmount = (businessData: any) => {
+    if ((businessData?.currency || 'CNY') === 'CNY') {
+      return `¥${(Number(businessData?.totalAmount || 0) / 10000).toFixed(1)}万`;
+    }
+    const usdThousands = (Number(businessData?.totalAmount || 0) / 1000).toFixed(1);
+    return portalLanguage === 'zh' ? `USD ${usdThousands}千` : `$${usdThousands}K`;
+  };
 
   return (
     <div className="space-y-4">
@@ -669,8 +709,10 @@ export default function LogisticsManagement() {
                     </TableCell>
                     <TableCell className="py-3" style={{ fontSize: '13px' }}>
                       <div>
-                        <p className="font-medium text-gray-900">{logistics.name}</p>
-                        <p className="text-xs text-gray-500">{logistics.nameEn}</p>
+                        <p className="font-medium text-gray-900">{getVisibleLogisticsName(logistics)}</p>
+                        {getVisibleLogisticsSubName(logistics) ? (
+                          <p className="text-xs text-gray-500">{getVisibleLogisticsSubName(logistics)}</p>
+                        ) : null}
                       </div>
                     </TableCell>
                     <TableCell className="py-3">
@@ -804,12 +846,14 @@ export default function LogisticsManagement() {
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <span className="text-gray-500">公司名称：</span>
-                    <span className="font-medium ml-2">{selectedLogistics.name}</span>
+                    <span className="font-medium ml-2">{getVisibleLogisticsName(selectedLogistics)}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-500">英文名称：</span>
-                    <span className="font-medium ml-2">{selectedLogistics.nameEn}</span>
-                  </div>
+                  {portalLanguage !== 'zh' && selectedLogistics.nameEn ? (
+                    <div>
+                      <span className="text-gray-500">英文名称：</span>
+                      <span className="font-medium ml-2">{selectedLogistics.nameEn}</span>
+                    </div>
+                  ) : null}
                   <div>
                     <span className="text-gray-500">服务类型：</span>
                     <span className="font-medium ml-2">{selectedLogistics.serviceType}</span>
@@ -923,11 +967,7 @@ export default function LogisticsManagement() {
                   </div>
                   <div>
                     <span className="text-gray-500">累计运费：</span>
-                    <span className="font-medium ml-2">
-                      {selectedLogistics.businessData.currency === 'CNY' ? '¥' : '$'}
-                      {(selectedLogistics.businessData.totalAmount / (selectedLogistics.businessData.currency === 'CNY' ? 10000 : 1000)).toFixed(1)}
-                      {selectedLogistics.businessData.currency === 'CNY' ? '万' : 'K'}
-                    </span>
+                    <span className="font-medium ml-2">{formatLogisticsAmount(selectedLogistics.businessData)}</span>
                   </div>
                   <div>
                     <span className="text-gray-500">最后发货：</span>

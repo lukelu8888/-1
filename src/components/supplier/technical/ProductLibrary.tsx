@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { Input } from '../../ui/input';
@@ -12,6 +12,9 @@ import { Label } from '../../ui/label'; // 🔥 添加Label
 import { Textarea } from '../../ui/textarea'; // 🔥 添加Textarea
 import { Checkbox } from '../../ui/checkbox'; // 🔥 添加Checkbox
 import JSZip from 'jszip'; // 🔥 添加JSZip用于创建ZIP文件
+import { useOrganization } from '../../../contexts/OrganizationContext';
+import { useUser } from '../../../contexts/UserContext';
+import { resolveSupplierPortalLanguage } from '../../../utils/supplierPortalLanguage';
 
 /**
  * 🔥 供应商视角：产品资料库
@@ -85,6 +88,24 @@ const downloadAllFilesAsZip = async (product: any) => {
 };
 
 export default function ProductLibrary() {
+  const { org } = useOrganization();
+  const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
+  const fallbackText = portalLanguage === 'zh' ? '待补充' : 'N/A';
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -241,14 +262,14 @@ export default function ProductLibrary() {
       createdBy: '当前用户',
       notes: newProductForm.notes,
       technicalData: {
-        material: newProductForm.material || 'N/A',
-        color: newProductForm.color || 'N/A',
-        size: newProductForm.size || 'N/A',
-        weight: newProductForm.weight || 'N/A',
-        waterAbsorption: newProductForm.waterAbsorption || 'N/A',
-        breakingStrength: newProductForm.breakingStrength || 'N/A',
-        surfaceFinish: newProductForm.surfaceFinish || 'N/A',
-        packingSpec: newProductForm.packingSpec || 'N/A',
+        material: newProductForm.material || fallbackText,
+        color: newProductForm.color || fallbackText,
+        size: newProductForm.size || fallbackText,
+        weight: newProductForm.weight || fallbackText,
+        waterAbsorption: newProductForm.waterAbsorption || fallbackText,
+        breakingStrength: newProductForm.breakingStrength || fallbackText,
+        surfaceFinish: newProductForm.surfaceFinish || fallbackText,
+        packingSpec: newProductForm.packingSpec || fallbackText,
       },
       files: {
         drawings: uploadedDrawings.map((file, index) => ({
@@ -2374,7 +2395,7 @@ ${selectedProduct.notes}
                       </div>
                       <span className="font-medium text-sm">💬 系统消息</span>
                     </div>
-                    <p className="text-xs text-gray-500 ml-6">发送到客户Portal系统内</p>
+                    <p className="text-xs text-gray-500 ml-6">发送到客户门户系统内</p>
                   </button>
                 </div>
               </div>
@@ -2388,7 +2409,7 @@ ${selectedProduct.notes}
                   <Input
                     id="recipient"
                     type="email"
-                    placeholder="例如：john@cosun.com"
+                    placeholder="例如：procurement@cosunchina.com"
                     className="h-9"
                     style={{ fontSize: '13px' }}
                     value={sendForm.recipient}
@@ -2401,8 +2422,8 @@ ${selectedProduct.notes}
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="COSUN">COSUN - 主要联系人</SelectItem>
-                      <SelectItem value="COSUN-John">COSUN - John Smith</SelectItem>
-                      <SelectItem value="COSUN-Mary">COSUN - Mary Johnson</SelectItem>
+                      <SelectItem value="COSUN-Purchasing">COSUN - 采购对接人</SelectItem>
+                      <SelectItem value="COSUN-Project">COSUN - 项目对接人</SelectItem>
                     </SelectContent>
                   </Select>
                 )}

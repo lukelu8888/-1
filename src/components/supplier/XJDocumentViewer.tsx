@@ -6,29 +6,36 @@ import { XJData } from '../documents/templates/XJDocument';
 import { XJDocumentA4Pages } from '../documents/templates/paginated/XJDocumentA4';
 import { buildXJDocumentSnapshot } from '../admin/purchase-order/purchaseOrderUtils';
 import { templateCenterService } from '../../lib/supabaseService';
+import { ProcurementDocumentViewerShell } from '../admin/purchase-order/ProcurementDocumentViewerShell';
+import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport';
+import { useAuth } from '../../hooks/useAuth';
+import { useUser } from '../../contexts/UserContext';
+import {
+  SUPPLIER_DOCUMENT_PREVIEW_BODY_CLASS,
+  SUPPLIER_DOCUMENT_PREVIEW_INNER_CLASS,
+} from './documentPreviewStandards';
 
 interface XJDocumentViewerProps {
+  open: boolean;
+  onClose: () => void;
   xj: any; // 采购询价对象，包含documentData字段
 }
 
-export default function XJDocumentViewer({ xj }: XJDocumentViewerProps) {
+export default function XJDocumentViewer({ open, onClose, xj }: XJDocumentViewerProps) {
   const documentRef = useRef<HTMLDivElement>(null);
   const [latestPublishedVersion, setLatestPublishedVersion] = useState<string | null>(null);
+  const { currentUser } = useAuth();
+  const { user: authUser } = useUser();
 
   // 🔥 打印/导出PDF功能
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!documentRef.current) {
       toast.error('文档未加载完成，请稍后重试');
       return;
     }
 
-    // 使用浏览器原生打印API
-    window.print();
-    
-    toast.success('文档已准备就绪', {
-      description: '请在打印对话框中选择"另存为PDF"进行保存',
-      duration: 3000
-    });
+    const filename = generatePDFFilename('Procurement_Inquiry', xj?.xjNumber ?? xj?.xjNo ?? 'XJ');
+    await exportToPDFPrint(documentRef.current, filename);
   };
 
   // 检查是否有文档数据
@@ -94,6 +101,54 @@ export default function XJDocumentViewer({ xj }: XJDocumentViewerProps) {
           : (fallbackDocumentData?.conditionGroups || []),
     } as XJData;
   }, [fallbackDocumentData, rawSnapshotData]);
+  const viewerContact = useMemo(() => {
+    const parseStoredUser = (key: string) => {
+      if (typeof window === 'undefined') return null;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const roleSwitchedUser = parseStoredUser('cosun_current_user');
+    const authCachedUser = parseStoredUser('cosun_auth_user');
+    const backendUser = parseStoredUser('cosun_backend_user');
+
+    const name = String(
+      currentUser?.name ||
+      authUser?.name ||
+      roleSwitchedUser?.name ||
+      backendUser?.displayName ||
+      backendUser?.name ||
+      authCachedUser?.name ||
+      '',
+    ).trim();
+    const email = String(
+      currentUser?.email ||
+      authUser?.email ||
+      roleSwitchedUser?.email ||
+      backendUser?.loginEmail ||
+      backendUser?.email ||
+      authCachedUser?.email ||
+      '',
+    ).trim();
+
+    return {
+      name: name || documentData?.buyer.contactPerson || '',
+      email: email || documentData?.buyer.email || '',
+    };
+  }, [
+    authUser?.email,
+    authUser?.name,
+    currentUser?.email,
+    currentUser?.name,
+    documentData?.buyer.contactPerson,
+    documentData?.buyer.email,
+  ]);
   const boundVersion =
     String(
       templateVersion?.version ||
@@ -122,78 +177,89 @@ export default function XJDocumentViewer({ xj }: XJDocumentViewerProps) {
     };
   }, []);
 
-  if (!documentData || !Array.isArray(documentData.products) || documentData.products.length === 0) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-        <FileText className="w-12 h-12 text-red-600 mx-auto mb-3" />
-        <h3 className="font-semibold text-red-900 mb-2">XJ 文档数据缺失</h3>
-        <p className="text-sm text-red-700">
-          此采购询价单缺少可渲染的产品文档数据，无法预览。
-          <br />
-          请重新生成该 XJ 后再试。
-        </p>
-      </div>
-    );
-  }
+  const missingDocumentPage = (
+    <div className="flex min-h-64 flex-col items-center justify-center rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+      <FileText className="mx-auto mb-3 h-12 w-12 text-red-600" />
+      <h3 className="mb-2 font-semibold text-red-900">XJ 文档数据缺失</h3>
+      <p className="text-sm text-red-700">
+        此采购询价单缺少可渲染的产品文档数据，无法预览。
+        <br />
+        请重新生成该 XJ 后再试。
+      </p>
+    </div>
+  );
+
+  const actions = (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-2"
+        onClick={async () => {
+          if (!documentRef.current) {
+            toast.error('文档未加载完成，请稍后重试');
+            return;
+          }
+
+          try {
+            const filename = generatePDFFilename('Procurement_Inquiry', documentData?.xjNo ?? xj?.xjNumber ?? 'XJ');
+            await exportToPDF(documentRef.current, filename);
+            toast.success('询价单PDF导出成功！');
+          } catch (error) {
+            toast.error('导出PDF失败');
+            console.error(error);
+          }
+        }}
+      >
+        <Download className="h-4 w-4" />
+        下载PDF
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-2"
+        onClick={() => {
+          void handlePrint();
+        }}
+      >
+        <Printer className="h-4 w-4" />
+        打印
+      </Button>
+    </>
+  );
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 bg-white px-4 py-3">
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-semibold text-gray-900">模板版本</span>
-            <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700">
-              {boundVersion || '未绑定'}
-            </span>
-            {latestPublishedVersion ? (
-              <span
-                className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
-                  isBoundToLatestPublished
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-amber-200 bg-amber-50 text-amber-700'
-                }`}
-              >
-                {isBoundToLatestPublished ? '已映射最新发布版' : `当前最新发布：${latestPublishedVersion}`}
-              </span>
-            ) : null}
-          </div>
-          <p className="text-xs text-gray-500">
-            编号: {documentData.xjNo} | 日期: {documentData.xjDate}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => {
-              handlePrint();
-            }}
+    <ProcurementDocumentViewerShell
+      open={open}
+      onClose={onClose}
+      title="询价单文档"
+      subtitle={documentData?.xjNo || xj?.xjNumber || '-'}
+      templateLabel={boundVersion || '未绑定'}
+      icon={<FileText className="h-6 w-6" />}
+      headerBadges={
+        latestPublishedVersion ? (
+          <span
+            className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+              isBoundToLatestPublished
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : 'border-amber-200 bg-amber-50 text-amber-700'
+            }`}
           >
-            <Printer className="w-4 h-4" />
-            打印
-          </Button>
-          <Button
-            variant="default"
-            size="sm"
-            className="gap-2 bg-orange-600 hover:bg-orange-700"
-            onClick={() => {
-              handlePrint();
-            }}
-          >
-            <Download className="w-4 h-4" />
-            导出PDF
-          </Button>
-        </div>
+            {isBoundToLatestPublished ? '已映射最新发布版' : `当前最新发布：${latestPublishedVersion}`}
+          </span>
+        ) : null
+      }
+      actions={actions}
+      bodyClassName={SUPPLIER_DOCUMENT_PREVIEW_BODY_CLASS}
+      innerClassName={SUPPLIER_DOCUMENT_PREVIEW_INNER_CLASS}
+    >
+      <div ref={documentRef}>
+        {documentData && Array.isArray(documentData.products) && documentData.products.length > 0 ? (
+          <XJDocumentA4Pages data={documentData} footerContact={viewerContact} />
+        ) : (
+          missingDocumentPage
+        )}
       </div>
-
-      <div className="bg-white border border-gray-300 rounded-lg overflow-hidden">
-        <div ref={documentRef} className="max-h-[70vh] overflow-y-auto bg-[#525659] p-6">
-          <div className="flex flex-col items-center gap-6">
-            <XJDocumentA4Pages data={documentData} />
-          </div>
-        </div>
-      </div>
-    </div>
+    </ProcurementDocumentViewerShell>
   );
 }

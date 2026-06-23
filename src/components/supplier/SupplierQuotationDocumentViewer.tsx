@@ -6,8 +6,8 @@
  * Data flow:
  *   quotation (Supabase row with persisted template binding)
  *     → documentDataSnapshot            (SupplierQuotationData)
- *     → buildQuotationPages             (paginates into A4 ReactNode[])
- *     → DocumentModal                   (draggable, zoom, PDF, print)
+ *     → SupplierQuotationDocumentA4Pages
+ *     → ProcurementDocumentViewerShell
  *
  * Error / loading states:
  *   • missing persisted snapshot → inline error page
@@ -15,11 +15,19 @@
  */
 
 import React, { useMemo } from 'react';
-import { Edit, Send, RefreshCw } from 'lucide-react';
+import { Download, Edit, FileText, Printer, RefreshCw, Send } from 'lucide-react';
 import { Button } from '../ui/button';
-import { DocumentModal } from '../documents/DocumentModal';
-import { buildQuotationPages } from '../documents/templates/SupplierQuotationPages';
 import type { SupplierQuotationData } from '../documents/templates/SupplierQuotationDocument';
+import { ProcurementDocumentViewerShell } from '../admin/purchase-order/ProcurementDocumentViewerShell';
+import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport';
+import { toast } from 'sonner@2.0.3';
+import { SupplierQuotationDocumentA4Pages } from '../documents/templates/paginated/SupplierQuotationDocumentA4';
+import { useAuth } from '../../hooks/useAuth';
+import { useUser } from '../../contexts/UserContext';
+import {
+  SUPPLIER_DOCUMENT_PREVIEW_BODY_CLASS,
+  SUPPLIER_DOCUMENT_PREVIEW_INNER_CLASS,
+} from './documentPreviewStandards';
 
 interface Props {
   open: boolean;
@@ -40,6 +48,9 @@ export default function SupplierQuotationDocumentViewer({
   onSubmit,
   extraActions,
 }: Props) {
+  const documentRef = React.useRef<HTMLDivElement>(null);
+  const { currentUser } = useAuth();
+  const { user: authUser, userInfo } = useUser();
   const templateSnapshot = quotation?.templateSnapshot || quotation?.template_snapshot || null;
   const templateVersion = templateSnapshot?.version || null;
   const rawData = (quotation?.documentDataSnapshot || quotation?.document_data_snapshot || null) as SupplierQuotationData | null;
@@ -64,19 +75,99 @@ export default function SupplierQuotationDocumentViewer({
       ? { ...rawData, projectExecutionBaseline }
       : rawData;
   }, [quotation, rawData]);
-  const isEmpty = !quotation;
+  const actorOverrides = useMemo(() => {
+    const parseStoredUser = (key: string) => {
+      if (typeof window === 'undefined') return null;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch {
+        return null;
+      }
+    };
 
-  // ── Build paginated A4 pages from the resolved data ───────────────────────
-  const pages = useMemo(
-    () => (data ? buildQuotationPages(data) : []),
-    [data],
-  );
+    const roleSwitchedUser = parseStoredUser('cosun_current_user');
+    const authCachedUser = parseStoredUser('cosun_auth_user');
+    const backendUser = parseStoredUser('cosun_backend_user');
+
+    const resolvedName = String(
+      userInfo?.contactPerson ||
+      currentUser?.name ||
+      authUser?.name ||
+      roleSwitchedUser?.name ||
+      backendUser?.displayName ||
+      backendUser?.name ||
+      authCachedUser?.name ||
+      '',
+    ).trim();
+    const resolvedEmail = String(
+      userInfo?.email ||
+      currentUser?.email ||
+      authUser?.email ||
+      roleSwitchedUser?.email ||
+      backendUser?.loginEmail ||
+      backendUser?.email ||
+      authCachedUser?.email ||
+      '',
+    ).trim();
+
+    return {
+      supplierContactPerson: resolvedName || data?.supplier.contactPerson || '',
+      supplierEmail: resolvedEmail || data?.supplier.email || '',
+      supplierRemarkBy: resolvedName || data?.supplierRemarks?.remarkBy || '',
+    };
+  }, [
+    authUser?.email,
+    authUser?.name,
+    currentUser?.email,
+    currentUser?.name,
+    userInfo?.contactPerson,
+    userInfo?.email,
+    data?.supplier.contactPerson,
+    data?.supplier.email,
+    data?.supplierRemarks?.remarkBy,
+  ]);
+  const isEmpty = !quotation;
 
   const isDraft = quotation?.status === 'draft';
 
   // ── Toolbar action buttons ────────────────────────────────────────────────
   const actions = (
     <>
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-2"
+        onClick={async () => {
+          if (!documentRef.current) return;
+          try {
+            const filename = generatePDFFilename('Supplier_Quotation', quotation?.quotationNo ?? quotation?.bjNumber ?? 'BJ');
+            await exportToPDF(documentRef.current, filename);
+            toast.success('供应商报价PDF导出成功！');
+          } catch (error) {
+            toast.error('PDF导出失败，请重试');
+            console.error('PDF export error:', error);
+          }
+        }}
+      >
+        <Download className="h-4 w-4" />
+        下载PDF
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-2"
+        onClick={async () => {
+          if (!documentRef.current) return;
+          const filename = generatePDFFilename('Supplier_Quotation', quotation?.quotationNo ?? quotation?.bjNumber ?? 'BJ');
+          await exportToPDFPrint(documentRef.current, filename);
+        }}
+      >
+        <Printer className="h-4 w-4" />
+        打印
+      </Button>
       {onEdit && isDraft && (
         <Button
           variant="outline" size="sm"
@@ -126,27 +217,31 @@ export default function SupplierQuotationDocumentViewer({
     </div>
   );
 
-  const displayPages = isEmpty
-    ? [emptyPage]
+  const fallbackContent = isEmpty
+    ? emptyPage
     : missingBoundSnapshot
-      ? [snapshotErrorPage]
-    : pages.length === 0 && !data
-      ? [errorPage]
-      : pages;
+      ? snapshotErrorPage
+      : errorPage;
 
   return (
-    <DocumentModal
+    <ProcurementDocumentViewerShell
       open={open}
       onClose={onClose}
-      title="报价单文档"
-      subtitle={
-        data
-          ? <span className="text-slate-500">{data.quotationNo}</span>
-          : quotation?.quotationNo
-      }
-      pages={displayPages}
+      title="供应商报价单"
+      subtitle={data ? data.quotationNo : quotation?.quotationNo}
+      templateLabel={templateVersion?.version || '未绑定'}
+      icon={<FileText className="h-6 w-6" />}
       actions={actions}
-      fileName={`${quotation?.quotationNo ?? quotation?.bjNumber ?? 'bj'}.pdf`}
-    />
+      bodyClassName={SUPPLIER_DOCUMENT_PREVIEW_BODY_CLASS}
+      innerClassName={SUPPLIER_DOCUMENT_PREVIEW_INNER_CLASS}
+    >
+      <div ref={documentRef}>
+        {data && !missingBoundSnapshot ? (
+          <SupplierQuotationDocumentA4Pages data={data} actorOverrides={actorOverrides} />
+        ) : (
+          fallbackContent
+        )}
+      </div>
+    </ProcurementDocumentViewerShell>
   );
 }

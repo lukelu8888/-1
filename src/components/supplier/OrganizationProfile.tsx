@@ -13,7 +13,7 @@
  *   Header logo re-renders immediately via React context (no page reload).
  *   PDF / print exports pick up the same data-URI.
  */
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import {
   ArrowLeft, Building2, Camera, Check, Globe,
   MapPin, Pencil, Phone, Upload, User, FileText, X,
@@ -21,6 +21,7 @@ import {
 import { useOrganization } from '../../contexts/OrganizationContext';
 import { useUser } from '../../contexts/UserContext';
 import { toast } from 'sonner';
+import { resolveSupplierPortalLanguage } from '../../utils/supplierPortalLanguage';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Mode = 'view' | 'edit';
@@ -91,6 +92,21 @@ interface OrganizationProfileProps {
 export default function OrganizationProfile({ onBack }: OrganizationProfileProps) {
   const { org, updateOrg, uploadOrgLogo } = useOrganization();
   const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
 
   const isAdmin =
     user?.role === 'admin' ||
@@ -243,7 +259,7 @@ export default function OrganizationProfile({ onBack }: OrganizationProfileProps
             </div>
             <div>
               <h1 className="text-[15px] font-semibold text-slate-800 leading-tight">公司信息</h1>
-              <p className="text-[11px] text-slate-400">Organization Profile</p>
+              <p className="text-[11px] text-slate-400">{portalLanguage === 'zh' ? '公司资料维护' : 'Organization Profile'}</p>
             </div>
           </div>
         </div>
@@ -282,14 +298,14 @@ export default function OrganizationProfile({ onBack }: OrganizationProfileProps
       </div>
 
       {/* ── Section 1: Logo ───────────────────────────────────────────────── */}
-      <Section title="公司标识 · Logo">
+      <Section title={portalLanguage === 'zh' ? '公司标识' : 'Logo'}>
         <div className="py-4 flex items-start gap-5">
           {/* Logo image / placeholder */}
           <div className="relative flex-shrink-0">
             {logoPreview ? (
               <img
                 src={logoPreview}
-                alt="Company Logo"
+                alt={portalLanguage === 'zh' ? '公司标识' : 'Company Logo'}
                 className="w-20 h-20 rounded-lg object-contain border border-slate-200 bg-slate-50"
               />
             ) : (
@@ -343,7 +359,7 @@ export default function OrganizationProfile({ onBack }: OrganizationProfileProps
             ) : (
               <div>
                 <p className="text-[13px] font-medium text-slate-700">{org.name}</p>
-                <p className="text-[12px] text-slate-400">{org.nameEn || 'Company Logo'}</p>
+                <p className="text-[12px] text-slate-400">{org.nameEn || (portalLanguage === 'zh' ? '公司标识' : 'Company Logo')}</p>
                 {!isAdmin && (
                   <p className="text-[11px] text-slate-300 mt-2">仅管理员可修改公司标识</p>
                 )}

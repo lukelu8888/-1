@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -8,12 +8,32 @@ import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner@2.0.3';
+import { useOrganization } from '../../contexts/OrganizationContext';
+import { useUser } from '../../contexts/UserContext';
+import { resolveSupplierPortalLanguage } from '../../utils/supplierPortalLanguage';
 
 /**
  * 🔥 供应商文档中心 - 订单流程紧凑表格视图 V2（台湾大厂风格）
  * 极致紧凑、高信息密度、专业工业化
  */
 export default function SupplierDocumentsWorkflowCompactV2() {
+  const { org } = useOrganization();
+  const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
   const [selectedOrderId, setSelectedOrderId] = useState('PO-2024-155');
   const [expandedPhases, setExpandedPhases] = useState<string[]>(['pre-order', 'sample', 'production', 'inspection', 'shipping']);
   const [expandedStages, setExpandedStages] = useState<number[]>([]);
@@ -555,7 +575,9 @@ export default function SupplierDocumentsWorkflowCompactV2() {
               </div>
               <div>
                 <h2 className="font-bold text-gray-900 text-sm leading-tight">订单流程文档管理系统</h2>
-                <p className="text-xs text-gray-500 leading-tight">Order Workflow Document Management</p>
+                <p className="text-xs text-gray-500 leading-tight">
+                  {portalLanguage === 'zh' ? '订单节点文档管理' : 'Order Workflow Document Management'}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-1.5">
@@ -600,14 +622,14 @@ export default function SupplierDocumentsWorkflowCompactV2() {
 
                     {/* 金额 */}
                     <div>
-                      <p className="text-xs text-gray-500">订单金额 Amount</p>
+                      <p className="text-xs text-gray-500">{portalLanguage === 'zh' ? '订单金额' : 'Order Amount'}</p>
                       <p className="font-bold text-blue-600 text-sm">{getCurrencySymbol(order.currency)}{order.amount.toLocaleString()}</p>
                     </div>
 
                     {/* 交期 + 倒计时 */}
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
-                        <p className="text-xs text-gray-500">交期 Delivery</p>
+                        <p className="text-xs text-gray-500">{portalLanguage === 'zh' ? '交期' : 'Delivery'}</p>
                         <p className="text-xs font-medium text-gray-700">{order.deliveryDate}</p>
                       </div>
                       {order.status !== 'completed' && (
@@ -889,7 +911,7 @@ export default function SupplierDocumentsWorkflowCompactV2() {
                                     stage.adminStatus === 'in_progress' ? 'bg-blue-50 border-blue-200' :
                                     'bg-orange-50 border-orange-200'
                                   }`}>
-                                    <span className="font-medium">🔗 Admin状态: </span>
+                                    <span className="font-medium">🔗 {portalLanguage === 'zh' ? '管理端状态' : 'Admin Status'}: </span>
                                     {stage.adminStatus === 'completed' && `✅ ${stage.adminRole}已完成 (${stage.adminDate})`}
                                     {stage.adminStatus === 'in_progress' && `⏱ ${stage.adminRole}处理中...`}
                                     {stage.adminStatus === 'pending' && `⚠️ 等待${stage.adminRole}处理`}
@@ -1006,7 +1028,7 @@ export default function SupplierDocumentsWorkflowCompactV2() {
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                 <p className="text-xs font-medium text-blue-900 mb-2">💰 订单税务信息：</p>
                 <div className="grid grid-cols-2 gap-2 text-xs text-blue-800">
-                  <div>订单类型：含税订单 ({selectedOrder.taxRate}% VAT)</div>
+                  <div>{portalLanguage === 'zh' ? '订单类型：含税订单' : 'Order Type: Tax Included'} ({selectedOrder.taxRate}% VAT)</div>
                   <div>含税金额：{getCurrencySymbol(selectedOrder.currency)}{selectedOrder.amountWithTax.toLocaleString()}</div>
                   <div>不含税金额：{getCurrencySymbol(selectedOrder.currency)}{selectedOrder.amountWithoutTax.toLocaleString()}</div>
                   <div>增值税额：{getCurrencySymbol(selectedOrder.currency)}{selectedOrder.taxAmount.toLocaleString()}</div>

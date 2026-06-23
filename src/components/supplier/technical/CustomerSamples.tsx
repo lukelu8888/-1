@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { Input } from '../../ui/input';
@@ -13,6 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner@2.0.3';
 import { loadSupplierCategories, saveSupplierCategories } from '../../../data/industryTemplates';
 import { getActiveSupplierCustomers } from '../../../data/supplierCustomers'; // 🔥 导入供应商客户数据
+import { useOrganization } from '../../../contexts/OrganizationContext';
+import { useUser } from '../../../contexts/UserContext';
+import { resolveSupplierPortalLanguage } from '../../../utils/supplierPortalLanguage';
 
 /**
  * 🔥 供应商视角：客户来样管理
@@ -22,6 +25,23 @@ import { getActiveSupplierCustomers } from '../../../data/supplierCustomers'; //
  * - 文件上传和邮件发送功能
  */
 export default function CustomerSamples() {
+  const { org } = useOrganization();
+  const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
   const [searchTerm, setSearchTerm] = useState('');
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
@@ -78,11 +98,27 @@ export default function CustomerSamples() {
     id: customer.id,
     name: customer.companyName,
     nameEn: customer.companyNameEn,
+    email: customer.email,
     region: customer.region,
     country: customer.country,
     city: customer.city,
     status: customer.status
   }));
+
+  const getVisibleCustomerName = (customer: { name?: string; nameEn?: string }) =>
+    portalLanguage === 'zh'
+      ? (customer.name || customer.nameEn || '')
+      : (customer.nameEn || customer.name || '');
+
+  const getVisibleCustomerAlias = (customer: { name?: string; nameEn?: string }) => {
+    const alias = portalLanguage === 'zh' ? customer.nameEn : customer.name;
+    return alias && alias !== getVisibleCustomerName(customer) ? alias : '';
+  };
+
+  const resolveCustomerRecipient = (customerName: string) =>
+    customerList.find(customer =>
+      customer.name === customerName || customer.nameEn === customerName
+    )?.email || '';
 
   // 🔥 模拟询价单数据（实际应从后端获取）
   const [availableXJs, setAvailableRFQs] = useState([
@@ -519,7 +555,7 @@ export default function CustomerSamples() {
                               setSelectedSample(sample);
                               setSendForm({
                                 method: 'email',
-                                recipient: '',
+                                recipient: resolveCustomerRecipient(sample.customer),
                                 subject: `来样分析报告 - ${sample.sampleNo} ${sample.productName}`,
                                 message: `尊敬的客户，\n\n附件是样品 ${sample.sampleNo} 的分析报告，请查收。\n\n样品信息：\n• 产品名称：${sample.productName}\n• 数量：${sample.sampleInfo.quantity}件\n• 描述：${sample.sampleInfo.description}\n\n如有任何问题，欢迎随时联系我们。\n\n此致\n敬礼！`,
                               });
@@ -830,11 +866,13 @@ export default function CustomerSamples() {
                     </SelectTrigger>
                     <SelectContent>
                       {customerList.map((customer) => (
-                        <SelectItem key={customer.id} value={customer.name}>
+                        <SelectItem key={customer.id} value={getVisibleCustomerName(customer)}>
                           <div className="flex flex-col">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium">{customer.name}</span>
-                              <span className="text-xs text-gray-400">({customer.nameEn})</span>
+                              <span className="font-medium">{getVisibleCustomerName(customer)}</span>
+                              {getVisibleCustomerAlias(customer) && (
+                                <span className="text-xs text-gray-400">({getVisibleCustomerAlias(customer)})</span>
+                              )}
                             </div>
                             <span className="text-xs text-gray-500">{customer.city}, {customer.country}</span>
                           </div>
@@ -1078,11 +1116,13 @@ export default function CustomerSamples() {
                     </SelectTrigger>
                     <SelectContent>
                       {customerList.map((customer) => (
-                        <SelectItem key={customer.id} value={customer.name}>
+                        <SelectItem key={customer.id} value={getVisibleCustomerName(customer)}>
                           <div className="flex flex-col">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium">{customer.name}</span>
-                              <span className="text-xs text-gray-400">({customer.nameEn})</span>
+                              <span className="font-medium">{getVisibleCustomerName(customer)}</span>
+                              {getVisibleCustomerAlias(customer) && (
+                                <span className="text-xs text-gray-400">({getVisibleCustomerAlias(customer)})</span>
+                              )}
                             </div>
                             <span className="text-xs text-gray-500">{customer.city}, {customer.country}</span>
                           </div>
@@ -1327,7 +1367,7 @@ export default function CustomerSamples() {
                 <Input
                   id="recipient"
                   type="email"
-                  placeholder="example@email.com"
+                  placeholder="procurement@cosunchina.com"
                   value={sendForm.recipient}
                   onChange={(e) => setSendForm({ ...sendForm, recipient: e.target.value })}
                   style={{ fontSize: '13px' }}

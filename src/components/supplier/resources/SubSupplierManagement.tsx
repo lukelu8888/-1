@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { Input } from '../../ui/input';
@@ -10,6 +10,9 @@ import { Textarea } from '../../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { Checkbox } from '../../ui/checkbox';
 import { toast } from 'sonner@2.0.3';
+import { useOrganization } from '../../../contexts/OrganizationContext';
+import { useUser } from '../../../contexts/UserContext';
+import { resolveSupplierPortalLanguage } from '../../../utils/supplierPortalLanguage';
 
 /**
  * 🔥 供应商视角：下游供应商管理（我方的供应商）
@@ -19,6 +22,23 @@ import { toast } from 'sonner@2.0.3';
  * - 供应商评级和绩效管理
  */
 export default function SubSupplierManagement() {
+  const { org } = useOrganization();
+  const { user } = useUser();
+  const portalLanguage = useMemo<'zh' | 'en'>(() => resolveSupplierPortalLanguage({
+    org: {
+      name: org?.name,
+      nameEn: org?.nameEn,
+      address: org?.address,
+    },
+    user: {
+      name: user?.name,
+      company: user?.company,
+      address: user?.address,
+      type: user?.type,
+      role: user?.role,
+      userRole: user?.userRole,
+    },
+  }), [org?.address, org?.name, org?.nameEn, user?.address, user?.company, user?.name, user?.role, user?.type, user?.userRole]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
@@ -28,6 +48,12 @@ export default function SubSupplierManagement() {
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false); // 🔥 批量删除确认对话框
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]); // 🔥 选中的供应商ID列表
+
+  const getVisibleSupplierName = (supplier: any) => (
+    portalLanguage === 'zh'
+      ? (supplier?.name || supplier?.nameEn || supplier?.code)
+      : (supplier?.nameEn || supplier?.name || supplier?.code)
+  );
 
   // 🔥 下游供应商数据（改为状态管理）
   const [subSuppliers, setSubSuppliers] = useState([
@@ -790,12 +816,14 @@ export default function SubSupplierManagement() {
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <span className="text-gray-500">公司名称：</span>
-                    <span className="font-medium ml-2">{selectedSupplier.name}</span>
+                    <span className="font-medium ml-2">{getVisibleSupplierName(selectedSupplier)}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-500">英文名称：</span>
-                    <span className="font-medium ml-2">{selectedSupplier.nameEn}</span>
-                  </div>
+                  {portalLanguage !== 'zh' && selectedSupplier.nameEn ? (
+                    <div>
+                      <span className="text-gray-500">英文名称：</span>
+                      <span className="font-medium ml-2">{selectedSupplier.nameEn}</span>
+                    </div>
+                  ) : null}
                   <div>
                     <span className="text-gray-500">供应类型：</span>
                     <span className="font-medium ml-2">{selectedSupplier.type}</span>

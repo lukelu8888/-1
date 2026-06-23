@@ -199,11 +199,11 @@ BT
 (${catalog.title}) Tj
 0 -30 Td
 /F1 12 Tf
-(Year: ${catalog.year} Version: ${catalog.version}) Tj
+(年份: ${catalog.year} 版本: ${catalog.version}) Tj
 0 -20 Td
-(File: ${catalog.fileName}) Tj
+(文件: ${catalog.fileName}) Tj
 0 -20 Td
-(Pages: ${catalog.pages}) Tj
+(页数: ${catalog.pages}) Tj
 ET
 endstream
 endobj
@@ -535,11 +535,11 @@ BT
 (${catalog.title}) Tj
 0 -30 Td
 /F1 12 Tf
-(Year: ${catalog.year} Version: ${catalog.version}) Tj
+(年份: ${catalog.year} 版本: ${catalog.version}) Tj
 0 -20 Td
-(File: ${catalog.fileName}) Tj
+(文件: ${catalog.fileName}) Tj
 0 -20 Td
-(Pages: ${catalog.pages}) Tj
+(页数: ${catalog.pages}) Tj
 ET
 endstream
 endobj
@@ -792,11 +792,11 @@ BT
 (${selectedCatalog.title}) Tj
 0 -30 Td
 /F1 12 Tf
-(Year: ${selectedCatalog.year} Version: ${selectedCatalog.version}) Tj
+(年份: ${selectedCatalog.year} 版本: ${selectedCatalog.version}) Tj
 0 -20 Td
-(File: ${selectedCatalog.fileName}) Tj
+(文件: ${selectedCatalog.fileName}) Tj
 0 -20 Td
-(Pages: ${selectedCatalog.pages}) Tj
+(页数: ${selectedCatalog.pages}) Tj
 ET
 endstream
 endobj
