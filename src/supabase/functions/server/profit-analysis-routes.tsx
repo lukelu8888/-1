@@ -1,27 +1,61 @@
 import { Hono } from "npm:hono";
-import * as kv from "./kv_store.tsx";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const profitAnalysisRoutes = new Hono();
 
-// 🔥 保存利润分析数据
+const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+const supabaseAdminDb = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+    detectSessionInUrl: false,
+  },
+  global: {
+    headers: {
+      apikey: supabaseServiceKey,
+      Authorization: `Bearer ${supabaseServiceKey}`,
+    },
+  },
+});
+
+function normalizeUserId(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
+// 保存利润分析数据
 profitAnalysisRoutes.post("/make-server-880fd43b/save-profit-analysis", async (c) => {
   try {
     const analysisData = await c.req.json();
-    const { userId, id, timestamp } = analysisData;
+    const userId = normalizeUserId(analysisData?.userId);
+    const analysisId = String(analysisData?.id || "").trim();
 
-    if (!userId || !id) {
+    if (!userId || !analysisId) {
       return c.json({ error: "Missing userId or id" }, 400);
     }
 
-    // 保存到KV存储，key格式：profit_analysis_{userId}_{id}
-    const key = `profit_analysis_${userId}_${id}`;
-    await kv.set(key, analysisData);
+    const row = {
+      user_id: userId,
+      analysis_id: analysisId,
+      quotation_id: String(analysisData?.quotationId || "").trim() || null,
+      quotation_number: String(analysisData?.quotationNumber || "").trim() || null,
+      analysis_payload: analysisData,
+      updated_at: new Date().toISOString(),
+    };
 
-    console.log(`✅ Profit analysis saved: ${key}`);
-    return c.json({ 
-      success: true, 
+    const { error } = await supabaseAdminDb
+      .from("saved_profit_analyses")
+      .upsert(row, { onConflict: "user_id,analysis_id" });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    console.log(`✅ Profit analysis saved: ${userId}/${analysisId}`);
+    return c.json({
+      success: true,
       message: "Analysis saved successfully",
-      key 
     });
   } catch (error) {
     console.error("❌ Error saving profit analysis:", error);
@@ -29,31 +63,32 @@ profitAnalysisRoutes.post("/make-server-880fd43b/save-profit-analysis", async (c
   }
 });
 
-// 🔥 获取用户的所有利润分析记录
+// 获取用户的所有利润分析记录
 profitAnalysisRoutes.get("/make-server-880fd43b/get-profit-analyses", async (c) => {
   try {
-    const userId = c.req.query("userId");
+    const userId = normalizeUserId(c.req.query("userId"));
 
     if (!userId) {
       return c.json({ error: "Missing userId parameter" }, 400);
     }
 
-    // 使用getByPrefix获取该用户的所有分析
-    const prefix = `profit_analysis_${userId}_`;
-    const analyses = await kv.getByPrefix(prefix);
+    const { data, error } = await supabaseAdminDb
+      .from("saved_profit_analyses")
+      .select("analysis_payload")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false });
 
-    // 按时间倒序排序
-    const sortedAnalyses = analyses.sort((a, b) => {
-      const timeA = new Date(a.timestamp).getTime();
-      const timeB = new Date(b.timestamp).getTime();
-      return timeB - timeA;
-    });
+    if (error) {
+      throw new Error(error.message);
+    }
 
-    console.log(`✅ Found ${sortedAnalyses.length} analyses for user: ${userId}`);
-    return c.json({ 
-      success: true, 
-      count: sortedAnalyses.length,
-      analyses: sortedAnalyses 
+    const analyses = (data || []).map((row: any) => row.analysis_payload).filter(Boolean);
+
+    console.log(`✅ Found ${analyses.length} analyses for user: ${userId}`);
+    return c.json({
+      success: true,
+      count: analyses.length,
+      analyses,
     });
   } catch (error) {
     console.error("❌ Error loading profit analyses:", error);
@@ -61,22 +96,31 @@ profitAnalysisRoutes.get("/make-server-880fd43b/get-profit-analyses", async (c) 
   }
 });
 
-// 🔥 删除指定的利润分析记录
+// 删除指定的利润分析记录
 profitAnalysisRoutes.delete("/make-server-880fd43b/delete-profit-analysis", async (c) => {
   try {
-    const { userId, id } = await c.req.json();
+    const body = await c.req.json();
+    const userId = normalizeUserId(body?.userId);
+    const analysisId = String(body?.id || "").trim();
 
-    if (!userId || !id) {
+    if (!userId || !analysisId) {
       return c.json({ error: "Missing userId or id" }, 400);
     }
 
-    const key = `profit_analysis_${userId}_${id}`;
-    await kv.del(key);
+    const { error } = await supabaseAdminDb
+      .from("saved_profit_analyses")
+      .delete()
+      .eq("user_id", userId)
+      .eq("analysis_id", analysisId);
 
-    console.log(`✅ Profit analysis deleted: ${key}`);
-    return c.json({ 
-      success: true, 
-      message: "Analysis deleted successfully" 
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    console.log(`✅ Profit analysis deleted: ${userId}/${analysisId}`);
+    return c.json({
+      success: true,
+      message: "Analysis deleted successfully",
     });
   } catch (error) {
     console.error("❌ Error deleting profit analysis:", error);

@@ -6,6 +6,25 @@ const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+function buildManagedInternalPassword(seed = ''): string {
+  const normalizedSeed = String(seed || '').trim().toLowerCase();
+  if (normalizedSeed === 'user_admin' || normalizedSeed === 'admin') {
+    return 'Zi39@cosun';
+  }
+
+  let hash = 0;
+  for (let index = 0; index < normalizedSeed.length; index += 1) {
+    hash = (hash * 31 + normalizedSeed.charCodeAt(index)) >>> 0;
+  }
+
+  const upperChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lowerChars = 'abcdefghijkmnpqrstuvwxyz';
+  const upper = upperChars[hash % upperChars.length];
+  const lower = lowerChars[Math.floor(hash / upperChars.length) % lowerChars.length];
+  const digits = String(hash % 100).padStart(2, '0');
+  return `${upper}${lower}${digits}@cosun`;
+}
+
 export async function initializeDatabase() {
   console.log('🚀 开始初始化数据库（三Portal完整业务闭环）...');
 
@@ -45,7 +64,7 @@ async function createInternalUsers() {
     {
       id: 'user_ceo',
       username: 'ceo',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_ceo'),
       name: '张明',
       email: 'ceo@cosun.com',
       role: 'CEO',
@@ -57,7 +76,7 @@ async function createInternalUsers() {
     {
       id: 'user_cfo',
       username: 'cfo',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_cfo'),
       name: '李华',
       email: 'cfo@cosun.com',
       role: 'CFO',
@@ -70,7 +89,7 @@ async function createInternalUsers() {
     {
       id: 'user_sales_director',
       username: 'sales.director',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_sales_director'),
       name: '王强',
       email: 'sales.director@cosun.com',
       role: 'Sales_Manager',
@@ -82,7 +101,7 @@ async function createInternalUsers() {
     {
       id: 'user_john_smith',
       username: 'john.smith',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_john_smith'),
       name: 'John Smith',
       email: 'john.smith@cosun.com',
       role: 'Sales_Manager',
@@ -94,7 +113,7 @@ async function createInternalUsers() {
     {
       id: 'user_carlos_silva',
       username: 'carlos.silva',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_carlos_silva'),
       name: 'Carlos Silva',
       email: 'carlos.silva@cosun.com',
       role: 'Sales_Manager',
@@ -106,7 +125,7 @@ async function createInternalUsers() {
     {
       id: 'user_hans_mueller',
       username: 'hans.mueller',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_hans_mueller'),
       name: 'Hans Mueller',
       email: 'hans.mueller@cosun.com',
       role: 'Sales_Manager',
@@ -118,7 +137,7 @@ async function createInternalUsers() {
     {
       id: 'user_maria',
       username: 'zhangwei',  // 🔥 修改用户名
-      password: 'cosun123',
+      password: buildManagedInternalPassword('user_maria'),
       name: '张伟',  // 🔥 保持中文名
       email: 'zhangwei@cosun.com',  // 🔥 修改邮箱
       role: 'Sales_Rep',
@@ -130,7 +149,7 @@ async function createInternalUsers() {
     {
       id: 'user_ana_santos',
       username: 'lifang',  // 🔥 修改用户名
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_ana_santos'),
       name: '李芳',  // 🔥 修改为中文名
       email: 'lifang@cosun.com',  // 🔥 修改邮箱
       role: 'Sales_Rep',
@@ -142,7 +161,7 @@ async function createInternalUsers() {
     {
       id: 'user_emma_thompson',
       username: 'wangfang',  // 🔥 修改用户名
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_emma_thompson'),
       name: '王芳',  // 🔥 修改为中文名
       email: 'wangfang@cosun.com',  // 🔥 修改邮箱
       role: 'Sales_Rep',
@@ -155,7 +174,7 @@ async function createInternalUsers() {
     {
       id: 'user_finance',
       username: 'finance',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_finance'),
       name: '赵敏',
       email: 'finance@cosun.com',
       role: 'Finance',
@@ -167,7 +186,7 @@ async function createInternalUsers() {
     {
       id: 'user_procurement',
       username: 'procurement',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_procurement'),
       name: '刘刚',
       email: 'procurement@cosun.com',
       role: 'Procurement',
@@ -180,9 +199,9 @@ async function createInternalUsers() {
     {
       id: 'user_admin',
       username: 'admin',
-      password: 'admin123',
+      password: Deno.env.get('PRIMARY_ADMIN_INIT_PASSWORD')?.trim() || buildManagedInternalPassword('user_admin'),
       name: '系统管理员',
-      email: 'admin@cosun.com',
+      email: 'admin@cosunchina.com',
       role: 'Admin',
       region: 'all',
       department: 'IT部',
@@ -192,7 +211,7 @@ async function createInternalUsers() {
     {
       id: 'user_marketing',
       username: 'marketing',
-      password: 'cosun2024',
+      password: buildManagedInternalPassword('user_marketing'),
       name: '李娜',
       email: 'marketing@cosun.com',
       role: 'Marketing_Ops',
