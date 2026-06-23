@@ -5,6 +5,9 @@ import { Footer } from './components/Footer';
 import {
   LazyHome,
   LazyProjectSolution,
+  LazyRetailWholesale,
+  LazyFabricators,
+  LazyChinaAgent,
   LazyQCMaster,
   LazyShipmentHub,
   LazySpecialOffers,
@@ -18,12 +21,15 @@ import {
   LazyMember,
   LazyLogin,
   LazyAdminLogin,
+  LazyAdminFormalLogin,
   LazyRegister,
   LazyBecomeSupplier,
   LazyCategoryDetail,
   LazyCart,
   LazyPrivacyPolicy,
   LazyTermsOfService,
+  LazyLiveStreamPage,
+  LazyLiveArchivePage,
   LazyCustomerDashboard,
   LazyAdminDashboard,
   LazySupplierDashboard,
@@ -41,7 +47,7 @@ import {
   LazyDocumentTestPage,
   LazyHeaderLayoutOptions,
 } from './lazyPages';
-import { LanguageProvider } from './contexts/LanguageContext';
+import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 
 function PageLoadFallback() {
   return (
@@ -73,6 +79,7 @@ import { AdminOrganizationProvider } from './contexts/AdminOrganizationContext';
 import { RegionSelectorModal } from './components/RegionSelectorModal';
 import { RegionTransition } from './components/RegionTransition';
 import { Toaster } from './components/ui/sonner';
+import { resetDocumentScrollLock } from './components/ui/dialog';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { ProtectedRoute } from './components/ProtectedRoute';
 // ❌ 已禁用：文件不存在
@@ -81,13 +88,40 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 // import ShipmentDemo from './pages/ShipmentDemo';
 
 const CUSTOMER_DASHBOARD_PAGES = ['dashboard', 'login', 'register', 'member'] as const;
+const PUBLIC_SITE_PAGES = [
+  'home',
+  'retail-wholesale',
+  'fabricators',
+  'china-agent',
+  'projectsolution',
+  'qcmaster',
+  'shipmenthub',
+  'specials',
+  'products',
+  'catalog',
+  'failurecases',
+  'services',
+  'socialmedia',
+  'news',
+  'about',
+  'member',
+  'cart',
+  'privacy-policy',
+  'terms-of-service',
+  'live',
+  'live-archive',
+] as const;
+
+function isPublicSitePage(currentPage: string) {
+  return PUBLIC_SITE_PAGES.includes(currentPage as (typeof PUBLIC_SITE_PAGES)[number]) || currentPage.startsWith('category-');
+}
 
 function shouldUseCustomerBusinessProviders(user: AppAuthUser | null, currentPage: string) {
-  return user?.type === 'customer' && CUSTOMER_DASHBOARD_PAGES.includes(currentPage as (typeof CUSTOMER_DASHBOARD_PAGES)[number]);
+  return currentPage === 'cart' || (user?.type === 'customer' && CUSTOMER_DASHBOARD_PAGES.includes(currentPage as (typeof CUSTOMER_DASHBOARD_PAGES)[number]));
 }
 
 function shouldRenderCustomerDashboard(user: AppAuthUser | null, currentPage: string) {
-  return shouldUseCustomerBusinessProviders(user, currentPage);
+  return user?.type === 'customer' && CUSTOMER_DASHBOARD_PAGES.includes(currentPage as (typeof CUSTOMER_DASHBOARD_PAGES)[number]);
 }
 
 function FullBusinessProviders({ children }: { children: React.ReactNode }) {
@@ -200,11 +234,15 @@ function AppContent({
 }) {
   const { currentPage, categoryParams, navigateTo } = useRouter();
   const { setRegion } = useRegion();
+  const { language } = useLanguage();
   const [showHomeDepotDemo, setShowHomeDepotDemo] = useState(false);
   const showCustomerDashboard = shouldRenderCustomerDashboard(user, currentPage);
   const isKnownPublicPage =
     [
       'home',
+      'retail-wholesale',
+      'fabricators',
+      'china-agent',
       'projectsolution',
       'qcmaster',
       'shipmenthub',
@@ -219,6 +257,7 @@ function AppContent({
       'member',
       'login',
       'admin-login',
+      'admin-formal-login',
       'register',
       'supplier',
       'dashboard',
@@ -232,6 +271,8 @@ function AppContent({
       'packaginginspection',
       'privacy-policy',
       'terms-of-service',
+      'live',
+      'live-archive',
       'cart',
       'clear-sales-orders',
       'document-test',
@@ -239,6 +280,21 @@ function AppContent({
       'test-inquiry-flow',
       'init-database',
     ].includes(currentPage) || currentPage.startsWith('category-');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const clearStalePublicScrollLock = () => {
+      const hasOpenDialog = Boolean(document.querySelector('[data-slot="dialog-content"]'));
+      if (!hasOpenDialog) {
+        resetDocumentScrollLock();
+      }
+    };
+
+    clearStalePublicScrollLock();
+    const frameId = window.requestAnimationFrame(clearStalePublicScrollLock);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [currentPage, categoryParams?.category, categoryParams?.subcategory]);
 
   // 🔥 临时预览类目导航Demo - 注释下面这行恢复正常网站
   // return <CategoryDemo />;
@@ -254,7 +310,6 @@ function AppContent({
 
   // 🔥 临时预览表单库（Home Depot风格）- 取消注释下面这行来预览
   // return <FormLibraryPreview />;
-
   // 🔥 预览高级表单布局系统 - 支持无限网格和灵活定位
   if (showHomeDepotDemo) {
     return (
@@ -269,13 +324,23 @@ function AppContent({
   //   return <RealHomeDepotDemo onClose={() => setShowHomeDepotDemo(false)} />;
   // }
 
+  // Admin 登录页必须先于 session 验证渲染；否则 Supabase 初始化慢时会卡在 Loading。
+  if (currentPage === 'admin-login' || currentPage === 'admin-formal-login') {
+    return (
+      <Suspense fallback={<PageLoadFallback />}>
+        {currentPage === 'admin-login' ? <LazyAdminLogin /> : <LazyAdminFormalLogin />}
+        <Toaster />
+      </Suspense>
+    );
+  }
+
   // 等待 Supabase session 验证完成，防止闪烁或卡死
   if (authLoading) {
     return <PageLoadFallback />;
   }
 
   // If user is logged in as admin, show admin dashboard
-  if (user && user.type === 'admin') {
+  if (user && user.type === 'admin' && !isPublicSitePage(currentPage)) {
     return (
       <Suspense fallback={<PageLoadFallback />}>
         <LazyAdminDashboard onLogout={async () => {
@@ -314,20 +379,22 @@ function AppContent({
   if (showCustomerDashboard) {
     return (
       <Suspense fallback={<PageLoadFallback />}>
-        <LazyCustomerDashboard
-          onLogout={async () => {
-            await logout();
-            navigateTo('home');
-          }}
-          userEmail={user.email || 'customer@example.com'}
-        />
+        <ProtectedRoute portalType="customer">
+          <LazyCustomerDashboard
+            onLogout={async () => {
+              await logout();
+              navigateTo('home');
+            }}
+            userEmail={user.email || 'customer@example.com'}
+          />
+        </ProtectedRoute>
         <Toaster />
       </Suspense>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white" lang="en">
+    <div className="min-h-screen bg-white" lang={language} dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <AppErrorBoundary scope="RegionSelectorModal">
         <RegionSelectorModal />
       </AppErrorBoundary>
@@ -339,6 +406,9 @@ function AppContent({
           <main>
             <Suspense fallback={<PageLoadFallback />}>
             {currentPage === 'home' && <LazyHome />}
+            {currentPage === 'retail-wholesale' && <LazyRetailWholesale />}
+            {currentPage === 'fabricators' && <LazyFabricators />}
+            {currentPage === 'china-agent' && <LazyChinaAgent />}
             {currentPage === 'projectsolution' && <LazyProjectSolution />}
             {currentPage === 'qcmaster' && <LazyQCMaster />}
             {currentPage === 'shipmenthub' && <LazyShipmentHub />}
@@ -353,28 +423,18 @@ function AppContent({
             {currentPage === 'member' && <LazyMember />}
             {currentPage === 'login' && <LazyLogin />}
             {currentPage === 'admin-login' && <LazyAdminLogin />}
+            {currentPage === 'admin-formal-login' && <LazyAdminFormalLogin />}
             {currentPage === 'register' && <LazyRegister />}
-            {currentPage === 'dashboard' && user && user.type === 'customer' && (
-              <LazyCustomerDashboard
-                onLogout={async () => {
-                  await logout();
-                  navigateTo('home');
-                }}
-                userEmail={user.email || 'customer@example.com'}
-              />
-            )}
-            {currentPage === 'dashboard' && !user && (
-              <div className="flex min-h-[60vh] items-center justify-center">
-                <div className="text-center space-y-4">
-                  <p className="text-gray-600">请先登录以访问个人中心</p>
-                  <button
-                    className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600"
-                    onClick={() => navigateTo('login')}
-                  >
-                    前往登录
-                  </button>
-                </div>
-              </div>
+            {currentPage === 'dashboard' && (
+              <ProtectedRoute portalType="customer">
+                <LazyCustomerDashboard
+                  onLogout={async () => {
+                    await logout();
+                    navigateTo('home');
+                  }}
+                  userEmail={user?.email || 'customer@example.com'}
+                />
+              </ProtectedRoute>
             )}
             {currentPage === 'supplier' && <LazyBecomeSupplier />}
             {currentPage === 'furnitureinspection' && <LazyFurnitureInspectionStandards />}
@@ -387,6 +447,8 @@ function AppContent({
             {currentPage === 'packaginginspection' && <LazyPackagingInspectionStandards />}
             {currentPage === 'privacy-policy' && <LazyPrivacyPolicy />}
             {currentPage === 'terms-of-service' && <LazyTermsOfService />}
+            {currentPage === 'live' && <LazyLiveStreamPage />}
+            {currentPage === 'live-archive' && <LazyLiveArchivePage />}
             {currentPage.startsWith('category-') && (
               <LazyCategoryDetail category={categoryParams?.category} subcategory={categoryParams?.subcategory} />
             )}

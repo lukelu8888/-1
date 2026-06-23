@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Menu, Search, X, ChevronDown, Shield, Radio } from 'lucide-react';
+import { Globe2, Menu, Radio, Search, X, ChevronDown } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { useRouter } from '../contexts/RouterContext';
 import { useCart } from '../contexts/CartContext';
 import { useRegion } from '../contexts/RegionContext';
 import { useOptionalUser } from '../contexts/UserContext';
+import { useLanguage, LanguageCode } from '../contexts/LanguageContext';
 import { toast } from 'sonner@2.0.3';
 import {
   Sheet,
@@ -18,8 +19,8 @@ import { productDetailsData, ProductDetail } from '../data/productDetailsData';
 import { ProductDetailDialog } from './ProductDetailDialog';
 import { RegionSwitcher } from './RegionSwitcher';
 import { RegionBadge } from './RegionBadge';
-import { productRecommendationsMap, defaultProducts } from '../data/header/recommendedProductsData';
-import { departments } from '../data/header/departmentsData';
+import { getLeafCategoryImage } from '../data/categoryLeafImages';
+import { productRecommendationsMap, defaultProducts } from '../data/departmentRecommendedProductsData';
 import { HeaderLogo } from './header/HeaderLogo';
 import { UserMenu } from './header/UserMenu';
 import { CartButton } from './header/CartButton';
@@ -27,8 +28,13 @@ import { MobileNavigation } from './header/MobileNavigation';
 import { QuantityAlertDialog } from './header/QuantityAlertDialog';
 import { DepartmentMegaMenu } from './header/DepartmentMegaMenu';
 import { ProductPanel } from './header/ProductPanel';
+import { useStorefrontDepartments } from '../hooks/useStorefrontDepartments';
+
+const languageOptions: LanguageCode[] = ['en', 'es', 'pt', 'fr', 'ru', 'ar'];
+const HEADER_ACTIVE_NAV_KEY = 'cosun_active_header_nav';
 
 export function Header() {
+  const { departments } = useStorefrontDepartments();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDepartmentOpen, setIsDepartmentOpen] = useState(false);
   const [isMobileDepartmentOpen, setIsMobileDepartmentOpen] = useState(false);
@@ -46,12 +52,52 @@ export function Header() {
   const [selectedSuggestedQuantity, setSelectedSuggestedQuantity] = useState<number | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<ProductDetail | null>(null);
   const [showProductDetail, setShowProductDetail] = useState(false);
-  const { navigateTo, currentPage } = useRouter();
+  const [isLanguageOpen, setIsLanguageOpen] = useState(false);
+  const { navigateTo, currentPage, categoryParams } = useRouter();
   const { addToCart, getTotalItems } = useCart();
   const { region, setShowRegionSelector } = useRegion();
+  const { language, setLanguage, t } = useLanguage();
+  const publicCopy = t.publicSite;
   const userContext = useOptionalUser();
   const user = userContext?.user ?? null;
   const logout = userContext?.logout ?? (async () => {});
+  const isCategoryPage = String(currentPage).startsWith('category-');
+  const routeNavigationName: Record<string, string> = {
+    'retail-wholesale': 'Retail & Wholesale',
+    fabricators: 'Fabricators',
+    'china-agent': 'China Agent',
+    projectsolution: 'Project Solution',
+    qcmaster: 'QC Inspection',
+    specials: 'Deals & Offers',
+  };
+  const [activeNavigationName, setActiveNavigationName] = useState<string | null>(() => {
+    if (isCategoryPage) return 'department';
+    const routeName = routeNavigationName[String(currentPage)];
+    if (routeName) return routeName;
+    try {
+      return sessionStorage.getItem(HEADER_ACTIVE_NAV_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const focusedDepartmentName =
+    isCategoryPage && categoryParams?.category
+      ? categoryParams.category
+      : undefined;
+  const activeMobileDepartment = mobileDeptIndex !== null ? departments[mobileDeptIndex] ?? null : null;
+
+  const setActiveNavigationModule = (name: string | null) => {
+    setActiveNavigationName(name);
+    try {
+      if (name) {
+        sessionStorage.setItem(HEADER_ACTIVE_NAV_KEY, name);
+      } else {
+        sessionStorage.removeItem(HEADER_ACTIVE_NAV_KEY);
+      }
+    } catch {
+      // Ignore storage failures; the in-memory state still updates.
+    }
+  };
 
   // Clear hover states when department menu is closed
   useEffect(() => {
@@ -61,6 +107,32 @@ export function Header() {
       setHoveredProduct(null);
     }
   }, [isDepartmentOpen]);
+
+  useEffect(() => {
+    if (mobileDeptIndex !== null && mobileDeptIndex >= departments.length) {
+      setMobileDeptIndex(null);
+      setMobileSubcatName(null);
+    }
+  }, [departments.length, mobileDeptIndex]);
+
+  useEffect(() => {
+    if (isCategoryPage) {
+      setActiveNavigationModule('department');
+    } else if (currentPage === 'home') {
+      setActiveNavigationModule(null);
+    } else if (routeNavigationName[String(currentPage)]) {
+      setActiveNavigationModule(routeNavigationName[String(currentPage)]);
+    } else {
+      try {
+        const savedNavigationName = sessionStorage.getItem(HEADER_ACTIVE_NAV_KEY);
+        if (savedNavigationName) {
+          setActiveNavigationName(savedNavigationName);
+        }
+      } catch {
+        // Ignore storage failures; click handlers keep the in-memory state current.
+      }
+    }
+  }, [currentPage, isCategoryPage]);
 
   // Update suggested quantities when orderQuantity or hoveredProduct changes
   useEffect(() => {
@@ -98,15 +170,6 @@ export function Header() {
   // Get product details by product name
   const getProductDetails = (productName: string) => {
     return productDetailsData[productName] || null;
-  };
-
-  // Check if region is selected before opening department dropdown
-  const handleDepartmentClick = () => {
-    if (!region) {
-      setShowRegionSelector(true);
-      return false;
-    }
-    return true;
   };
 
   // Calculate cartons and CBM based on quantity
@@ -157,7 +220,7 @@ export function Header() {
 
   /* 
    * OLD PRODUCT RECOMMENDATIONS DATA REMOVED
-   * Data moved to: /data/header/recommendedProductsData.ts
+   * Data moved to: /data/departmentRecommendedProductsData.ts
    * This section previously contained ~450 lines of product mapping data (lines 170-622)
    * The data has been extracted to improve file maintainability
    */
@@ -609,52 +672,279 @@ export function Header() {
   };
 
   const navigationItems = [
-    { name: 'Project Solution', page: 'projectsolution' as const },
-    { name: 'Your QC Expert', page: 'qcmaster' as const },
-    { name: 'Special & Offers', page: 'specials' as const },
-    { name: 'Become A Supplier', page: 'supplier' as const },
+    {
+      name: 'Retail & Wholesale',
+      page: 'retail-wholesale' as const,
+      summary: 'For retail chains, local hardware stores, wholesalers, and ecommerce sellers buying stable product assortments in volume.',
+      sections: [
+        {
+          title: 'Buy & Replenish',
+          links: [
+            { label: 'Browse Product Categories', page: 'catalog' },
+            { label: 'Bulk Inquiry / RFQ', page: user ? 'dashboard' : 'login' },
+            { label: 'Store Replenishment', page: user ? 'dashboard' : 'login' },
+            { label: 'Deals & Volume Offers', page: 'specials' },
+          ],
+        },
+        {
+          title: 'Workflow',
+          links: [
+            { label: 'Inquiry to Quotation', page: user ? 'dashboard' : 'login' },
+            { label: 'Order Tracking', page: 'shipmenthub' },
+            { label: 'Payment & Documents', page: user ? 'dashboard' : 'login' },
+            { label: 'New Arrivals', page: 'products' },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'Project Solution',
+      page: 'projectsolution' as const,
+      summary: 'For open-ended project requirements that need suitable suppliers, manufacturers, turnkey contractors, or automation partners.',
+      sections: [
+        {
+          title: 'Project Intake',
+          links: [
+            { label: 'Project Solution', page: 'projectsolution' },
+            { label: 'Submit Project Requirement', page: user ? 'dashboard' : 'login' },
+            { label: 'Turnkey Project Matching', page: 'projectsolution' },
+            { label: 'Request Project Proposal', page: user ? 'dashboard' : 'login' },
+          ],
+        },
+        {
+          title: 'Execution',
+          links: [
+            { label: 'Supplier / Manufacturer Matching', page: 'projectsolution' },
+            { label: 'PLC & Technical Partners', page: 'projectsolution' },
+            { label: 'Project Progress Tracking', page: user ? 'dashboard' : 'login' },
+            { label: 'Project QC & Documents', page: 'qcmaster' },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'Fabricators',
+      page: 'fabricators' as const,
+      summary: 'For door, window, cabinet, furniture, hardware, and building-material fabricators that need repeatable materials and components.',
+      sections: [
+        {
+          title: 'Fabrication Supply',
+          links: [
+            { label: 'Fabricator Supply Support', page: 'fabricators' },
+            { label: 'Materials & Components', page: 'catalog' },
+            { label: 'Specification Matching', page: 'fabricators' },
+            { label: 'Alternative Products', page: 'catalog' },
+          ],
+        },
+        {
+          title: 'Repeat Business',
+          links: [
+            { label: 'Specification-based Inquiry', page: user ? 'dashboard' : 'login' },
+            { label: 'Repeat Orders', page: user ? 'dashboard' : 'login' },
+            { label: 'Batch Tracking', page: 'shipmenthub' },
+            { label: 'Sample Confirmation', page: 'fabricators' },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'China Agent',
+      page: 'china-agent' as const,
+      summary: 'For overseas buyers looking for a trusted China-side agent to communicate with suppliers, follow orders, coordinate QC, and keep execution visible.',
+      sections: [
+        {
+          title: 'Agent Services',
+          links: [
+            { label: 'China Agent Overview', page: 'china-agent' },
+            { label: 'Submit Buying Brief', page: user ? 'dashboard' : 'login' },
+            { label: 'Supplier Communication', page: 'china-agent' },
+            { label: 'Quote & Sample Follow-up', page: user ? 'dashboard' : 'login' },
+          ],
+        },
+        {
+          title: 'Execution Support',
+          links: [
+            { label: 'Order Follow-up', page: user ? 'dashboard' : 'login' },
+            { label: 'QC Coordination', page: 'qcmaster' },
+            { label: 'Shipment Coordination', page: 'shipmenthub' },
+            { label: 'Workspace Tracking', page: user ? 'dashboard' : 'login' },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'QC Inspection',
+      page: 'qcmaster' as const,
+      summary: 'For buyers who already have suppliers but need factory audits, AQL inspection, pre-shipment checks, or loading supervision.',
+      sections: [
+        {
+          title: 'Inspection Types',
+          links: [
+            { label: 'Pre-shipment Inspection', page: 'qcmaster' },
+            { label: 'During Production Inspection', page: 'qcmaster' },
+            { label: 'Container Loading Check', page: 'qcmaster' },
+            { label: 'Factory Audit', page: 'qcmaster' },
+          ],
+        },
+        {
+          title: 'Report Flow',
+          links: [
+            { label: 'Book Inspection', page: user ? 'dashboard' : 'login' },
+            { label: 'AQL Standards', page: 'qcmaster' },
+            { label: 'Issue Follow-up', page: user ? 'dashboard' : 'login' },
+            { label: 'Release Decision', page: user ? 'dashboard' : 'login' },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'Deals & Offers',
+      page: 'specials' as const,
+      summary: 'For price-sensitive buying, seasonal campaigns, bulk promotions, and fast-moving product opportunities.',
+      sections: [
+        {
+          title: 'Promotions',
+          links: [
+            { label: 'Deals of the Week', page: 'specials' },
+            { label: 'Bulk Order Savings', page: 'specials' },
+            { label: 'Special Buy', page: 'specials' },
+            { label: 'New Lower Price', page: 'specials' },
+          ],
+        },
+        {
+          title: 'Value Buying',
+          links: [
+            { label: 'Clearance', page: 'specials' },
+            { label: 'Seasonal Campaigns', page: 'specials' },
+            { label: 'Best Value Products', page: 'products' },
+            { label: 'Volume Pricing', page: user ? 'dashboard' : 'login' },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'Resources',
+      page: 'shipmenthub' as const,
+      summary: 'Guides, service standards, shipment tools, document support, and practical resources for managing China trade orders.',
+      sections: [
+        {
+          title: 'Guides',
+          links: [
+            { label: 'Shipment Hub', page: 'shipmenthub' },
+            { label: 'AQL Standards', page: 'qcmaster' },
+            { label: 'Trade Terms', page: 'services' },
+            { label: 'Buying Guides', page: 'news' },
+          ],
+        },
+        {
+          title: 'Order Support',
+          links: [
+            { label: 'Order Tracking', page: 'shipmenthub' },
+            { label: 'Payment & Documents', page: user ? 'dashboard' : 'login' },
+            { label: 'CI / PL / BL Support', page: 'shipmenthub' },
+            { label: 'Contact Support', page: 'services' },
+          ],
+        },
+      ],
+    },
   ];
 
   /* 
    * DEPARTMENTS DATA REMOVED
-   * Data moved to: /data/header/departmentsData.ts
+   * Data moved to: /data/departmentsData.ts
    * This section previously contained ~360 lines of department category data (lines 638-997)
    * The data has been extracted to improve file maintainability
    * The imported 'departments' array from departmentsData.ts is now used throughout the component
    */
 
-  // Using imported departments array from /data/header/departmentsData.ts
+  // Using imported departments array from /data/departmentsData.ts
 
   return (
     <>
-    <header className="sticky top-0 z-50 w-full bg-white shadow-sm">
+    <header className="sticky top-0 z-50 w-full bg-white">
+      <div className="hidden bg-gray-900 text-white lg:block">
+        <div className="cosun-shell flex h-7 items-center justify-between text-xs font-semibold">
+          <div className="flex items-center gap-4">
+            <div className="cosun-top-region-badge">
+              <RegionBadge />
+            </div>
+            <span className="h-3 w-px bg-white/25" />
+            <div className="cosun-top-region-switcher">
+              <RegionSwitcher />
+            </div>
+          </div>
+
+          <button
+            onClick={() => navigateTo('live')}
+            className="flex items-center gap-1.5 text-red-300 transition hover:text-red-200"
+            title="Live Stream"
+          >
+            <Radio className="h-3.5 w-3.5" />
+            {publicCopy.header.live}
+          </button>
+
+          <div className="relative flex items-center gap-5">
+            <button
+              type="button"
+              onClick={() => setIsLanguageOpen((open) => !open)}
+              className="flex items-center gap-1.5 hover:text-red-300"
+            >
+              <Globe2 className="h-3.5 w-3.5" />
+              {publicCopy.languageNames[language]}
+              <ChevronDown className={`h-3 w-3 transition-transform ${isLanguageOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {isLanguageOpen && (
+              <div className="absolute right-0 top-full z-50 mt-2 w-40 overflow-hidden rounded-sm border border-gray-200 bg-white py-1 text-gray-800 shadow-xl">
+                {languageOptions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => {
+                      setLanguage(option);
+                      setIsLanguageOpen(false);
+                    }}
+                    className={`block w-full px-3 py-2 text-left text-xs transition hover:bg-red-50 hover:text-red-700 ${
+                      language === option ? 'bg-red-50 font-bold text-red-700' : ''
+                    }`}
+                  >
+                    {publicCopy.languageNames[option]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
       {/* Main Header - White Background with Logo, Search, Actions */}
-      <div className="px-4 py-4 border-b">
-        <div className="mx-auto max-w-7xl">
+      <div className="pt-2.5">
+        <div className="cosun-shell border-b border-gray-200 pb-2.5">
           {/* Top Row - Logo, Search, Cart */}
-          <div className="flex items-end justify-between gap-4">
+          <div className="flex items-center justify-between gap-6">
             {/* Left Side - Logo and Search Area */}
-            <div className="flex items-start gap-2 flex-1">
+            <div className="flex min-w-0 flex-1 items-center gap-8">
               {/* Logo */}
               <HeaderLogo onNavigateHome={() => navigateTo('home')} />
 
               {/* Right Side - Text and Search */}
-              <div className="hidden md:flex flex-col gap-2 flex-1 max-w-3xl">
-                {/* Text */}
-                <div className="text-base tracking-wider text-gray-800 font-semibold">
-                  YOUR ONE-STOP SOURCING SOLUTION EXPERT IN CHINA
-                </div>
-                
+              <div className="hidden flex-1 md:flex">
                 {/* Search Bar */}
                 <div className="relative w-full">
                   <Input
                     type="text"
-                    placeholder="What can we help you find?"
-                    className="w-full pr-12 h-8"
+                    placeholder={publicCopy.header.searchPlaceholder}
+                    className="h-10 w-full rounded-sm border-gray-300 pr-44"
+                    style={{ paddingRight: '11rem' }}
                   />
+                  <button
+                    className="absolute top-0 hidden h-10 items-center gap-1 border-l border-gray-200 px-4 text-xs font-semibold text-gray-600 md:flex"
+                    style={{ right: '3rem' }}
+                  >
+                    {publicCopy.header.allCategories}
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
                   <Button
                     size="icon"
-                    className="absolute right-0 top-0 h-8 rounded-l-none"
+                    className="absolute right-0 top-0 h-10 w-12 rounded-l-none rounded-r-sm bg-red-600 hover:bg-red-700"
                   >
                     <Search className="h-4 w-4" />
                   </Button>
@@ -662,77 +952,17 @@ export function Header() {
               </div>
             </div>
 
-            {/* Right Side - Navigation Links + Login/Cart */}
-            <div className="hidden lg:flex flex-col gap-2">
-              {/* Top Row - Navigation Links */}
-              <div className="flex items-center justify-end gap-1 text-sm">
-                <RegionBadge />
-                <span className="text-gray-400">|</span>
-                <RegionSwitcher />
-                <span className="text-gray-400">|</span>
-                <button
-                  onClick={() => navigateTo('live')}
-                  className="px-2 py-1 text-red-600 hover:text-red-700 transition-colors flex items-center gap-1 font-semibold animate-pulse"
-                  title="Live Stream"
-                >
-                  <Radio className="h-3 w-3" />
-                  LIVE
-                </button>
-                <span className="text-gray-400">|</span>
-                <button
-                  onClick={() => navigateTo('services')}
-                  className="px-2 py-1 text-gray-700 hover:text-orange-600 transition-colors"
-                >
-                  Our Services
-                </button>
-                <span className="text-gray-400">|</span>
-                <button
-                  onClick={() => navigateTo('about')}
-                  className="px-2 py-1 text-gray-700 hover:text-orange-600 transition-colors"
-                >
-                  Our Story
-                </button>
-                <span className="text-gray-400">|</span>
-                <button
-                  onClick={() => navigateTo('shipmenthub')}
-                  className="px-2 py-1 text-gray-700 hover:text-orange-600 transition-colors"
-                >
-                  Shipment Hub
-                </button>
-                <span className="text-gray-400">|</span>
-                <button
-                  onClick={() => navigateTo('failurecases')}
-                  className="px-2 py-1 text-gray-700 hover:text-orange-600 transition-colors"
-                >
-                  Our Failure Cases
-                </button>
-                <span className="text-gray-400">|</span>
-                {/* 🔥 管理员后台入口（固定可见） */}
-                <button
-                  onClick={() => navigateTo('admin-login')}
-                  className="px-2 py-1 text-red-600 hover:text-red-700 transition-colors flex items-center gap-1 font-semibold"
-                  title="Admin Portal"
-                >
-                  <Shield className="h-3 w-3" />
-                  Admin Portal
-                </button>
-              </div>
-
-              {/* Bottom Row - Login/User and Cart */}
-              <div className="flex items-center justify-end gap-2">
-                {/* User Menu or Login Button + Notification Center */}
-                <UserMenu
-                  user={user}
-                  logout={logout}
-                  onNavigateTo={(page) => navigateTo(page)}
-                />
-
-                {/* Cart Button */}
-                <CartButton
-                  totalItems={getTotalItems()}
-                  onNavigateToCart={() => navigateTo('cart')}
-                />
-              </div>
+            {/* Right Side - Login/User and Cart */}
+            <div className="hidden items-center justify-end gap-3 lg:flex">
+              <UserMenu
+                user={user}
+                logout={logout}
+                onNavigateTo={(page) => navigateTo(page)}
+              />
+              <CartButton
+                totalItems={getTotalItems()}
+                onNavigateToCart={() => navigateTo('cart')}
+              />
             </div>
 
             {/* Mobile Menu Button */}
@@ -751,12 +981,12 @@ export function Header() {
             <div className="relative">
               <Input
                 type="text"
-                placeholder="What can we help you find?"
+                placeholder={publicCopy.header.searchPlaceholder}
                 className="w-full pr-12"
               />
               <Button
                 size="icon"
-                className="absolute right-0 top-0 rounded-l-none"
+                className="absolute right-0 top-0 rounded-l-none bg-red-600 hover:bg-red-700"
               >
                 <Search className="h-5 w-5" />
               </Button>
@@ -766,134 +996,57 @@ export function Header() {
       </div>
 
       {/* Navigation Bar */}
-      <div className="border-t bg-white">
-        <div className="mx-auto max-w-7xl px-4">
-          <nav className="hidden lg:flex items-center gap-1 py-3">
-            {/* Shop by Department — managed by DepartmentMegaMenu */}
-            <DepartmentMegaMenu
-              isDepartmentOpen={isDepartmentOpen}
-              currentPage={currentPage}
-              hoveredDept={hoveredDept}
-              hoveredSubcat={hoveredSubcat}
-              hoveredProduct={hoveredProduct}
-              showQuantityAlert={showQuantityAlert}
-              departments={departments}
-              onOpenChange={(open) => {
-                if (open && !region) {
-                  setShowRegionSelector(true);
-                  return;
-                }
-                setIsDepartmentOpen(open);
-              }}
-              onHoverDept={(index) => {
-                setHoveredDept(index);
-                setHoveredSubcat(null);
-              }}
-              onHoverSubcat={(name) => setHoveredSubcat(name)}
-              onHoverProduct={(name) => {
-                setHoveredProduct(name);
-                setOrderQuantity(1);
-                setSelectedColors([]);
-                setColorQuantities({});
-                setSuggestedQuantities([]);
-              }}
-              onNavigateToDept={(categoryName) => {
-                const categorySlug = categoryName
-                  .toLowerCase()
-                  .replace(/&/g, 'and')
-                  .replace(/[^a-z0-9]+/g, '-')
-                  .replace(/^-+|-+$/g, '');
-                setHoveredDept(null);
-                setHoveredSubcat(null);
-                setIsDepartmentOpen(false);
-                setTimeout(() => navigateTo(`category-${categorySlug}`, { category: categoryName }), 0);
-              }}
-              onNavigateToDeptSubcat={(categoryName, subcategoryName) => {
-                const categorySlug = categoryName
-                  .toLowerCase()
-                  .replace(/&/g, 'and')
-                  .replace(/[^a-z0-9]+/g, '-')
-                  .replace(/^-+|-+$/g, '');
-                setHoveredDept(null);
-                setHoveredSubcat(null);
-                setIsDepartmentOpen(false);
-                setTimeout(() => navigateTo(`category-${categorySlug}`, { category: categoryName, subcategory: subcategoryName }), 0);
-              }}
-              onNavigateToCatalog={() => {
-                navigateTo('catalog');
-                setIsDepartmentOpen(false);
-              }}
-              onNavigateToSpecials={() => {
+      {currentPage !== 'home' && (
+      <div className="bg-white">
+        <div className="cosun-shell border-b border-gray-200">
+          <nav className="hidden h-12 items-center lg:flex">
+            <button
+              type="button"
+              onClick={() => {
                 setIsDepartmentOpen(false);
                 setHoveredDept(null);
                 setHoveredSubcat(null);
-                navigateTo('specials');
+                setHoveredProduct(null);
+                setActiveNavigationModule(null);
+                navigateTo('home');
               }}
-              onCloseMenu={() => setIsDepartmentOpen(false)}
-              onProductItemClick={(productName) => {
-                const product = getProductDetails(productName);
-                if (product) {
-                  setSelectedProduct(product);
-                  setShowProductDetail(true);
-                }
-              }}
-              onMouseLeaveProductArea={() => {
-                if (!showQuantityAlert) {
-                  setHoveredProduct(null);
-                  setSelectedColors([]);
-                  setColorQuantities({});
-                  setSuggestedQuantities([]);
-                }
-              }}
-              getRecommendedProducts={getRecommendedProducts}
-              productPanelNode={
-                hoveredProduct && getProductDetails(hoveredProduct) ? (
-                  <ProductPanel
-                    hoveredProduct={hoveredProduct}
-                    orderQuantity={orderQuantity}
-                    selectedColors={selectedColors}
-                    colorQuantities={colorQuantities}
-                    suggestedQuantities={suggestedQuantities}
-                    setOrderQuantity={setOrderQuantity}
-                    setSelectedColors={setSelectedColors}
-                    setColorQuantities={setColorQuantities}
-                    setSuggestedQuantities={setSuggestedQuantities}
-                    setPendingCartItem={setPendingCartItem}
-                    setShowQuantityAlert={setShowQuantityAlert}
-                    setIsDepartmentOpen={setIsDepartmentOpen}
-                    setHoveredDept={setHoveredDept}
-                    setHoveredSubcat={setHoveredSubcat}
-                    setHoveredProduct={setHoveredProduct}
-                    getProductDetails={getProductDetails}
-                    calculateShipping={calculateShipping}
-                    addToCart={addToCart}
-                  />
-                ) : null
-              }
-            />
+              className="flex h-full w-[280px] flex-shrink-0 items-center justify-between bg-red-600 px-4 text-sm font-bold uppercase tracking-wide text-white transition-colors hover:bg-red-700"
+            >
+              <span className="flex items-center gap-3">
+                <Menu className="h-5 w-5" />
+                <span>Shop by Department</span>
+              </span>
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
 
-            {/* Other Navigation Items */}
-            {navigationItems.map((item) => (
-              <button
-                key={item.name}
-                onClick={() => {
-                  setIsDepartmentOpen(false);
-                  setHoveredDept(null);
-                  setHoveredSubcat(null);
-                  navigateTo(item.page);
-                }}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  currentPage === item.page && !isDepartmentOpen
-                    ? 'bg-red-600 text-white hover:bg-red-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                {item.name}
-              </button>
-            ))}
+            <div className="flex h-full flex-1 items-center justify-between">
+              {/* Other Navigation Items */}
+              {navigationItems.map((item) => (
+                <div key={item.name} className="relative h-full">
+                  <button
+                  key={item.name}
+                  onClick={() => {
+                    setIsDepartmentOpen(false);
+                    setHoveredDept(null);
+                    setHoveredSubcat(null);
+                    setActiveNavigationModule(item.name);
+                    navigateTo(item.page);
+                  }}
+                  className={`flex h-full items-center border-b-2 px-4 text-sm font-semibold transition-colors ${
+                    activeNavigationName === item.name
+                      ? 'border-red-600 text-red-700'
+                      : 'border-transparent text-gray-700 hover:bg-gray-50 hover:text-red-700'
+                  }`}
+                >
+                  {item.name}
+                  </button>
+                </div>
+              ))}
+            </div>
           </nav>
         </div>
       </div>
+      )}
 
       {/* Mobile Navigation */}
       <MobileNavigation
@@ -903,6 +1056,8 @@ export function Header() {
         region={region}
         logout={logout}
         navigationItems={navigationItems}
+        activeNavigationName={activeNavigationName}
+        onSetActiveNavigationName={setActiveNavigationModule}
         onNavigateTo={(page) => navigateTo(page)}
         onSetShowRegionSelector={setShowRegionSelector}
         onOpenMobileDept={() => setIsMobileDepartmentOpen(true)}
@@ -945,9 +1100,9 @@ export function Header() {
     <Sheet open={isMobileDepartmentOpen} onOpenChange={setIsMobileDepartmentOpen}>
       <SheetContent side="left" className="w-[90vw] sm:w-[400px] p-0 overflow-y-auto">
         <SheetHeader className="px-4 py-3 border-b">
-          <SheetTitle>Shop by Department</SheetTitle>
+          <SheetTitle>{publicCopy.home.departmentTitle}</SheetTitle>
           <SheetDescription className="sr-only">
-            Browse all product departments and categories
+            {publicCopy.home.browseDepartmentsDescription}
           </SheetDescription>
         </SheetHeader>
         
@@ -969,6 +1124,7 @@ export function Header() {
               <div className="border-t my-3 pt-3">
                 <button
                   onClick={() => {
+                    setActiveNavigationModule('department');
                     navigateTo('catalog');
                     setIsMobileDepartmentOpen(false);
                   }}
@@ -991,16 +1147,26 @@ export function Header() {
                 Back to Departments
               </button>
               
-              <h3 className="font-medium text-lg mb-3">{departments[mobileDeptIndex].name}</h3>
+              <h3 className="font-medium text-lg mb-3">{activeMobileDepartment?.name}</h3>
               
               <div className="space-y-1">
-                {departments[mobileDeptIndex].subcategories.map((subcat, idx) => (
+                {activeMobileDepartment?.subcategories.map((subcat, idx) => (
                   <button
                     key={idx}
                     onClick={() => setMobileSubcatName(subcat.name)}
-                    className="w-full flex items-center justify-between px-4 py-3 rounded-lg text-left hover:bg-gray-100 transition-colors"
+                    className="flex min-h-14 w-full items-center justify-between gap-3 rounded-lg px-4 py-2.5 text-left transition-colors hover:bg-gray-100"
                   >
-                    <span className="text-sm">{subcat.name}</span>
+                    <span className="flex min-w-0 items-center gap-3 text-sm">
+                      {subcat.image && (
+                        <img
+                          src={subcat.image}
+                          alt={subcat.name}
+                          className="h-10 w-10 flex-shrink-0 rounded object-cover"
+                          loading="lazy"
+                        />
+                      )}
+                      <span className="leading-snug">{subcat.name}</span>
+                    </span>
                     <ChevronDown className="h-4 w-4 -rotate-90 text-gray-400" />
                   </button>
                 ))}
@@ -1016,37 +1182,49 @@ export function Header() {
                 className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-3"
               >
                 <ChevronDown className="h-4 w-4 rotate-90" />
-                Back to {departments[mobileDeptIndex].name}
+                Back to {activeMobileDepartment?.name}
               </button>
               
               <h3 className="font-medium text-lg mb-3">{mobileSubcatName}</h3>
               
               {(() => {
-                const subcat = departments[mobileDeptIndex].subcategories.find(s => s.name === mobileSubcatName);
+                const subcat = activeMobileDepartment?.subcategories.find(s => s.name === mobileSubcatName);
                 if (!subcat) return null;
                 
                 return (
                   <div className="space-y-1">
-                    {subcat.items.map((item, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          const productDetails = getProductDetails(item);
-                          if (productDetails) {
-                            setSelectedProduct(productDetails);
-                            setShowProductDetail(true);
-                            setIsMobileDepartmentOpen(false);
-                            setMobileDeptIndex(null);
-                            setMobileSubcatName(null);
-                          } else {
-                            toast.info('Product details coming soon');
-                          }
-                        }}
-                        className="w-full px-4 py-3 rounded-lg text-left hover:bg-gray-100 transition-colors text-sm"
-                      >
-                        {item}
-                      </button>
-                    ))}
+                    {subcat.items.map((item, idx) => {
+                      const itemImage = getLeafCategoryImage(item);
+
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            const productDetails = getProductDetails(item);
+                            if (productDetails) {
+                              setSelectedProduct(productDetails);
+                              setShowProductDetail(true);
+                              setIsMobileDepartmentOpen(false);
+                              setMobileDeptIndex(null);
+                              setMobileSubcatName(null);
+                            } else {
+                              toast.info('Product details coming soon');
+                            }
+                          }}
+                          className="flex min-h-14 w-full items-center gap-3 rounded-lg px-4 py-2.5 text-left text-sm transition-colors hover:bg-gray-100"
+                        >
+                          {itemImage && (
+                            <img
+                              src={itemImage}
+                              alt={item}
+                              className="h-10 w-10 flex-shrink-0 rounded object-cover"
+                              loading="lazy"
+                            />
+                          )}
+                          <span className="leading-snug">{item}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 );
               })()}

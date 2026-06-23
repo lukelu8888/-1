@@ -128,7 +128,7 @@ export function ProductPanel({
         {product.colorOptions && product.colorOptions.length > 0 && selectedColors.length === 0 && (
           <div className="border-t pt-3">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
-              ℹ️ Please select at least one color to view pricing and add to cart
+              Please select at least one color to view pricing and add to inquiry
             </div>
           </div>
         )}
@@ -380,7 +380,7 @@ export function ProductPanel({
           </div>
         )}
 
-        {/* Add to Cart Button */}
+        {/* Add to Inquiry Button */}
         <button
           className={`w-full py-2 rounded-md transition-colors text-sm text-center ${
             (product.colorOptions ? selectedColors.length > 0 : orderQuantity > 0)
@@ -424,7 +424,7 @@ export function ProductPanel({
                   return;
                 }
 
-                // All quantities are full cartons, add to cart
+                // All quantities are full cartons, add to inquiry list
                 selectedColors.forEach((colorName) => {
                   const colorOption = product.colorOptions!.find(c => c.name === colorName);
                   if (!colorOption) return;
@@ -456,7 +456,7 @@ export function ProductPanel({
                 setHoveredProduct(null);
 
                 // Show success message
-                toast.success('Products added to cart!', {
+                toast.success('Products added to inquiry list!', {
                   description: `${selectedColors.length} color variant(s) added`,
                 });
               }
@@ -479,7 +479,7 @@ export function ProductPanel({
                   return;
                 }
 
-                // Quantity is a full carton, add to cart
+                // Quantity is a full carton, add to inquiry list
                 addToCart({
                   productName: product.name,
                   image: product.image,
@@ -504,14 +504,14 @@ export function ProductPanel({
                 setHoveredProduct(null);
 
                 // Show success message
-                toast.success('Product added to cart!', {
+                toast.success('Product added to inquiry list!', {
                   description: `${orderQuantity} pcs added`,
                 });
               }
             }
           }}
         >
-          Add to Cart {selectedColors.length > 0 && `(${selectedColors.length} color${selectedColors.length > 1 ? 's' : ''})`}
+          Add to Inquiry {selectedColors.length > 0 && `(${selectedColors.length} color${selectedColors.length > 1 ? 's' : ''})`}
         </button>
       </div>
     </>

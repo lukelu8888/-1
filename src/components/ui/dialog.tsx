@@ -6,6 +6,71 @@ import { XIcon } from "lucide-react@0.487.0";
 
 import { cn } from "./utils";
 
+type ScrollLockSnapshot = {
+  htmlOverflow: string;
+  bodyOverflow: string;
+  bodyPosition: string;
+  bodyTop: string;
+  bodyWidth: string;
+  scrollY: number;
+};
+
+let activeDialogScrollLocks = 0;
+let dialogScrollLockSnapshot: ScrollLockSnapshot | null = null;
+
+export function resetDocumentScrollLock() {
+  if (typeof window === "undefined") return;
+
+  activeDialogScrollLocks = 0;
+  dialogScrollLockSnapshot = null;
+  document.documentElement.style.overflow = "";
+  document.body.style.overflow = "";
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.width = "";
+}
+
+function lockDocumentScroll() {
+  if (typeof window === "undefined") return;
+
+  activeDialogScrollLocks += 1;
+  if (activeDialogScrollLocks > 1) return;
+
+  const scrollY = window.scrollY;
+  dialogScrollLockSnapshot = {
+    htmlOverflow: document.documentElement.style.overflow,
+    bodyOverflow: document.body.style.overflow,
+    bodyPosition: document.body.style.position,
+    bodyTop: document.body.style.top,
+    bodyWidth: document.body.style.width,
+    scrollY,
+  };
+
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${scrollY}px`;
+  document.body.style.width = "100%";
+}
+
+function unlockDocumentScroll() {
+  if (typeof window === "undefined") return;
+
+  activeDialogScrollLocks = Math.max(0, activeDialogScrollLocks - 1);
+  if (activeDialogScrollLocks > 0) return;
+
+  const snapshot = dialogScrollLockSnapshot;
+  dialogScrollLockSnapshot = null;
+  if (!snapshot) return;
+
+  document.documentElement.style.overflow = snapshot.htmlOverflow;
+  document.body.style.overflow = snapshot.bodyOverflow;
+  document.body.style.position = snapshot.bodyPosition;
+  document.body.style.top = snapshot.bodyTop;
+  document.body.style.width = snapshot.bodyWidth;
+  window.scrollTo({ top: snapshot.scrollY, left: 0, behavior: "auto" });
+}
+
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
@@ -54,30 +119,12 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     hideClose?: boolean;
     unstyled?: boolean;
+    safeViewport?: boolean;
   }
->(({ className, children, hideClose = false, unstyled = false, ...props }, ref) => {
+>(({ className, children, hideClose = false, unstyled = false, safeViewport = false, ...props }, ref) => {
   React.useEffect(() => {
-    const scrollY = window.scrollY;
-    const previousHtmlOverflow = document.documentElement.style.overflow;
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousBodyPosition = document.body.style.position;
-    const previousBodyTop = document.body.style.top;
-    const previousBodyWidth = document.body.style.width;
-
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overflow = "hidden";
-    document.body.style.position = "fixed";
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = "100%";
-
-    return () => {
-      document.documentElement.style.overflow = previousHtmlOverflow;
-      document.body.style.overflow = previousBodyOverflow;
-      document.body.style.position = previousBodyPosition;
-      document.body.style.top = previousBodyTop;
-      document.body.style.width = previousBodyWidth;
-      window.scrollTo({ top: scrollY, left: 0, behavior: "auto" });
-    };
+    lockDocumentScroll();
+    return () => unlockDocumentScroll();
   }, []);
 
   return (
@@ -87,8 +134,10 @@ const DialogContent = React.forwardRef<
         ref={ref}
         data-slot="dialog-content"
         className={cn(
-          !unstyled &&
+          !unstyled && !safeViewport &&
             "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-h-[calc(100dvh-2rem)] overflow-y-auto translate-x-[-50%] translate-y-[-50%] rounded-lg border shadow-lg duration-200 p-6",
+          !unstyled && safeViewport &&
+            "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed top-4 bottom-4 left-[50%] z-50 grid h-auto w-full max-h-none translate-x-[-50%] translate-y-0 rounded-lg border shadow-lg duration-200 p-6",
           className,
         )}
         {...props}

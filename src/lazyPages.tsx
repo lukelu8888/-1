@@ -11,6 +11,15 @@ export const LazyHome = React.lazy(() =>
 export const LazyProjectSolution = React.lazy(() =>
   import('./components/ProjectSolution').then((m) => ({ default: m.ProjectSolution }))
 );
+export const LazyRetailWholesale = React.lazy(() =>
+  import('./components/RetailWholesale').then((m) => ({ default: m.RetailWholesale }))
+);
+export const LazyFabricators = React.lazy(() =>
+  import('./components/Fabricators').then((m) => ({ default: m.Fabricators }))
+);
+export const LazyChinaAgent = React.lazy(() =>
+  import('./components/ChinaAgent').then((m) => ({ default: m.ChinaAgent }))
+);
 export const LazyQCMaster = React.lazy(() =>
   import('./components/QCMaster').then((m) => ({ default: m.QCMaster }))
 );
@@ -48,6 +57,7 @@ export const LazyLogin = React.lazy(() =>
   import('./components/Login').then((m) => ({ default: m.Login }))
 );
 export const LazyAdminLogin = React.lazy(() => import('./components/AdminLogin'));
+export const LazyAdminFormalLogin = React.lazy(() => import('./components/AdminFormalLogin'));
 export const LazyRegister = React.lazy(() =>
   import('./components/Register').then((m) => ({ default: m.Register }))
 );
@@ -62,6 +72,12 @@ export const LazyCart = React.lazy(() =>
 );
 export const LazyPrivacyPolicy = React.lazy(() => import('./components/PrivacyPolicy'));
 export const LazyTermsOfService = React.lazy(() => import('./components/TermsOfService'));
+export const LazyLiveStreamPage = React.lazy(() =>
+  import('./components/live/LiveStreamPagePro').then((m) => ({ default: m.LiveStreamPagePro }))
+);
+export const LazyLiveArchivePage = React.lazy(() =>
+  import('./components/live/LiveArchivePage').then((m) => ({ default: m.LiveArchivePage }))
+);
 export const LazyCustomerDashboard = React.lazy(() =>
   import('./components/CustomerDashboard').then((m) => ({ default: m.CustomerDashboard }))
 );

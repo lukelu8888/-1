@@ -61,15 +61,9 @@ function TabsContent({
       className={cn(
         "flex-1 outline-none",
         "data-[state=inactive]:hidden",
-        // 性能优化：硬件加速
-        "transform-gpu will-change-auto",
         className,
       )}
       forceMount={forceMount}
-      style={{ 
-        transform: 'translateZ(0)',
-        backfaceVisibility: 'hidden' as const,
-      }}
       {...props}
     />
   );

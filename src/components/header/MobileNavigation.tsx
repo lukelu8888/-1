@@ -9,6 +9,8 @@ interface MobileNavigationProps {
   region: string | null;
   logout: () => Promise<void>;
   navigationItems: { name: string; page: string }[];
+  activeNavigationName: string | null;
+  onSetActiveNavigationName: (name: string) => void;
   onNavigateTo: (page: string) => void;
   onSetShowRegionSelector: (show: boolean) => void;
   onOpenMobileDept: () => void;
@@ -22,6 +24,8 @@ export function MobileNavigation({
   region,
   logout,
   navigationItems,
+  activeNavigationName,
+  onSetActiveNavigationName,
   onNavigateTo,
   onSetShowRegionSelector,
   onOpenMobileDept,
@@ -35,9 +39,9 @@ export function MobileNavigation({
         {/* Shop by Department Button */}
         <button
           className={`rounded-lg px-4 py-3 text-left transition-colors flex items-center justify-between ${
-            currentPage === 'catalog'
+            activeNavigationName === 'department'
               ? 'bg-red-600 text-white hover:bg-red-700'
-              : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+              : 'text-gray-700 hover:bg-gray-100 hover:text-red-600'
           }`}
           onClick={() => {
             if (!region) {
@@ -45,6 +49,7 @@ export function MobileNavigation({
               onClose();
               return;
             }
+            onSetActiveNavigationName('department');
             onOpenMobileDept();
             onClose();
           }}
@@ -57,11 +62,12 @@ export function MobileNavigation({
           <button
             key={item.name}
             className={`rounded-lg px-4 py-3 text-left transition-colors ${
-              currentPage === item.page
+              activeNavigationName === item.name
                 ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                : 'text-gray-700 hover:bg-gray-100 hover:text-red-600'
             }`}
             onClick={() => {
+              onSetActiveNavigationName(item.name);
               onNavigateTo(item.page);
               onClose();
             }}
@@ -72,12 +78,12 @@ export function MobileNavigation({
         <div className="border-t my-2"></div>
         {user ? (
           <>
-            <div className="px-4 py-2 bg-blue-50 rounded-lg">
+            <div className="px-4 py-2 bg-red-50 rounded-lg">
               <p className="text-sm font-medium text-gray-900">{user.email}</p>
               <p className="text-xs text-gray-500">Customer Account</p>
             </div>
             <button
-              className="rounded-lg px-4 py-3 text-left text-gray-700 transition-colors hover:bg-gray-100 hover:text-blue-600 flex items-center gap-2"
+              className="rounded-lg px-4 py-3 text-left text-gray-700 transition-colors hover:bg-gray-100 hover:text-red-600 flex items-center gap-2"
               onClick={() => {
                 onNavigateTo('dashboard');
                 onClose();
@@ -101,7 +107,7 @@ export function MobileNavigation({
           </>
         ) : (
           <button
-            className="rounded-lg px-4 py-3 text-left text-gray-700 transition-colors hover:bg-gray-100 hover:text-blue-600"
+            className="rounded-lg px-4 py-3 text-left text-gray-700 transition-colors hover:bg-gray-100 hover:text-red-600"
             onClick={() => {
               onNavigateTo('login');
               onClose();

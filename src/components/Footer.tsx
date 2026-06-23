@@ -1,177 +1,80 @@
-import { Facebook, Instagram, Linkedin, Mail, MapPin, Phone, Twitter } from 'lucide-react';
-import logo from 'figma:asset/262d7b2c13569c77ce921a39b3150003bd6f7975.png';
+import { Facebook, Instagram, Linkedin, Smartphone } from 'lucide-react';
 import { useRouter } from '../contexts/RouterContext';
+
+const footerGroups = [
+  ['Shop', 'All Departments', 'Deals & Offers', 'New Arrivals', 'Best Sellers', 'Brands', 'Clearance'],
+  ['Services', 'Sourcing Solutions', 'Request a Quote', 'Trade Services', 'Quality Assurance', 'Logistics & Shipping', 'Inspection Services'],
+  ['Company', 'About Us', 'Our Suppliers', 'Careers', 'News & Media', 'Sustainability', 'Contact Us'],
+  ['Help', 'Help Center', 'Order Tracking', 'Returns & Refunds', 'Shipping Info', 'Payment Options', 'FAQs'],
+];
 
 export function Footer() {
   const { navigateTo } = useRouter();
-  
+
   return (
-    <footer className="bg-white px-4 py-12 text-gray-600 border-t border-gray-200">
-      <div className="mx-auto max-w-7xl">
-        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
-          {/* Company Info */}
+    <footer className="cosun-footer text-white">
+      <div className="cosun-shell py-12 lg:py-14">
+        <div className="cosun-footer-grid">
           <div>
-            <div className="mb-4 flex items-center gap-2">
-              <img src={logo} alt="福建高盛达富建材有限公司" className="h-10 w-10 object-contain" />
-              <div className="text-gray-900">FUJIAN COSUN TUFF BUILDING MATERIALS CO., LTD.</div>
-            </div>
-            <p className="mb-4 text-sm">
-              Leading manufacturer of premium building materials with over 15 years of experience. Serving clients worldwide.
+            <button onClick={() => navigateTo('home')} className="text-left">
+              <div className="font-serif text-xl font-black leading-none tracking-normal text-red-600">COSUN</div>
+              <div className="mt-1 text-xs font-semibold uppercase tracking-wider text-white/80">Global Trade & Supply</div>
+            </button>
+            <p className="mt-6 max-w-[260px] text-sm leading-6 text-white/70">
+              Your global partner for building materials and industrial supplies. Source smarter. Build better.
             </p>
-            <div className="flex gap-3">
-              <a
-                href="#"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-600 transition-colors hover:bg-blue-600 hover:text-white"
-                aria-label="Facebook"
-              >
-                <Facebook className="h-4 w-4" />
-              </a>
-              <a
-                href="#"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-600 transition-colors hover:bg-blue-600 hover:text-white"
-                aria-label="Twitter"
-              >
-                <Twitter className="h-4 w-4" />
-              </a>
-              <a
-                href="#"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-600 transition-colors hover:bg-blue-600 hover:text-white"
-                aria-label="LinkedIn"
-              >
-                <Linkedin className="h-4 w-4" />
-              </a>
-              <a
-                href="#"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-600 transition-colors hover:bg-blue-600 hover:text-white"
-                aria-label="Instagram"
-              >
-                <Instagram className="h-4 w-4" />
-              </a>
+            <div className="mt-6 flex gap-3">
+              {[Linkedin, Facebook, Instagram].map((Icon, index) => (
+                <span key={index} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/20 text-white/70">
+                  <Icon className="h-4 w-4" />
+                </span>
+              ))}
             </div>
           </div>
 
-          {/* Quick Links */}
-          <div>
-            <h3 className="mb-4 text-gray-900">Quick Links</h3>
-            <ul className="space-y-2 text-sm">
-              <li>
-                <button onClick={() => navigateTo('catalog')} className="transition-colors hover:text-blue-600 text-left">
-                  Products
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigateTo('services')} className="transition-colors hover:text-blue-600 text-left">
-                  Services
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigateTo('projectsolution')} className="transition-colors hover:text-blue-600 text-left">
-                  Cases
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigateTo('about')} className="transition-colors hover:text-blue-600 text-left">
-                  About Us
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigateTo('socialmedia')} className="transition-colors hover:text-blue-600 text-left">
-                  Our Social Media
-                </button>
-              </li>
-              <li>
-                <button onClick={() => navigateTo('news')} className="transition-colors hover:text-blue-600 text-left">
-                  News
-                </button>
-              </li>
-            </ul>
-          </div>
+          {footerGroups.map(([title, ...links]) => (
+            <div key={title}>
+              <h3 className="text-sm font-black uppercase text-white">{title}</h3>
+              <ul className="mt-5 space-y-3 text-sm text-white/65">
+                {links.map((link) => (
+                  <li key={link}>
+                    <button onClick={() => navigateTo(link.includes('Quote') ? 'login' : 'catalog')} className="hover:text-white">
+                      {link}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
 
-          {/* Contact Info */}
-          <div>
-            <h3 className="mb-4 text-gray-900">Contact Us</h3>
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-start gap-2">
-                <Phone className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-gray-500">Phone</p>
-                  <a href="tel:+8613799993509" className="hover:text-blue-600">
-                    +86 13799993509
-                  </a>
-                </div>
-              </li>
-              <li className="flex items-start gap-2">
-                <Mail className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-gray-500">Email</p>
-                  <a href="mailto:services@cosunchina.com" className="hover:text-blue-600">
-                    services@cosunchina.com
-                  </a>
-                </div>
-              </li>
-              <li className="flex items-start gap-2">
-                <MapPin className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-gray-500">Address</p>
-                  <p>Fujian Province, China</p>
-                </div>
-              </li>
-            </ul>
-          </div>
-
-          {/* Social Media */}
-          <div>
-            <h3 className="mb-4 text-gray-900">Follow Us</h3>
-            <p className="mb-4 text-sm">
-              Stay updated with our latest news and products
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="email"
-                placeholder="Your email"
-                className="flex-1 rounded-lg bg-gray-50 px-4 py-2 text-sm text-gray-900 placeholder-gray-400 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
-              />
-              <button className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white transition-colors hover:bg-blue-700">
-                Subscribe
-              </button>
+          <div className="cosun-footer-app">
+            <h3 className="text-sm font-black uppercase">Get the App</h3>
+            <p className="mt-4 text-sm text-white/65">Scan to download Cosun App</p>
+            <div className="mt-5 flex items-center gap-4">
+              <div className="grid h-[88px] w-[88px] grid-cols-5 grid-rows-5 gap-1 bg-white p-2">
+                {Array.from({ length: 25 }).map((_, index) => (
+                  <span key={index} className={(index * 7) % 5 < 3 ? 'bg-gray-900' : 'bg-white'} />
+                ))}
+              </div>
+              <div className="space-y-2">
+                {['App Store', 'Google Play'].map((store) => (
+                  <div key={store} className="flex h-9 w-32 items-center gap-2 rounded-sm border border-white/25 px-3 text-xs text-white/75">
+                    <Smartphone className="h-4 w-4" />
+                    {store}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="mt-8 border-t border-gray-200 pt-8 text-center text-sm">
-          <p>
-            © 2025 FUJIAN COSUN TUFF BUILDING MATERIALS CO., LTD. All rights reserved.
-          </p>
-          <div className="mt-3 flex justify-center gap-6 text-xs">
-            <button 
-              onClick={() => navigateTo('privacy-policy')} 
-              className="text-gray-600 hover:text-blue-600 transition-colors"
-            >
-              Privacy Policy
-            </button>
-            <span className="text-gray-400">•</span>
-            <button 
-              onClick={() => navigateTo('terms-of-service')} 
-              className="text-gray-600 hover:text-blue-600 transition-colors"
-            >
-              Terms of Service
-            </button>
-            <span className="text-gray-400">•</span>
-            <button 
-              onClick={() => navigateTo('about')} 
-              className="text-gray-600 hover:text-blue-600 transition-colors"
-            >
-              Contact Us
-            </button>
-            <span className="text-gray-400">•</span>
-            {/* 🔥 内部员工登录入口 */}
-            <button 
-              onClick={() => navigateTo('admin-login')} 
-              className="text-gray-400 hover:text-red-600 transition-colors text-[10px]"
-              title="Internal Staff Only"
-            >
-              Staff Portal
-            </button>
+        <div className="mt-12 flex flex-wrap items-center justify-between gap-4 border-t border-white/10 pt-7 text-xs text-white/45">
+          <p>© 2025 COSUN Global Trade & Supply. All rights reserved.</p>
+          <div className="flex flex-wrap items-center gap-4">
+            <button onClick={() => navigateTo('privacy-policy')}>Privacy Policy</button>
+            <button onClick={() => navigateTo('terms-of-service')}>Terms of Use</button>
+            <button onClick={() => navigateTo('about')}>Cookies Policy</button>
+            <span>United States (English / USD)</span>
           </div>
         </div>
       </div>

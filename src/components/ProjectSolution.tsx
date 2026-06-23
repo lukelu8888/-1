@@ -1,311 +1,315 @@
-import { useLanguage } from '../contexts/LanguageContext';
-import { useState } from 'react';
-import { CheckCircle2, Package, Truck, FileCheck, Users, Globe2, Clock, Shield } from 'lucide-react';
+import {
+  ArrowRight,
+  Building2,
+  CheckCircle2,
+  ClipboardCheck,
+  Factory,
+  FileSearch,
+  Gauge,
+  Network,
+  PackageCheck,
+} from 'lucide-react';
+import { useOptionalUser } from '../contexts/UserContext';
+import { useRouter } from '../contexts/RouterContext';
 import { Button } from './ui/button';
-import { Card, CardContent } from './ui/card';
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from './ui/carousel';
-import { ImageWithFallback } from './figma/ImageWithFallback';
-import processDiagram from 'figma:asset/d05a768ad03cf9724be73608024eaea836fca1a8.png';
+import processDiagram from '../assets/d05a768ad03cf9724be73608024eaea836fca1a8.png';
+
+const matchingTargets = [
+  {
+    title: 'Supplier Matching',
+    text: 'For materials, components, equipment, spare parts, and supporting products.',
+    icon: Network,
+  },
+  {
+    title: 'Manufacturer Matching',
+    text: 'For custom production, processing lines, modular systems, OEM items, and factory equipment.',
+    icon: Factory,
+  },
+  {
+    title: 'PLC / Automation Partners',
+    text: 'For control systems, electrical panels, automation upgrades, and technical integration needs.',
+    icon: Gauge,
+  },
+  {
+    title: 'Turnkey Contractors',
+    text: 'For complete project packages that need design support, manufacturing, installation, or commissioning.',
+    icon: Building2,
+  },
+];
+
+const requirementInputs = [
+  'Project brief',
+  'Drawings or layout',
+  'Capacity target',
+  'Equipment list',
+  'Technical requirements',
+  'Photos or reference links',
+  'Budget range',
+  'Target timeline',
+];
+
+const workflowSteps = [
+  {
+    title: 'Submit',
+    text: 'Send brief, files, drawings, target capacity, budget, and timeline.',
+  },
+  {
+    title: 'Match',
+    text: 'COSUN compares suitable suppliers, factories, PLC teams, and contractors.',
+  },
+  {
+    title: 'Coordinate',
+    text: 'Track proposals, samples, technical confirmation, QC, shipment, and records.',
+  },
+];
+
+const openProjectScopes = [
+  'Real estate and construction',
+  'Turnkey production lines',
+  'CBD extraction plants',
+  'Food factory water filtration modules',
+  'Containerized processing systems',
+  'PLC and automation providers',
+];
+
+const partnerBrands = [
+  { name: 'SIEMENS', style: 'text-cyan-700 text-[15px] tracking-[0.08em]' },
+  { name: 'Schneider Electric', style: 'text-green-600 text-[11px] leading-[0.95]' },
+  { name: 'ABB', style: 'text-red-600 text-[18px] tracking-[0.02em]' },
+  { name: 'Rockwell', style: 'text-gray-900 text-[13px]' },
+  { name: 'Honeywell', style: 'text-red-700 text-[13px]' },
+  { name: 'Danfoss', style: 'text-red-600 text-[13px]' },
+  { name: 'VEOLIA', style: 'text-blue-700 text-[14px] tracking-[0.06em]' },
+  { name: 'GEA', style: 'text-gray-900 text-[17px]' },
+  { name: 'Bühler', style: 'text-blue-900 text-[14px]' },
+  { name: 'CEMEX', style: 'text-blue-700 text-[13px] italic' },
+  { name: 'Saint-Gobain', style: 'text-gray-900 text-[11px]' },
+  { name: 'BOSCH', style: 'text-red-600 text-[14px]' },
+];
 
 export function ProjectSolution() {
-  const { t } = useLanguage();
-  const [selectedStep, setSelectedStep] = useState<number | null>(null);
-
-  const projects = [
-    {
-      title: t.projectSolution.projects.cannabis,
-      image: 'https://images.unsplash.com/photo-1741471598347-b1bfbccf184b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjYW5uYWJpcyUyMGZhY2lsaXR5JTIwcHJvZHVjdGlvbnxlbnwxfHx8fDE3NjA3ODQ1OTF8MA&ixlib=rb-4.1.0&q=80&w=1080',
-    },
-    {
-      title: t.projectSolution.projects.warehouse,
-      subtitle: 'Disposable Nitrile Glove Production Line',
-      image: 'https://images.unsplash.com/photo-1759310347581-b3eb0a385ef9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxpbmR1c3RyaWFsJTIwd2FyZWhvdXNlJTIwZmFjaWxpdHl8ZW58MXx8fHwxNzYwNzczNzA4fDA&ixlib=rb-4.1.0&q=80&w=1080',
-    },
-    {
-      title: t.projectSolution.projects.manufacturing,
-      image: 'https://images.unsplash.com/photo-1722842895153-ba7bf9d53dfb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtYW51ZmFjdHVyaW5nJTIwcGxhbnQlMjBidWlsZGluZ3xlbnwxfHx8fDE3NjA3NzM3MDh8MA&ixlib=rb-4.1.0&q=80&w=1080',
-    },
-  ];
-
-  const services = [
-    {
-      icon: Package,
-      title: t.projectSolution.services.procurement,
-      description: t.projectSolution.services.procurementDesc,
-    },
-    {
-      icon: FileCheck,
-      title: t.projectSolution.services.quality,
-      description: t.projectSolution.services.qualityDesc,
-    },
-    {
-      icon: Truck,
-      title: t.projectSolution.services.logistics,
-      description: t.projectSolution.services.logisticsDesc,
-    },
-    {
-      icon: Shield,
-      title: t.projectSolution.services.compliance,
-      description: t.projectSolution.services.complianceDesc,
-    },
-  ];
-
-  const benefits = [
-    t.projectSolution.benefits.costReduction,
-    t.projectSolution.benefits.timeEfficiency,
-    t.projectSolution.benefits.qualityAssurance,
-    t.projectSolution.benefits.riskMitigation,
-    t.projectSolution.benefits.singleContact,
-    t.projectSolution.benefits.expertiseAccess,
-  ];
-
-  const process = [
-    {
-      step: '01',
-      title: t.projectSolution.process.consultation,
-      description: t.projectSolution.process.consultationDesc,
-    },
-    {
-      step: '02',
-      title: t.projectSolution.process.contract,
-      description: t.projectSolution.process.contractDesc,
-    },
-    {
-      step: '03',
-      title: t.projectSolution.process.engineering,
-      description: t.projectSolution.process.engineeringDesc,
-    },
-    {
-      step: '04',
-      title: t.projectSolution.process.fabricating,
-      description: t.projectSolution.process.fabricatingDesc,
-    },
-    {
-      step: '05',
-      title: t.projectSolution.process.quality,
-      description: t.projectSolution.process.qualityDesc,
-    },
-    {
-      step: '06',
-      title: t.projectSolution.process.logistics,
-      description: t.projectSolution.process.logisticsDesc,
-    },
-    {
-      step: '07',
-      title: t.projectSolution.process.delivery,
-      description: t.projectSolution.process.deliveryDesc,
-    },
-  ];
+  const { navigateTo } = useRouter();
+  const userContext = useOptionalUser();
+  const customerEntry = userContext?.user ? 'dashboard' : 'login';
+  const goPortal = () => navigateTo(customerEntry);
 
   return (
-    <section id="project-solution" className="py-16 bg-gradient-to-b from-white to-gray-50">
-      <div className="mx-auto max-w-7xl px-4">
-        {/* Hero Section */}
-        <div className="text-center mb-16">
-          <div className="inline-block px-4 py-2 bg-orange-100 text-orange-600 rounded-full mb-4">
-            <span className="flex items-center gap-2">
-              <Globe2 className="h-4 w-4" />
-              Project Solution
-            </span>
-          </div>
-          <h1 className="text-gray-900 mb-4">
-            {t.projectSolution.title}
-          </h1>
-          <p className="text-gray-600 max-w-3xl mx-auto">
-            {t.projectSolution.subtitle}
-          </p>
-        </div>
-
-        {/* Project Portfolio Carousel */}
-        <div className="mb-16">
-          <h2 className="text-gray-900 text-center mb-12">
-            {t.projectSolution.projectsTitle}
-          </h2>
-          <div className="relative px-12">
-            <Carousel className="w-full">
-              <CarouselContent>
-                {projects.map((project, index) => (
-                  <CarouselItem key={index}>
-                    <div className="relative">
-                      <div className="aspect-video overflow-hidden rounded-2xl shadow-2xl relative">
-                        <ImageWithFallback
-                          src={project.image}
-                          alt={project.title}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-8">
-                          <h3 className="text-white text-2xl">{project.title}</h3>
-                          {project.subtitle && (
-                            <p className="text-white/90 mt-2">{project.subtitle}</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </CarouselItem>
-                ))}
-              </CarouselContent>
-              <CarouselPrevious className="left-0" />
-              <CarouselNext className="right-0" />
-            </Carousel>
-          </div>
-        </div>
-
-        {/* Cannabis Project Details */}
-        <div className="mb-16 bg-white rounded-2xl shadow-lg border overflow-hidden">
-          <div className="p-8 md:p-12">
-            <h2 className="text-gray-900 mb-4">
-              {t.projectSolution.cannabisTitle}
-            </h2>
-            <p className="text-gray-600 mb-8">
-              {t.projectSolution.cannabisDesc}
+    <div className="overflow-hidden bg-white text-gray-900" style={{ maxWidth: '100vw' }}>
+      <section
+        className="relative isolate overflow-hidden bg-gray-950 text-white"
+        style={{
+          background:
+            'linear-gradient(135deg, #020617 0%, #0f172a 54%, #155e75 100%)',
+        }}
+      >
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(2,6,23,0.96)_0%,rgba(2,6,23,0.8)_48%,rgba(2,6,23,0.22)_100%)]" />
+        <div className="cosun-shell relative grid min-h-[460px] gap-10 py-10 lg:grid-cols-2 lg:items-start lg:pt-16">
+          <div className="relative z-20 max-w-3xl">
+            <h1 className="text-4xl font-black leading-[0.98] tracking-normal sm:text-5xl md:text-[60px]">
+              Tell us the project.
+              <span className="block">We find the right</span>
+              <span className="block">execution partners.</span>
+            </h1>
+            <p className="mt-5 max-w-2xl text-base leading-7 text-gray-200/90 md:text-lg md:leading-8">
+              From project brief to execution partner matching, COSUN helps connect your requirement with
+              suitable suppliers, manufacturers, PLC providers, or turnkey contractors.
             </p>
-            
-            <div className="bg-gray-50 rounded-xl p-6">
-              <h3 className="text-gray-900 mb-6 text-center">
-                {t.projectSolution.processDiagram}
-              </h3>
-              <div className="bg-white rounded-lg p-4 overflow-auto">
-                <img
-                  src={processDiagram}
-                  alt="Cannabis Production Process Diagram"
-                  className="w-full h-auto"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Key Services */}
-        <div className="mb-16">
-          <h2 className="text-gray-900 text-center mb-12">
-            {t.projectSolution.servicesTitle}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {services.map((service, index) => (
-              <Card key={index} className="border-2 hover:border-orange-500 transition-all hover:shadow-lg">
-                <CardContent className="p-6">
-                  <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center mb-4">
-                    <service.icon className="h-6 w-6 text-orange-600" />
-                  </div>
-                  <h3 className="text-gray-900 mb-3">{service.title}</h3>
-                  <p className="text-gray-600 text-sm leading-relaxed">
-                    {service.description}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-
-        {/* Benefits */}
-        <div className="mb-16 bg-white rounded-2xl shadow-sm border p-8 md:p-12">
-          <h2 className="text-gray-900 text-center mb-12">
-            {t.projectSolution.benefitsTitle}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {benefits.map((benefit, index) => (
-              <div key={index} className="flex items-start gap-3">
-                <CheckCircle2 className="h-6 w-6 text-green-600 flex-shrink-0 mt-0.5" />
-                <p className="text-gray-700">{benefit}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Process */}
-        <div className="mb-16">
-          <h2 className="text-gray-900 text-center mb-12">
-            {t.projectSolution.processTitle}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-6">
-            {process.map((item, index) => {
-              const isSelected = selectedStep === index;
-              return (
-                <div key={index} className="relative">
-                  <div 
-                    onClick={() => setSelectedStep(index)}
-                    className={`rounded-xl border-2 p-6 transition-all duration-300 h-full min-h-[280px] flex flex-col cursor-pointer
-                      ${isSelected 
-                        ? 'bg-orange-500 border-orange-500 shadow-lg' 
-                        : 'bg-white border-gray-200 hover:bg-orange-500 hover:border-orange-500 hover:shadow-lg'
-                      } group`}
-                  >
-                    <div className={`text-5xl mb-4 transition-colors duration-300
-                      ${isSelected 
-                        ? 'text-white opacity-30' 
-                        : 'text-orange-500 opacity-20 group-hover:text-white group-hover:opacity-30'
-                      }`}>
-                      {item.step}
-                    </div>
-                    <h3 className={`mb-3 transition-colors duration-300
-                      ${isSelected 
-                        ? 'text-white' 
-                        : 'text-gray-900 group-hover:text-white'
-                      }`}>
-                      {item.title}
-                    </h3>
-                    <p className={`text-sm leading-relaxed flex-grow transition-colors duration-300
-                      ${isSelected 
-                        ? 'text-white/90' 
-                        : 'text-gray-600 group-hover:text-white/90'
-                      }`}>
-                      {item.description}
-                    </p>
-                  </div>
-                  {index < process.length - 1 && (
-                    <div className="hidden xl:block absolute top-1/2 -right-3 w-6 h-0.5 bg-orange-300 z-10"></div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Why Choose Us */}
-        <div className="bg-gradient-to-r from-orange-600 to-orange-500 rounded-2xl p-8 md:p-12 text-white">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-            <div>
-              <h2 className="text-white mb-6">
-                {t.projectSolution.whyChooseTitle}
-              </h2>
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <Users className="h-6 w-6" />
-                  <span>{t.projectSolution.whyChoose.experience}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Package className="h-6 w-6" />
-                  <span>{t.projectSolution.whyChoose.turnkeyExperience}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Globe2 className="h-6 w-6" />
-                  <span>{t.projectSolution.whyChoose.network}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Clock className="h-6 w-6" />
-                  <span>{t.projectSolution.whyChoose.efficiency}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Shield className="h-6 w-6" />
-                  <span>{t.projectSolution.whyChoose.reliability}</span>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6">
-              <h3 className="text-white mb-4">{t.projectSolution.contactTitle}</h3>
-              <p className="text-white/90 mb-6">
-                {t.projectSolution.contactDesc}
-              </p>
-              <Button 
-                size="lg" 
-                className="bg-white text-orange-600 hover:bg-gray-100"
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button
+                onClick={goPortal}
+                className="h-12 bg-cyan-600 px-6 text-base font-semibold leading-none hover:bg-cyan-700"
               >
-                {t.projectSolution.contactButton}
+                Submit Project Requirement
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+              <Button
+                onClick={goPortal}
+                variant="outline"
+                className="h-12 border-white/50 bg-white/5 px-6 text-base font-semibold leading-none text-white hover:!border-white hover:!bg-white/12 hover:!text-white"
+              >
+                Track Project Progress
               </Button>
             </div>
           </div>
+
+          <div className="relative z-10 hidden min-w-0 lg:flex lg:justify-end" style={{ perspective: '1200px' }}>
+            <div
+              className="pointer-events-none absolute inset-y-[-18px] left-[-64px] z-20 hidden w-32 bg-gradient-to-r from-gray-950 via-gray-950/80 to-transparent blur-sm lg:block"
+              aria-hidden="true"
+            />
+            <div
+              className="max-w-full overflow-hidden rounded-md bg-white shadow-2xl ring-1 ring-white/25"
+              style={{
+                width: '430px',
+                aspectRatio: '1.62 / 1',
+                transform: 'rotateY(-9deg) rotateX(2deg)',
+                transformOrigin: 'center right',
+              }}
+            >
+              <img
+                src={processDiagram}
+                alt="Industrial project drawing"
+                className="h-full w-full object-cover"
+                style={{ objectPosition: '53% 34%' }}
+              />
+            </div>
+          </div>
+
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section className="bg-gray-50 py-12">
+        <div className="cosun-shell">
+          <div className="mb-10 rounded-md border border-cyan-100 bg-white p-5 shadow-sm">
+            <div className="grid gap-5 lg:grid-cols-[0.58fr_1.42fr] lg:items-center">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.08em] text-cyan-700">Open project scope</p>
+                <p className="mt-2 text-lg font-black leading-tight text-gray-950">
+                  Start from the requirement, not a fixed category.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {openProjectScopes.map((item) => (
+                  <div key={item} className="flex min-h-10 items-center gap-2 rounded-sm bg-gray-50 px-3 text-sm font-semibold text-gray-700">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-cyan-700" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-8 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-cyan-700">What COSUN does</p>
+              <h2 className="text-2xl font-black leading-tight text-gray-950 md:text-3xl">
+                We turn specific project needs into partner options.
+              </h2>
+              <p className="mt-3 text-base leading-7 text-gray-600">
+                Instead of limiting projects to a fixed category, COSUN focuses on finding the right supply,
+                manufacturing, engineering, or automation resources for the requirement in front of us.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {matchingTargets.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.title} className="rounded-md border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-md">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-cyan-50 text-cyan-700">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-black leading-6 text-gray-950">{item.title}</h3>
+                        <p className="mt-2 text-sm leading-6 text-gray-600">{item.text}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="border-y border-gray-200 bg-white py-12">
+        <div className="cosun-shell">
+          <div className="mb-10 rounded-md border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-2 border-b border-gray-100 pb-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.08em] text-cyan-700">Partner ecosystem</p>
+                <h2 className="mt-1 text-xl font-black leading-tight text-gray-950">
+                  Brand and specialist resources we can help coordinate.
+                </h2>
+              </div>
+              <p className="max-w-xl text-sm leading-6 text-gray-500">
+                Depending on the project, COSUN helps connect suitable equipment, automation, materials, water treatment,
+                production-line, and engineering partners.
+              </p>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              {partnerBrands.map((brand) => (
+                <div
+                  key={brand.name}
+                  className="flex h-14 min-w-0 items-center justify-center rounded-sm border border-gray-100 bg-gray-50 px-3 text-center font-black uppercase leading-none"
+                >
+                  <span className={`truncate ${brand.style}`}>{brand.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-8 lg:grid-cols-2">
+            <div className="rounded-md border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-md bg-cyan-50 text-cyan-700">
+                  <FileSearch className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.08em] text-cyan-700">What you can send</p>
+                  <h2 className="text-xl font-black leading-tight text-gray-950">Start with any concrete requirement.</h2>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-2 sm:grid-cols-2">
+                {requirementInputs.map((item) => (
+                  <div key={item} className="flex items-center gap-2 border-b border-gray-100 py-2 text-sm font-semibold text-gray-700">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-cyan-700" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-md border border-gray-900 p-6 text-white shadow-sm" style={{ backgroundColor: '#020617' }}>
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-md bg-white/10 text-cyan-200">
+                  <ClipboardCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.08em] text-cyan-200">How it moves forward</p>
+                  <h2 className="text-xl font-black leading-tight">Submit, match, and coordinate.</h2>
+                </div>
+              </div>
+              <div className="mt-6 space-y-3">
+                {workflowSteps.map((step, index) => (
+                  <div
+                    key={step.title}
+                    className="grid grid-cols-[44px_1fr] gap-3 rounded-md p-4 ring-1 ring-white/10"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}
+                  >
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-500 text-sm font-black text-white">
+                      {index + 1}
+                    </div>
+                    <div>
+                      <p className="font-black text-white">{step.title}</p>
+                      <p className="mt-1 text-sm leading-6 text-gray-300">{step.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <Button onClick={goPortal} className="mt-6 h-11 bg-cyan-600 px-5 font-semibold text-white hover:bg-cyan-700">
+                Open Customer Workspace
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-col gap-3 border-t border-gray-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <PackageCheck className="mt-0.5 h-5 w-5 shrink-0 text-cyan-700" />
+              <p className="max-w-3xl text-base font-semibold leading-7 text-gray-800">
+                Project Solution is not a fixed product category. It is COSUN's ability to find and coordinate the
+                right execution resources for complex project requirements.
+              </p>
+            </div>
+            <Button onClick={goPortal} className="h-10 bg-cyan-600 px-5 font-semibold text-white hover:bg-cyan-700">
+              Submit Requirement
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }

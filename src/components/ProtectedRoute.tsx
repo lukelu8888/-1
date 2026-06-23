@@ -10,6 +10,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useRouter } from '../contexts/RouterContext';
 import { useUser } from '../contexts/UserContext';
+import { getProtectedAdminLoginPage } from '../config/adminPortalPolicy';
 
 type PortalType = 'admin' | 'customer' | 'supplier';
 
@@ -56,7 +57,7 @@ export function ProtectedRoute({ portalType, children }: ProtectedRouteProps) {
   // UserContext 已经通过 Supabase onAuthStateChange 同步了登录状态
   // 直接用 user.type 判断，无需再次查询 Supabase，避免转圈
   if (!user) {
-    const loginPage = portalType === 'admin' ? 'admin-login' : 'login';
+    const loginPage = portalType === 'admin' ? getProtectedAdminLoginPage() : 'login';
     // 延迟跳转，避免初始化瞬间闪跳
     return (
       <AccessDeniedScreen

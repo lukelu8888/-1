@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { FileText, ArrowLeft, ShoppingCart, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { directOrderDraftService } from '../lib/services/direct-order-draft/directOrderDraftService';
 
 interface OrderEditingBannerProps {
   onReturnToOrder: () => void;
@@ -18,15 +19,12 @@ export function OrderEditingBanner({ onReturnToOrder }: OrderEditingBannerProps)
       try {
         const session = JSON.parse(sessionData);
         setOrderSession(session);
-        
-        // Load draft orders to get product count
-        const draftsData = localStorage.getItem('draftOrders');
-        if (draftsData) {
-          const drafts = JSON.parse(draftsData);
-          const currentDraft = drafts.find((d: any) => d.id === session.orderId);
-          if (currentDraft) {
-            setProductCount(currentDraft.products?.length || 0);
-          }
+
+        const currentDraft = directOrderDraftService.getById(session.orderId);
+        if (currentDraft) {
+          setProductCount(currentDraft.products?.length || 0);
+        } else {
+          setProductCount(0);
         }
       } catch (error) {
         console.error('Failed to load order session:', error);
@@ -41,8 +39,7 @@ export function OrderEditingBanner({ onReturnToOrder }: OrderEditingBannerProps)
       if (draftsData && sessionData) {
         try {
           const session = JSON.parse(sessionData);
-          const drafts = JSON.parse(draftsData);
-          const currentDraft = drafts.find((d: any) => d.id === session.orderId);
+          const currentDraft = directOrderDraftService.getById(session.orderId);
           if (currentDraft) {
             setProductCount(currentDraft.products?.length || 0);
           }

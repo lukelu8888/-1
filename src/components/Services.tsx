@@ -1,4 +1,4 @@
-import { ShoppingCart, Search, Truck, ClipboardCheck, Building2, Package, ChevronLeft, ChevronRight, Award, Users, Globe, TrendingUp, Store, Briefcase, HardHat, Boxes, Tag, Zap, Bell, LineChart, Ship, Container, Handshake } from 'lucide-react';
+import { ShoppingCart, Search, Truck, ClipboardCheck, Building2, Package, Award, Users, Globe, TrendingUp, Store, HardHat, Boxes, Tag, Zap, Bell, LineChart, Ship, Container, Handshake } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from './ui/carousel';
 import { ImageWithFallback } from './figma/ImageWithFallback';
@@ -14,10 +14,97 @@ export function Services() {
   // State for carousel API access
   const [api, setApi] = useState<CarouselApi>();
   const carouselContainerRef = useRef<HTMLDivElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const processSteps = [
+    {
+      id: 1,
+      color: 'blue',
+      title: 'Requirement Analysis',
+      description: 'Understand your product specs, quality standards, budget constraints, and delivery timeline',
+    },
+    {
+      id: 2,
+      color: 'orange',
+      title: 'Supplier Matching',
+      description: 'Leverage our 10,000+ verified supplier network to find manufacturers matching your needs',
+    },
+    {
+      id: 3,
+      color: 'green',
+      title: 'Quotation & Negotiation',
+      description: 'Collect quotes, negotiate best prices and terms, provide comprehensive comparisons',
+    },
+    {
+      id: 4,
+      color: 'red',
+      title: 'Production Monitoring',
+      description: 'On-site factory visits, progress tracking, ensure adherence to your specifications',
+    },
+    {
+      id: 5,
+      color: 'purple',
+      title: 'Pre-Shipment Inspection',
+      description: 'Comprehensive quality checks, verify specs, packaging, quantity, detailed reports',
+    },
+    {
+      id: 6,
+      color: 'pink',
+      title: 'Logistics & Delivery',
+      description: 'International shipping, customs handling, real-time tracking, safe delivery on schedule',
+    },
+  ] as const;
+
+  const desktopTimelineSteps = [
+    processSteps[0],
+    processSteps[1],
+    processSteps[2],
+    processSteps[3],
+    processSteps[4],
+    processSteps[5],
+  ];
+
+  const colorClasses = {
+    blue: {
+      badge: 'bg-blue-500',
+      border: 'border-blue-500',
+    },
+    orange: {
+      badge: 'bg-orange-500',
+      border: 'border-orange-500',
+    },
+    green: {
+      badge: 'bg-green-600',
+      border: 'border-green-600',
+    },
+    red: {
+      badge: 'bg-red-600',
+      border: 'border-red-600',
+    },
+    purple: {
+      badge: 'bg-purple-600',
+      border: 'border-purple-600',
+    },
+    pink: {
+      badge: 'bg-pink-600',
+      border: 'border-pink-600',
+    },
+  } as const;
 
   // Piano sound effects for 6 cards - Do, Re, Mi, Fa, Sol, La
   const playPianoNote = (frequency: number) => {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (typeof window === 'undefined') return;
+
+    const AudioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    const audioContext = audioContextRef.current ?? new AudioContextCtor();
+    audioContextRef.current = audioContext;
+
+    if (audioContext.state === 'suspended') {
+      void audioContext.resume();
+    }
+
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
 
@@ -44,17 +131,26 @@ export function Services() {
   const playFa = () => playPianoNote(349.23);   // F4 - Fa
   const playSol = () => playPianoNote(392.00);  // G4 - Sol
   const playLa = () => playPianoNote(440.00);   // A4 - La
-  const playXi = () => playPianoNote(493.88);   // B4 - Xi (Si)
-  const playDo2 = () => playPianoNote(523.25);  // C5 - Do (High octave)
+  const getSpeechSynthesis = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      return null;
+    }
+
+    return window.speechSynthesis;
+  };
 
   // Text-to-Speech for Retailers card
   const speakRetailersText = () => {
+    const speechSynthesis = getSpeechSynthesis();
+    if (!speechSynthesis) return;
+
     // Cancel any ongoing speech
-    if (window.speechSynthesis.speaking) {
-      window.speechSynthesis.cancel();
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
     }
 
     const text = "We partner with chain supermarkets and retailers of all sizes. We excel at empowering small retailers with cost-effective quality products, helping them grow into mid-sized retail businesses with strong market presence.";
+    if (typeof window === 'undefined' || typeof window.SpeechSynthesisUtterance === 'undefined') return;
     const utterance = new SpeechSynthesisUtterance(text);
     
     // Configure voice settings for a deeper, more authoritative tone
@@ -63,7 +159,7 @@ export function Services() {
     utterance.volume = 1.0; // Full volume
     
     // Try to find an English male voice
-    const voices = window.speechSynthesis.getVoices();
+    const voices = speechSynthesis.getVoices();
     const maleVoice = voices.find(voice => 
       voice.lang.startsWith('en') && 
       (voice.name.includes('Male') || voice.name.includes('David') || voice.name.includes('Daniel'))
@@ -73,24 +169,37 @@ export function Services() {
       utterance.voice = maleVoice;
     }
     
-    window.speechSynthesis.speak(utterance);
+    speechSynthesis.speak(utterance);
   };
 
   // Stop speech when mouse leaves
   const stopSpeech = () => {
-    if (window.speechSynthesis.speaking) {
-      window.speechSynthesis.cancel();
+    const speechSynthesis = getSpeechSynthesis();
+    if (speechSynthesis?.speaking) {
+      speechSynthesis.cancel();
     }
   };
 
   // Load voices when component mounts
   useEffect(() => {
-    // Some browsers need this to load voices
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.getVoices();
+    const speechSynthesis = getSpeechSynthesis();
+    if (speechSynthesis && speechSynthesis.onvoiceschanged !== undefined) {
+      // Some browsers need this to load voices
+      speechSynthesis.onvoiceschanged = () => {
+        speechSynthesis.getVoices();
       };
     }
+
+    return () => {
+      if (speechSynthesis?.onvoiceschanged) {
+        speechSynthesis.onvoiceschanged = null;
+      }
+      speechSynthesis?.cancel();
+      if (audioContextRef.current?.state !== 'closed') {
+        void audioContextRef.current?.close();
+        audioContextRef.current = null;
+      }
+    };
   }, []);
 
   // Add wheel event listener for horizontal scrolling with mouse
@@ -155,45 +264,6 @@ export function Services() {
       description: 'Built over 20 years of dedicated service, our network provides access to qualified suppliers across all product categories. From construction materials to specialized components and custom solutions, we connect you with the right manufacturers for any project requirement.',
       image: 'https://images.unsplash.com/photo-1760045788252-d8d386ea1d12?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxlbmdpbmVlcmluZyUyMGNvbnN0cnVjdGlvbiUyMHN1cHBsaWVyfGVufDF8fHx8MTc2MTQ2MzkyOXww&ixlib=rb-4.1.0&q=80&w=1080',
       gradient: 'from-pink-900/90 to-pink-700/80',
-    },
-  ];
-
-  const services = [
-    {
-      icon: ShoppingCart,
-      title: 'Procurement Services',
-      description: 'Professional purchasing services for clients - sourcing quality products at competitive prices',
-      color: 'bg-blue-100 text-blue-600',
-    },
-    {
-      icon: Search,
-      title: 'Supplier Sourcing',
-      description: 'Finding and vetting reliable suppliers across China to meet your specific needs',
-      color: 'bg-green-100 text-green-600',
-    },
-    {
-      icon: Truck,
-      title: 'Shipment Arrangement',
-      description: 'Complete logistics coordination - from factory to your doorstep with full tracking',
-      color: 'bg-purple-100 text-purple-600',
-    },
-    {
-      icon: ClipboardCheck,
-      title: 'Product Inspection',
-      description: 'Comprehensive quality control and inspection services ensuring products meet your standards',
-      color: 'bg-orange-100 text-orange-600',
-    },
-    {
-      icon: Building2,
-      title: 'Comprehensive Supplier Network',
-      description: 'Access to qualified suppliers across all product categories for any project requirement',
-      color: 'bg-pink-100 text-pink-600',
-    },
-    {
-      icon: Package,
-      title: 'One-Stop Solution',
-      description: 'Complete procurement to delivery service - your trusted sourcing partner in China',
-      color: 'bg-indigo-100 text-indigo-600',
     },
   ];
 
@@ -719,7 +789,7 @@ export function Services() {
       {/* HOW WE SERVE - Service Process */}
       <div className="px-4 py-16 bg-white">
         <div className="mx-auto max-w-7xl">
-          <div className="text-center md:mb-0" style={{ marginBottom: '-40px' }}>
+          <div className="mb-10 text-center">
             <h2 className="mb-4 text-gray-900 font-bold text-4xl">How We Serve</h2>
             <p className="text-gray-600 max-w-3xl mx-auto mb-0">
               Our proven 6-step process ensures seamless procurement excellence
@@ -729,223 +799,83 @@ export function Services() {
           {/* Mobile Version - Vertical Flow (visible on mobile only) */}
           <div className="block lg:hidden mt-12 px-2">
             <div className="space-y-4 max-w-lg mx-auto">
-              {/* Step 1 */}
-              <div className="flex items-start gap-3">
-                <div className="w-14 h-14 bg-blue-500 rounded-full flex items-center justify-center shadow-lg border-4 border-gray-700 flex-shrink-0">
-                  <div className="text-2xl font-bold text-white">1</div>
-                </div>
-                <div className="flex-1 bg-white px-5 py-4 rounded-xl shadow-lg border-2 border-blue-500">
-                  <h4 className="font-bold text-gray-900 mb-2 text-base">Requirement Analysis</h4>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    Understand your product specs, quality standards, budget constraints, and delivery timeline
-                  </p>
-                </div>
-              </div>
+              {processSteps.map((step, index) => {
+                const theme = colorClasses[step.color];
+                const hasNextStep = Boolean(processSteps[index + 1]);
 
-              {/* Connector Arrow */}
-              <div className="flex justify-center">
-                <div className="w-1 h-6 bg-gradient-to-b from-blue-300 to-orange-300 rounded-full"></div>
-              </div>
+                return (
+                  <div key={step.id}>
+                    <div className="flex items-start gap-3">
+                      <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-gray-700 flex-shrink-0 ${theme.badge}`}>
+                        <div className="text-2xl font-bold text-white">{step.id}</div>
+                      </div>
+                      <div className={`flex-1 bg-white px-5 py-4 rounded-xl shadow-lg border-2 ${theme.border}`}>
+                        <h4 className="font-bold text-gray-900 mb-2 text-base">{step.title}</h4>
+                        <p className="text-sm text-gray-600 leading-relaxed">
+                          {step.description}
+                        </p>
+                      </div>
+                    </div>
 
-              {/* Step 2 */}
-              <div className="flex items-start gap-3">
-                <div className="w-14 h-14 bg-orange-500 rounded-full flex items-center justify-center shadow-lg border-4 border-gray-700 flex-shrink-0">
-                  <div className="text-2xl font-bold text-white">2</div>
-                </div>
-                <div className="flex-1 bg-white px-5 py-4 rounded-xl shadow-lg border-2 border-orange-500">
-                  <h4 className="font-bold text-gray-900 mb-2 text-base">Supplier Matching</h4>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    Leverage our 10,000+ verified supplier network to find manufacturers matching your needs
-                  </p>
-                </div>
-              </div>
-
-              {/* Connector Arrow */}
-              <div className="flex justify-center">
-                <div className="w-1 h-6 bg-gradient-to-b from-orange-300 to-green-300 rounded-full"></div>
-              </div>
-
-              {/* Step 3 */}
-              <div className="flex items-start gap-3">
-                <div className="w-14 h-14 bg-green-600 rounded-full flex items-center justify-center shadow-lg border-4 border-gray-700 flex-shrink-0">
-                  <div className="text-2xl font-bold text-white">3</div>
-                </div>
-                <div className="flex-1 bg-white px-5 py-4 rounded-xl shadow-lg border-2 border-green-600">
-                  <h4 className="font-bold text-gray-900 mb-2 text-base">Quotation & Negotiation</h4>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    Collect quotes, negotiate best prices and terms, provide comprehensive comparisons
-                  </p>
-                </div>
-              </div>
-
-              {/* Connector Arrow */}
-              <div className="flex justify-center">
-                <div className="w-1 h-6 bg-gradient-to-b from-green-300 to-red-300 rounded-full"></div>
-              </div>
-
-              {/* Step 4 */}
-              <div className="flex items-start gap-3">
-                <div className="w-14 h-14 bg-red-600 rounded-full flex items-center justify-center shadow-lg border-4 border-gray-700 flex-shrink-0">
-                  <div className="text-2xl font-bold text-white">4</div>
-                </div>
-                <div className="flex-1 bg-white px-5 py-4 rounded-xl shadow-lg border-2 border-red-600">
-                  <h4 className="font-bold text-gray-900 mb-2 text-base">Production Monitoring</h4>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    On-site factory visits, progress tracking, ensure adherence to your specifications
-                  </p>
-                </div>
-              </div>
-
-              {/* Connector Arrow */}
-              <div className="flex justify-center">
-                <div className="w-1 h-6 bg-gradient-to-b from-red-300 to-purple-300 rounded-full"></div>
-              </div>
-
-              {/* Step 5 */}
-              <div className="flex items-start gap-3">
-                <div className="w-14 h-14 bg-purple-600 rounded-full flex items-center justify-center shadow-lg border-4 border-gray-700 flex-shrink-0">
-                  <div className="text-2xl font-bold text-white">5</div>
-                </div>
-                <div className="flex-1 bg-white px-5 py-4 rounded-xl shadow-lg border-2 border-purple-600">
-                  <h4 className="font-bold text-gray-900 mb-2 text-base">Pre-Shipment Inspection</h4>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    Comprehensive quality checks, verify specs, packaging, quantity, detailed reports
-                  </p>
-                </div>
-              </div>
-
-              {/* Connector Arrow */}
-              <div className="flex justify-center">
-                <div className="w-1 h-6 bg-gradient-to-b from-purple-300 to-pink-300 rounded-full"></div>
-              </div>
-
-              {/* Step 6 */}
-              <div className="flex items-start gap-3">
-                <div className="w-14 h-14 bg-pink-600 rounded-full flex items-center justify-center shadow-lg border-4 border-gray-700 flex-shrink-0">
-                  <div className="text-2xl font-bold text-white">6</div>
-                </div>
-                <div className="flex-1 bg-white px-5 py-4 rounded-xl shadow-lg border-2 border-pink-600">
-                  <h4 className="font-bold text-gray-900 mb-2 text-base">Logistics & Delivery</h4>
-                  <p className="text-sm text-gray-600 leading-relaxed">
-                    International shipping, customs handling, real-time tracking, safe delivery on schedule
-                  </p>
-                </div>
-              </div>
+                    {hasNextStep && (
+                      <div className="flex justify-center">
+                        <div className="h-6 w-1 rounded-full bg-gradient-to-b from-slate-200 to-slate-100"></div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* Desktop Version - U-Shape Track Process Flow (hidden on mobile) */}
-          <div className="hidden lg:block relative max-w-7xl mx-auto px-16" style={{ height: '700px' }} key="u-shape-track-v3-force-update">
-            {/* SVG U-Shape Track - Centered */}
-            <svg className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" width="550" height="600" viewBox="0 0 550 600" preserveAspectRatio="xMidYMid meet">
-              {/* Outer U-shape track (dark) */}
-              <path
-                d="M 120,70 L 120,420 Q 120,500 200,500 L 350,500 Q 430,500 430,420 L 430,70"
-                fill="none"
-                stroke="#3f3f46"
-                strokeWidth="35"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              
-              {/* Inner dashed white line */}
-              <path
-                d="M 120,70 L 120,420 Q 120,500 200,500 L 350,500 Q 430,500 430,420 L 430,70"
-                fill="none"
-                stroke="white"
-                strokeWidth="4"
-                strokeDasharray="12,8"
-                strokeLinecap="round"
-              />
-            </svg>
+          {/* Desktop Version - Responsive Process Flow (hidden on mobile) */}
+          <div className="hidden lg:block mt-16">
+            <div className="relative mx-auto max-w-6xl rounded-[2rem] border border-gray-200 bg-gradient-to-br from-slate-50 via-white to-red-50/40 px-8 py-10 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+              <div className="pointer-events-none absolute left-1/2 top-10 bottom-10 w-px -translate-x-1/2 bg-gradient-to-b from-blue-200 via-red-200 to-pink-200"></div>
+              <div className="pointer-events-none absolute left-1/2 top-10 bottom-10 w-6 -translate-x-1/2 rounded-full bg-gradient-to-b from-white/0 via-white/80 to-white/0 blur-md"></div>
 
-            {/* Step 1 - Top Left - Text box left, circle closer to track */}
-            <div className="absolute" style={{ left: '16%', top: '10%' }} key="step-1">
-              <div className="flex items-center gap-3">
-                <div className="text-right bg-white px-4 py-3 rounded-lg shadow-lg border-2 border-blue-500 w-48">
-                  <h4 className="font-bold text-gray-900 mb-2">Requirement Analysis</h4>
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    Understand your product specs, quality standards, budget constraints, and delivery timeline
-                  </p>
-                </div>
-                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center shadow-xl border-3 border-gray-700 hover:scale-110 transition-all duration-300 cursor-pointer flex-shrink-0">
-                  <div className="text-xl font-bold text-white">1</div>
-                </div>
-              </div>
-            </div>
+              <div className="grid grid-cols-[1fr_auto_1fr] gap-x-8 gap-y-8">
+                {desktopTimelineSteps.map((step, index) => {
+                  const theme = colorClasses[step.color];
+                  const isLeft = index % 2 === 0;
 
-            {/* Step 2 - Left Middle - Text box left, circle closer to track */}
-            <div className="absolute" style={{ left: '16%', top: '43%' }} key="step-2">
-              <div className="flex items-center gap-3">
-                <div className="text-right bg-white px-4 py-3 rounded-lg shadow-lg border-2 border-orange-500 w-48">
-                  <h4 className="font-bold text-gray-900 mb-2">Supplier Matching</h4>
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    Leverage our 10,000+ verified supplier network to find manufacturers matching your needs
-                  </p>
-                </div>
-                <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center shadow-xl border-3 border-gray-700 hover:scale-110 transition-all duration-300 cursor-pointer flex-shrink-0">
-                  <div className="text-xl font-bold text-white">2</div>
-                </div>
-              </div>
-            </div>
+                  return (
+                    <div key={step.id} className="contents">
+                      <div className={isLeft ? 'flex justify-end' : ''}>
+                        {isLeft ? (
+                          <div className={`w-full max-w-sm rounded-2xl border-2 bg-white/95 p-5 shadow-lg ${theme.border}`}>
+                            <p className="mb-2 text-sm font-semibold text-gray-500">Step {step.id}</p>
+                            <h4 className="mb-2 font-bold text-gray-900">{step.title}</h4>
+                            <p className="text-sm leading-relaxed text-gray-600">{step.description}</p>
+                          </div>
+                        ) : (
+                          <div />
+                        )}
+                      </div>
 
-            {/* Step 3 - Bottom Left - Circle closer to track, text below */}
-            <div className="absolute" style={{ left: '32.45%', top: '77%' }} key="step-3-adjusted-17percent">
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 bg-green-600 rounded-full flex items-center justify-center shadow-xl border-3 border-gray-700 hover:scale-110 transition-all duration-300 cursor-pointer">
-                  <div className="text-xl font-bold text-white">3</div>
-                </div>
-                <div className="mt-3 text-center bg-white px-4 py-3 rounded-lg shadow-lg border-2 border-green-600 w-56" style={{ transform: 'translateX(-25%)' }}>
-                  <h4 className="font-bold text-gray-900 mb-2">Quotation & Negotiation</h4>
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    Collect quotes, negotiate best prices and terms, provide comprehensive comparisons
-                  </p>
-                </div>
-              </div>
-            </div>
+                      <div className="relative flex items-center justify-center">
+                        <div className={`relative z-10 flex h-14 w-14 items-center justify-center rounded-full border-4 border-white text-xl font-bold text-white shadow-xl ${theme.badge}`}>
+                          {step.id}
+                        </div>
+                        {index < desktopTimelineSteps.length - 1 && (
+                          <div className="absolute top-full mt-1 h-8 w-px bg-gradient-to-b from-slate-300 to-slate-100"></div>
+                        )}
+                      </div>
 
-            {/* Step 4 - Bottom Right - Circle closer to track, text below */}
-            <div className="absolute" style={{ left: '50%', top: '77%' }} key="step-4-half-distance-v6">
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center shadow-xl border-3 border-gray-700 hover:scale-110 transition-all duration-300 cursor-pointer">
-                  <div className="text-xl font-bold text-white">4</div>
-                </div>
-                <div className="mt-3 text-center bg-white px-4 py-3 rounded-lg shadow-lg border-2 border-red-600 w-56" style={{ transform: 'translateX(25%)' }}>
-                  <h4 className="font-bold text-gray-900 mb-2">Production Monitoring</h4>
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    On-site factory visits, progress tracking, ensure adherence to your specifications
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Step 5 - Right Middle - Circle closer to track, text box right */}
-            <div className="absolute" style={{ left: '84%', top: '43%', transform: 'translateX(-100%)' }} key="step-5">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center shadow-xl border-3 border-gray-700 hover:scale-110 transition-all duration-300 cursor-pointer flex-shrink-0">
-                  <div className="text-xl font-bold text-white">5</div>
-                </div>
-                <div className="text-left bg-white px-4 py-3 rounded-lg shadow-lg border-2 border-purple-600 w-48">
-                  <h4 className="font-bold text-gray-900 mb-2">Pre-Shipment Inspection</h4>
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    Comprehensive quality checks, verify specs, packaging, quantity, detailed reports
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Step 6 - Top Right - Circle closer to track, text box right */}
-            <div className="absolute" style={{ left: '84%', top: '10%', transform: 'translateX(-100%)' }} key="step-6">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-pink-600 rounded-full flex items-center justify-center shadow-xl border-3 border-gray-700 hover:scale-110 transition-all duration-300 cursor-pointer flex-shrink-0">
-                  <div className="text-xl font-bold text-white">6</div>
-                </div>
-                <div className="text-left bg-white px-4 py-3 rounded-lg shadow-lg border-2 border-pink-600 w-48">
-                  <h4 className="font-bold text-gray-900 mb-2">Logistics & Delivery</h4>
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    International shipping, customs handling, real-time tracking, safe delivery on schedule
-                  </p>
-                </div>
+                      <div className={!isLeft ? 'flex justify-start' : ''}>
+                        {!isLeft ? (
+                          <div className={`w-full max-w-sm rounded-2xl border-2 bg-white/95 p-5 shadow-lg ${theme.border}`}>
+                            <p className="mb-2 text-sm font-semibold text-gray-500">Step {step.id}</p>
+                            <h4 className="mb-2 font-bold text-gray-900">{step.title}</h4>
+                            <p className="text-sm leading-relaxed text-gray-600">{step.description}</p>
+                          </div>
+                        ) : (
+                          <div />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

@@ -47,15 +47,9 @@ export function RegionTransition({ children }: RegionTransitionProps) {
         )}
       </AnimatePresence>
 
-      {/* Page Content with Transition */}
-      <motion.div
-        key={region || 'no-region'}
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-      >
+      <div key={region || 'no-region'}>
         {children}
-      </motion.div>
+      </div>
     </>
   );
 }

@@ -143,18 +143,8 @@ export default function DatabaseInitializer() {
                 <h3 className="text-xl font-bold text-green-900">初始化成功！</h3>
               </div>
               <p className="text-green-800 mb-4">
-                数据库已成功初始化，您现在可以使用测试账号登录系统了。
+                数据库已成功初始化。请使用“账户与访问”中已开通的真实账号登录系统。
               </p>
-              <div className="bg-white rounded-lg p-4 border border-green-200 mb-4">
-                <p className="font-semibold text-green-900 mb-2">测试账号信息：</p>
-                <div className="text-sm text-green-800 space-y-1">
-                  <p>• CEO: zhangming / cosun123</p>
-                  <p>• CFO: lihua / cosun123</p>
-                  <p>• 销售主管: wangqiang / cosun123</p>
-                  <p>• 业务员: maria / cosun123</p>
-                  <p>• 管理员: admin / admin123</p>
-                </div>
-              </div>
               <Button
                 onClick={() => navigateTo('admin-login')}
                 className="w-full bg-green-600 hover:bg-green-700 text-white"

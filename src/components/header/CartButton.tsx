@@ -1,5 +1,6 @@
 import { ShoppingCart } from 'lucide-react';
 import { Button } from '../ui/button';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface CartButtonProps {
   totalItems: number;
@@ -7,6 +8,8 @@ interface CartButtonProps {
 }
 
 export function CartButton({ totalItems, onNavigateToCart }: CartButtonProps) {
+  const { t } = useLanguage();
+
   return (
     <Button
       variant="ghost"
@@ -19,7 +22,7 @@ export function CartButton({ totalItems, onNavigateToCart }: CartButtonProps) {
           {totalItems}
         </span>
       )}
-      <span className="hidden xl:inline ml-2">Cart</span>
+      <span className="hidden xl:inline ml-2">{t.publicSite.header.cart}</span>
     </Button>
   );
 }

@@ -12,6 +12,9 @@ import { Checkbox } from './ui/checkbox';
 import { toast } from 'sonner';
 import { signInWithEmail, fetchProfile } from '../hooks/useSupabaseAuth';
 import { upsertPortalPasswordMirror } from '../lib/portalPasswordMirror';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase';
+import { getProtectedAdminLoginPage } from '../config/adminPortalPolicy';
+import { isCurrentLocalDevHost } from '../lib/localDevHost';
 
 const REMEMBER_CUSTOMER_KEY = 'cosun_remember_customer';
 const REMEMBER_SUPPLIER_KEY = 'cosun_remember_supplier';
@@ -40,6 +43,43 @@ function normalizeErrorMessage(error: unknown): string {
   return 'Login failed';
 }
 
+function shouldUseSupabaseProxy() {
+  return isCurrentLocalDevHost();
+}
+
+function getSupabaseRestBase() {
+  return shouldUseSupabaseProxy() ? '/__supabase_rest__' : `${supabaseUrl}/rest/v1`;
+}
+
+async function fetchRestRows<T>(path: string, accessToken: string, timeoutMs = 3000): Promise<T[]> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${getSupabaseRestBase()}${path}`, {
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${accessToken}`,
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`REST fetch failed with status ${response.status}`);
+    }
+
+    const payload = await response.json().catch(() => []);
+    return Array.isArray(payload) ? payload as T[] : [];
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('REST fetch timed out');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function readCachedProfile(email: string) {
   try {
     const backendUserRaw = localStorage.getItem('cosun_backend_user');
@@ -57,6 +97,127 @@ function readCachedProfile(email: string) {
   } catch {
     return null;
   }
+}
+
+function normalizePortalRole(value: unknown): 'customer' | 'supplier' | 'admin' | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'customer' || normalized === 'supplier' || normalized === 'admin') return normalized;
+  if (normalized === 'staff') return 'admin';
+  return null;
+}
+
+async function lookupPortalRoleByPortalProfiles(userId: string, email: string, accessToken?: string) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+
+  const trySupplierByRest = async () => {
+    if (!accessToken || !userId) return null;
+    const rows = await fetchRestRows<{ portal_role?: string | null }>(
+      `/supplier_portal_profiles?select=portal_role&auth_user_id=eq.${encodeURIComponent(userId)}`,
+      accessToken,
+    );
+    return normalizePortalRole(rows[0]?.portal_role);
+  };
+
+  const trySupplierByEmailRest = async () => {
+    if (!accessToken || !normalizedEmail) return null;
+    const rows = await fetchRestRows<{ portal_role?: string | null }>(
+      `/supplier_portal_profiles?select=portal_role&login_email=eq.${encodeURIComponent(normalizedEmail)}`,
+      accessToken,
+    );
+    return normalizePortalRole(rows[0]?.portal_role) ?? (rows.length > 0 ? 'supplier' : null);
+  };
+
+  const tryCustomerByRest = async () => {
+    if (!accessToken || !userId) return null;
+    const rows = await fetchRestRows<{ portal_role?: string | null }>(
+      `/customer_portal_profiles?select=portal_role&auth_user_id=eq.${encodeURIComponent(userId)}`,
+      accessToken,
+    );
+    return normalizePortalRole(rows[0]?.portal_role);
+  };
+
+  const tryCustomerByEmailRest = async () => {
+    if (!accessToken || !normalizedEmail) return null;
+    const rows = await fetchRestRows<{ portal_role?: string | null }>(
+      `/customer_portal_profiles?select=portal_role&login_email=eq.${encodeURIComponent(normalizedEmail)}`,
+      accessToken,
+    );
+    return normalizePortalRole(rows[0]?.portal_role) ?? (rows.length > 0 ? 'customer' : null);
+  };
+
+  const trySupplierByAuthUser = async () => {
+    const { data, error } = await supabase
+      .from('supplier_portal_profiles')
+      .select('portal_role')
+      .eq('auth_user_id', userId)
+      .maybeSingle();
+    if (!error) return normalizePortalRole(data?.portal_role);
+    return null;
+  };
+
+  const trySupplierByEmail = async () => {
+    if (!normalizedEmail) return null;
+    const { data, error } = await supabase
+      .from('supplier_portal_profiles')
+      .select('portal_role')
+      .eq('login_email', normalizedEmail)
+      .maybeSingle();
+    if (!error) return normalizePortalRole(data?.portal_role) ?? 'supplier';
+    return null;
+  };
+
+  const tryCustomerByAuthUser = async () => {
+    const { data, error } = await supabase
+      .from('customer_portal_profiles')
+      .select('portal_role')
+      .eq('auth_user_id', userId)
+      .maybeSingle();
+    if (!error) return normalizePortalRole(data?.portal_role);
+    return null;
+  };
+
+  const tryCustomerByEmail = async () => {
+    if (!normalizedEmail) return null;
+    const { data, error } = await supabase
+      .from('customer_portal_profiles')
+      .select('portal_role')
+      .eq('login_email', normalizedEmail)
+      .maybeSingle();
+    if (!error) return normalizePortalRole(data?.portal_role) ?? 'customer';
+    return null;
+  };
+
+  return (
+    await trySupplierByRest()
+    || await trySupplierByEmailRest()
+    || await tryCustomerByRest()
+    || await tryCustomerByEmailRest()
+    || await trySupplierByAuthUser()
+    || await trySupplierByEmail()
+    || await tryCustomerByAuthUser()
+    || await tryCustomerByEmail()
+    || null
+  );
+}
+
+async function resolvePortalRoleForSession(params: {
+  sessionUser: any;
+  profile: { portal_role?: string | null } | null;
+  fallbackEmail: string;
+  accessToken?: string;
+}) {
+  const profilePortalRole = normalizePortalRole(params.profile?.portal_role);
+  if (profilePortalRole) return profilePortalRole;
+
+  const metadataPortalRole =
+    normalizePortalRole(params.sessionUser?.user_metadata?.portal_role)
+    || normalizePortalRole(params.sessionUser?.app_metadata?.portal_role);
+  if (metadataPortalRole) return metadataPortalRole;
+
+  const cachedPortalRole = normalizePortalRole(readCachedProfile(params.fallbackEmail)?.portal_role);
+  if (cachedPortalRole) return cachedPortalRole;
+
+  return lookupPortalRoleByPortalProfiles(params.sessionUser?.id || '', params.fallbackEmail, params.accessToken);
 }
 
 function persistFallbackAuthState(params: {
@@ -118,16 +279,50 @@ function completeLoginNavigation(
   if (window.location.hash !== targetHash) {
     window.location.hash = targetHash;
   }
+
+  // In local dev we occasionally see the in-page auth/session transition stall
+  // after a successful external-portal login. Reloading after we have already
+  // persisted the resolved portal identity makes the redirect deterministic.
+  if (portalRole === 'customer' || portalRole === 'supplier') {
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 60);
+  }
 }
 
 async function resolveProfileWithFallback(
   userId: string,
   email: string,
-  portalRole: 'customer' | 'supplier' | 'admin'
+  portalRole: 'customer' | 'supplier' | 'admin',
+  accessToken?: string,
 ) {
   const cachedProfile = readCachedProfile(email);
 
   try {
+    if (accessToken) {
+      const rows = await fetchRestRows<{
+        id: string;
+        email: string;
+        name: string;
+        portal_role: 'admin' | 'customer' | 'supplier';
+        rbac_role: string | null;
+        region: string | null;
+        company?: string | null;
+        phone?: string | null;
+      }>(
+        `/user_profiles?select=*&id=eq.${encodeURIComponent(userId)}`,
+        accessToken,
+        3000,
+      );
+
+      if (rows[0]) {
+        return {
+          profile: rows[0],
+          degraded: false,
+        };
+      }
+    }
+
     const profile = await promiseWithTimeout(
       fetchProfile(userId),
       5000,
@@ -163,6 +358,7 @@ export function Login() {
   const userContext = useOptionalUser();
   const setUser = userContext?.setUser ?? (() => {});
   const { navigateTo } = useRouter();
+  const adminLoginPage = getProtectedAdminLoginPage();
   const [showPassword, setShowPassword] = useState(false);
   const [isCustomerSubmitting, setIsCustomerSubmitting] = useState(false);
   const [isManufacturerSubmitting, setIsManufacturerSubmitting] = useState(false);
@@ -186,16 +382,10 @@ export function Login() {
     rememberMe: false,
   });
 
-  // Legacy helpers for hidden dev-only blocks (do not use in real login flow)
-  const authenticateUser = (..._args: any[]) => null as any;
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    navigateTo('admin-login');
+    navigateTo(adminLoginPage);
   };
-  const handleTestLogin = (_username: string, _password: string) => {
-    navigateTo('admin-login');
-  };
-
   const handleCustomerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const email = customerData.email.trim();
@@ -210,31 +400,48 @@ export function Login() {
         session.user.id,
         session.user.email!,
         'customer',
+        session.access_token,
       );
 
-      if (profile && profile.portal_role !== 'customer') {
+      const resolvedPortalRole = await promiseWithTimeout(
+        resolvePortalRoleForSession({
+          sessionUser: session.user,
+          profile,
+          fallbackEmail: session.user.email!,
+          accessToken: session.access_token,
+        }),
+        4000,
+        'Portal role lookup timed out. Please try again.',
+      );
+
+      if (!resolvedPortalRole) {
+        await import('../hooks/useSupabaseAuth').then(m => m.signOut());
+        throw new Error('Unable to determine this account role. Please contact admin to complete portal role setup.');
+      }
+
+      if (resolvedPortalRole !== 'customer') {
         await import('../hooks/useSupabaseAuth').then(m => m.signOut());
         throw new Error(
-          profile.portal_role === 'admin'
+          resolvedPortalRole === 'admin'
             ? 'This is an admin account. Please use the Admin Portal.'
             : 'This is a supplier account. Please use the Manufacturer tab.'
         );
       }
 
+      persistFallbackAuthState({
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        portalRole: resolvedPortalRole,
+        rbacRole: profile?.rbac_role,
+        region: profile?.region,
+      });
       setUser({
         type: 'customer',
         email: session.user.email!,
         id: session.user.id,
         name: profile?.name ?? session.user.email!.split('@')[0],
         region: profile?.region ?? undefined,
-      });
-      persistFallbackAuthState({
-        id: session.user.id,
-        email: session.user.email!,
-        name: profile?.name ?? session.user.email!.split('@')[0],
-        portalRole: 'customer',
-        rbacRole: profile?.rbac_role,
-        region: profile?.region,
       });
       upsertPortalPasswordMirror({
         portalType: 'customer',
@@ -279,31 +486,48 @@ export function Login() {
         session.user.id,
         session.user.email!,
         'supplier',
+        session.access_token,
       );
 
-      if (profile && profile.portal_role !== 'supplier') {
+      const resolvedPortalRole = await promiseWithTimeout(
+        resolvePortalRoleForSession({
+          sessionUser: session.user,
+          profile,
+          fallbackEmail: session.user.email!,
+          accessToken: session.access_token,
+        }),
+        4000,
+        'Portal role lookup timed out. Please try again.',
+      );
+
+      if (!resolvedPortalRole) {
+        await import('../hooks/useSupabaseAuth').then(m => m.signOut());
+        throw new Error('Unable to determine this account role. Please contact admin to complete portal role setup.');
+      }
+
+      if (resolvedPortalRole !== 'supplier') {
         await import('../hooks/useSupabaseAuth').then(m => m.signOut());
         throw new Error(
-          profile.portal_role === 'admin'
+          resolvedPortalRole === 'admin'
             ? 'This is an admin account. Please use the Admin Portal.'
             : 'This is a customer account. Please use the Customer tab.'
         );
       }
 
+      persistFallbackAuthState({
+        id: session.user.id,
+        email: session.user.email!,
+        name: profile?.name ?? session.user.email!.split('@')[0],
+        portalRole: resolvedPortalRole,
+        rbacRole: profile?.rbac_role,
+        region: profile?.region,
+      });
       setUser({
         type: 'supplier',
         email: session.user.email!,
         id: session.user.id,
         name: profile?.name ?? session.user.email!.split('@')[0],
         region: profile?.region ?? undefined,
-      });
-      persistFallbackAuthState({
-        id: session.user.id,
-        email: session.user.email!,
-        name: profile?.name ?? session.user.email!.split('@')[0],
-        portalRole: 'supplier',
-        rbacRole: profile?.rbac_role,
-        region: profile?.region,
       });
       upsertPortalPasswordMirror({
         portalType: 'supplier',
@@ -350,14 +574,18 @@ export function Login() {
         {/* Login Tabs */}
         <div className="max-w-md mx-auto">
           <Tabs defaultValue="customer" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-8">
+            <TabsList className="grid w-full grid-cols-3 mb-8">
               <TabsTrigger value="customer" className="flex items-center gap-2">
                 <User className="h-4 w-4" />
                 {t.login?.customerTab || 'Customer'}
               </TabsTrigger>
               <TabsTrigger value="manufacturer" className="flex items-center gap-2">
                 <Building2 className="h-4 w-4" />
-                {t.login?.manufacturerTab || 'Manufacturer'}
+                {t.login?.manufacturerTab || 'Supplier'}
+              </TabsTrigger>
+              <TabsTrigger value="admin" className="flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                Admin
               </TabsTrigger>
             </TabsList>
 
@@ -489,16 +717,16 @@ export function Login() {
               </div>
             </TabsContent>
 
-            {/* Manufacturer Login */}
+            {/* Supplier Login */}
             <TabsContent value="manufacturer">
               <Card className="border-2">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Building2 className="h-5 w-5 text-orange-600" />
-                    {t.login?.manufacturerTitle || 'Manufacturer Login'}
+                    {t.login?.manufacturerTitle || 'Supplier Login'}
                   </CardTitle>
                   <CardDescription>
-                    {t.login?.manufacturerDesc || 'Access your manufacturer portal to manage products, orders, and business operations'}
+                    {t.login?.manufacturerDesc || 'Access your supplier portal to manage products, orders, and business operations'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -583,203 +811,13 @@ export function Login() {
                     </div>
                   </form>
 
-                  {false && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <div className="mb-4">
-                      <p className="text-xs text-orange-600 flex items-center gap-2 font-medium">
-                        <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
-                        Quick Login (Development Test)
-                      </p>
-                    </div>
-                    
-                    {/* 🏭 供应商账号 */}
-                    <div>
-                      <p className="text-[10px] text-gray-500 mb-2 font-medium">🏭 Supplier Portal - Test Accounts</p>
-                      <div className="space-y-2">
-                        {/* 真实供应商账户 - A级 */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const username = 'zhang';
-                            const password = 'Supplier123!';
-                            const user = authenticateUser(username, password);
-                            
-                            if (user && user.role === 'supplier') {
-                              saveSession(user);
-                              setUser({ type: 'supplier', email: user.email });
-                              toast.success(`Welcome back, ${user.company}!`);
-                              navigateTo('manufacturer');
-                            } else {
-                              toast.error('Invalid credentials');
-                            }
-                          }}
-                          className="w-full px-3 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs transition-colors border border-blue-200 font-medium text-left"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>🏭 东莞市华盛电器</span>
-                            <span className="text-[10px] text-blue-600 font-semibold">A级</span>
-                          </div>
-                          <div className="text-[10px] text-gray-500 mt-1">电气设备 • 128订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">zhang / Cosun123!</div>
-                        </button>
-                        
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const username = 'li';
-                            const password = 'Supplier123!';
-                            const user = authenticateUser(username, password);
-                            
-                            if (user && user.role === 'supplier') {
-                              saveSession(user);
-                              setUser({ type: 'supplier', email: user.email });
-                              toast.success(`Welcome back, ${user.company}!`);
-                              navigateTo('manufacturer');
-                            } else {
-                              toast.error('Invalid credentials');
-                            }
-                          }}
-                          className="w-full px-3 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs transition-colors border border-blue-200 font-medium text-left"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>🏭 佛山市鑫达卫浴</span>
-                            <span className="text-[10px] text-blue-600 font-semibold">A级</span>
-                          </div>
-                          <div className="text-[10px] text-gray-500 mt-1">卫浴产品 • 96订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">li / Cosun123!</div>
-                        </button>
-                        
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const username = 'chen';
-                            const password = 'Supplier123!';
-                            const user = authenticateUser(username, password);
-                            
-                            if (user && user.role === 'supplier') {
-                              saveSession(user);
-                              setUser({ type: 'supplier', email: user.email });
-                              toast.success(`Welcome back, ${user.company}!`);
-                              navigateTo('manufacturer');
-                            } else {
-                              toast.error('Invalid credentials');
-                            }
-                          }}
-                          className="w-full px-3 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs transition-colors border border-blue-200 font-medium text-left"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>🏭 上海明辉建材</span>
-                            <span className="text-[10px] text-blue-600 font-semibold">A级</span>
-                          </div>
-                          <div className="text-[10px] text-gray-500 mt-1">建筑材料 • 156订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">chen / Cosun123!</div>
-                        </button>
-                        
-                        {/* 真实供应商账户 - B级 */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const username = 'wang';
-                            const password = 'Supplier123!';
-                            const user = authenticateUser(username, password);
-                            
-                            if (user && user.role === 'supplier') {
-                              saveSession(user);
-                              setUser({ type: 'supplier', email: user.email });
-                              toast.success(`Welcome back, ${user.company}!`);
-                              navigateTo('manufacturer');
-                            } else {
-                              toast.error('Invalid credentials');
-                            }
-                          }}
-                          className="w-full px-3 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs transition-colors border border-amber-200 font-medium text-left"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>🏭 温州精工五金</span>
-                            <span className="text-[10px] text-amber-600 font-semibold">B级</span>
-                          </div>
-                          <div className="text-[10px] text-gray-500 mt-1">门窗配件 • 64订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">wang / Cosun123!</div>
-                        </button>
-                        
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const username = 'zhao';
-                            const password = 'Supplier123!';
-                            const user = authenticateUser(username, password);
-                            
-                            if (user && user.role === 'supplier') {
-                              saveSession(user);
-                              setUser({ type: 'supplier', email: user.email });
-                              toast.success(`Welcome back, ${user.company}!`);
-                              navigateTo('manufacturer');
-                            } else {
-                              toast.error('Invalid credentials');
-                            }
-                          }}
-                          className="w-full px-3 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs transition-colors border border-amber-200 font-medium text-left"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>🏭 济南安全劳保</span>
-                            <span className="text-[10px] text-amber-600 font-semibold">B级</span>
-                          </div>
-                          <div className="text-[10px] text-gray-500 mt-1">劳保用品 • 45订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">zhao / Cosun123!</div>
-                        </button>
-                        
-                        {/* 真实供应商账户 - C级 */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const username = 'liu';
-                            const password = 'Supplier123!';
-                            const user = authenticateUser(username, password);
-                            
-                            if (user && user.role === 'supplier') {
-                              saveSession(user);
-                              setUser({ type: 'supplier', email: user.email });
-                              toast.success(`Welcome back, ${user.company}!`);
-                              navigateTo('manufacturer');
-                            } else {
-                              toast.error('Invalid credentials');
-                            }
-                          }}
-                          className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span>🏭 宁波创新电器</span>
-                            <span className="text-[10px] text-gray-600 font-semibold">C级</span>
-                          </div>
-                          <div className="text-[10px] text-gray-500 mt-1">电气设备 • 18订单</div>
-                          <div className="text-[10px] text-gray-500 mt-0.5">liu / Cosun123!</div>
-                        </button>
-                        
-                        {/* 🔥 新增询价供应商 */}
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_b', 'Supplier123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 广州优质五金</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">五金配件 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_b / Cosun123!</div></button>
-                        
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_c', 'Supplier123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 东莞精工卫浴</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">卫浴产品 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_c / Cosun123!</div></button>
-                        
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_d', 'Supplier123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 佛山安全劳保</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">劳保用品 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_d / Cosun123!</div></button>
-                        
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_e', 'Supplier123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 中山照明电器</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">LED照明 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_e / Cosun123!</div></button>
-                        
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_f', 'Supplier123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 温州五金配件</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">五金建材 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_f / Cosun123!</div></button>
-                        
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_g', 'Supplier123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 宁波电气设备</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">开关插座 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_g / Cosun123!</div></button>
-                        
-                        <button type="button" onClick={() => { const user = authenticateUser('supplier_h', 'Supplier123!'); if (user && user.role === 'supplier') { saveSession(user); setUser({ type: 'supplier', email: user.email }); toast.success(`Welcome, ${user.company}!`); navigateTo('manufacturer'); } }} className="w-full px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg text-xs transition-colors border border-gray-200 font-medium text-left"><div className="flex items-center justify-between"><span>🏭 杭州智能家居</span><span className="text-[10px] text-orange-600 font-semibold">新</span></div><div className="text-[10px] text-gray-500 mt-1">智能设备 • 已收到询价</div><div className="text-[10px] text-gray-500 mt-0.5">supplier_h / Cosun123!</div></button>
-                      </div>
-                    </div>
-                  </div>
-                  )}
                 </CardContent>
               </Card>
 
-              {/* Manufacturer Benefits */}
+              {/* Supplier Benefits */}
               <div className="mt-8 p-6 bg-orange-50 rounded-lg">
                 <h3 className="text-gray-900 mb-4">
-                  {t.login?.manufacturerBenefitsTitle || 'Manufacturer Benefits'}
+                  {t.login?.manufacturerBenefitsTitle || 'Supplier Benefits'}
                 </h3>
                 <ul className="space-y-2 text-sm text-gray-700">
                   <li className="flex items-start gap-2">
@@ -800,6 +838,33 @@ export function Login() {
                   </li>
                 </ul>
               </div>
+            </TabsContent>
+
+            <TabsContent value="admin">
+              <Card className="border-2 border-slate-200">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Shield className="h-5 w-5 text-red-600" />
+                    COSUN Admin Login
+                  </CardTitle>
+                  <CardDescription>
+                    Authorized internal staff access for catalog publishing, inquiry operations, users, and platform controls.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Button
+                    type="button"
+                    onClick={() => navigateTo(adminLoginPage)}
+                    className="w-full bg-red-600 hover:bg-red-700"
+                  >
+                    <Shield className="mr-2 h-4 w-4" />
+                    Continue to Admin Portal
+                  </Button>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+                    Admin is a separate protected portal. Customer and supplier credentials cannot enter the admin dashboard.
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
 
             {false && (
@@ -888,158 +953,6 @@ export function Login() {
                 </CardContent>
               </Card>
 
-              {/* 🔥 Quick Login Test Accounts */}
-              <Card className="mt-6 bg-gradient-to-br from-gray-50 to-white border-2 border-dashed border-gray-300">
-                <CardContent className="pt-6">
-                  <div className="mb-4">
-                    <p className="text-xs text-gray-500 flex items-center gap-2">
-                      <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                      Quick Login (Development Test)
-                    </p>
-                  </div>
-                  
-                  {/* 🔧 系统管理员 - 移到最上面 */}
-                  <div className="mb-3">
-                    <p className="text-[10px] text-gray-500 mb-2 font-medium">🔧 System Administrator</p>
-                    <div className="grid grid-cols-1 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('admin', 'admin123')}
-                        className="w-full px-3 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs transition-colors border border-slate-200 font-medium"
-                      >
-                        🔧 System Admin
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 📱 Marketing - 单独一行 */}
-                  <div className="mb-3">
-                    <p className="text-[10px] text-gray-500 mb-2 font-medium">📱 Marketing</p>
-                    <div className="grid grid-cols-1 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('marketing', 'cosun2024')}
-                        className="w-full px-3 py-2.5 bg-fuchsia-50 hover:bg-fuchsia-100 text-fuchsia-700 rounded-lg text-xs transition-colors border border-fuchsia-200 font-medium"
-                      >
-                        📱 Marketing
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {/* 🏢 Executive Team */}
-                  <div className="mb-4">
-                    <p className="text-[10px] text-gray-400 mb-2 font-medium">🏢 Executive Team</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('ceo', 'cosun2024')}
-                        className="px-3 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-xs transition-colors border border-purple-200 font-medium"
-                      >
-                        👨‍💼 CEO
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('cfo', 'cosun2024')}
-                        className="px-3 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs transition-colors border border-blue-200 font-medium"
-                      >
-                        💼 CFO
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {/* 📊 销售团队 */}
-                  <div className="mb-3">
-                    <p className="text-[10px] text-gray-500 mb-2 font-medium">📊 Sales Team</p>
-                    <div className="grid grid-cols-1 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('sales.director', 'cosun2024')}
-                        className="w-full px-3 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs transition-colors border border-blue-200 font-medium"
-                      >
-                        📊 Sales Director
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 🎯 运营人员 - 只保留Finance和Procurement */}
-                  <div className="mb-3">
-                    <p className="text-[10px] text-gray-500 mb-2 font-medium">🎯 Operations Team</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('finance', 'cosun2024')}
-                        className="w-full px-3 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs transition-colors border border-emerald-200 font-medium"
-                      >
-                        💰 Finance
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('procurement', 'cosun2024')}
-                        className="w-full px-3 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs transition-colors border border-indigo-200 font-medium"
-                      >
-                        🛒 Procurement
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 🌐 区域主管 */}
-                  <div className="mb-4">
-                    <p className="text-[10px] text-gray-400 mb-2 font-medium">🌎 Regional Managers</p>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('john.smith', 'cosun2024')}
-                        className="px-2 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-[10px] transition-colors border border-rose-200 font-medium leading-tight"
-                      >
-                        🇺🇸 NA
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('carlos.silva', 'cosun2024')}
-                        className="px-2 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-[10px] transition-colors border border-amber-200 font-medium leading-tight"
-                      >
-                        🇧🇷 SA
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('hans.mueller', 'cosun2024')}
-                        className="px-2 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-[10px] transition-colors border border-sky-200 font-medium leading-tight"
-                      >
-                        🇪🇺 EA
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {/* 👔 Sales Representatives */}
-                  <div>
-                    <p className="text-[10px] text-gray-400 mb-2 font-medium">👔 Sales Representatives</p>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('zhangwei', 'cosun123')}
-                        className="px-2 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-lg text-[10px] transition-colors border border-orange-200 font-medium leading-tight"
-                      >
-                        👨‍💼 张伟
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('lifang', 'cosun2024')}
-                        className="px-2 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-lg text-[10px] transition-colors border border-teal-200 font-medium leading-tight"
-                      >
-                        👩‍💼 李芳
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleTestLogin('wangfang', 'cosun2024')}
-                        className="px-2 py-2 bg-pink-50 hover:bg-pink-100 text-pink-700 rounded-lg text-[10px] transition-colors border border-pink-200 font-medium leading-tight"
-                      >
-                        👩‍💼 王芳
-                      </button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
               {/* Admin Portal Features */}
               <div className="mt-8 p-6 bg-red-50 rounded-lg border border-red-200">
                 <h3 className="text-gray-900 mb-4">
@@ -1080,15 +993,6 @@ export function Login() {
             </TabsContent>
             )}
 
-            <div className="mt-4 text-center">
-              <button
-                type="button"
-                onClick={() => navigateTo('admin-login')}
-                className="text-xs text-gray-500 hover:text-red-600 underline underline-offset-4"
-              >
-                Internal staff? Go to Admin Login
-              </button>
-            </div>
           </Tabs>
         </div>
 

@@ -4,11 +4,19 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { authenticateUser, saveSession, type AuthorizedUser } from '../data/authorizedUsers';
+import { fetchProfile, signInWithEmail } from '../hooks/useSupabaseAuth';
 import { toast } from 'sonner@2.0.3';
 
+export interface ContainerTrackingSessionUser {
+  id: string;
+  email: string;
+  name: string;
+  company: string;
+  portalRole: 'admin' | 'customer' | 'supplier';
+}
+
 interface ContainerTrackingLoginProps {
-  onLoginSuccess: (user: AuthorizedUser) => void;
+  onLoginSuccess: (user: ContainerTrackingSessionUser) => void;
 }
 
 export function ContainerTrackingLogin({ onLoginSuccess }: ContainerTrackingLoginProps) {
@@ -16,11 +24,10 @@ export function ContainerTrackingLogin({ onLoginSuccess }: ContainerTrackingLogi
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showDemoAccounts, setShowDemoAccounts] = useState(true);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!username.trim() || !password.trim()) {
       toast.error('Please enter both username and password');
       return;
@@ -28,35 +35,32 @@ export function ContainerTrackingLogin({ onLoginSuccess }: ContainerTrackingLogi
 
     setIsLoading(true);
 
-    // Simulate API call delay
-    setTimeout(() => {
-      const user = authenticateUser(username, password);
-      
-      if (user) {
-        saveSession(user);
-        toast.success(`Welcome back, ${user.company}!`);
-        onLoginSuccess(user);
-      } else {
-        toast.error('Invalid username or password');
-      }
-      
-      setIsLoading(false);
-    }, 800);
-  };
+    try {
+      const email = username.trim().toLowerCase();
+      const { session } = await signInWithEmail(email, password);
+      if (!session?.user) throw new Error('Login failed');
 
-  const quickLogin = (demoUsername: string, demoPassword: string) => {
-    setUsername(demoUsername);
-    setPassword(demoPassword);
-    
-    // Automatically submit after a short delay
-    setTimeout(() => {
-      const user = authenticateUser(demoUsername, demoPassword);
-      if (user) {
-        saveSession(user);
-        toast.success(`Welcome back, ${user.company}!`);
-        onLoginSuccess(user);
-      }
-    }, 500);
+      const profile = await fetchProfile(session.user.id);
+      const sessionUser: ContainerTrackingSessionUser = {
+        id: session.user.id,
+        email: session.user.email ?? email,
+        name: profile?.name ?? session.user.email?.split('@')[0] ?? email,
+        company: profile?.company ?? profile?.name ?? session.user.email?.split('@')[0] ?? email,
+        portalRole: profile?.portal_role ?? 'customer',
+      };
+
+      toast.success(`Welcome back, ${sessionUser.company}!`);
+      onLoginSuccess(sessionUser);
+    } catch (error: any) {
+      const message = String(error?.message || error || '');
+      toast.error(
+        message.includes('Invalid login credentials') || message.includes('invalid_credentials')
+          ? 'Invalid email or password'
+          : message || 'Login failed',
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -100,10 +104,10 @@ export function ContainerTrackingLogin({ onLoginSuccess }: ContainerTrackingLogi
                     <div className="relative">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                       <Input
-                        type="text"
+                        type="email"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        placeholder="Enter your username"
+                        placeholder="Enter your email"
                         className="pl-10 h-12"
                         disabled={isLoading}
                       />
@@ -214,104 +218,26 @@ export function ContainerTrackingLogin({ onLoginSuccess }: ContainerTrackingLogi
 
           {/* Right Side - Demo Accounts & Features */}
           <div className="space-y-6">
-            {/* Demo Accounts */}
-            {showDemoAccounts && (
-              <Card className="border-2 border-green-200 bg-gradient-to-br from-green-50 to-emerald-50">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2 text-green-900">
-                      <CheckCircle2 className="w-6 h-6 text-green-600" />
-                      Demo Accounts
-                    </CardTitle>
-                    <Badge className="bg-green-100 text-green-800">
-                      For Testing
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-green-700 mt-2">
-                    Click any account below for quick login
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {/* Admin Account */}
-                  <button
-                    onClick={() => quickLogin('admin', 'admin123')}
-                    className="w-full p-4 bg-white rounded-lg border-2 border-green-200 hover:border-green-400 hover:shadow-md transition-all text-left"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <div className="font-semibold text-gray-900">Administrator</div>
-                        <div className="text-sm text-gray-600">COSUN Building Materials</div>
-                      </div>
-                      <Badge className="bg-red-100 text-red-800">Admin</Badge>
-                    </div>
-                    <div className="text-xs text-gray-500 space-y-1">
-                      <div>Username: <span className="font-mono font-semibold">admin</span></div>
-                      <div>Password: <span className="font-mono font-semibold">admin123</span></div>
-                    </div>
-                  </button>
-
-                  {/* Demo Customer */}
-                  <button
-                    onClick={() => quickLogin('demo', 'demo123')}
-                    className="w-full p-4 bg-white rounded-lg border-2 border-green-200 hover:border-green-400 hover:shadow-md transition-all text-left"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <div className="font-semibold text-gray-900">Demo Customer</div>
-                        <div className="text-sm text-gray-600">ABC Trading Co.</div>
-                      </div>
-                      <Badge className="bg-blue-100 text-blue-800">Customer</Badge>
-                    </div>
-                    <div className="text-xs text-gray-500 space-y-1">
-                      <div>Username: <span className="font-mono font-semibold">demo</span></div>
-                      <div>Password: <span className="font-mono font-semibold">demo123</span></div>
-                    </div>
-                  </button>
-
-                  {/* John Doe */}
-                  <button
-                    onClick={() => quickLogin('johndoe', 'john123')}
-                    className="w-full p-4 bg-white rounded-lg border-2 border-green-200 hover:border-green-400 hover:shadow-md transition-all text-left"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <div className="font-semibold text-gray-900">John Doe</div>
-                        <div className="text-sm text-gray-600">BuildMart USA</div>
-                      </div>
-                      <Badge className="bg-blue-100 text-blue-800">Customer</Badge>
-                    </div>
-                    <div className="text-xs text-gray-500 space-y-1">
-                      <div>Username: <span className="font-mono font-semibold">johndoe</span></div>
-                      <div>Password: <span className="font-mono font-semibold">john123</span></div>
-                    </div>
-                    <div className="mt-2 text-xs text-green-600 font-medium">
-                      ✓ Has 8 orders • Can track containers
-                    </div>
-                  </button>
-
-                  {/* New User - No Orders */}
-                  <button
-                    onClick={() => quickLogin('newuser', 'new123')}
-                    className="w-full p-4 bg-white rounded-lg border-2 border-orange-200 hover:border-orange-400 hover:shadow-md transition-all text-left"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <div className="font-semibold text-gray-900">New Customer</div>
-                        <div className="text-sm text-gray-600">New Customer Ltd.</div>
-                      </div>
-                      <Badge className="bg-orange-100 text-orange-800">Customer</Badge>
-                    </div>
-                    <div className="text-xs text-gray-500 space-y-1">
-                      <div>Username: <span className="font-mono font-semibold">newuser</span></div>
-                      <div>Password: <span className="font-mono font-semibold">new123</span></div>
-                    </div>
-                    <div className="mt-2 text-xs text-orange-600 font-medium">
-                      ⊗ No orders yet • Cannot track containers
-                    </div>
-                  </button>
-                </CardContent>
-              </Card>
-            )}
+            <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-blue-900">
+                    <CheckCircle2 className="w-6 h-6 text-blue-600" />
+                    Unified Account Access
+                  </CardTitle>
+                  <Badge className="bg-blue-100 text-blue-800">
+                    Live Data
+                  </Badge>
+                </div>
+                <p className="text-sm text-blue-700 mt-2">
+                  Demo accounts have been retired. Please use a real email and password managed in the live account system.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-blue-900">
+                <p>Container tracking now uses the same Supabase-backed credentials as the rest of the platform.</p>
+                <p>Account changes made in the live account system take effect here without a separate demo user list.</p>
+              </CardContent>
+            </Card>
 
             {/* Features */}
             <Card>

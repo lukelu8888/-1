@@ -1,5 +1,5 @@
 import { X, ChevronDown } from 'lucide-react';
-import { Department } from '../../data/header/departmentsData';
+import type { Department } from '../../lib/storefrontDepartmentBaseline';
 
 interface DepartmentListProps {
   departments: Department[];

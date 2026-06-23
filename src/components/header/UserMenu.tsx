@@ -9,6 +9,7 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { CustomerNotificationCenter } from '../CustomerNotificationCenter';
 import { AuthUser } from '../../contexts/UserContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface UserMenuProps {
   user: AuthUser | null;
@@ -17,6 +18,9 @@ interface UserMenuProps {
 }
 
 export function UserMenu({ user, logout, onNavigateTo }: UserMenuProps) {
+  const { t } = useLanguage();
+  const publicCopy = t.publicSite;
+
   return (
     <>
       {/* User Menu or Login Button */}
@@ -31,7 +35,7 @@ export function UserMenu({ user, logout, onNavigateTo }: UserMenuProps) {
                 <User className="h-5 w-5 text-white" />
               </div>
               <div className="hidden xl:flex flex-col items-start">
-                <span className="text-xs text-gray-500">Welcome</span>
+                <span className="text-xs text-gray-500">{publicCopy.header.welcome}</span>
                 <span className="text-sm font-medium">{user.email.split('@')[0]}</span>
               </div>
               <ChevronDown className="h-4 w-4 hidden xl:block" />

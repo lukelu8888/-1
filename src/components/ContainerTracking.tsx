@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { searchContainer, sampleContainerNumbers, type ContainerInfo } from '../data/containerTrackingData';
 import { ContainerDetailsPage } from './ContainerDetailsPage';
-import { ContainerTrackingLogin } from './ContainerTrackingLogin';
-import { getCurrentUser, clearSession, type AuthorizedUser } from '../data/authorizedUsers';
+import { ContainerTrackingLogin, type ContainerTrackingSessionUser } from './ContainerTrackingLogin';
+import { fetchProfile, signOut } from '../hooks/useSupabaseAuth';
+import { supabase } from '../lib/supabase';
 import { toast } from 'sonner@2.0.3';
 
 // Storage key for tracking history
@@ -28,14 +29,46 @@ export function ContainerTracking() {
   const [trackingHistory, setTrackingHistory] = useState<TrackingHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showDetailsPage, setShowDetailsPage] = useState(false);
-  const [user, setUser] = useState<AuthorizedUser | null>(null);
+  const [user, setUser] = useState<ContainerTrackingSessionUser | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   // Check authentication on mount
   useEffect(() => {
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
-    setIsCheckingAuth(false);
+    let alive = true;
+
+    const hydrateSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!alive) return;
+
+        if (!session?.user) {
+          setUser(null);
+          return;
+        }
+
+        const profile = await fetchProfile(session.user.id);
+        if (!alive) return;
+
+        setUser({
+          id: session.user.id,
+          email: session.user.email ?? '',
+          name: profile?.name ?? session.user.email?.split('@')[0] ?? 'User',
+          company: profile?.company ?? profile?.name ?? session.user.email?.split('@')[0] ?? 'User',
+          portalRole: profile?.portal_role ?? 'customer',
+        });
+      } catch (error) {
+        console.error('Failed to hydrate container tracking session:', error);
+        if (alive) setUser(null);
+      } finally {
+        if (alive) setIsCheckingAuth(false);
+      }
+    };
+
+    hydrateSession();
+
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // Load tracking history from localStorage on mount
@@ -50,16 +83,21 @@ export function ContainerTracking() {
     }
   }, []);
 
-  const handleLoginSuccess = (loggedInUser: AuthorizedUser) => {
+  const handleLoginSuccess = (loggedInUser: ContainerTrackingSessionUser) => {
     setUser(loggedInUser);
   };
 
-  const handleLogout = () => {
-    clearSession();
-    setUser(null);
-    setContainerInfo(null);
-    setSearchQuery('');
-    toast.success('Logged out successfully');
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      setUser(null);
+      setContainerInfo(null);
+      setSearchQuery('');
+      toast.success('Logged out successfully');
+    } catch (error) {
+      console.error('Failed to log out of container tracking:', error);
+      toast.error('Logout failed');
+    }
   };
 
   // Save to history
@@ -166,7 +204,11 @@ export function ContainerTracking() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       {/* Show login page if not authenticated */}
-      {!user ? (
+      {isCheckingAuth ? (
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-gray-50 to-white">
+          <div className="text-gray-500">Checking session...</div>
+        </div>
+      ) : !user ? (
         <ContainerTrackingLogin onLoginSuccess={handleLoginSuccess} />
       ) : showDetailsPage && containerInfo ? (
         <div className="max-w-7xl mx-auto px-4 py-8">

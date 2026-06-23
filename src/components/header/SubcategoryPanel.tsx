@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react';
-import { Department } from '../../data/header/departmentsData';
+import type { Department } from '../../lib/storefrontDepartmentBaseline';
 
 interface SubcategoryPanelProps {
   department: Department;
@@ -7,6 +7,7 @@ interface SubcategoryPanelProps {
   showQuantityAlert: boolean;
   onHoverSubcat: (name: string) => void;
   onNavigateToDept: (categoryName: string) => void;
+  onNavigateToDeptSubcat: (categoryName: string, subcategoryName: string) => void;
 }
 
 export function SubcategoryPanel({
@@ -15,6 +16,7 @@ export function SubcategoryPanel({
   showQuantityAlert,
   onHoverSubcat,
   onNavigateToDept,
+  onNavigateToDeptSubcat,
 }: SubcategoryPanelProps) {
   return (
     <div className="w-[240px] flex-shrink-0 border-r bg-white overflow-y-auto max-h-[600px]">
@@ -42,11 +44,26 @@ export function SubcategoryPanel({
                   onHoverSubcat(subcat.name);
                 }
               }}
-              className={`flex items-center justify-between py-2.5 text-sm cursor-pointer transition-colors group ${
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onNavigateToDeptSubcat(department.name, subcat.name);
+              }}
+              className={`flex min-h-12 items-center justify-between gap-3 rounded-md px-2 py-2 text-sm cursor-pointer transition-colors group ${
                 hoveredSubcat === subcat.name ? 'text-orange-600' : 'text-gray-700 hover:text-orange-600'
               }`}
             >
-              <span>{subcat.name}</span>
+              <span className="flex min-w-0 items-center gap-3">
+                {subcat.image && (
+                  <img
+                    src={subcat.image}
+                    alt={subcat.name}
+                    className="h-9 w-9 flex-shrink-0 rounded object-cover"
+                    loading="lazy"
+                  />
+                )}
+                <span className="leading-snug">{subcat.name}</span>
+              </span>
               {subcat.items && subcat.items.length > 0 && (
                 <ChevronDown className={`h-4 w-4 -rotate-90 transition-colors ${
                   hoveredSubcat === subcat.name ? 'text-orange-600' : 'text-gray-400 group-hover:text-orange-600'
