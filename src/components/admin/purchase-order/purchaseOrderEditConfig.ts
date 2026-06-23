@@ -1,3 +1,5 @@
+import { buildPaymentTermsText } from '../../../lib/paymentFlow';
+
 export type EditPOFormState = {
   poNumber: string;
   requirementNo: string;
@@ -8,6 +10,12 @@ export type EditPOFormState = {
   supplierContact: string;
   supplierPhone: string;
   supplierAddress: string;
+  supplierBankName: string;
+  supplierBankAccountName: string;
+  supplierBankAccountNumber: string;
+  supplierBankSwiftCode: string;
+  supplierBankAddress: string;
+  supplierBankCurrency: string;
   currency: string;
   paymentTerms: string;
   deliveryTerms: string;
@@ -61,7 +69,7 @@ export const createInitialCreateOrderForm = (): CreateOrderFormState => ({
   supplierName: '',
   supplierCode: '',
   currency: 'CNY',
-  paymentTerms: '30% 预付，70% 发货前付清',
+  paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
   deliveryTerms: 'EXW 工厂交货',
   expectedDate: '',
   remarks: '',
@@ -77,6 +85,12 @@ export const createInitialEditPOForm = (): EditPOFormState => ({
   supplierContact: '',
   supplierPhone: '',
   supplierAddress: '',
+  supplierBankName: '',
+  supplierBankAccountName: '',
+  supplierBankAccountNumber: '',
+  supplierBankSwiftCode: '',
+  supplierBankAddress: '',
+  supplierBankCurrency: '',
   currency: 'CNY',
   paymentTerms: '',
   deliveryTerms: '',

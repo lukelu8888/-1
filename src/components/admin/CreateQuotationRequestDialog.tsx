@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
 import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext'; // 🔥 导入报价请求单 Context（QR 语义层）
-import { getCurrentUser } from '../../utils/dataIsolation'; // 🔥 导入获取当前用户工具
-import { getSession } from '../../data/authorizedUsers'; // 🔥 导入获取用户session工具
+import { getAuthenticatedUser, getCurrentUser } from '../../utils/dataIsolation'; // 🔥 导入统一身份工具
 import { nextQRNumber, type RegionType } from '../../utils/xjNumberGenerator';
 import { TRADE_TERMS_PRESETS, isPresetTradeTerm, resolveInitialTradeTerms } from '../../utils/tradeTerms';
 import {
@@ -11,7 +10,16 @@ import {
   buildProcurementRequestNotes,
   DEFAULT_DOWNSTREAM_VISIBILITY,
 } from '../../utils/procurementRequestContext';
-import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { getFactoryFacingModelNo, getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import type { PaymentMode } from '../../contexts/SalesQuotationContext';
+import {
+  BALANCE_TRIGGER_OPTIONS,
+  PAYMENT_MODE_OPTIONS,
+  buildPaymentTermsText,
+  deriveBalanceTrigger,
+  type BalanceTrigger,
+} from '../../lib/paymentFlow';
+import { getCustomerDocumentReleasePreferenceLabel } from '../documents/templates/CustomerInquiryDocument';
 import { Calendar } from 'lucide-react';
 import {
   Dialog,
@@ -29,6 +37,53 @@ import {
   type QuoteRequirementDocumentData,
 } from '../documents/templates/QuoteRequirementDocument';
 
+const resolveInquiryStructuredRequirements = (inquiry: any) => {
+  const requirements = inquiry?.requirements && typeof inquiry.requirements === 'object' ? inquiry.requirements : {};
+  const rawPaymentMode = String(
+    requirements.paymentMode ||
+    inquiry?.paymentMode ||
+    '',
+  ).trim() as PaymentMode;
+  const paymentMode = PAYMENT_MODE_OPTIONS.some((option) => option.value === rawPaymentMode)
+    ? rawPaymentMode
+    : 'tt_deposit_balance_before_shipment';
+  const balanceTrigger = deriveBalanceTrigger(
+    paymentMode,
+    requirements.balanceTrigger || inquiry?.balanceTrigger || null,
+  );
+  const tradeTerms = resolveInitialTradeTerms(
+    requirements.tradeTerms,
+    inquiry?.shippingInfo?.tradeTerms,
+    inquiry?.tradeTerms,
+  );
+  const sourceInquiryNumber = String(
+    inquiry?.inquiryNumber ||
+    inquiry?.sourceInquiryNumber ||
+    inquiry?.id ||
+    '',
+  ).trim();
+
+  return {
+    requirements,
+    paymentMode,
+    balanceTrigger,
+    paymentTerms:
+      String(requirements.paymentTerms || inquiry?.paymentTerms || '').trim() ||
+      buildPaymentTermsText(paymentMode, balanceTrigger),
+    tradeTerms,
+    sourceInquiryNumber,
+    documentReleasePreference: getCustomerDocumentReleasePreferenceLabel(requirements.documentReleasePreference),
+    incoterm: String(requirements.incoterm || '').trim(),
+    locationValue: String(requirements.locationValue || requirements.portOfDestination || '').trim(),
+    deliveryTime: String(requirements.deliveryTime || '').trim(),
+    packingRequirements: String(requirements.packingRequirements || '').trim(),
+    certifications: Array.isArray(requirements.certifications)
+      ? requirements.certifications.filter(Boolean).join(', ')
+      : String(requirements.certifications || '').trim(),
+    otherRequirements: String(requirements.otherRequirements || '').trim(),
+  };
+};
+
 /**
  * 📋 向采购员请求报价对话框
  * 
@@ -41,16 +96,6 @@ import {
  * 
  * ✅ 产品表格：移除图片列，仅显示核心信息
  */
-
-// 🔥 预设选项配置
-const PAYMENT_TERMS_PRESETS = [
-  '30% T/T预付，70%见提单副本付款',
-  '50% T/T预付，50%发货前付清',
-  '100% T/T预付',
-  'L/C at sight（即期信用证）',
-  '30天远期信用证',
-  '自定义...'
-];
 
 const QUALITY_REQUIREMENTS_PRESETS = [
   '需要第三方验货，AQL 2.5标准',
@@ -102,19 +147,24 @@ export function CreateQuotationRequestDialog({
   const [loading, setLoading] = useState(false);
   
   const [tradeTerms, setTradeTerms] = useState(resolveInitialTradeTerms());
-  const [paymentTerms, setPaymentTerms] = useState(PAYMENT_TERMS_PRESETS[0]); // 🔥 默认：第一条付款条款
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('tt_deposit_balance_before_shipment');
+  const [balanceTrigger, setBalanceTrigger] = useState<BalanceTrigger>(
+    deriveBalanceTrigger('tt_deposit_balance_before_shipment', null),
+  );
+  const [paymentTerms, setPaymentTerms] = useState(
+    buildPaymentTermsText('tt_deposit_balance_before_shipment', deriveBalanceTrigger('tt_deposit_balance_before_shipment', null)),
+  );
   const [deliveryDate, setDeliveryDate] = useState(getDefaultDeliveryDate()); // 🔥 默认：30天后
   const [targetCostRange, setTargetCostRange] = useState('');
   const [qualityRequirements, setQualityRequirements] = useState(QUALITY_REQUIREMENTS_PRESETS[0]); // 🔥 默认：第一条验货要求
   const [packagingRequirements, setPackagingRequirements] = useState(PACKAGING_REQUIREMENTS_PRESETS[0]); // 🔥 默认：第一条特殊包装
 
-  // 🔥 控制是否使用自定义输入
-  const [isCustomPayment, setIsCustomPayment] = useState(false);
   const [isCustomTradeTerms, setIsCustomTradeTerms] = useState(false);
   const [isCustomQuality, setIsCustomQuality] = useState(false);
   const [isCustomPackaging, setIsCustomPackaging] = useState(false);
 
   const [editableProducts, setEditableProducts] = useState<any[]>([]);
+  const structured = resolveInquiryStructuredRequirements(inquiry);
 
   useEffect(() => {
     if (inquiry?.products) {
@@ -123,6 +173,19 @@ export function CreateQuotationRequestDialog({
       const processedProducts = inquiry.products.map((p: any) => ({
         ...p,
         modelNo: getFormalBusinessModelNo(p) || p.color || 'N/A',
+        factoryModelNo:
+          getFactoryFacingModelNo(p) ||
+          p?.inquirySnapshot?.factoryModelNo ||
+          p?.inquirySnapshotDraft?.factoryModelNo ||
+          getFormalBusinessModelNo(p) ||
+          p.color ||
+          'N/A',
+        internalModelNo:
+          p?.internalModelNo ||
+          p?.inquirySnapshot?.masterRef?.internalModelNo ||
+          p?.inquirySnapshotDraft?.masterRef?.internalModelNo ||
+          getFormalBusinessModelNo(p) ||
+          '',
         editableQuantity: p.quantity || 0,
         editableRemarks: p.remarks || ''
       }));
@@ -138,23 +201,19 @@ export function CreateQuotationRequestDialog({
       console.log('🔄 [CreateQuotationRequestDialog] 对话框打开，重置为默认值');
       setExpectedQuoteDate(getDefaultQuoteDate());
       setDeliveryDate(getDefaultDeliveryDate());
-      setPaymentTerms(PAYMENT_TERMS_PRESETS[0]);
-      setQualityRequirements(QUALITY_REQUIREMENTS_PRESETS[0]);
-      setPackagingRequirements(PACKAGING_REQUIREMENTS_PRESETS[0]);
-      const initialTradeTerms = resolveInitialTradeTerms(
-        inquiry?.shippingInfo?.tradeTerms,
-        inquiry?.requirements?.tradeTerms,
-        inquiry?.tradeTerms,
-      );
-      setTradeTerms(initialTradeTerms);
+      setPaymentMode(structured.paymentMode);
+      setBalanceTrigger(structured.balanceTrigger);
+      setPaymentTerms(structured.paymentTerms);
+      setQualityRequirements(structured.certifications || QUALITY_REQUIREMENTS_PRESETS[0]);
+      setPackagingRequirements(structured.packingRequirements || PACKAGING_REQUIREMENTS_PRESETS[0]);
+      setTradeTerms(structured.tradeTerms);
       setTargetCostRange('');
       setRemarks('');
-      setIsCustomPayment(false);
-      setIsCustomTradeTerms(!isPresetTradeTerm(initialTradeTerms));
+      setIsCustomTradeTerms(!isPresetTradeTerm(structured.tradeTerms));
       setIsCustomQuality(false);
       setIsCustomPackaging(false);
     }
-  }, [open, inquiry]);
+  }, [open, inquiry, structured.balanceTrigger, structured.certifications, structured.packingRequirements, structured.paymentMode, structured.paymentTerms, structured.tradeTerms]);
 
   const handleSubmit = async () => {
     if (!inquiry) return;
@@ -185,9 +244,9 @@ export function CreateQuotationRequestDialog({
 
     try {
       // 🔥 获取完整用户信息（包含姓名）
-      const userSession = getSession();
       const salesRepEmail = getCurrentUser()?.email || 'sales@cosun.com';
-      const salesRepName = userSession?.user?.username || userSession?.user?.email?.split('@')[0] || '业务员';
+      const operatorUser = getAuthenticatedUser() || getCurrentUser();
+      const salesRepName = operatorUser?.name || operatorUser?.email?.split('@')[0] || '业务员';
       
       console.log('🔍 [CreateQuotationRequestDialog] 业务员信息:');
       console.log('  - Email:', salesRepEmail);
@@ -201,6 +260,9 @@ export function CreateQuotationRequestDialog({
         expectedQuoteDate,
         deliveryDate,
         tradeTerms: tradeTerms.trim(),
+        incoterm: structured.incoterm || undefined,
+        paymentMode,
+        balanceTrigger,
         paymentTerms: paymentTerms.trim(),
         targetCostRange: targetCostRange.trim() || undefined,
         qualityRequirements: qualityRequirements.trim() || undefined,
@@ -214,6 +276,13 @@ export function CreateQuotationRequestDialog({
         id: product.id || `item_${Date.now()}_${Math.random()}`,
         productName: product.productName,
         modelNo: getFormalBusinessModelNo(product) || product.color || 'N/A',
+        factoryModelNo:
+          getFactoryFacingModelNo(product) ||
+          product.factoryModelNo ||
+          getFormalBusinessModelNo(product) ||
+          product.color ||
+          'N/A',
+        internalModelNo: product.internalModelNo || getFormalBusinessModelNo(product) || '',
         specification: product.specification,
         quantity: product.editableQuantity,
         unit: 'pcs',
@@ -227,7 +296,7 @@ export function CreateQuotationRequestDialog({
         requestNumber,
         
         sourceInquiryId: inquiry.id,
-        sourceInquiryNumber: inquiry.id,
+        sourceInquiryNumber: structured.sourceInquiryNumber,
         customerName: inquiry.buyerInfo?.companyName || inquiry.customerName || 'N/A',
         customerEmail: inquiry.userEmail || inquiry.buyerInfo?.email,
         region: inquiry.region,
@@ -240,6 +309,8 @@ export function CreateQuotationRequestDialog({
         items: items,
 
         tradeTerms: commercialTerms.tradeTerms,
+        paymentMode: commercialTerms.paymentMode,
+        balanceTrigger: commercialTerms.balanceTrigger,
         paymentTerms: commercialTerms.paymentTerms,
         deliveryDate: commercialTerms.deliveryDate,
         targetCostRange: commercialTerms.targetCostRange,
@@ -274,7 +345,9 @@ export function CreateQuotationRequestDialog({
         products: items.map((item: any, index: number) => ({
           no: index + 1,
           productName: item.productName,
-          modelNo: getFormalBusinessModelNo(item),
+          modelNo: item.factoryModelNo || getFactoryFacingModelNo(item) || getFormalBusinessModelNo(item),
+          factoryModelNo: item.factoryModelNo || getFactoryFacingModelNo(item) || undefined,
+          internalModelNo: item.internalModelNo || getFormalBusinessModelNo(item) || undefined,
           specification: item.specification || '',
           quantity: item.quantity,
           unit: item.unit,
@@ -283,9 +356,15 @@ export function CreateQuotationRequestDialog({
         customerRequirements: {
           deliveryTerms: commercialTerms.tradeTerms,
           paymentTerms: commercialTerms.paymentTerms,
-          qualityStandard: commercialTerms.qualityRequirements,
-          packaging: commercialTerms.packagingRequirements,
-          specialRequirements: remarks.trim() || undefined,
+          qualityStandard: commercialTerms.qualityRequirements || structured.certifications || undefined,
+          packaging: commercialTerms.packagingRequirements || structured.packingRequirements || undefined,
+          specialRequirements: [
+            structured.documentReleasePreference ? `Document Release Preference: ${structured.documentReleasePreference}` : '',
+            structured.locationValue ? `Location Requirement: ${structured.locationValue}` : '',
+            structured.deliveryTime ? `Customer Delivery Time: ${structured.deliveryTime}` : '',
+            structured.otherRequirements,
+            remarks.trim(),
+          ].filter(Boolean).join(' | ') || undefined,
         },
         salesDeptNotes: flowNotes,
         urgency: 'medium',
@@ -297,7 +376,7 @@ export function CreateQuotationRequestDialog({
         id: `pr_${Date.now()}_${random}`,
         requirementNo: requestNumber, // 使用相同的编号
         source: '报价请求', // 来源是报价请求
-        sourceRef: inquiry.id, // 🔥 修复：关联原始INQ编号（业务员询价单号）
+        sourceRef: structured.sourceInquiryNumber, // 🔥 关联原始 ING 编号，避免只落内部 UUID
         requiredDate: deliveryDate, // 期望交
         urgency: 'medium' as const,
         status: 'pending' as const,
@@ -306,6 +385,8 @@ export function CreateQuotationRequestDialog({
         expectedQuoteDate: commercialTerms.expectedQuoteDate,
         deliveryDate: commercialTerms.deliveryDate,
         tradeTerms: commercialTerms.tradeTerms,
+        paymentMode: commercialTerms.paymentMode,
+        balanceTrigger: commercialTerms.balanceTrigger,
         paymentTerms: commercialTerms.paymentTerms,
         targetCostRange: commercialTerms.targetCostRange,
         qualityRequirements: commercialTerms.qualityRequirements,
@@ -320,7 +401,9 @@ export function CreateQuotationRequestDialog({
         items: items.map((item: any) => ({
           id: item.id,
           productName: item.productName,
-          modelNo: getFormalBusinessModelNo(item),
+          modelNo: item.modelNo || getFormalBusinessModelNo(item),
+          factoryModelNo: item.factoryModelNo || getFactoryFacingModelNo(item) || undefined,
+          internalModelNo: item.internalModelNo || getFormalBusinessModelNo(item) || undefined,
           specification: item.specification,
           quantity: item.quantity,
           unit: item.unit,
@@ -343,13 +426,14 @@ export function CreateQuotationRequestDialog({
       // 🔥 重置为默认值，而不是清空
       setExpectedQuoteDate(getDefaultQuoteDate());
       setRemarks('');
-      setTradeTerms('FOB');
-      setPaymentTerms(PAYMENT_TERMS_PRESETS[0]);
+      setTradeTerms(structured.tradeTerms);
+      setPaymentMode(structured.paymentMode);
+      setBalanceTrigger(structured.balanceTrigger);
+      setPaymentTerms(structured.paymentTerms);
       setDeliveryDate(getDefaultDeliveryDate());
       setTargetCostRange('');
-      setQualityRequirements(QUALITY_REQUIREMENTS_PRESETS[0]);
-      setPackagingRequirements(PACKAGING_REQUIREMENTS_PRESETS[0]);
-      setIsCustomPayment(false);
+      setQualityRequirements(structured.certifications || QUALITY_REQUIREMENTS_PRESETS[0]);
+      setPackagingRequirements(structured.packingRequirements || PACKAGING_REQUIREMENTS_PRESETS[0]);
       setIsCustomQuality(false);
       setIsCustomPackaging(false);
       
@@ -421,7 +505,8 @@ export function CreateQuotationRequestDialog({
                     <thead>
                       <tr className="border-b border-gray-300 bg-gray-50">
                         <th className="text-left px-4 py-3 text-xs tracking-wider uppercase text-gray-700 w-12">No.</th>
-                        <th className="text-left px-4 py-3 text-xs tracking-wider uppercase text-gray-700 w-32">Model No.</th>
+                        <th className="text-left px-4 py-3 text-xs tracking-wider uppercase text-gray-700 w-32">Internal No.</th>
+                        <th className="text-left px-4 py-3 text-xs tracking-wider uppercase text-gray-700 w-32">Factory No.</th>
                         <th className="text-left px-4 py-3 text-xs tracking-wider uppercase text-gray-700 min-w-[320px]">Item Name / Specification</th>
                         <th className="text-left px-4 py-3 text-xs tracking-wider uppercase text-gray-700 w-28">Quantity</th>
                         <th className="text-left px-4 py-3 text-xs tracking-wider uppercase text-gray-700 w-16">Unit</th>
@@ -440,6 +525,12 @@ export function CreateQuotationRequestDialog({
                           <td className="px-4 py-3">
                             <span className="text-xs font-mono text-black">
                               {getFormalBusinessModelNo(product) || product.color || product.productName?.slice(0, 12) || '-'}
+                            </span>
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <span className="text-xs font-mono font-semibold text-black">
+                              {product.factoryModelNo || getFactoryFacingModelNo(product) || '-'}
                             </span>
                           </td>
                           
@@ -537,11 +628,31 @@ export function CreateQuotationRequestDialog({
                       )}
                       <tr className="border-b border-gray-200">
                         <td className="py-2 w-32 text-gray-600">包装要求</td>
-                        <td className="py-2 text-black">出口标准包装</td>
+                        <td className="py-2 text-black">{structured.packingRequirements || '出口标准包装'}</td>
                       </tr>
+                      {structured.certifications && (
+                        <tr className="border-b border-gray-200">
+                          <td className="py-2 w-32 text-gray-600">认证要求</td>
+                          <td className="py-2 text-black">{structured.certifications}</td>
+                        </tr>
+                      )}
+                      {structured.documentReleasePreference && (
+                        <tr className="border-b border-gray-200">
+                          <td className="py-2 w-32 text-gray-600">提单放单要求</td>
+                          <td className="py-2 text-black">{structured.documentReleasePreference}</td>
+                        </tr>
+                      )}
+                      {structured.deliveryTime && (
+                        <tr className="border-b border-gray-200">
+                          <td className="py-2 w-32 text-gray-600">客户交期要求</td>
+                          <td className="py-2 text-black">{structured.deliveryTime}</td>
+                        </tr>
+                      )}
                       <tr>
                         <td className="py-2 w-32 text-gray-600">其它要求</td>
-                        <td className="py-2 text-black">详见产品规格说明（Item Name / Specification 列）</td>
+                        <td className="py-2 text-black">
+                          {structured.otherRequirements || '详见产品规格说明（Item Name / Specification 列）'}
+                        </td>
                       </tr>
                     </tbody>
                   </table>
@@ -607,45 +718,42 @@ export function CreateQuotationRequestDialog({
 
                       <div className="space-y-2">
                         <Label className="text-xs uppercase tracking-wide text-gray-700">
-                          付款条款 *
+                          付款主规则 *
                         </Label>
-                        {!isCustomPayment ? (
-                          <select
-                            value={paymentTerms}
-                            onChange={(e) => {
-                              if (e.target.value === '自定义...') {
-                                setIsCustomPayment(true);
-                                setPaymentTerms('');
-                              } else {
-                                setPaymentTerms(e.target.value);
-                              }
-                            }}
-                            className="w-full text-xs border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:border-black"
-                          >
-                            {PAYMENT_TERMS_PRESETS.map((preset) => (
-                              <option key={preset} value={preset}>{preset}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <div className="flex flex-col gap-2">
-                            <Input
-                              placeholder="例如：30% T/T预付，70%见提单副本付款"
-                              value={paymentTerms}
-                              onChange={(e) => setPaymentTerms(e.target.value)}
-                              className="text-xs border-gray-300 focus:border-black"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsCustomPayment(false);
-                                setPaymentTerms('');
-                              }}
-                              className="px-2 py-1 text-xs border border-gray-300 hover:bg-gray-50 self-start"
-                            >
-                              返回
-                            </button>
-                          </div>
-                        )}
+                        <select
+                          value={paymentMode}
+                          onChange={(e) => {
+                            const nextMode = e.target.value as PaymentMode;
+                            const nextTrigger = deriveBalanceTrigger(nextMode, null);
+                            setPaymentMode(nextMode);
+                            setBalanceTrigger(nextTrigger);
+                            setPaymentTerms(buildPaymentTermsText(nextMode, nextTrigger));
+                          }}
+                          className="w-full text-xs border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:border-black"
+                        >
+                          {PAYMENT_MODE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs uppercase tracking-wide text-gray-700">
+                          触发节点 *
+                        </Label>
+                        <select
+                          value={balanceTrigger}
+                          onChange={(e) => {
+                            const nextTrigger = e.target.value as BalanceTrigger;
+                            setBalanceTrigger(nextTrigger);
+                            setPaymentTerms(buildPaymentTermsText(paymentMode, nextTrigger));
+                          }}
+                          className="w-full text-xs border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:border-black"
+                        >
+                          {BALANCE_TRIGGER_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
                       </div>
 
                       <div className="space-y-2">
@@ -796,6 +904,18 @@ export function CreateQuotationRequestDialog({
                           </div>
                         )}
                       </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase tracking-wide text-gray-700">
+                        付款条款展示文本 *
+                      </Label>
+                      <Textarea
+                        value={paymentTerms}
+                        onChange={(e) => setPaymentTerms(e.target.value)}
+                        className="text-xs border-gray-300 focus:border-black min-h-[76px]"
+                        placeholder="结构化付款规则会自动生成展示文本，也可人工微调。"
+                      />
                     </div>
 
                     {/* 第二行：给采购员的备注（单独一行，仅占左半边） */}

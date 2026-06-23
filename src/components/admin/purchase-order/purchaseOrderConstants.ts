@@ -2,6 +2,7 @@
  * 🔥 采购订单管理 - 常量配置
  * 包含所有预设选项和配置常量
  */
+import { buildPaymentTermsText } from '../../../lib/paymentFlow';
 
 // 🔥 16条询价条款预设选项
 export const TERMS_OPTIONS = {
@@ -135,7 +136,7 @@ export const STATUS_CONFIG = {
 // 🔥 默认表单值
 export const DEFAULT_FORM_VALUES = {
   currency: '元',
-  paymentTerms: 'T/T 30% 预付，70% 发货前付清',
+  paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
   deliveryTerms: 'EXW 工厂交货',
   deliveryAddress: '福建省福州市仓山区仓山工业区',
   deliveryRequirement: '收到订单后30天内交货',

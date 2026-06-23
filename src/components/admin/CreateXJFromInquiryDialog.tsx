@@ -17,7 +17,7 @@ import { Search, Building2, Mail, Phone, Star, Send, Package, AlertCircle } from
 import { toast } from 'sonner';
 import { useXJs } from '../../contexts/XJContext';
 import { buildXJDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
-import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { getCustomerFacingModelNo, getFactoryFacingModelNo, getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 
 /**
  * 📋 从客户询价创建供应商采购询价（XJ）对话框
@@ -57,6 +57,10 @@ interface InquiryItem {
   id: string;
   productName: string;
   modelNo: string;
+  internalModelNo?: string;
+  factoryModelNo?: string;
+  customerModelNo?: string;
+  supplierModelNo?: string;
   specification?: string;
   quantity: number;
   unit: string;
@@ -228,6 +232,24 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
 
   // 获取当前产品
   const currentProduct = inquiry?.items[currentProductIndex];
+  const resolveFactoryModelNo = (item: InquiryItem) =>
+    getFactoryFacingModelNo(item) ||
+    (item as any).inquirySnapshot?.factoryModelNo ||
+    (item as any).inquirySnapshotDraft?.factoryModelNo ||
+    getFormalBusinessModelNo(item);
+
+  const resolveInternalModelNo = (item: InquiryItem) =>
+    getFormalBusinessModelNo(item) ||
+    (item as any).inquirySnapshot?.masterRef?.internalModelNo ||
+    (item as any).inquirySnapshotDraft?.masterRef?.internalModelNo ||
+    item.modelNo ||
+    '';
+
+  const resolveCustomerModelNo = (item: InquiryItem) =>
+    getCustomerFacingModelNo(item) ||
+    (item as any).inquirySnapshot?.customerModelNo ||
+    (item as any).inquirySnapshotDraft?.customerModelNo ||
+    '';
 
   // 切换供应商选择
   const toggleSupplier = (productId: string, supplierId: string) => {
@@ -295,20 +317,53 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
           if (!supplier) return;
 
           const xjNumber = `XJ-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+          const factoryModelNo = resolveFactoryModelNo(item);
+          const internalModelNo = resolveInternalModelNo(item);
+          const customerModelNo = resolveCustomerModelNo(item);
           
           const xjPayload = {
             id: `xj_${Date.now()}_${supplierId}_${item.id}`,
             xjNumber,
+            products: [{
+              id: item.id || `${xjNumber}-item-1`,
+              productName: item.productName,
+              productNameEn: (item as any).productNameEn || '',
+              productNameZh: (item as any).productNameZh || '',
+              modelNo: factoryModelNo,
+              factoryModelNo,
+              internalModelNo,
+              customerModelNo,
+              displayModelNo: customerModelNo || internalModelNo || factoryModelNo,
+              specification: item.specification || '',
+              specificationEn: (item as any).specificationEn || '',
+              specificationZh: (item as any).specificationZh || '',
+              quantity: item.quantity,
+              unit: item.unit,
+              targetPrice: item.targetPrice,
+              currency: item.currency,
+            }],
             
             // 🔥 关联客户询价单
             sourceInquiryId: inquiry.id,
             sourceInquiryNumber: inquiry.inquiryNumber,
-            customerName: inquiry.customerName,
+            customerName: 'COSUN采购',
+            customerCompany: 'COSUN采购',
+            buyerCompany: 'COSUN采购',
+            buyerContact: 'COSUN采购',
+            buyerEmail: 'procurement@cosun.com',
             
             // 🔥 产品信息（单个产品）
             productName: item.productName,
-            modelNo: getFormalBusinessModelNo(item),
+            productNameEn: (item as any).productNameEn || '',
+            productNameZh: (item as any).productNameZh || '',
+            modelNo: factoryModelNo,
+            factoryModelNo,
+            internalModelNo,
+            customerModelNo,
+            displayModelNo: customerModelNo || internalModelNo || factoryModelNo,
             specification: item.specification,
+            specificationEn: (item as any).specificationEn || '',
+            specificationZh: (item as any).specificationZh || '',
             quantity: item.quantity,
             unit: item.unit,
             targetPrice: item.targetPrice,
@@ -448,7 +503,11 @@ export function CreateXJFromInquiryDialog({ open, onClose, inquiry }: CreateXJFr
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <p className="text-xs text-slate-600 mb-1">型号</p>
-                      <p className="font-semibold">{getFormalBusinessModelNo(currentProduct) || '-'}</p>
+                      <p className="font-semibold">{resolveInternalModelNo(currentProduct) || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-600 mb-1">工厂编号</p>
+                      <p className="font-semibold text-orange-700">{resolveFactoryModelNo(currentProduct) || '-'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-600 mb-1">数量</p>

@@ -105,6 +105,7 @@ export function PimDetailPage({ productId, onBack }: Props) {
 
   // refs for scroll-spy
   const refs = useRef<Record<SectionId, HTMLDivElement | null>>({} as any);
+  const contentScrollRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (baseProduct) {
@@ -212,15 +213,20 @@ export function PimDetailPage({ productId, onBack }: Props) {
   }
 
   const scrollTo = (id: SectionId) => {
+    const container = contentScrollRef.current;
     const el = refs.current[id];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setActiveSection(id);
-    }
+    if (!container || !el) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = el.getBoundingClientRect();
+    const targetTop = targetRect.top - containerRect.top + container.scrollTop;
+
+    container.scrollTo({ top: targetTop, behavior: 'smooth' });
+    setActiveSection(id);
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Top status bar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
         <Button variant="ghost" size="sm" className="h-8" onClick={onBack}>
@@ -322,7 +328,7 @@ export function PimDetailPage({ productId, onBack }: Props) {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left TOC */}
         <aside className="w-48 shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
           <div className="sticky top-0 border-b border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -360,7 +366,7 @@ export function PimDetailPage({ productId, onBack }: Props) {
         </aside>
 
         {/* Right content */}
-        <section className="min-w-0 flex-1 overflow-y-auto bg-slate-50">
+        <section ref={contentScrollRef} className="min-w-0 flex-1 overflow-y-auto bg-slate-50">
           <div className="space-y-3 p-3">
             <div ref={(el) => (refs.current.basic = el)}>
               <BasicInfoSection product={draft} update={update} />
@@ -432,7 +438,7 @@ export function PimDetailPage({ productId, onBack }: Props) {
 
 // ── Section: Basic Info ─────────────────────────────────────────────────────
 
-function BasicInfoSection({
+export function BasicInfoSection({
   product,
   update,
 }: {
@@ -570,7 +576,7 @@ function BasicInfoSection({
 
 // ── Section: Category & Attributes ──────────────────────────────────────────
 
-function CategoryAttrsSection({
+export function CategoryAttrsSection({
   product,
   update,
 }: {
@@ -578,7 +584,13 @@ function CategoryAttrsSection({
   update: <K extends keyof Product>(field: K, value: Product[K]) => void;
 }) {
   const ctx = useProductCenter();
-  const attrs = ctx.attributes;
+  const attrs = ctx.attributes
+    .filter((a) => {
+      if (!product.primaryCategoryId) return true;
+      if (!a.appliesToCategoryIds || a.appliesToCategoryIds.length === 0) return false;
+      return a.appliesToCategoryIds.includes(product.primaryCategoryId);
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder);
   const values = ctx.getAttributeValuesForProduct(product.id);
   const valueByAttr = new Map(values.map((v) => [v.attributeId, v]));
 
@@ -737,7 +749,7 @@ function AttrNumber({
 
 // ── Section: Specs ───────────────────────────────────────────────────────────
 
-function SpecsSection({
+export function SpecsSection({
   product,
   update,
 }: {
@@ -830,7 +842,7 @@ function SpecsSection({
 
 // ── Section: Packaging & Logistics ──────────────────────────────────────────
 
-function PackagingSection({
+export function PackagingSection({
   product,
   update,
 }: {
@@ -894,7 +906,7 @@ function PackagingSection({
 
 // ── Section: Media ──────────────────────────────────────────────────────────
 
-function MediaSection({ productId, thumbnailUrl }: { productId: string; thumbnailUrl?: string }) {
+export function MediaSection({ productId, thumbnailUrl }: { productId: string; thumbnailUrl?: string }) {
   const ctx = useProductCenter();
   const media = ctx.getMediaForProduct(productId);
   const [uploaderOpen, setUploaderOpen] = useState(false);
@@ -964,7 +976,7 @@ function MediaSection({ productId, thumbnailUrl }: { productId: string; thumbnai
 
 // ── Section: Suppliers & Cost ───────────────────────────────────────────────
 
-function SuppliersSection({
+export function SuppliersSection({
   productId,
   onOpenQuotes,
 }: {
@@ -1057,7 +1069,7 @@ function SuppliersSection({
 
 // ── Section: Region Prices ──────────────────────────────────────────────────
 
-function RegionPricesSection({
+export function RegionPricesSection({
   productId,
   onOpenHistory,
 }: {
@@ -1234,7 +1246,7 @@ function savePrice(
 
 // ── Section: Publish Settings ───────────────────────────────────────────────
 
-function PublishSettingsSection({ productId }: { productId: string }) {
+export function PublishSettingsSection({ productId }: { productId: string }) {
   const ctx = useProductCenter();
   const channels = ctx.getPublishChannelsForProduct(productId);
   const byRegion = new Map(channels.map((c) => [c.regionCode, c] as const));
@@ -1365,7 +1377,7 @@ function patchChannel(
 
 // ── Section: SEO ────────────────────────────────────────────────────────────
 
-function SeoSection({ productId }: { productId: string }) {
+export function SeoSection({ productId }: { productId: string }) {
   const ctx = useProductCenter();
   const channels = ctx.getPublishChannelsForProduct(productId);
   const byRegion = new Map(channels.map((c) => [c.regionCode, c] as const));
@@ -1477,7 +1489,7 @@ function SeoCell({
 
 // ── Section: Campaign ───────────────────────────────────────────────────────
 
-function CampaignSection({ productId }: { productId: string }) {
+export function CampaignSection({ productId }: { productId: string }) {
   const ctx = useProductCenter();
   const cmps = ctx.getCampaignsForProduct(productId);
   return (
@@ -1530,7 +1542,7 @@ function CampaignSection({ productId }: { productId: string }) {
 
 // ── Section: Documents ──────────────────────────────────────────────────────
 
-function DocumentsSection({ productId }: { productId: string }) {
+export function DocumentsSection({ productId }: { productId: string }) {
   const ctx = useProductCenter();
   const docs = ctx.getDocumentsForProduct(productId);
   return (
@@ -1567,7 +1579,7 @@ function DocumentsSection({ productId }: { productId: string }) {
 
 // ── Section: Audit ──────────────────────────────────────────────────────────
 
-function AuditSection({ productId }: { productId: string }) {
+export function AuditSection({ productId }: { productId: string }) {
   const ctx = useProductCenter();
   const logs = ctx.getAuditLogsForProduct(productId);
   return (

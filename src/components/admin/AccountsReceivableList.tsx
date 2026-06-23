@@ -13,7 +13,7 @@
  * - 操作
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -41,14 +41,136 @@ import {
   CheckSquare
 } from 'lucide-react';
 import { useOrders } from '../../contexts/OrderContext';
+import { useFinance } from '../../contexts/FinanceContext';
+import { usePayments } from '../../contexts/PaymentContext';
+import { useSalesContracts } from '../../contexts/SalesContractContext';
 import { getCurrentUser } from '../../utils/dataIsolation';
 import { toast } from 'sonner@2.0.3';
 import { orderService } from '../../lib/supabaseService';
 import { paymentProofStorage } from '../../lib/storageService';
+import { generateAccountsReceivableNumber } from '../../utils/xjNumberGenerator';
+import { deriveReceivableStatus } from '../../lib/financeReceivableFlow';
+import { ReceivableProofCell } from './receivables/ReceivableProofCell';
 
 export function AccountsReceivableList() {
   const { orders, updateOrder } = useOrders();
+  const { accountsReceivable, addAccountReceivable, updateARByOrderNumber } = useFinance();
+  const { addPayment } = usePayments();
+  const { contracts, getContractByContractNumber, confirmDeposit } = useSalesContracts();
   const currentUser = getCurrentUser();
+  const autoBackfilledContractsRef = useRef<Set<string>>(new Set());
+  const normalizeCustomerProof = (proof: any, fallbackAmount = 0, fallbackCurrency = 'USD') => {
+    if (!proof) return undefined;
+    return {
+      ...proof,
+      amount: Number(proof.amount || fallbackAmount || 0),
+      currency: proof.currency || fallbackCurrency,
+      uploadedAt: proof.uploadedAt || proof.receiptDate || null,
+    };
+  };
+  const normalizeReceiptProof = (proof: any, fallbackAmount = 0, fallbackCurrency = 'USD') => {
+    if (!proof) return undefined;
+    return {
+      ...proof,
+      amount: Number(proof.amount || proof.actualAmount || fallbackAmount || 0),
+      actualAmount: Number(proof.actualAmount || proof.amount || fallbackAmount || 0),
+      currency: proof.currency || fallbackCurrency,
+      uploadedAt: proof.uploadedAt || proof.receiptDate || null,
+    };
+  };
+  const resolveBackendPublicUrl = (fileUrl?: string | null) => {
+    if (!fileUrl) return '';
+    if (/^https?:\/\//i.test(fileUrl) || fileUrl.startsWith('blob:') || fileUrl.startsWith('data:')) {
+      return fileUrl;
+    }
+    return paymentProofStorage.getPublicUrl(fileUrl);
+  };
+  const getProofFileName = (proof?: any) => {
+    const explicitName = String(proof?.fileName || '').trim();
+    if (explicitName) return explicitName;
+    const sourceUrl = String(proof?.fileUrl || '').trim();
+    if (!sourceUrl) return 'proof-file';
+    try {
+      const parsed = sourceUrl.startsWith('http') ? new URL(sourceUrl) : null;
+      const pathname = parsed?.pathname || sourceUrl;
+      const rawName = pathname.split('/').filter(Boolean).pop() || 'proof-file';
+      return decodeURIComponent(rawName);
+    } catch {
+      const rawName = sourceUrl.split('/').filter(Boolean).pop() || 'proof-file';
+      return decodeURIComponent(rawName.split('?')[0] || 'proof-file');
+    }
+  };
+  const formatDisplayDate = (value?: string | null) => {
+    if (!value) return 'N/A';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? 'N/A' : parsed.toLocaleDateString('zh-CN');
+  };
+  const formatDisplayDateTime = (value?: string | null) => {
+    if (!value) return 'N/A';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? 'N/A' : parsed.toLocaleString('zh-CN');
+  };
+  const toPositiveNumber = (value: unknown) => {
+    const numeric = Number(value || 0);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  };
+  const resolveExpectedDepositAmount = (params: {
+    totalAmount: number;
+    contract?: any;
+    depositPaymentProof?: any;
+    depositReceiptProof?: any;
+  }) => {
+    const explicitAmount = [
+      params.contract?.depositAmount,
+      params.depositPaymentProof?.amount,
+      params.depositReceiptProof?.actualAmount,
+    ].map(toPositiveNumber).find((amount) => amount > 0);
+    if (explicitAmount) return explicitAmount;
+    return toPositiveNumber(params.totalAmount) * 0.3;
+  };
+  const resolveExpectedBalanceAmount = (params: {
+    totalAmount: number;
+    contract?: any;
+    balancePaymentProof?: any;
+    balanceReceiptProof?: any;
+    depositAmount: number;
+  }) => {
+    const explicitAmount = [
+      params.contract?.balanceAmount,
+      params.balancePaymentProof?.amount,
+      params.balanceReceiptProof?.actualAmount,
+    ].map(toPositiveNumber).find((amount) => amount > 0);
+    if (explicitAmount) return explicitAmount;
+    return Math.max(toPositiveNumber(params.totalAmount) - toPositiveNumber(params.depositAmount), 0);
+  };
+  const normalizeReceiptDateInput = (value: string) => value.replace(/\//g, '-').trim();
+  const isImageProof = (proof?: any) => {
+    const target = String(getProofFileName(proof) || proof?.fileUrl || '').toLowerCase();
+    return ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].some((ext) => target.includes(ext));
+  };
+  const openProofInNewWindow = (proof?: any) => {
+    const previewUrl = resolveBackendPublicUrl(proof?.fileUrl);
+    if (!previewUrl) {
+      toast.error('未找到凭证文件地址');
+      return;
+    }
+    window.open(previewUrl, '_blank', 'noopener,noreferrer');
+  };
+  const downloadProofFile = (proof?: any) => {
+    const previewUrl = resolveBackendPublicUrl(proof?.fileUrl);
+    if (!previewUrl) {
+      toast.error('未找到可下载的凭证文件');
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = previewUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.download = getProofFileName(proof);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // 进入应收账款页面时主动请求一次订单列表（GET /api/orders）
   useEffect(() => {
@@ -96,44 +218,312 @@ export function AccountsReceivableList() {
     };
   }, [selectedReceiptPreview]);
   
-  // 🔥 筛选需要财务处理的订单（有销售合同的订单）
+  const contractLookup = useMemo(() => {
+    const lookup = new Map<string, any>();
+    contracts.forEach((contract) => {
+      if (contract?.contractNumber) {
+        lookup.set(contract.contractNumber, contract);
+      }
+    });
+    return lookup;
+  }, [contracts]);
+
+  const orderLookup = useMemo(() => {
+    const lookup = new Map<string, any>();
+    orders.forEach((order) => {
+      if (order?.orderNumber) {
+        lookup.set(order.orderNumber, order);
+      }
+    });
+    return lookup;
+  }, [orders]);
+
+  useEffect(() => {
+    const qualifyingStatuses = new Set(['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'balance_uploaded', 'balance_confirmed', 'completed']);
+
+    contracts.forEach((contract) => {
+      if (!contract?.contractNumber || !qualifyingStatuses.has(String(contract.status || ''))) {
+        return;
+      }
+      if (accountsReceivable.some((ar) => ar.orderNumber === contract.contractNumber)) {
+        autoBackfilledContractsRef.current.delete(contract.contractNumber);
+        return;
+      }
+      if (autoBackfilledContractsRef.current.has(contract.contractNumber)) {
+        return;
+      }
+
+      const linkedOrder = orderLookup.get(contract.contractNumber);
+      const contractWorkflow = contract.documentRenderMeta?.erpWorkflow || {};
+      const depositReceiptProof = normalizeReceiptProof(
+        linkedOrder?.depositReceiptProof || contractWorkflow.depositReceiptProof || contractWorkflow.financeReceiptProof,
+        contract.depositAmount,
+        contract.currency || 'USD',
+      );
+      const paidAmount = Number(depositReceiptProof?.actualAmount || 0);
+      const totalAmount = Number(contract.totalAmount || 0);
+      const remainingAmount = Math.max(totalAmount - paidAmount, 0);
+
+      autoBackfilledContractsRef.current.add(contract.contractNumber);
+      addAccountReceivable({
+        arNumber: generateAccountsReceivableNumber((contract.region || 'NA') as any),
+        orderNumber: contract.contractNumber,
+        quotationNumber: contract.quotationNumber,
+        contractNumber: contract.contractNumber,
+        customerName: contract.customerCompany || contract.customerName || 'Unknown Customer',
+        customerEmail: contract.customerEmail || '',
+        region: contract.region || 'NA',
+        invoiceDate: String(contract.customerConfirmedAt || contract.createdAt || new Date().toISOString()).split('T')[0],
+        dueDate: String(contract.customerConfirmedAt || contract.createdAt || new Date().toISOString()).split('T')[0],
+        totalAmount,
+        paidAmount,
+        remainingAmount,
+        currency: contract.currency || 'USD',
+        status: paidAmount > 0
+          ? (remainingAmount <= 0 ? 'paid' : 'partially_paid')
+          : contract.status === 'deposit_uploaded'
+            ? 'proof_uploaded'
+            : 'pending',
+        paymentTerms: contract.paymentTerms || '',
+        products: Array.isArray(contract.products)
+          ? contract.products.map((product: any) => ({
+              name: product.productName || product.name || 'Product',
+              quantity: Number(product.quantity || 0),
+              unitPrice: Number(product.unitPrice || 0),
+              totalPrice: Number(product.amount || (Number(product.quantity || 0) * Number(product.unitPrice || 0))),
+            }))
+          : [],
+        paymentHistory: paidAmount > 0
+          ? [{
+              date: depositReceiptProof.receiptDate || String(new Date().toISOString()).split('T')[0],
+              amount: paidAmount,
+              method: 'T/T',
+              reference: depositReceiptProof.bankReference || '',
+              receivedBy: currentUser?.email || 'finance@cosunchina.com',
+              notes: depositReceiptProof.notes || 'Backfilled from linked sales contract receipt proof',
+              proofUrl: depositReceiptProof.fileUrl,
+              proofFileName: depositReceiptProof.fileName,
+            }]
+          : [],
+        depositProof: normalizeCustomerProof(
+          linkedOrder?.depositPaymentProof || contract.depositProof,
+          contract.depositAmount,
+          contract.currency || 'USD',
+        ),
+        balanceProof: linkedOrder?.balancePaymentProof || undefined,
+        createdBy: currentUser?.email || 'finance@cosunchina.com',
+        notes: `Auto-backfilled from sales contract status ${contract.status}`,
+      });
+    });
+  }, [accountsReceivable, addAccountReceivable, contracts, currentUser?.email, orderLookup]);
+
+  // 🔥 筛选需要财务处理的订单（优先使用AR，其次回退到合同）
   const receivableOrders = useMemo(() => {
-    return orders.filter(order => {
-      // 只显示有合同编号的订单（以SC-开头）
+    const rows: any[] = [];
+    const seen = new Set<string>();
+    const financeContractStatuses = new Set(['customer_confirmed', 'deposit_uploaded', 'deposit_confirmed', 'balance_uploaded', 'balance_confirmed', 'completed']);
+
+    accountsReceivable.forEach((ar) => {
+      if (!ar?.orderNumber?.startsWith('SC-')) {
+        return;
+      }
+      const linkedOrder = orderLookup.get(ar.orderNumber);
+      const linkedContract = contractLookup.get(ar.contractNumber || ar.orderNumber);
+      const contractWorkflow = linkedContract?.documentRenderMeta?.erpWorkflow || {};
+      const latestPayment = Array.isArray(ar.paymentHistory) ? ar.paymentHistory[ar.paymentHistory.length - 1] : undefined;
+      const totalAmount = Number(ar.totalAmount || linkedOrder?.totalAmount || linkedContract?.totalAmount || 0);
+      const currency = ar.currency || linkedOrder?.currency || linkedContract?.currency || 'USD';
+      const depositPaymentProof = normalizeCustomerProof(
+        ar.depositProof || linkedOrder?.depositPaymentProof || linkedContract?.depositProof,
+        linkedContract?.depositAmount,
+        currency,
+      );
+      const depositReceiptProof = normalizeReceiptProof(
+        linkedOrder?.depositReceiptProof
+          || contractWorkflow.depositReceiptProof
+          || contractWorkflow.financeReceiptProof
+          || (latestPayment ? {
+            actualAmount: latestPayment.amount,
+            receiptDate: latestPayment.date,
+            bankReference: latestPayment.reference,
+            fileUrl: latestPayment.proofUrl,
+            fileName: latestPayment.proofFileName,
+          } : undefined),
+        linkedContract?.depositAmount,
+        currency,
+      );
+      const balancePaymentProof = ar.balanceProof || linkedOrder?.balancePaymentProof || undefined;
+      const balanceReceiptProof = normalizeReceiptProof(
+        linkedOrder?.balanceReceiptProof
+          || contractWorkflow.balanceReceiptProof
+          || contractWorkflow.financeBalanceReceiptProof,
+        linkedContract?.balanceAmount,
+        currency,
+      );
+      const depositExpectedAmount = resolveExpectedDepositAmount({
+        totalAmount,
+        contract: linkedContract,
+        depositPaymentProof,
+        depositReceiptProof,
+      });
+      const balanceExpectedAmount = resolveExpectedBalanceAmount({
+        totalAmount,
+        contract: linkedContract,
+        balancePaymentProof,
+        balanceReceiptProof,
+        depositAmount: depositExpectedAmount,
+      });
+      const receivedAmount =
+        toPositiveNumber(depositReceiptProof?.actualAmount)
+        + toPositiveNumber(balanceReceiptProof?.actualAmount);
+      const statusSnapshot = deriveReceivableStatus({
+        totalAmount,
+        receivedAmount,
+        paymentMode: linkedContract?.paymentMode || null,
+        balanceTrigger: linkedContract?.balanceTrigger || null,
+        contractStatus: linkedContract?.status,
+        depositProof: depositPaymentProof,
+        depositReceiptProof,
+        balanceProof: balancePaymentProof,
+        balanceReceiptProof,
+      });
+
+      rows.push({
+        id: ar.id,
+        orderRecordId: linkedOrder?.id || null,
+        orderNumber: ar.orderNumber,
+        customer: ar.customerName || linkedOrder?.customer || linkedContract?.customerCompany || linkedContract?.customerName || 'Unknown Customer',
+        customerEmail: ar.customerEmail || linkedOrder?.customerEmail || linkedContract?.customerEmail || '',
+        totalAmount,
+        currency,
+        status: ar.status,
+        depositPaymentProof,
+        depositReceiptProof,
+        balancePaymentProof,
+        balanceReceiptProof,
+        depositExpectedAmount,
+        balanceExpectedAmount,
+        arNumber: ar.arNumber,
+        contractStatus: linkedContract?.status,
+        statusSnapshot,
+        source: 'accounts_receivable',
+      });
+      seen.add(ar.orderNumber);
+    });
+
+    contracts.forEach((contract) => {
+      if (!contract?.contractNumber?.startsWith('SC-')) {
+        return;
+      }
+      if (seen.has(contract.contractNumber) || !financeContractStatuses.has(String(contract.status || ''))) {
+        return;
+      }
+      const linkedOrder = orderLookup.get(contract.contractNumber);
+      const contractWorkflow = contract.documentRenderMeta?.erpWorkflow || {};
+      const totalAmount = Number(contract.totalAmount || linkedOrder?.totalAmount || 0);
+      const currency = contract.currency || linkedOrder?.currency || 'USD';
+      const depositPaymentProof = normalizeCustomerProof(
+        linkedOrder?.depositPaymentProof || contract.depositProof,
+        contract.depositAmount,
+        currency,
+      );
+      const depositReceiptProof = normalizeReceiptProof(
+        linkedOrder?.depositReceiptProof || contractWorkflow.depositReceiptProof || contractWorkflow.financeReceiptProof,
+        contract.depositAmount,
+        currency,
+      );
+      const balancePaymentProof = linkedOrder?.balancePaymentProof || undefined;
+      const balanceReceiptProof = normalizeReceiptProof(
+        linkedOrder?.balanceReceiptProof || contractWorkflow.balanceReceiptProof || contractWorkflow.financeBalanceReceiptProof,
+        contract.balanceAmount,
+        currency,
+      );
+      const depositExpectedAmount = resolveExpectedDepositAmount({
+        totalAmount,
+        contract,
+        depositPaymentProof,
+        depositReceiptProof,
+      });
+      const balanceExpectedAmount = resolveExpectedBalanceAmount({
+        totalAmount,
+        contract,
+        balancePaymentProof,
+        balanceReceiptProof,
+        depositAmount: depositExpectedAmount,
+      });
+      const receivedAmount =
+        toPositiveNumber(depositReceiptProof?.actualAmount)
+        + toPositiveNumber(balanceReceiptProof?.actualAmount);
+      const statusSnapshot = deriveReceivableStatus({
+        totalAmount,
+        receivedAmount,
+        paymentMode: contract.paymentMode || null,
+        balanceTrigger: contract.balanceTrigger || null,
+        contractStatus: contract.status,
+        depositProof: depositPaymentProof,
+        depositReceiptProof,
+        balanceProof: balancePaymentProof,
+        balanceReceiptProof,
+      });
+      rows.push({
+        id: contract.id,
+        orderRecordId: linkedOrder?.id || null,
+        orderNumber: contract.contractNumber,
+        customer: contract.customerCompany || contract.customerName || linkedOrder?.customer || 'Unknown Customer',
+        customerEmail: contract.customerEmail || linkedOrder?.customerEmail || '',
+        totalAmount,
+        currency,
+        status: contract.status,
+        depositPaymentProof,
+        depositReceiptProof,
+        balancePaymentProof,
+        balanceReceiptProof,
+        depositExpectedAmount,
+        balanceExpectedAmount,
+        contractStatus: contract.status,
+        statusSnapshot,
+        source: 'sales_contract',
+      });
+      seen.add(contract.contractNumber);
+    });
+
+    return rows.filter((order) => {
       if (!order.orderNumber?.startsWith('SC-')) {
         return false;
       }
-      
-      // 搜索筛选
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         return (
-          order.orderNumber.toLowerCase().includes(term) ||
-          order.customer.toLowerCase().includes(term) ||
-          order.customerEmail?.toLowerCase().includes(term)
+          String(order.orderNumber || '').toLowerCase().includes(term) ||
+          String(order.customer || '').toLowerCase().includes(term) ||
+          String(order.customerEmail || '').toLowerCase().includes(term)
         );
       }
-      
       return true;
     });
-  }, [orders, searchTerm]);
+  }, [accountsReceivable, contractLookup, contracts, orderLookup, searchTerm]);
   
   // 🔥 统计信息
   const stats = useMemo(() => {
     const total = receivableOrders.length;
-    const depositPending = receivableOrders.filter(o => o.depositPaymentProof && !o.depositPaymentProof.status).length;
-    const balancePending = receivableOrders.filter(o => o.balancePaymentProof && !o.balancePaymentProof.status).length;
-    const depositReceived = receivableOrders.filter(o => o.depositReceiptProof).length;
-    const balanceReceived = receivableOrders.filter(o => o.balanceReceiptProof).length;
+    const depositPending = receivableOrders.filter(
+      (o) => o.statusSnapshot?.depositStageLabel === '待财务确认定金到账',
+    ).length;
+    const balancePending = receivableOrders.filter(
+      (o) => o.statusSnapshot?.balanceStageLabel === '待财务确认余款到账',
+    ).length;
+    const depositReceived = receivableOrders.filter(
+      (o) => o.statusSnapshot?.depositStageLabel === '定金已确认到账',
+    ).length;
+    const balanceReceived = receivableOrders.filter(
+      (o) => o.statusSnapshot?.balanceStageLabel === '已结清'
+        || o.statusSnapshot?.balanceStageLabel === '余款已确认到账',
+    ).length;
     
     // 🔥 计算金额统计
     const totalReceivable = receivableOrders.reduce((sum, o) => sum + o.totalAmount, 0);
-    const depositAmount = receivableOrders
-      .filter(o => o.depositReceiptProof)
-      .reduce((sum, o) => sum + (o.depositReceiptProof?.actualAmount || 0), 0);
-    const balanceAmount = receivableOrders
-      .filter(o => o.balanceReceiptProof)
-      .reduce((sum, o) => sum + (o.balanceReceiptProof?.actualAmount || 0), 0);
+    const depositAmount = receivableOrders.reduce((sum, o) => sum + toPositiveNumber(o.depositExpectedAmount), 0);
+    const balanceAmount = receivableOrders.reduce((sum, o) => sum + toPositiveNumber(o.balanceExpectedAmount), 0);
     
     return {
       total,
@@ -200,6 +590,12 @@ export function AccountsReceivableList() {
       return;
     }
 
+    const normalizedReceiptDate = normalizeReceiptDateInput(receiptData.receiptDate);
+    if (!normalizedReceiptDate || Number.isNaN(new Date(normalizedReceiptDate).getTime())) {
+      toast.error('请填写正确的收款日期！');
+      return;
+    }
+
     if (!selectedReceiptFile && !receiptData.fileUrl) {
       toast.error('请先上传收款凭证文件！');
       return;
@@ -210,7 +606,7 @@ export function AccountsReceivableList() {
       let fileUrl = receiptData.fileUrl;
       let fileName = receiptData.fileName;
 
-      const orderUid = selectedOrder.id || selectedOrder.orderNumber;
+      const orderUid = selectedOrder.orderRecordId || null;
       const type = proofType === 'depositReceipt' ? 'deposit' : 'balance';
 
       // 上传文件到 Supabase Storage
@@ -227,16 +623,77 @@ export function AccountsReceivableList() {
 
       const proofData = {
         actualAmount: receiptData.actualAmount,
-        receiptDate: receiptData.receiptDate,
+        receiptDate: normalizedReceiptDate,
         bankReference: receiptData.bankReference,
         notes: receiptData.notes || null,
         fileUrl: fileUrl || null,
         fileName: fileName || null,
         uploadedAt: new Date().toISOString(),
       };
-      const proofField = type === 'deposit' ? 'deposit_receipt_proof' : 'balance_receipt_proof';
-      await orderService.upsert({ id: orderUid, [proofField]: proofData });
-      updateOrder(orderUid, { [`${type}ReceiptProof`]: proofData });
+      if (orderUid) {
+        const proofField = type === 'deposit' ? 'deposit_receipt_proof' : 'balance_receipt_proof';
+        await orderService.upsert({ id: orderUid, [proofField]: proofData });
+        updateOrder(orderUid, { [`${type}ReceiptProof`]: proofData });
+      }
+
+      const matchedAR = accountsReceivable.find((ar) => ar.orderNumber === selectedOrder.orderNumber);
+      if (matchedAR) {
+        const paymentAmount = receiptData.actualAmount;
+        const nextPaidAmount = (matchedAR.paidAmount || 0) + paymentAmount;
+        const nextRemainingAmount = Math.max((matchedAR.totalAmount || 0) - nextPaidAmount, 0);
+        const nextStatus = nextRemainingAmount <= 0 ? 'paid' : 'partially_paid';
+
+        updateARByOrderNumber(selectedOrder.orderNumber, {
+          paidAmount: nextPaidAmount,
+          remainingAmount: nextRemainingAmount,
+          status: nextStatus,
+          paymentHistory: [
+            ...(matchedAR.paymentHistory || []),
+            {
+              date: normalizedReceiptDate,
+              amount: paymentAmount,
+              method: 'T/T',
+              reference: receiptData.bankReference,
+              receivedBy: currentUser?.email || 'finance@cosunchina.com',
+              notes: receiptData.notes || `${type === 'deposit' ? 'Deposit' : 'Balance'} receipt confirmed by finance`,
+              proofUrl: fileUrl || undefined,
+              proofFileName: fileName || undefined,
+            },
+          ],
+        });
+
+        addPayment({
+          receivableNumber: matchedAR.arNumber,
+          receivableId: matchedAR.id,
+          orderNumber: matchedAR.orderNumber,
+          customerName: matchedAR.customerName,
+          customerEmail: matchedAR.customerEmail,
+          amount: paymentAmount,
+          currency: matchedAR.currency,
+          paymentDate: normalizedReceiptDate,
+          paymentMethod: 'T/T',
+          bankReference: receiptData.bankReference,
+          receivedBy: currentUser?.email || 'finance@cosunchina.com',
+          notes: receiptData.notes || `${type === 'deposit' ? 'Deposit' : 'Balance'} receipt uploaded by finance`,
+          proofUrl: fileUrl || undefined,
+          proofFileName: fileName || undefined,
+          status: 'confirmed',
+          region: matchedAR.region,
+          createdBy: currentUser?.email || 'finance@cosunchina.com',
+        });
+      }
+
+      if (type === 'deposit') {
+        const relatedContract = getContractByContractNumber(selectedOrder.orderNumber);
+        if (relatedContract?.id || relatedContract?.contractNumber) {
+          await confirmDeposit(
+            relatedContract.contractNumber || relatedContract.id,
+            currentUser?.email || 'finance@cosunchina.com',
+            receiptData.notes || `Bank reference: ${receiptData.bankReference}`,
+          );
+        }
+      }
+
       window.dispatchEvent(new CustomEvent('ordersUpdated'));
 
       toast.success(`${proofType === 'depositReceipt' ? '定金' : '余款'}收款凭证已上传！`, {
@@ -321,126 +778,14 @@ export function AccountsReceivableList() {
     order: any, 
     proofType: 'depositPayment' | 'depositReceipt' | 'balancePayment' | 'balanceReceipt'
   ) => {
-    const isPayment = proofType.includes('Payment');
-    const isDeposit = proofType.includes('deposit');
-    
-    const proofField = isPayment 
-      ? (isDeposit ? 'depositPaymentProof' : 'balancePaymentProof')
-      : (isDeposit ? 'depositReceiptProof' : 'balanceReceiptProof');
-    
-    const proof = order[proofField];
-    
-    // 🔥 客户付款凭证
-    if (isPayment) {
-      if (!proof) {
-        return (
-          <div className="space-y-1.5">
-            <Badge className="h-5 px-2 text-xs bg-gray-100 text-gray-500 border-gray-300 flex items-center gap-1 w-fit">
-              <Clock className="h-3 w-3" />
-              待客户上传
-            </Badge>
-            <div className="text-[10px] text-gray-400">客户尚未上传付款凭证</div>
-          </div>
-        );
-      }
-      
-      // 已上传 - 🔥 优化：Badge和眼睛图标单行显示
-      return (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <Badge className="h-5 px-2 text-xs bg-blue-100 text-blue-700 border-blue-300 flex items-center gap-1 w-fit">
-              <FileCheck className="h-3 w-3" />
-              已上传
-            </Badge>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => handleOpenView(order, proof, proofType)}
-              className="h-5 w-5 p-0 hover:bg-blue-50"
-              title="查看客户付款凭证"
-            >
-              <Eye className="h-3 w-3 text-blue-600" />
-            </Button>
-          </div>
-          <div className="text-[11px] font-semibold text-gray-900">
-            {order.currency} {proof.amount?.toLocaleString()}
-          </div>
-          <div className="text-[10px] text-gray-500">
-            {new Date(proof.uploadedAt).toLocaleDateString('zh-CN')}
-          </div>
-        </div>
-      );
-    }
-    
-    // 🔥 财务收款凭证
-    else {
-      // 检查客户是否已上传付款凭证
-      const paymentProofField = isDeposit ? 'depositPaymentProof' : 'balancePaymentProof';
-      const paymentProof = order[paymentProofField];
-      
-      if (!paymentProof) {
-        return (
-          <div className="space-y-1.5">
-            <Badge className="h-5 px-2 text-xs bg-gray-50 text-gray-400 border-gray-200 flex items-center gap-1 w-fit">
-              <Clock className="h-3 w-3" />
-              等待客户付款
-            </Badge>
-            <div className="text-[10px] text-gray-400">客户需先上传付款凭证</div>
-          </div>
-        );
-      }
-      
-      if (!proof) {
-        // 待上传 - 🔥 优化：Badge和上传图标单行显示
-        return (
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <Badge className="h-5 px-2 text-xs bg-yellow-100 text-yellow-700 border-yellow-300 flex items-center gap-1 w-fit">
-                <AlertCircle className="h-3 w-3" />
-                待上传
-              </Badge>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleOpenUpload(order, proofType as 'depositReceipt' | 'balanceReceipt')}
-                className="h-5 w-5 p-0 hover:bg-green-50"
-                title="上传财务收款凭证"
-              >
-                <Upload className="h-3 w-3 text-green-600" />
-              </Button>
-            </div>
-            <div className="text-[10px] text-gray-600">请上传收款凭证</div>
-          </div>
-        );
-      }
-      
-      // 已上传
-      return (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <Badge className="h-5 px-2 text-xs bg-green-100 text-green-700 border-green-300 flex items-center gap-1 w-fit">
-              <CheckCircle className="h-3 w-3" />
-              已上传
-            </Badge>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => handleOpenView(order, proof, proofType)}
-              className="h-5 w-5 p-0 hover:bg-blue-50"
-              title="查看财务收款凭证"
-            >
-              <Eye className="h-3 w-3 text-blue-600" />
-            </Button>
-          </div>
-          <div className="text-[11px] font-semibold text-green-700">
-            {order.currency} {proof.actualAmount?.toLocaleString()}
-          </div>
-          <div className="text-[10px] text-gray-500">
-            {new Date(proof.receiptDate).toLocaleDateString('zh-CN')}
-          </div>
-        </div>
-      );
-    }
+    return (
+      <ReceivableProofCell
+        order={order}
+        proofType={proofType}
+        onView={handleOpenView}
+        onUpload={handleOpenUpload}
+      />
+    );
   };
   
   return (
@@ -617,8 +962,8 @@ export function AccountsReceivableList() {
       
       {/* 🔥 上传收款凭证Dialog */}
       <Dialog open={uploadDialog} onOpenChange={setUploadDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden p-0 flex flex-col">
+          <DialogHeader className="px-6 pt-6 pb-0 shrink-0">
             <DialogTitle className="text-lg flex items-center gap-2">
               <Upload className="h-5 w-5 text-[#F96302]" />
               上传{proofType === 'depositReceipt' ? '定金' : '余款'}收款凭证
@@ -628,7 +973,7 @@ export function AccountsReceivableList() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="space-y-3 py-4">
+          <div className="space-y-3 py-4 px-6 overflow-y-auto flex-1">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>实际到账金额 <span className="text-red-500">*</span></Label>
@@ -643,9 +988,10 @@ export function AccountsReceivableList() {
               <div>
                 <Label>收款日期 <span className="text-red-500">*</span></Label>
                 <Input
-                  type="date"
+                  type="text"
                   value={receiptData.receiptDate}
-                  onChange={(e) => setReceiptData(prev => ({ ...prev, receiptDate: e.target.value }))}
+                  onChange={(e) => setReceiptData(prev => ({ ...prev, receiptDate: normalizeReceiptDateInput(e.target.value) }))}
+                  placeholder="YYYY-MM-DD 或 YYYY/MM/DD"
                   className="mt-1"
                 />
               </div>
@@ -671,7 +1017,7 @@ export function AccountsReceivableList() {
                         <img
                           src={selectedReceiptPreview}
                           alt="收款凭证预览"
-                          className="max-h-44 max-w-full mx-auto rounded border object-contain bg-gray-50"
+                          className="max-h-[40vh] max-w-full mx-auto rounded border object-contain bg-gray-50"
                         />
                       ) : (
                         <FileCheck className="h-8 w-8 mx-auto text-green-600 mb-2" />
@@ -725,7 +1071,7 @@ export function AccountsReceivableList() {
             </div>
           </div>
           
-          <DialogFooter>
+          <DialogFooter className="px-6 pb-6 pt-4 shrink-0 border-t bg-white">
             <Button variant="outline" onClick={() => {
               setUploadDialog(false);
               resetForm();
@@ -777,7 +1123,7 @@ export function AccountsReceivableList() {
                   <div>
                     <Label className="text-xs text-gray-500">上传时间</Label>
                     <div className="text-sm text-gray-700">
-                      {new Date(selectedProof.uploadedAt).toLocaleString('zh-CN')}
+                      {formatDisplayDateTime(selectedProof.uploadedAt)}
                     </div>
                   </div>
                 </div>
@@ -798,7 +1144,7 @@ export function AccountsReceivableList() {
                   <div>
                     <Label className="text-xs text-gray-500">收款日期</Label>
                     <div className="text-sm text-gray-700">
-                      {new Date(selectedProof.receiptDate).toLocaleDateString('zh-CN')}
+                      {formatDisplayDate(selectedProof.receiptDate)}
                     </div>
                   </div>
                 )}
@@ -818,7 +1164,7 @@ export function AccountsReceivableList() {
                     <Label className="text-sm font-medium text-blue-900">凭证文件</Label>
                   </div>
                   <div className="text-xs text-blue-700 mb-3">
-                    {selectedProof.fileName || 'proof-file.pdf'}
+                    {getProofFileName(selectedProof)}
                   </div>
                   
                   {/* 🔥 凭证预览区域 */}
@@ -830,18 +1176,25 @@ export function AccountsReceivableList() {
                       </Badge>
                     </div>
                     <div className="p-3 bg-gray-50">
-                      <img 
-                        src={previewImage || resolveBackendPublicUrl(selectedProof.fileUrl)}
-                        alt="凭证预览"
-                        className="w-full h-auto rounded border border-gray-300 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-                        onClick={() => {
-                          const previewUrl = previewImage || resolveBackendPublicUrl(selectedProof.fileUrl);
-                          if (previewUrl) window.open(previewUrl, '_blank');
-                        }}
-                      />
-                      <p className="text-[10px] text-gray-500 text-center mt-2">
-                        点击图片可在新窗口中查看完整凭证
-                      </p>
+                      {isImageProof(selectedProof) ? (
+                        <>
+                          <img 
+                            src={previewImage || resolveBackendPublicUrl(selectedProof.fileUrl)}
+                            alt="凭证预览"
+                            className="w-full h-auto rounded border border-gray-300 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                            onClick={() => openProofInNewWindow(selectedProof)}
+                          />
+                          <p className="text-[10px] text-gray-500 text-center mt-2">
+                            点击图片可在新窗口中查看完整凭证
+                          </p>
+                        </>
+                      ) : (
+                        <div className="rounded border border-gray-300 bg-white p-6 text-center">
+                          <FileText className="h-10 w-10 mx-auto text-blue-500 mb-2" />
+                          <p className="text-sm text-gray-700 mb-1">该凭证为文档文件，当前不支持内嵌图片预览</p>
+                          <p className="text-[10px] text-gray-500">请使用下方按钮在新窗口中打开原文件</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                   
@@ -851,8 +1204,7 @@ export function AccountsReceivableList() {
                       variant="outline"
                       className="flex-1 h-8 text-xs"
                       onClick={() => {
-                        const previewUrl = previewImage || resolveBackendPublicUrl(selectedProof.fileUrl);
-                        if (previewUrl) window.open(previewUrl, '_blank');
+                        openProofInNewWindow(selectedProof);
                       }}
                     >
                       <Eye className="h-3 w-3 mr-1" />
@@ -863,9 +1215,7 @@ export function AccountsReceivableList() {
                       variant="outline"
                       className="flex-1 h-8 text-xs"
                       onClick={() => {
-                        toast.success('下载功能', {
-                          description: '凭证文件下载功能已触发。在实际环境中会下载真实的PDF或图片文件。'
-                        });
+                        downloadProofFile(selectedProof);
                       }}
                     >
                       <Download className="h-3 w-3 mr-1" />

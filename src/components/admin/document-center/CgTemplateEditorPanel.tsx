@@ -3,6 +3,7 @@ import React from 'react';
 import type { PurchaseOrderData } from '../../documents/templates/PurchaseOrderDocument';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { Textarea } from '../../ui/textarea';
 import { TemplateTableColumnsPanel } from './TemplateTableColumnsPanel';
 import { TemplateVersionActionsCard } from './TemplateVersionActionsCard';
@@ -109,6 +110,28 @@ export function CgTemplateEditorPanel({
               onChange={(e) => updateCgTemplateData('poDate', e.target.value)}
               className="mt-1 h-7 text-xs"
             />
+          </div>
+          <div>
+            <Label className="text-[11px] text-gray-500">结算币种</Label>
+            <Select
+              value={String(cgTemplateData.terms.currency || 'CNY').toUpperCase() === 'USD' ? 'USD' : 'CNY'}
+              onValueChange={(value) => {
+                const nextCurrency = value === 'USD' ? 'USD' : 'CNY';
+                updateCgTemplateData('terms', { ...cgTemplateData.terms, currency: nextCurrency });
+                updateCgTemplateData(
+                  'products',
+                  cgTemplateData.products.map((item) => ({ ...item, currency: nextCurrency })),
+                );
+              }}
+            >
+              <SelectTrigger className="mt-1 h-7 text-xs">
+                <SelectValue placeholder="选择币种" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="CNY">人民币 (CNY)</SelectItem>
+                <SelectItem value="USD">美元 (USD)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="col-span-2">
             <Label className="text-[11px] text-gray-500">要求交期</Label>

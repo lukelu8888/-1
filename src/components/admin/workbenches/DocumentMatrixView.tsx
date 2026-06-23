@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
+import { buildPaymentTermsText } from '../../../lib/paymentFlow';
 
 interface DocumentMatrixViewProps {
   onBack?: () => void;
@@ -107,7 +108,7 @@ function DocumentPreviewDialog({ doc, onClose }: DocumentPreviewDialogProps) {
           </table>
           
           <div className="mt-4 text-xs space-y-2">
-            <p><span className="font-bold">Payment Terms:</span> 30% deposit, 70% before shipment</p>
+            <p><span className="font-bold">Payment Terms:</span> {buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment')}</p>
             <p><span className="font-bold">Delivery Time:</span> 30 days after deposit</p>
             <p><span className="font-bold">Port of Loading:</span> Xiamen, China</p>
             <p><span className="font-bold">Destination:</span> New York, USA</p>

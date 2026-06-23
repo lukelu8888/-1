@@ -1,14 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Trash2, FileText, Eye, Edit, Send } from 'lucide-react';
+import { Search, FileText } from 'lucide-react';
 import { XJ } from '../../../contexts/XJContext';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { TabsContent } from '../../ui/tabs';
 import {
   ERP_LIST_UI_SPEC_V1,
+  getErpListBatchDeletePillClass,
+  getErpListBatchDeletePillStyle,
   getErpListFilterPillClass,
   getErpListFilterPillStyle,
 } from '../../shared/erpListUiSpec';
+import { useResizableTableColumns } from '../../shared/useResizableTableColumns';
 
 type XJManagementTabProps = {
   xjs: XJ[];
@@ -23,6 +26,51 @@ type XJManagementTabProps = {
   handleEditXJ: (xj: XJ) => void;
   handleSubmitXJToSupplier: (xj: XJ) => void;
 };
+
+type XJColumnKey =
+  | 'selection'
+  | 'index'
+  | 'date'
+  | 'number'
+  | 'supplier'
+  | 'products'
+  | 'status'
+  | 'actions';
+
+const XJ_COLUMN_ORDER: XJColumnKey[] = [
+  'selection',
+  'index',
+  'date',
+  'number',
+  'supplier',
+  'products',
+  'status',
+  'actions',
+];
+
+const XJ_COLUMN_DEFAULT_WIDTHS: Record<XJColumnKey, number> = {
+  selection: 52,
+  index: 56,
+  date: 170,
+  number: 220,
+  supplier: 220,
+  products: 92,
+  status: 120,
+  actions: 280,
+};
+
+const XJ_COLUMN_MIN_WIDTHS: Record<XJColumnKey, number> = {
+  selection: 52,
+  index: 56,
+  date: 140,
+  number: 180,
+  supplier: 180,
+  products: 88,
+  status: 110,
+  actions: 220,
+};
+
+const XJ_TABLE_UI_PREFERENCE_KEY = 'xj_management_table_column_widths_v1';
 
 export const XJManagementTab: React.FC<XJManagementTabProps> = ({
   xjs,
@@ -39,6 +87,17 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
 }) => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'sent' | 'pending' | 'quoted'>('all');
   const [expandedRelatedIds, setExpandedRelatedIds] = useState<string[]>([]);
+  const {
+    getColumnStyle,
+    renderResizeHandle,
+    renderHeaderCell,
+  } = useResizableTableColumns<XJColumnKey>({
+    storageKey: XJ_TABLE_UI_PREFERENCE_KEY,
+    order: XJ_COLUMN_ORDER,
+    defaults: XJ_COLUMN_DEFAULT_WIDTHS,
+    minWidths: XJ_COLUMN_MIN_WIDTHS,
+    fixedColumns: ['selection', 'index'],
+  });
   const displayXJs = useMemo(() => {
     if (statusFilter === 'all') return filteredXJs;
     return filteredXJs.filter((xj) => String((xj.status as any) || '').trim() === statusFilter);
@@ -94,13 +153,11 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
               variant="outline"
               onClick={handleBatchDeleteXJs}
               disabled={selectedXJIds.length === 0}
-              style={selectedXJIds.length > 0 ? getErpListFilterPillStyle(true) : undefined}
-              className={(selectedXJIds.length > 0
-                ? getErpListFilterPillClass(true)
-                : getErpListFilterPillClass(false))
+              style={getErpListBatchDeletePillStyle(selectedXJIds.length > 0)}
+              className={getErpListBatchDeletePillClass(selectedXJIds.length > 0)
                 .replace('h-9', 'h-8')
                 .replace('px-4', 'px-3')
-                .replace('text-slate-700', 'text-slate-900') + ' disabled:opacity-100 disabled:text-slate-900 disabled:bg-white disabled:border-slate-200'}
+                .replace('text-[12px]', ERP_LIST_UI_SPEC_V1.buttonTextClass)}
             >
               批量删除{selectedXJIds.length > 0 ? ` (${selectedXJIds.length})` : ''}
             </Button>
@@ -116,30 +173,44 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
         ) : (
           <div className="border border-gray-200 rounded bg-white flex flex-1 min-h-0 flex-col overflow-visible min-h-[calc(100dvh-360px)]">
             <div className="overflow-x-auto overflow-y-visible bg-white flex-1 rounded-[inherit] min-h-0">
-            <table className="min-w-max w-full text-[14px]">
+            <table className="w-full table-fixed text-[14px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                      checked={selectedXJIds.length === displayXJs.length && displayXJs.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedXJIds(displayXJs.map(r => r.id));
-                        } else {
-                          setSelectedXJIds([]);
-                        }
-                      }}
-                    />
+                  <th
+                    className="group relative overflow-hidden px-2 py-3 text-left font-semibold text-gray-700"
+                    style={getColumnStyle('selection')}
+                  >
+                    <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
+                        checked={selectedXJIds.length === displayXJs.length && displayXJs.length > 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedXJIds(displayXJs.map(r => r.id));
+                          } else {
+                            setSelectedXJIds([]);
+                          }
+                        }}
+                      />
+                    </div>
+                    {renderResizeHandle('selection', { hitAreaClassName: 'w-8 -right-4' })}
                   </th>
-                  <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">序号</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-32">日期</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-44">询价单号</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-40">供应商</th>
-                  <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-16">产品数</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700 w-20">状态</th>
-                  <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-40">操作</th>
+                  <th
+                    className="group relative overflow-hidden px-2 py-3 text-left font-semibold text-gray-700"
+                    style={getColumnStyle('index')}
+                  >
+                    <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                      <span className="block whitespace-nowrap text-[13px] font-semibold leading-4">序号</span>
+                    </div>
+                    {renderResizeHandle('index', { hitAreaClassName: 'w-8 -right-4' })}
+                  </th>
+                  {renderHeaderCell('date', '日期', 'text-left text-gray-700', { hitAreaClassName: 'w-8 -right-4' })}
+                  {renderHeaderCell('number', '询价单号', 'text-left text-gray-700')}
+                  {renderHeaderCell('supplier', '供应商', 'text-left text-gray-700')}
+                  {renderHeaderCell('products', '产品数', 'text-left text-gray-700')}
+                  {renderHeaderCell('status', '状态', 'text-left text-gray-700')}
+                  {renderHeaderCell('actions', '操作', 'text-left text-gray-700')}
                 </tr>
               </thead>
               <tbody>
@@ -150,7 +221,13 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                   const lockedByQuotation = hasDownstreamQuotationForXJ(xj);
                   const relatedRefs = Array.from(
                     new Set(
-                      [xj.requirementNo, xj.sourceRef]
+                      [
+                        xj.requirementNo,
+                        (xj as any).sourceQRNumber,
+                        (xj as any).sourceQrNumber,
+                        xj.sourceInquiryNumber,
+                        xj.sourceRef,
+                      ]
                         .map((value) => String(value || '').trim())
                         .filter(Boolean),
                     ),
@@ -159,7 +236,7 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
 
                   return (
                     <tr key={xj.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-                      <td className="py-2 px-2 text-center">
+                      <td className="py-2 px-2 text-left" style={getColumnStyle('selection')}>
                         <input
                           type="checkbox"
                           className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
@@ -173,10 +250,10 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                           }}
                         />
                       </td>
-                      <td className="py-2 px-2 text-center text-gray-500">
+                      <td className="py-2 px-2 text-left text-gray-500" style={getColumnStyle('index')}>
                         {idx + 1}
                       </td>
-                      <td className="py-2 px-2">
+                      <td className="py-2 px-2" style={getColumnStyle('date')}>
                         <div className="text-gray-900">
                           <span className="mr-1 text-[12px] text-gray-500">发送日期</span>
                           {formatDateOnly((xj as any).sentDate || xj.createdDate)}
@@ -186,7 +263,7 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                           {xj.quotationDeadline}
                         </div>
                       </td>
-                      <td className="py-2 px-2">
+                      <td className="py-2 px-2" style={getColumnStyle('number')}>
                         <div className="relative inline-block">
                         <button
                           type="button"
@@ -221,16 +298,16 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                         ) : null}
                         </div>
                       </td>
-                      <td className="py-2 px-2 whitespace-nowrap">
+                      <td className="py-2 px-2 whitespace-nowrap" style={getColumnStyle('supplier')}>
                         <div className="text-gray-900">{xj.supplierName}</div>
                         <div className="text-[12px] text-gray-500">{xj.supplierCode}</div>
                       </td>
-                      <td className="py-2 px-2 text-center">
+                      <td className="py-2 px-2 text-left" style={getColumnStyle('products')}>
                         <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
                           {xj.products?.length || 1}
                         </span>
                       </td>
-                      <td className="py-2 px-2">
+                      <td className="py-2 px-2" style={getColumnStyle('status')}>
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${
                           isDraft ? 'bg-gray-50 text-gray-700 border-gray-200' :
                           isSent ? 'bg-blue-50 text-blue-700 border-blue-200' :
@@ -245,8 +322,8 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                            xj.status}
                         </span>
                       </td>
-                      <td className="py-2 px-2 text-center">
-                        <div className="flex gap-1 justify-center">
+                      <td className="py-2 px-2 text-left" style={getColumnStyle('actions')}>
+                        <div className="flex gap-1 justify-start">
                           {/* 查看按钮：始终可用 */}
                           <Button
                             type="button"
@@ -255,7 +332,6 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                             onClick={() => openXJPreview(xj)}
                             className="h-6 text-[12px] px-2 border-blue-300 text-blue-600 hover:bg-blue-50"
                           >
-                            <Eye className="w-3 h-3 mr-1" />
                             查看
                           </Button>
                           {/* 编辑按钮：存在下游(BJ)后禁用 */}
@@ -270,7 +346,6 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                                 : 'border-gray-300 text-gray-600 hover:bg-gray-50'
                             }`}
                           >
-                            <Edit className="w-3 h-3 mr-1" />
                             编辑
                           </Button>
                           {/* 下推按钮：存在下游(BJ)后变灰禁用 */}
@@ -280,7 +355,6 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                               disabled
                               className="h-6 text-[12px] px-2 bg-gray-200 text-gray-400 cursor-not-allowed"
                             >
-                              <Send className="w-3 h-3 mr-1" />
                               已锁定
                             </Button>
                           ) : (
@@ -289,7 +363,6 @@ export const XJManagementTab: React.FC<XJManagementTabProps> = ({
                               onClick={() => handleSubmitXJToSupplier(xj)}
                               className="h-6 text-[12px] px-2 bg-[#F96302] hover:bg-[#E05502]"
                             >
-                              <Send className="w-3 h-3 mr-1" />
                               {isSent ? '重新下推' : '下推供应商'}
                             </Button>
                           )}

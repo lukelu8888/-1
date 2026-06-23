@@ -1,5 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Filter, Plus, Download, Eye, Edit2, DollarSign, Calendar, CheckCircle, Building2, Truck, FileText } from 'lucide-react';
+import { exportPaymentRecordBridgeService } from '../../lib/services/export-service/exportPaymentRecordBridgeService';
+import { exportPayableBridgeService } from '../../lib/services/export-service/exportPayableBridgeService';
+import { syncExportDocumentationBridgeFromOperations } from '../../lib/services/export-service/exportDocumentationBridgeWorkflowService';
+import { syncExportExecutionBridgeState } from '../../lib/services/export-service/syncExportExecutionBridgeState';
 
 /**
  * 💸 付款记录管理 - Admin Portal
@@ -163,10 +167,39 @@ export default function PaymentRecordManagement() {
   const [payeeTypeFilter, setPayeeTypeFilter] = useState<string>('all');
   const [regionFilter, setRegionFilter] = useState<string>('all');
   const [methodFilter, setMethodFilter] = useState<string>('all');
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const allPaymentRecords = useMemo(
+    () => [...exportPaymentRecordBridgeService.list(), ...mockPaymentRecords],
+    [refreshKey],
+  );
+
+  const handleConfirmExportPayment = (record: PaymentRecord) => {
+    if (!record.id.startsWith('export-payment-bridge-')) return
+    exportPaymentRecordBridgeService.update(record.id, {
+      status: 'completed',
+      paymentDate: new Date().toISOString().slice(0, 10),
+    })
+
+    const payableRecord = exportPayableBridgeService.list().find((item) => item.payableNo === record.payableNo)
+    if (payableRecord) {
+      exportPayableBridgeService.update(payableRecord.id, {
+        status: 'paid',
+        paidAmount: payableRecord.totalAmount,
+        unpaidAmount: 0,
+        lastPaymentDate: new Date().toISOString().slice(0, 10),
+        paymentCount: Math.max(payableRecord.paymentCount, 1),
+      })
+      syncExportDocumentationBridgeFromOperations(payableRecord.serviceOrderId, 'PaymentRecordManagement')
+      syncExportExecutionBridgeState(payableRecord.serviceOrderId)
+    }
+
+    setRefreshKey((value) => value + 1)
+  }
 
   // 筛选逻辑
   const filteredRecords = useMemo(() => {
-    return mockPaymentRecords.filter(record => {
+    return allPaymentRecords.filter(record => {
       const matchSearch = 
         record.paymentNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
         record.payeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -180,17 +213,17 @@ export default function PaymentRecordManagement() {
       
       return matchSearch && matchStatus && matchPayeeType && matchRegion && matchMethod;
     });
-  }, [searchTerm, statusFilter, payeeTypeFilter, regionFilter, methodFilter]);
+  }, [allPaymentRecords, searchTerm, statusFilter, payeeTypeFilter, regionFilter, methodFilter]);
 
   // 统计数据
   const stats = useMemo(() => {
-    const total = mockPaymentRecords.reduce((sum, r) => sum + r.amount, 0);
-    const completed = mockPaymentRecords.filter(r => r.status === 'completed').reduce((sum, r) => sum + r.amount, 0);
-    const pending = mockPaymentRecords.filter(r => r.status === 'pending').reduce((sum, r) => sum + r.amount, 0);
-    const count = mockPaymentRecords.length;
+    const total = allPaymentRecords.reduce((sum, r) => sum + r.amount, 0);
+    const completed = allPaymentRecords.filter(r => r.status === 'completed').reduce((sum, r) => sum + r.amount, 0);
+    const pending = allPaymentRecords.filter(r => r.status === 'pending').reduce((sum, r) => sum + r.amount, 0);
+    const count = allPaymentRecords.length;
 
     return { total, completed, pending, count };
-  }, []);
+  }, [allPaymentRecords]);
 
   // 状态标签
   const getStatusBadge = (status: string) => {
@@ -473,6 +506,14 @@ export default function PaymentRecordManagement() {
                       <button className="p-1 hover:bg-gray-100 rounded transition-colors" title="凭证">
                         <FileText className="w-4 h-4 text-gray-600" />
                       </button>
+                      {record.id.startsWith('export-payment-bridge-') && record.status !== 'completed' && (
+                        <button
+                          className="px-2 py-1 bg-[#F96302] text-white rounded text-[10px] hover:bg-[#E55A02] transition-colors"
+                          onClick={() => handleConfirmExportPayment(record)}
+                        >
+                          确认付款
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

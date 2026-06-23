@@ -269,6 +269,10 @@ export interface ProductCenterService {
     asOfDate?: string;
   }): Promise<EffectiveCustomerPriceResult>;
 
+  // ── Categories ───────────────────────────────────────────────────────────
+  upsertCategory(input: ProductCategory): Promise<ProductCategory>;
+  removeCategory(id: string): Promise<void>;
+
   // ── Phase 5a: media upload ───────────────────────────────────────────────
 
   /**
@@ -496,6 +500,13 @@ export const mockProductCenterService: ProductCenterService = {
     return input;
   },
   async removeAttributeValue() {
+    /* noop */
+  },
+
+  async upsertCategory(input) {
+    return input;
+  },
+  async removeCategory() {
     /* noop */
   },
 

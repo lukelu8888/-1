@@ -8,7 +8,6 @@ import type {
   PermissionScopeId,
 } from '../../../lib/services/permissionCenterService';
 import { Input } from '../../ui/input';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
 
 interface ActionsDataScopeTabProps {
   matrixSearch: string;
@@ -64,11 +63,30 @@ export function ActionsDataScopeTab({
   onSetScopeForRole,
 }: ActionsDataScopeTabProps) {
   const currentScope = (scopeMatrix[selectedRoleId]?.[selectedModule.id] || 'assigned') as PermissionScopeId;
+  const getActionHeaderLines = (action: PermissionActionId) => {
+    const fullLabel = actionLabel[action];
+    const match = fullLabel.match(/^(.*?)\s*\((.*?)\)$/);
+
+    if (!match) {
+      return {
+        primary: actionShortLabel[action] || fullLabel,
+        secondary: '',
+      };
+    }
+
+    return {
+      primary: match[1].trim(),
+      secondary: `(${match[2].trim()})`,
+    };
+  };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white">
-      <div className="flex min-w-0 divide-x divide-slate-200">
-        <div className="flex w-[324px] min-w-[324px] flex-col bg-white">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div
+        className="grid min-w-0 min-h-0 flex-1 divide-x divide-slate-200"
+        style={{ gridTemplateColumns: 'clamp(280px, 22vw, 324px) minmax(0, 1fr) clamp(320px, 24vw, 340px)' }}
+      >
+        <div className="flex min-h-0 min-w-0 flex-col bg-white">
           <div className="flex min-h-[74px] items-center border-b border-slate-200 px-4">
             <div className="relative w-full">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -80,7 +98,7 @@ export function ActionsDataScopeTab({
               />
             </div>
           </div>
-          <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-1 p-4 pt-2">
               {moduleCategoryOrder.filter((category) => filteredModuleCategories[category]?.length).map((category) => {
                 const collapsed = !!collapsedActionCategories[category];
@@ -122,7 +140,7 @@ export function ActionsDataScopeTab({
           </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col bg-white">
+        <div className="flex min-w-0 min-h-0 flex-col bg-white">
           <div className="flex min-h-[74px] items-center justify-between gap-4 border-b border-slate-200 bg-white px-5">
             <div className="flex min-w-0 items-center gap-2">
               <Shield className="h-4 w-4 shrink-0 text-blue-600" />
@@ -132,78 +150,96 @@ export function ActionsDataScopeTab({
               已选中: <span className="font-semibold text-blue-700">{selectedRoleDefinition.name}</span>
             </span>
           </div>
-          <div className="overflow-x-auto">
-            <div className="min-w-0">
-              <Table className="w-full table-fixed">
-                <colgroup>
-                  <col className="w-[22%]" />
-                  {permissionActionOptions.map((action) => (
-                    <col key={action} className="w-[9.75%]" />
-                  ))}
-                </colgroup>
-                <TableHeader className="bg-[#f3f4f6]">
-                  <TableRow className="border-b border-slate-200">
-                    <TableHead className="border-r border-slate-200 px-4 py-2.5 text-left text-[12px] font-semibold text-slate-700">
-                      角色名称
-                    </TableHead>
-                    {permissionActionOptions.map((action) => (
-                      <TableHead
-                        key={action}
-                        className="border-r border-slate-200 px-1.5 py-2.5 text-center text-[12px] font-semibold leading-tight text-slate-700"
-                      >
-                        {actionLabel[action]}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {roleDefinitions.map((role) => {
-                    const enabledActions = actionMatrix[role.id]?.[selectedModule.id] || [];
-                    const isSelected = selectedRoleId === role.id;
+          <div className="min-h-0 flex-1 overflow-auto">
+            <table
+              className="border-separate border-spacing-0 text-sm"
+              style={{ minWidth: '1080px', width: 'max-content', tableLayout: 'fixed' }}
+            >
+              <colgroup>
+                <col style={{ width: '164px' }} />
+                {permissionActionOptions.map((action) => (
+                  <col key={action} style={{ width: '114px' }} />
+                ))}
+              </colgroup>
+              <thead className="bg-[#f3f4f6]">
+                <tr>
+                  <th className="border-b border-r border-slate-200 bg-[#f3f4f6] px-3 py-3 text-left text-slate-700 align-middle">
+                    <div className="min-h-[46px] flex items-center">
+                      <span className="block text-[12px] font-semibold leading-snug whitespace-normal break-words [overflow-wrap:anywhere]">
+                        角色名称
+                      </span>
+                    </div>
+                  </th>
+                  {permissionActionOptions.map((action) => {
+                    const lines = getActionHeaderLines(action);
 
                     return (
-                      <TableRow
-                        key={`${selectedModule.id}-${role.id}`}
-                        className={`cursor-pointer transition-colors ${isSelected ? 'bg-blue-50/60' : 'hover:bg-slate-50'}`}
-                        onClick={() => onSelectRole(role.id)}
+                      <th
+                        key={action}
+                        className="border-b border-r border-slate-200 bg-[#f3f4f6] px-2 py-3 text-center text-slate-700 align-middle"
                       >
-                        <TableCell
-                          className={`border-r border-slate-200 px-4 py-2.5 text-[13px] ${
-                            isSelected ? 'border-l-2 border-l-blue-600 font-semibold text-blue-800' : 'font-medium text-slate-700'
-                          }`}
-                        >
-                          <span className="block truncate">{role.name}</span>
-                        </TableCell>
-                        {permissionActionOptions.map((action) => (
-                          <TableCell
-                            key={`${role.id}-${action}`}
-                            className="border-r border-slate-200 py-2.5 text-center"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onSelectRole(role.id);
-                              onToggleAction(role.id, selectedModule.id, action);
-                            }}
-                          >
-                            <div className="flex justify-center">
-                              <input
-                                type="checkbox"
-                                readOnly
-                                checked={enabledActions.includes(action)}
-                                className="h-[18px] w-[18px] cursor-pointer rounded border border-gray-300 accent-[#67b84b] focus:ring-[#67b84b]"
-                              />
-                            </div>
-                          </TableCell>
-                        ))}
-                      </TableRow>
+                        <div className="min-h-[66px] flex flex-col items-center justify-center">
+                          <span className="block text-[12px] font-semibold leading-tight whitespace-nowrap">
+                            {lines.primary}
+                          </span>
+                          {lines.secondary ? (
+                            <span className="mt-1 block text-[10px] font-semibold leading-tight text-slate-600 whitespace-nowrap">
+                              {lines.secondary}
+                            </span>
+                          ) : null}
+                        </div>
+                      </th>
                     );
                   })}
-                </TableBody>
-              </Table>
-            </div>
+                </tr>
+              </thead>
+              <tbody>
+                {roleDefinitions.map((role) => {
+                  const enabledActions = actionMatrix[role.id]?.[selectedModule.id] || [];
+                  const isSelected = selectedRoleId === role.id;
+
+                  return (
+                    <tr
+                      key={`${selectedModule.id}-${role.id}`}
+                      className={`cursor-pointer transition-colors ${isSelected ? 'bg-blue-50/60' : 'bg-white hover:bg-slate-50'}`}
+                      onClick={() => onSelectRole(role.id)}
+                    >
+                      <td
+                        className={`border-b border-r border-slate-200 bg-inherit px-4 py-2.5 text-[13px] whitespace-nowrap ${
+                          isSelected ? 'border-l-2 border-l-blue-600 font-semibold text-blue-800' : 'font-medium text-slate-700'
+                        }`}
+                      >
+                        <span className="block truncate">{role.name}</span>
+                      </td>
+                      {permissionActionOptions.map((action) => (
+                        <td
+                          key={`${role.id}-${action}`}
+                          className="border-b border-r border-slate-200 bg-inherit py-3 text-center align-middle"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelectRole(role.id);
+                            onToggleAction(role.id, selectedModule.id, action);
+                          }}
+                        >
+                          <div className="flex h-7 items-center justify-center">
+                            <input
+                              type="checkbox"
+                              readOnly
+                              checked={enabledActions.includes(action)}
+                              className="h-[18px] w-[18px] cursor-pointer rounded border border-gray-300 accent-[#67b84b] focus:ring-[#67b84b]"
+                            />
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
 
-        <div className="flex w-[340px] min-w-[340px] flex-col bg-white">
+        <div className="flex min-h-0 min-w-0 flex-col bg-white">
           <div className="flex min-h-[74px] items-center border-b border-slate-200 bg-white px-5 shadow-sm">
             <div>
               <div className="flex items-center gap-2">
@@ -215,7 +251,7 @@ export function ActionsDataScopeTab({
               </p>
             </div>
           </div>
-          <div className="space-y-3 p-5">
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
             <div className="space-y-3">
               <label className="text-[12px] font-semibold text-slate-400">标准数据维度</label>
               <div className="space-y-2">

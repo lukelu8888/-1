@@ -17,6 +17,7 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { Progress } from '../ui/progress';
 import { useOrders } from '../../contexts/OrderContext';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 
 // 询价接口
 interface Inquiry {
@@ -153,7 +154,7 @@ export default function QuotationFlowManagement() {
       totalAmount: 54150,
       currency: 'USD',
       validUntil: '2025-12-16',
-      paymentTerms: '30% T/T预付，70%见提单副本付款',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_against_bl', 'after_shipment'),
       deliveryTerms: 'FOB Shenzhen, 15-20个工作日',
       quotationDate: '2025-11-16',
       status: 'sent',
@@ -181,7 +182,7 @@ export default function QuotationFlowManagement() {
       totalAmount: 68000,
       currency: 'USD',
       validUntil: '2025-12-17',
-      paymentTerms: '30% T/T预付，70%见提单副本付款',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_against_bl', 'after_shipment'),
       deliveryTerms: 'FOB Ningbo, 20-25个工作日',
       quotationDate: '2025-11-17',
       status: 'confirmed',

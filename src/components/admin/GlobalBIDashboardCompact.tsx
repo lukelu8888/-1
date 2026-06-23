@@ -1,10 +1,11 @@
 // 🔥 全局BI决策仪表盘 - 紧凑型优化版
 // 台湾大厂风格 + 高密度信息展示 + 字体恢复原版 + 竖向间距减少30%
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
+import { Alert, AlertDescription } from '../ui/alert';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -48,6 +49,7 @@ import {
   PolarRadiusAxis,
   Radar
 } from 'recharts';
+import { getErpKpiSnapshot, type ErpKpiSnapshot, type ErpKpiTimeWindow } from '../../lib/services/erpKpiSnapshotService';
 
 interface GlobalBIDashboardCompactProps {
   userRole?: string;
@@ -58,6 +60,12 @@ export default function GlobalBIDashboardCompact({ userRole = 'CEO', userRegion 
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month' | 'quarter'>('month');
   const [selectedRegion, setSelectedRegion] = useState<'all' | 'NA' | 'SA' | 'EA'>(userRegion as any);
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [erpSnapshot, setErpSnapshot] = useState<ErpKpiSnapshot | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+
+  const snapshotTimeWindow: ErpKpiTimeWindow = timeRange;
+  const snapshotRegion = selectedRegion === 'all' ? null : selectedRegion;
 
   // 🔥 实时业务KPI数据
   const kpiData = {
@@ -87,7 +95,59 @@ export default function GlobalBIDashboardCompact({ userRole = 'CEO', userRegion 
     }
   };
 
-  const currentKPI = kpiData[timeRange];
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSnapshot = async () => {
+      setSnapshotLoading(true);
+      setSnapshotError(null);
+      try {
+        const snapshot = await getErpKpiSnapshot({
+          timeWindow: snapshotTimeWindow,
+          region: snapshotRegion,
+        });
+        if (!cancelled) {
+          setErpSnapshot(snapshot);
+          setLastRefresh(new Date());
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSnapshotError(error instanceof Error ? error.message : 'KPI snapshot load failed');
+        }
+      } finally {
+        if (!cancelled) {
+          setSnapshotLoading(false);
+        }
+      }
+    };
+
+    void loadSnapshot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshotRegion, snapshotTimeWindow]);
+
+  const currentKPI = useMemo(() => {
+    const fallback = kpiData[timeRange];
+    if (!erpSnapshot) return fallback;
+
+    return {
+      ...fallback,
+      orders: {
+        ...fallback.orders,
+        value: erpSnapshot.metrics.order_total_count?.value ?? fallback.orders.value,
+      },
+      newCustomers: {
+        ...fallback.newCustomers,
+        value: erpSnapshot.metrics.customer_total_count?.value ?? fallback.newCustomers.value,
+      },
+      conversionRate: {
+        ...fallback.conversionRate,
+        value: erpSnapshot.metrics.inquiry_to_approved_quote_conversion_rate?.value ?? fallback.conversionRate.value,
+      },
+    };
+  }, [erpSnapshot, timeRange]);
 
   // 🔥 销售漏斗数据
   const funnelData = [
@@ -233,6 +293,16 @@ export default function GlobalBIDashboardCompact({ userRole = 'CEO', userRegion 
           </Button>
         </div>
       </div>
+
+      <Alert className="border-slate-200 bg-slate-50">
+        <AlertDescription className="text-xs text-slate-700">
+          当前看板已接入第一版统一 KPI 快照。订单总数、客户总数、询盘转已批报价转化率已支持全局和区域视角的真实口径；暂未统一口径的指标仍显示回退值。
+          当前时间窗口：{snapshotTimeWindow === 'today' ? '今日' : snapshotTimeWindow === 'week' ? '本周' : snapshotTimeWindow === 'month' ? '本月' : '本季度'}。
+          {snapshotRegion ? ` 当前区域：${snapshotRegion}。` : ' 当前区域：全局。'}
+          {snapshotLoading ? ' 正在刷新 KPI 快照…' : ''}
+          {snapshotError ? ` KPI 快照加载失败：${snapshotError}` : ''}
+        </AlertDescription>
+      </Alert>
 
       {/* 🔥 第一行：核心KPI - 字体恢复原版，间距缩小30% */}
       <div className="grid grid-cols-4 gap-1.5">

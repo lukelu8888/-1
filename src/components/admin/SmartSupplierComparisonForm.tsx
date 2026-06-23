@@ -53,6 +53,23 @@ export function SmartSupplierComparisonForm({
   
   // 🔥 本地状态：采购员的选择
   const [localResult, setLocalResult] = useState<SmartComparisonResult>(comparisonResult);
+
+  const formatSignedPercent = (value?: number | null) => {
+    if (value == null || !Number.isFinite(value)) return null;
+    return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+  };
+
+  const getDeviationTone = (quotation: SupplierQuotationForComparison) => {
+    if (quotation.historicalPriceDeviationLevel === 'alert') {
+      return quotation.historicalPriceDeltaPct != null && quotation.historicalPriceDeltaPct < 0
+        ? 'text-red-600'
+        : 'text-amber-600';
+    }
+    if (quotation.historicalPriceDeviationLevel === 'watch') {
+      return 'text-amber-600';
+    }
+    return 'text-slate-500';
+  };
   
   // 🔥 更新产品选择
   const handleSelectQuotation = (productId: string, bjNumber: string) => {
@@ -273,7 +290,7 @@ export function SmartSupplierComparisonForm({
                           <th className="text-center py-1.5 px-2 font-semibold text-gray-700 border-r border-gray-200" style={{ width: '60px' }}>交期</th>
                           <th className="text-center py-1.5 px-2 font-semibold text-gray-700 border-r border-gray-200" style={{ width: '70px' }}>MOQ</th>
                           <th className="text-left py-1.5 px-2 font-semibold text-gray-700 border-r border-gray-200" style={{ width: '140px' }}>账期</th>
-                          <th className="text-center py-1.5 px-2 font-semibold text-gray-700 border-r border-gray-200" style={{ width: '60px' }}>得分</th>
+                          <th className="text-center py-1.5 px-2 font-semibold text-gray-700 border-r border-gray-200" style={{ width: '140px' }}>决策分 / 拆解</th>
                           <th className="text-center py-1.5 px-2 font-semibold text-gray-700 border-r border-gray-200" style={{ width: '50px' }}>风险</th>
                           <th className="text-left py-1.5 px-3 font-semibold text-gray-700" style={{ minWidth: '220px' }}>AI推荐理由</th>
                         </tr>
@@ -315,6 +332,16 @@ export function SmartSupplierComparisonForm({
                               <td className="py-2 px-3 border-r border-gray-100">
                                 <div className="font-medium text-gray-900">{quotation.supplierName}</div>
                                 <div className="text-[11px] text-gray-500 mt-0.5 font-mono">{quotation.bjNumber}</div>
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  {quotation.supplierPerformanceScore != null ? (
+                                    <>
+                                      履约分 <span className="font-semibold text-slate-700">{quotation.supplierPerformanceScore}</span>
+                                      {' '}| 历史PO {quotation.supplierPerformance?.historicalPurchaseOrderCount || 0}
+                                    </>
+                                  ) : (
+                                    '履约记录不足'
+                                  )}
+                                </div>
                               </td>
                               
                               {/* 单价 */}
@@ -326,6 +353,18 @@ export function SmartSupplierComparisonForm({
                                   <div className="text-[11px] text-green-600 flex items-center justify-end gap-0.5 mt-0.5">
                                     <TrendingDown className="h-2.5 w-2.5" />
                                     最低价
+                                  </div>
+                                )}
+                                {quotation.historicalPriceDeltaPct != null && (
+                                  <div className={`text-[11px] mt-0.5 ${getDeviationTone(quotation)}`}>
+                                    较历史均价 {formatSignedPercent(quotation.historicalPriceDeltaPct)}
+                                    {quotation.historicalPriceDeviationLevel === 'alert'
+                                      ? quotation.historicalPriceDeltaPct < 0
+                                        ? ' · 异常低价'
+                                        : ' · 偏高'
+                                      : quotation.historicalPriceDeviationLevel === 'watch'
+                                        ? ' · 需关注'
+                                        : ''}
                                   </div>
                                 )}
                               </td>
@@ -373,7 +412,19 @@ export function SmartSupplierComparisonForm({
                                   }`}>
                                     {quotation.totalScore}
                                   </div>
-                                  <div className="text-[10px] text-gray-500">分</div>
+                                  <div className="text-[10px] text-gray-500">
+                                    基础 {quotation.baseTotalScore ?? quotation.totalScore}
+                                    {' '}
+                                    {quotation.supplierPerformanceAdjustment
+                                      ? `${quotation.supplierPerformanceAdjustment > 0 ? '+' : ''}${quotation.supplierPerformanceAdjustment}`
+                                      : '+0'}
+                                  </div>
+                                  <div className="mt-1 text-[10px] leading-4 text-slate-500">
+                                    价{quotation.priceScore} 交{quotation.leadTimeScore} 账{quotation.paymentScore}
+                                  </div>
+                                  <div className="text-[10px] leading-4 text-slate-500">
+                                    MOQ{quotation.moqScore} 信{quotation.supplierCreditScore} 品{quotation.qualityScore}
+                                  </div>
                                 </div>
                               </td>
                               

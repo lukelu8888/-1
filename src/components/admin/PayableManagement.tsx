@@ -1,5 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Filter, Plus, Download, Eye, Edit2, DollarSign, Calendar, Building2, Truck, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { exportPayableBridgeService } from '../../lib/services/export-service/exportPayableBridgeService';
+import { exportPaymentRecordBridgeService } from '../../lib/services/export-service/exportPaymentRecordBridgeService';
+import { syncExportDocumentationBridgeFromOperations } from '../../lib/services/export-service/exportDocumentationBridgeWorkflowService';
+import { syncExportExecutionBridgeState } from '../../lib/services/export-service/syncExportExecutionBridgeState';
 
 /**
  * 💰 应付账款管理 - Admin Portal
@@ -152,10 +156,43 @@ export default function PayableManagement() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [payeeTypeFilter, setPayeeTypeFilter] = useState<string>('all');
   const [regionFilter, setRegionFilter] = useState<string>('all');
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const allPayables = useMemo(
+    () => [...exportPayableBridgeService.list(), ...mockPayables],
+    [refreshKey],
+  );
+
+  const handleExportPayablePayment = (payable: PayableAccount) => {
+    if (!payable.id.startsWith('export-payable-bridge-')) return
+
+    const nextStatus = payable.status === 'unpaid' ? 'partial' : 'paid'
+    const nextPaidAmount = nextStatus === 'partial' ? payable.totalAmount / 2 : payable.totalAmount
+    exportPayableBridgeService.update(payable.id, {
+      status: nextStatus,
+      paidAmount: nextPaidAmount,
+      unpaidAmount: Math.max(payable.totalAmount - nextPaidAmount, 0),
+      paymentCount: payable.paymentCount + 1,
+      lastPaymentDate: new Date().toISOString().slice(0, 10),
+    })
+
+    const paymentRecord = exportPaymentRecordBridgeService.list().find((item) => item.serviceOrderId === payable.payeeId)
+    if (paymentRecord) {
+      exportPaymentRecordBridgeService.update(paymentRecord.id, {
+        amount: nextPaidAmount,
+        status: nextStatus === 'paid' ? 'completed' : 'pending',
+        paymentDate: new Date().toISOString().slice(0, 10),
+      })
+    }
+
+    syncExportDocumentationBridgeFromOperations(payable.payeeId, 'PayableManagement')
+    syncExportExecutionBridgeState(payable.serviceType === 'forwarder' ? payable.payeeId : payable.payeeId)
+    setRefreshKey((value) => value + 1)
+  }
 
   // 筛选逻辑
   const filteredPayables = useMemo(() => {
-    return mockPayables.filter(payable => {
+    return allPayables.filter(payable => {
       const matchSearch = 
         payable.payableNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
         payable.payeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -167,19 +204,19 @@ export default function PayableManagement() {
       
       return matchSearch && matchStatus && matchPayeeType && matchRegion;
     });
-  }, [searchTerm, statusFilter, payeeTypeFilter, regionFilter]);
+  }, [allPayables, searchTerm, statusFilter, payeeTypeFilter, regionFilter]);
 
   // 统计数据
   const stats = useMemo(() => {
-    const total = mockPayables.reduce((sum, p) => sum + p.totalAmount, 0);
-    const unpaid = mockPayables.reduce((sum, p) => sum + p.unpaidAmount, 0);
-    const paid = mockPayables.reduce((sum, p) => sum + p.paidAmount, 0);
-    const overdueCount = mockPayables.filter(p => 
+    const total = allPayables.reduce((sum, p) => sum + p.totalAmount, 0);
+    const unpaid = allPayables.reduce((sum, p) => sum + p.unpaidAmount, 0);
+    const paid = allPayables.reduce((sum, p) => sum + p.paidAmount, 0);
+    const overdueCount = allPayables.filter(p => 
       p.status !== 'paid' && new Date(p.dueDate) < new Date()
     ).length;
 
     return { total, unpaid, paid, overdueCount };
-  }, []);
+  }, [allPayables]);
 
   // 状态标签
   const getStatusBadge = (status: string) => {
@@ -457,7 +494,13 @@ export default function PayableManagement() {
                         <Edit2 className="w-3.5 h-3.5 text-gray-600" />
                       </button>
                       {payable.status !== 'paid' && (
-                        <button className="px-2 py-1 bg-[#F96302] text-white rounded text-[10px] hover:bg-[#E55A02] transition-colors">
+                        <button
+                          className="px-2 py-1 bg-[#F96302] text-white rounded text-[10px] hover:bg-[#E55A02] transition-colors"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            handleExportPayablePayment(payable)
+                          }}
+                        >
                           付款
                         </button>
                       )}

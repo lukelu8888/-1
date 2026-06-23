@@ -176,7 +176,7 @@ export function ProductCenterShell({
   }, [activeModule, detailProductId, setDetailProductId]);
 
   return (
-    <div className="flex h-full min-h-[calc(100vh-200px)] flex-col bg-slate-50 text-slate-900">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-900">
       <RegionBar
         active={activeRegion}
         onChange={setActiveRegion}
@@ -191,7 +191,7 @@ export function ProductCenterShell({
         region={activeRegion}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <aside
           className={cn(
             'relative shrink-0 border-r border-slate-200 bg-white transition-all',
@@ -261,7 +261,7 @@ export function ProductCenterShell({
           </nav>
         </aside>
 
-        <main className="flex-1 overflow-auto">{moduleContent}</main>
+        <main className="min-w-0 flex-1 overflow-hidden">{moduleContent}</main>
       </div>
     </div>
   );

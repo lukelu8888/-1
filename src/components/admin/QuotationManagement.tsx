@@ -26,7 +26,10 @@ import { useOrders } from '../../contexts/OrderContext';
 import { useQuotations } from '../../contexts/QuotationContext';
 import { useInquiry } from '../../contexts/InquiryContext'; // 🔥 导入InquiryContext
 import { sendNotificationToUser } from '../../utils/notificationUtils'; // 🆕 导入通知功能
-import { getCurrentUser } from '../../data/authorizedUsers'; // 🆕 获取当前用户信息
+import { getCurrentUser } from '../../utils/dataIsolation'; // 🆕 获取当前用户信息
+import type { PaymentMode } from '../../contexts/SalesQuotationContext';
+import type { BalanceTrigger } from '../../lib/paymentFlow';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 import { adaptLegacyQuotationToDocumentData } from '../../utils/documentDataAdapters';
 import { customerProductLibraryService } from '../../lib/customerProductLibrary';
 import { normalizeApprovalNotes } from '../../utils/approvalWorkflow';
@@ -34,6 +37,11 @@ import EditQuotationDialog from './EditQuotationDialog';
 import ViewQuotationDialog from './ViewQuotationDialog';
 import NegotiationDialog from './NegotiationDialog';
 import { CompactStatCard } from './CompactStatCard'; // 🎨 导入紧凑型统计卡片
+import {
+  ERP_LIST_DELETE_BUTTON_CLASS,
+  ERP_LIST_DELETE_BUTTON_STYLE,
+  ERP_LIST_UI_SPEC_V1,
+} from '../shared/erpListUiSpec';
 
 // 报价接口
 export interface Quotation {
@@ -74,6 +82,8 @@ export interface Quotation {
   currency: 'USD' | 'EUR' | 'CNY';
   validUntil: string;
   paymentTerms: string;
+  paymentMode?: PaymentMode | null;
+  balanceTrigger?: BalanceTrigger | null;
   deliveryTerms: string;
   quotationDate: string;
   status: 'draft' | 'sent' | 'confirmed' | 'rejected' | 'expired' | 'converted' | 'negotiating' | 'pending_supervisor' | 'pending_director' | 'approved'; // 🔥 添加审批状态
@@ -476,7 +486,7 @@ export default function QuotationManagement({
       totalAmount: 0,
       currency: 'USD',
       validUntil: validDate.toISOString().split('T')[0],
-      paymentTerms: '30% T/T预付，70%见提单副本付款',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_against_bl', 'after_shipment'),
       deliveryTerms: 'FOB Shenzhen, 15-20个工作日',
       quotationDate: today,
       status: 'draft',
@@ -1070,18 +1080,18 @@ export default function QuotationManagement({
                 placeholder="搜索报价单号、客户名称..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 h-9 text-xs"
+                className={`pl-9 h-9 ${ERP_LIST_UI_SPEC_V1.searchTextClass}`}
               />
             </div>
 
             {/* 🔥 批量删除按钮 */}
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={handleBulkDelete}
               disabled={selectedIds.size === 0}
-              className="h-9 px-3 text-red-600 hover:text-red-700 hover:bg-red-50 disabled:opacity-40"
-              style={{ fontSize: '12px' }}
+              style={ERP_LIST_DELETE_BUTTON_STYLE}
+              className={ERP_LIST_DELETE_BUTTON_CLASS}
             >
               <Trash2 className="w-3.5 h-3.5 mr-1" />
               批量删除 {selectedIds.size > 0 && `(${selectedIds.size})`}

@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs'
 import { Textarea } from '../../ui/textarea'
 import { Checkbox } from '../../ui/checkbox'
+import { useUser } from '../../../contexts/UserContext'
 import {
   arrivalNoticeService,
   cargoReceiptService,
@@ -35,6 +36,22 @@ import {
   thirdPartyWarehouseService,
   voyageTrackingService,
 } from '../../../lib/supabaseService'
+import { deriveWarehouseTaskSummary } from '../../../lib/services/warehouseTaskCenterService'
+
+const LC_DISCREPANCY_MARKER = '[LC_DISCREPANCY]'
+
+function hasOpenLcDiscrepancy(remarks: unknown) {
+  const raw = String(remarks || '').trim()
+  if (!raw) return false
+  const markerLine = raw.split('\n').find((line) => line.startsWith(LC_DISCREPANCY_MARKER))
+  if (!markerLine) return false
+  try {
+    const parsed = JSON.parse(markerLine.slice(LC_DISCREPANCY_MARKER.length))
+    return ['open', 'pending', 'raised'].includes(String(parsed?.status || ''))
+  } catch {
+    return false
+  }
+}
 
 type WarehouseRecord = {
   id: string
@@ -168,6 +185,10 @@ const EMPTY_PLAN_ITEM: ConsolidationItemDraft = {
 }
 
 export default function ThirdPartyWarehouseModule() {
+  const { user } = useUser()
+  const currentUserRole = String(user?.role || user?.userRole || '')
+  const canEditFinancialReleaseFields = ['Finance', 'CFO', 'CEO'].includes(currentUserRole)
+  const canManageExecutionCloseArchive = ['Warehouse_Ops', 'CEO'].includes(currentUserRole)
   const [activeTab, setActiveTab] = useState('warehouses')
   const [warehouses, setWarehouses] = useState<WarehouseRecord[]>([])
   const [plans, setPlans] = useState<any[]>([])
@@ -288,6 +309,19 @@ export default function ThirdPartyWarehouseModule() {
       ].some((value) => String(value || '').toLowerCase().includes(keyword))
     )
   }, [loadingPools, poolSearch])
+
+  const warehouseTaskSummary = useMemo(
+    () =>
+      deriveWarehouseTaskSummary({
+        plans,
+        loadingPools,
+        selectedPoolSolutions,
+        exportPrepRows,
+      }),
+    [exportPrepRows, loadingPools, plans, selectedPoolSolutions],
+  )
+  const { taskCenter } = warehouseTaskSummary
+  const collaborationSections = taskCenter.collaborationSections
 
   async function openPool(pool: any) {
     setSelectedPool(pool)
@@ -642,6 +676,8 @@ export default function ThirdPartyWarehouseModule() {
             products: relatedItems.map((item: any) => item.productName).filter(Boolean),
             collectionControlMode: execution?.collection_control_mode || null,
             documentReleaseMode: execution?.document_release_mode || null,
+            customerBalanceStatus: execution?.customer_balance_status || 'pending',
+            customerBalanceGateStatus: execution?.customer_balance_gate_status || null,
             bankSubmissionStatus: execution?.bank_submission_status || 'not_required',
             bankSubmittedAt: execution?.bank_submitted_at ? String(execution.bank_submitted_at).slice(0, 16) : null,
             bankSubmittedBy: execution?.bank_submitted_by || null,
@@ -705,6 +741,111 @@ export default function ThirdPartyWarehouseModule() {
     setExportPrepRows((rows) => rows.map((row) => (
       row.purchaseOrderId === purchaseOrderId ? { ...row, [key]: value } : row
     )))
+  }
+
+  function normalizeBankAndReleaseState(row: any, actorName: string) {
+    const mode = String(row.collectionControlMode || '')
+    const balanceStatus = String(row.customerBalanceStatus || '').toLowerCase()
+    const gateStatus = String(row.customerBalanceGateStatus || '').toLowerCase()
+    const hasCustomerPaymentClearance =
+      ['finance_confirmed', 'paid', 'balance_paid'].includes(balanceStatus) ||
+      gateStatus.startsWith('finance_confirmed')
+
+    let bankStatus = String(row.bankSubmissionStatus || 'not_required')
+    let releaseStatus = String(row.documentReleaseStatus || 'pending')
+    const warnings: string[] = []
+    const lcDiscrepancyOpen = hasOpenLcDiscrepancy(row.executionRemarks || row.remarks)
+    const paymentControlSummary = row.workflowSummary?.replySummary?.customerPaymentControl || null
+    const financialRiskBlocked = Boolean(paymentControlSummary?.financialRiskBlocked)
+    const financialBlockedReason = paymentControlSummary?.blockedReason || null
+
+    if (['prepaid_before_booking', 'post_tt_before_obl_release'].includes(mode)) {
+      if (bankStatus !== 'not_required') {
+        bankStatus = 'not_required'
+        warnings.push('当前收款模式无需银行交单，系统已自动改为 not_required。')
+      }
+
+      if (!hasCustomerPaymentClearance) {
+        if (releaseStatus !== 'blocked') {
+          releaseStatus = 'blocked'
+          warnings.push('客户款项未确认，放单状态已自动阻断。')
+        }
+      } else if (!['ready_to_release', 'released'].includes(releaseStatus)) {
+        releaseStatus = 'ready_to_release'
+      }
+    }
+
+    if (mode === 'lc_bank_negotiation') {
+      if (bankStatus === 'not_required') {
+        bankStatus = 'pending_submission'
+        warnings.push('L/C 模式必须走银行交单，系统已自动改为 pending_submission。')
+      }
+
+      if (lcDiscrepancyOpen) {
+        if (releaseStatus !== 'blocked') {
+          releaseStatus = 'blocked'
+          warnings.push('当前存在 L/C 不符点未解除，放单状态已自动阻断。')
+        }
+      } else if (!['negotiated', 'collected'].includes(bankStatus)) {
+        if (releaseStatus !== 'blocked') {
+          releaseStatus = 'blocked'
+          warnings.push('L/C 模式下需完成银行议付或收汇后才能放单，系统已自动阻断。')
+        }
+      } else if (!['ready_to_release', 'released'].includes(releaseStatus)) {
+        releaseStatus = 'ready_to_release'
+      }
+    }
+
+    if (mode === 'dp_collection' || mode === 'dp_or_other_collection') {
+      if (bankStatus === 'not_required') {
+        bankStatus = 'pending_submission'
+        warnings.push('D/P 或托收模式必须跟踪银行交单，系统已自动改为 pending_submission。')
+      }
+
+      if (bankStatus !== 'collected') {
+        if (releaseStatus !== 'blocked') {
+          releaseStatus = 'blocked'
+          warnings.push('D/P 或托收模式下需确认托收到账后才能放单，系统已自动阻断。')
+        }
+      } else if (!['ready_to_release', 'released'].includes(releaseStatus)) {
+        releaseStatus = 'ready_to_release'
+      }
+    }
+
+    if (mode === 'da_acceptance') {
+      if (bankStatus === 'not_required') {
+        bankStatus = 'pending_submission'
+        warnings.push('D/A 模式必须跟踪银行交单与承兑状态，系统已自动改为 pending_submission。')
+      }
+
+      if (!['accepted', 'negotiated', 'collected'].includes(bankStatus)) {
+        if (releaseStatus !== 'blocked') {
+          releaseStatus = 'blocked'
+          warnings.push('D/A 模式下需先完成承兑确认后才能放单，系统已自动阻断。')
+        }
+      } else if (!['ready_to_release', 'released'].includes(releaseStatus)) {
+        releaseStatus = 'ready_to_release'
+      }
+    }
+
+    if (financialRiskBlocked) {
+      if (releaseStatus !== 'blocked') {
+        releaseStatus = 'blocked'
+        warnings.push(financialBlockedReason || '存在财务放货风险，系统已自动阻断放单。')
+      }
+    }
+
+    const hasBankMilestone = ['submitted_to_bank', 'negotiated', 'collected'].includes(bankStatus)
+
+    return {
+      bankStatus,
+      releaseStatus,
+      bankSubmittedAt: hasBankMilestone ? (row.bankSubmittedAt || new Date().toISOString()) : null,
+      bankSubmittedBy: hasBankMilestone ? (row.bankSubmittedBy || actorName) : null,
+      documentReleasedAt: releaseStatus === 'released' ? (row.documentReleasedAt || new Date().toISOString()) : null,
+      documentReleasedBy: releaseStatus === 'released' ? (row.documentReleasedBy || actorName) : null,
+      warnings,
+    }
   }
 
   function renderWorkflowReplySummary(row: any) {
@@ -771,21 +912,16 @@ export default function ThirdPartyWarehouseModule() {
   async function handleSaveExportPrepRow(row: any) {
     setSavingExportPrepId(row.purchaseOrderId)
     try {
-      const now = new Date().toISOString()
-      const bankStatus = String(row.bankSubmissionStatus || 'not_required')
-      const releaseStatus = String(row.documentReleaseStatus || 'pending')
-      const bankSubmittedAt = row.bankSubmittedAt || (
-        ['submitted_to_bank', 'negotiated', 'collected'].includes(bankStatus) ? now : null
-      )
-      const bankSubmittedBy = row.bankSubmittedBy || (
-        ['submitted_to_bank', 'negotiated', 'collected'].includes(bankStatus) ? 'warehouse-loading' : null
-      )
-      const documentReleasedAt = row.documentReleasedAt || (
-        releaseStatus === 'released' ? now : null
-      )
-      const documentReleasedBy = row.documentReleasedBy || (
-        releaseStatus === 'released' ? 'warehouse-loading' : null
-      )
+      const actorName = user?.name || user?.email || 'warehouse-loading'
+      const {
+        bankStatus,
+        releaseStatus,
+        bankSubmittedAt,
+        bankSubmittedBy,
+        documentReleasedAt,
+        documentReleasedBy,
+        warnings,
+      } = normalizeBankAndReleaseState(row, actorName)
       const docsPending = Boolean(row.requiresInspection || row.requiresCo || row.requiresFumigation)
       const primaryTask = actualLoadingTasks[0] || null
       await exportRequirementCheckService.upsertByPurchaseOrderId(row.purchaseOrderId, {
@@ -839,10 +975,14 @@ export default function ThirdPartyWarehouseModule() {
       await purchaseOrderExecutionStatusService.upsertByPurchaseOrderId(row.purchaseOrderId, {
         executionStatus: 'loaded',
         shipmentReadinessStatus,
-        bankSubmissionStatus: row.bankSubmissionStatus || 'not_required',
+        collectionControlMode: row.collectionControlMode || undefined,
+        documentReleaseMode: row.documentReleaseMode || undefined,
+        customerBalanceStatus: row.customerBalanceStatus || undefined,
+        customerBalanceGateStatus: row.customerBalanceGateStatus || undefined,
+        bankSubmissionStatus: bankStatus,
         bankSubmittedAt,
         bankSubmittedBy,
-        documentReleaseStatus: row.documentReleaseStatus || 'pending',
+        documentReleaseStatus: releaseStatus,
         documentReleasedAt,
         documentReleasedBy,
         caseCloseStatus: row.caseCloseStatus || 'pending',
@@ -950,10 +1090,14 @@ export default function ThirdPartyWarehouseModule() {
 
       await purchaseOrderExecutionStatusService.upsertByPurchaseOrderId(row.purchaseOrderId, {
         shipmentReadinessStatus: transitReadinessStatus,
-        bankSubmissionStatus: row.bankSubmissionStatus || 'not_required',
+        collectionControlMode: row.collectionControlMode || undefined,
+        documentReleaseMode: row.documentReleaseMode || undefined,
+        customerBalanceStatus: row.customerBalanceStatus || undefined,
+        customerBalanceGateStatus: row.customerBalanceGateStatus || undefined,
+        bankSubmissionStatus: bankStatus,
         bankSubmittedAt,
         bankSubmittedBy,
-        documentReleaseStatus: row.documentReleaseStatus || 'pending',
+        documentReleaseStatus: releaseStatus,
         documentReleasedAt,
         documentReleasedBy,
         caseCloseStatus: row.caseCloseStatus || 'pending',
@@ -1016,6 +1160,9 @@ export default function ThirdPartyWarehouseModule() {
 
       await financeCompliancePacketService.syncByPurchaseOrderId(row.purchaseOrderId)
       await loadExportPrepOverview(selectedContainerDetail)
+      if (warnings.length > 0) {
+        toast.warning(warnings.join(' '))
+      }
       toast.success('报关前准备已保存')
     } catch (error: any) {
       toast.error(error?.message || '保存报关前准备失败')
@@ -1025,11 +1172,15 @@ export default function ThirdPartyWarehouseModule() {
   }
 
   async function handleCloseCase(row: any) {
+    if (!canManageExecutionCloseArchive) {
+      toast.error('当前角色不能执行结案，请由 Warehouse_Ops 或 CEO 处理')
+      return
+    }
     setSavingExportPrepId(row.purchaseOrderId)
     try {
       await purchaseOrderExecutionStatusService.closeCaseByPurchaseOrderId(row.purchaseOrderId, {
-        closedBy: 'warehouse-loading',
-        remarks: '由后段蓝图V2内部页执行结案',
+        closedBy: user?.name || user?.email || 'warehouse-ops',
+        remarks: '由发货管理模块执行结案',
       })
       await loadExportPrepOverview(selectedContainerDetail)
       toast.success('已结案')
@@ -1041,11 +1192,15 @@ export default function ThirdPartyWarehouseModule() {
   }
 
   async function handleArchiveCase(row: any) {
+    if (!canManageExecutionCloseArchive) {
+      toast.error('当前角色不能执行业务归档，请由 Warehouse_Ops 或 CEO 处理')
+      return
+    }
     setSavingExportPrepId(row.purchaseOrderId)
     try {
       await purchaseOrderExecutionStatusService.markArchivedByPurchaseOrderId(row.purchaseOrderId, {
-        archivedBy: 'warehouse-loading',
-        remarks: '由后段蓝图V2内部页执行业务归档完成',
+        archivedBy: user?.name || user?.email || 'warehouse-ops',
+        remarks: '由发货管理模块执行业务归档完成',
       })
       await loadExportPrepOverview(selectedContainerDetail)
       toast.success('已完成业务归档')
@@ -1783,6 +1938,91 @@ export default function ThirdPartyWarehouseModule() {
             <MapPin className="w-4 h-4 text-green-600" />
           </div>
           <div className="text-2xl text-gray-900">{warehouses.filter((warehouse) => warehouse.status === 'active').length}</div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+        <Card className="p-3">
+          <div className="text-[11px] text-gray-500">集货/装柜计划</div>
+          <div className="mt-1 text-lg font-semibold text-gray-900">{warehouseTaskSummary.counts.totalPlans}</div>
+          <div className="text-[11px] text-gray-500">当前模块可见计划总数</div>
+        </Card>
+        <Card className="p-3">
+          <div className="text-[11px] text-gray-500">待规划装柜池</div>
+          <div className="mt-1 text-lg font-semibold text-amber-700">{warehouseTaskSummary.counts.poolsPendingPlanning}</div>
+          <div className="text-[11px] text-gray-500">待补箱规/待生成方案</div>
+        </Card>
+        <Card className="p-3">
+          <div className="text-[11px] text-gray-500">待执行柜</div>
+          <div className="mt-1 text-lg font-semibold text-slate-900">{warehouseTaskSummary.counts.containersAwaitingExecution}</div>
+          <div className="text-[11px] text-gray-500">已分柜但未完成执行回写</div>
+        </Card>
+        <Card className="p-3">
+          <div className="text-[11px] text-gray-500">放单阻断</div>
+          <div className="mt-1 text-lg font-semibold text-red-600">{warehouseTaskSummary.counts.releaseBlocked}</div>
+          <div className="text-[11px] text-gray-500">财务/收款/LC 条件未满足</div>
+        </Card>
+        <Card className="p-3">
+          <div className="text-[11px] text-gray-500">待结案</div>
+          <div className="mt-1 text-lg font-semibold text-gray-900">{warehouseTaskSummary.counts.caseClosePending}</div>
+          <div className="text-[11px] text-gray-500">已出运但未结案</div>
+        </Card>
+        <Card className="p-3">
+          <div className="text-[11px] text-gray-500">待归档</div>
+          <div className="mt-1 text-lg font-semibold text-gray-900">{warehouseTaskSummary.counts.archivePending}</div>
+          <div className="text-[11px] text-gray-500">已结案但未归档</div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-gray-900">仓配风险摘要</div>
+            <Package className="w-4 h-4 text-amber-600" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <div className="text-xs text-amber-700">规划/执行风险</div>
+              <div className="mt-1 text-xl font-semibold text-amber-900">{warehouseTaskSummary.riskSummary.planningRisk}</div>
+            </div>
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+              <div className="text-xs text-red-700">放单阻断</div>
+              <div className="mt-1 text-xl font-semibold text-red-900">{warehouseTaskSummary.riskSummary.releaseBlocked}</div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-700">待结案</div>
+              <div className="mt-1 text-xl font-semibold text-slate-900">{warehouseTaskSummary.riskSummary.pendingClosure}</div>
+            </div>
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+              <div className="text-xs text-purple-700">待归档</div>
+              <div className="mt-1 text-xl font-semibold text-purple-900">{warehouseTaskSummary.riskSummary.pendingArchive}</div>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-gray-900">协同角色入口</div>
+            <Building2 className="w-4 h-4 text-slate-600" />
+          </div>
+          <div className="space-y-2">
+            {collaborationSections.map((section) => (
+              <div key={section.key} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">{section.label}</div>
+                    <div className="mt-0.5 text-xs text-slate-600">{section.roles.join(' / ')}</div>
+                  </div>
+                  <div className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-700 border border-slate-200">
+                    {section.count}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {collaborationSections.length === 0 && (
+              <div className="text-xs text-gray-500">暂无待协同事项</div>
+            )}
+          </div>
         </Card>
       </div>
 
@@ -2524,7 +2764,7 @@ export default function ThirdPartyWarehouseModule() {
                                         </Select>
                                         <Input value={row.currentLocation || ''} onChange={(e) => updateExportPrepRow(row.purchaseOrderId, 'currentLocation', e.target.value)} placeholder="当前节点 / 地点" className="h-8" />
                                         <Select value={row.bankSubmissionStatus || 'not_required'} onValueChange={(value) => updateExportPrepRow(row.purchaseOrderId, 'bankSubmissionStatus', value)}>
-                                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                          <SelectTrigger className="h-8" disabled={!canEditFinancialReleaseFields}><SelectValue /></SelectTrigger>
                                           <SelectContent>
                                             <SelectItem value="not_required">not_required</SelectItem>
                                             <SelectItem value="pending_submission">pending_submission</SelectItem>
@@ -2534,7 +2774,7 @@ export default function ThirdPartyWarehouseModule() {
                                           </SelectContent>
                                         </Select>
                                         <Select value={row.documentReleaseStatus || 'pending'} onValueChange={(value) => updateExportPrepRow(row.purchaseOrderId, 'documentReleaseStatus', value)}>
-                                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                          <SelectTrigger className="h-8" disabled={!canEditFinancialReleaseFields}><SelectValue /></SelectTrigger>
                                           <SelectContent>
                                             <SelectItem value="pending">pending</SelectItem>
                                             <SelectItem value="blocked">blocked</SelectItem>
@@ -2547,6 +2787,9 @@ export default function ThirdPartyWarehouseModule() {
                                           <div>交单操作者：{row.bankSubmittedBy || '-'}</div>
                                           <div>放单时间：{row.documentReleasedAt || '-'}</div>
                                           <div>放单操作者：{row.documentReleasedBy || '-'}</div>
+                                          {!canEditFinancialReleaseFields && (
+                                            <div className="mt-1 text-amber-700">银行交单与放单状态仅允许 Finance / CFO / CEO 维护，仓配侧只读。</div>
+                                          )}
                                         </div>
                                         <Input value={row.arrivalNoticeNo || ''} onChange={(e) => updateExportPrepRow(row.purchaseOrderId, 'arrivalNoticeNo', e.target.value)} placeholder="Arrival Notice No." className="h-8" />
                                         <Input value={row.arrivalPort || ''} onChange={(e) => updateExportPrepRow(row.purchaseOrderId, 'arrivalPort', e.target.value)} placeholder="到港港口" className="h-8" />
@@ -2626,7 +2869,7 @@ export default function ThirdPartyWarehouseModule() {
                                     <TableCell>
                                       <div className="space-y-2 text-xs">
                                         <Select value={row.caseCloseStatus || 'pending'} onValueChange={(value) => updateExportPrepRow(row.purchaseOrderId, 'caseCloseStatus', value)}>
-                                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                          <SelectTrigger className="h-8" disabled><SelectValue /></SelectTrigger>
                                           <SelectContent>
                                             <SelectItem value="pending">pending</SelectItem>
                                             <SelectItem value="in_progress">in_progress</SelectItem>
@@ -2634,7 +2877,7 @@ export default function ThirdPartyWarehouseModule() {
                                           </SelectContent>
                                         </Select>
                                         <Select value={row.archiveStatus || 'pending'} onValueChange={(value) => updateExportPrepRow(row.purchaseOrderId, 'archiveStatus', value)}>
-                                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                          <SelectTrigger className="h-8" disabled><SelectValue /></SelectTrigger>
                                           <SelectContent>
                                             <SelectItem value="pending">pending</SelectItem>
                                             <SelectItem value="ready">ready</SelectItem>
@@ -2647,6 +2890,9 @@ export default function ThirdPartyWarehouseModule() {
                                         <div className="text-[11px] text-gray-500">
                                           {row.archivedAt ? `归档: ${row.archivedAt}` : '归档: -'}
                                         </div>
+                                        <div className="text-[11px] text-amber-700">
+                                          结案/归档状态不可直接手改，请使用下方动作按钮。
+                                        </div>
                                       </div>
                                     </TableCell>
                                     <TableCell>
@@ -2654,12 +2900,15 @@ export default function ThirdPartyWarehouseModule() {
                                         <Button size="sm" variant="outline" onClick={() => handleSaveExportPrepRow(row)} disabled={savingExportPrepId === row.purchaseOrderId}>
                                           {savingExportPrepId === row.purchaseOrderId ? '保存中...' : '保存'}
                                         </Button>
-                                        <Button size="sm" variant="outline" onClick={() => handleCloseCase(row)} disabled={savingExportPrepId === row.purchaseOrderId || row.caseCloseStatus === 'closed'}>
+                                        <Button size="sm" variant="outline" onClick={() => handleCloseCase(row)} disabled={!canManageExecutionCloseArchive || savingExportPrepId === row.purchaseOrderId || row.caseCloseStatus === 'closed'}>
                                           结案
                                         </Button>
-                                        <Button size="sm" variant="outline" onClick={() => handleArchiveCase(row)} disabled={savingExportPrepId === row.purchaseOrderId || row.archiveStatus === 'archived' || row.caseCloseStatus !== 'closed'}>
+                                        <Button size="sm" variant="outline" onClick={() => handleArchiveCase(row)} disabled={!canManageExecutionCloseArchive || savingExportPrepId === row.purchaseOrderId || row.archiveStatus === 'archived' || row.caseCloseStatus !== 'closed'}>
                                           业务归档
                                         </Button>
+                                        {!canManageExecutionCloseArchive && (
+                                          <div className="text-[11px] text-amber-700">仅 Warehouse_Ops / CEO 可执行结案与业务归档。</div>
+                                        )}
                                       </div>
                                     </TableCell>
                                     </TableRow>

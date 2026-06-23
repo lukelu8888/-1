@@ -1,15 +1,20 @@
 import React, { useMemo, useState } from 'react';
-import { Search, RefreshCw, Trash2, FileText, Eye, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Search, RefreshCw, FileText } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { TabsContent } from '../../ui/tabs';
 import { saveSupplierQuotation } from '../../../utils/createQuotationFromXJ';
 import {
+  ERP_LIST_PILL_STYLE,
+  ERP_LIST_TOOL_PILL_CLASS,
   ERP_LIST_UI_SPEC_V1,
+  getErpListBatchDeletePillClass,
+  getErpListBatchDeletePillStyle,
   getErpListFilterPillClass,
   getErpListFilterPillStyle,
 } from '../../shared/erpListUiSpec';
+import { useResizableTableColumns } from '../../shared/useResizableTableColumns';
 
 type SupplierQuotationsTabProps = {
   supplierQuotations: any[];
@@ -26,6 +31,55 @@ type SupplierQuotationsTabProps = {
   setAcceptedQuotationNo: (no: string) => void;
   setShowFeedbackReminderDialog: (show: boolean) => void;
 };
+
+type SupplierQuotationColumnKey =
+  | 'selection'
+  | 'index'
+  | 'date'
+  | 'number'
+  | 'supplier'
+  | 'amount'
+  | 'products'
+  | 'status'
+  | 'actions';
+
+const SUPPLIER_QUOTATION_COLUMN_ORDER: SupplierQuotationColumnKey[] = [
+  'selection',
+  'index',
+  'date',
+  'number',
+  'supplier',
+  'amount',
+  'products',
+  'status',
+  'actions',
+];
+
+const SUPPLIER_QUOTATION_COLUMN_DEFAULT_WIDTHS: Record<SupplierQuotationColumnKey, number> = {
+  selection: 52,
+  index: 56,
+  date: 160,
+  number: 210,
+  supplier: 200,
+  amount: 140,
+  products: 92,
+  status: 120,
+  actions: 250,
+};
+
+const SUPPLIER_QUOTATION_COLUMN_MIN_WIDTHS: Record<SupplierQuotationColumnKey, number> = {
+  selection: 52,
+  index: 56,
+  date: 140,
+  number: 180,
+  supplier: 180,
+  amount: 120,
+  products: 88,
+  status: 110,
+  actions: 220,
+};
+
+const SUPPLIER_QUOTATION_TABLE_UI_PREFERENCE_KEY = 'supplier_quotations_table_column_widths_v1';
 
 export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
   supplierQuotations,
@@ -44,7 +98,17 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
 }) => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'submitted' | 'accepted' | 'rejected'>('all');
   const [expandedRelatedIds, setExpandedRelatedIds] = useState<string[]>([]);
-  const capsuleButtonClass = `h-8 shrink-0 whitespace-nowrap !rounded-full px-3 shadow-sm ${ERP_LIST_UI_SPEC_V1.buttonTextClass} font-semibold leading-[1.35]`;
+  const {
+    getColumnStyle,
+    renderResizeHandle,
+    renderHeaderCell,
+  } = useResizableTableColumns<SupplierQuotationColumnKey>({
+    storageKey: SUPPLIER_QUOTATION_TABLE_UI_PREFERENCE_KEY,
+    order: SUPPLIER_QUOTATION_COLUMN_ORDER,
+    defaults: SUPPLIER_QUOTATION_COLUMN_DEFAULT_WIDTHS,
+    minWidths: SUPPLIER_QUOTATION_COLUMN_MIN_WIDTHS,
+    fixedColumns: ['selection', 'index'],
+  });
   const filterPillClass = (active: boolean) =>
     `${getErpListFilterPillClass(active)
       .replace('h-9', 'h-8')
@@ -117,26 +181,12 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
               size="sm"
               variant="outline"
               onClick={() => loadSupplierQuotationsFromApi()}
-              className={`${capsuleButtonClass} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}
-              style={{ borderRadius: '9999px' }}
+              className={ERP_LIST_TOOL_PILL_CLASS.replace('text-[12px]', ERP_LIST_UI_SPEC_V1.buttonTextClass)}
+              style={ERP_LIST_PILL_STYLE}
             >
               <RefreshCw className="w-3.5 h-3.5" />
               刷新
             </Button>
-            <button
-              type="button"
-              onClick={handleBatchDeleteQuotations}
-              disabled={selectedQuotationIds.length === 0}
-              className={`inline-flex items-center justify-center transition-colors ${capsuleButtonClass} ${
-                selectedQuotationIds.length > 0
-                  ? 'border border-red-200 bg-white text-red-600 hover:bg-red-50'
-                  : 'cursor-not-allowed border border-[#F7D3D8] bg-white text-[#EE8F9D]'
-              }`}
-              style={{ borderRadius: '9999px' }}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              批量删除{selectedQuotationIds.length > 0 ? ` (${selectedQuotationIds.length})` : ''}
-            </button>
             {[
               ['all', '全部', supplierQuotations.length],
               ['submitted', '待审核', supplierQuotations.filter(q => q.status === 'submitted').length],
@@ -157,6 +207,20 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                 {label} ({count})
               </Button>
             ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleBatchDeleteQuotations}
+              disabled={selectedQuotationIds.length === 0}
+              style={getErpListBatchDeletePillStyle(selectedQuotationIds.length > 0)}
+              className={getErpListBatchDeletePillClass(selectedQuotationIds.length > 0)
+                .replace('h-9', 'h-8')
+                .replace('px-4', 'px-3')
+                .replace('text-[12px]', ERP_LIST_UI_SPEC_V1.buttonTextClass)}
+            >
+              批量删除{selectedQuotationIds.length > 0 ? ` (${selectedQuotationIds.length})` : ''}
+            </Button>
           </div>
         </div>
 
@@ -169,31 +233,45 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
         ) : (
           <div className="border border-gray-200 rounded bg-white flex flex-1 min-h-0 flex-col overflow-visible min-h-[calc(100dvh-360px)]">
             <div className="overflow-x-auto overflow-y-visible bg-white flex-1 rounded-[inherit] min-h-0">
-            <table className="w-full text-[14px]">
+            <table className="w-full table-fixed text-[14px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-10">
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
-                      checked={selectedQuotationIds.length === displayQuotations.length && displayQuotations.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedQuotationIds(displayQuotations.map(q => q.id));
-                        } else {
-                          setSelectedQuotationIds([]);
-                        }
-                      }}
-                    />
+                  <th
+                    className="group relative overflow-hidden px-2 py-3 text-left font-semibold text-gray-700"
+                    style={getColumnStyle('selection')}
+                  >
+                    <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
+                        checked={selectedQuotationIds.length === displayQuotations.length && displayQuotations.length > 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedQuotationIds(displayQuotations.map(q => q.id));
+                          } else {
+                            setSelectedQuotationIds([]);
+                          }
+                        }}
+                      />
+                    </div>
+                    {renderResizeHandle('selection', { hitAreaClassName: 'w-8 -right-4' })}
                   </th>
-                  <th className="text-center py-1.5 px-2 font-medium text-gray-700 w-12">#</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700">日期</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700">报价单号</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700">供应商</th>
-                  <th className="text-right py-1.5 px-2 font-medium text-gray-700">报价金额</th>
-                  <th className="text-center py-1.5 px-2 font-medium text-gray-700">产品数</th>
-                  <th className="text-left py-1.5 px-2 font-medium text-gray-700">状态</th>
-                  <th className="text-center py-1.5 px-2 font-medium text-gray-700">操作</th>
+                  <th
+                    className="group relative overflow-hidden px-2 py-3 text-left font-semibold text-gray-700"
+                    style={getColumnStyle('index')}
+                  >
+                    <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                      <span className="block whitespace-nowrap text-[13px] font-semibold leading-4">#</span>
+                    </div>
+                    {renderResizeHandle('index', { hitAreaClassName: 'w-8 -right-4' })}
+                  </th>
+                  {renderHeaderCell('date', '日期', 'text-left text-gray-700', { hitAreaClassName: 'w-8 -right-4' })}
+                  {renderHeaderCell('number', '报价单号', 'text-left text-gray-700')}
+                  {renderHeaderCell('supplier', '供应商', 'text-left text-gray-700')}
+                  {renderHeaderCell('amount', '报价金额', 'text-left text-gray-700')}
+                  {renderHeaderCell('products', '产品数', 'text-left text-gray-700')}
+                  {renderHeaderCell('status', '状态', 'text-left text-gray-700')}
+                  {renderHeaderCell('actions', '操作', 'text-left text-gray-700')}
                 </tr>
               </thead>
               <tbody>
@@ -203,7 +281,18 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                   const supplierCompany = String(quotation.supplierCompany || '').trim();
                   const relatedRefs = Array.from(
                     new Set(
-                      [quotation.sourceXJ, quotation.sourceQR]
+                      [
+                        quotation.sourceXJ,
+                        quotation.sourceXJNumber,
+                        quotation.xjNumber,
+                        quotation.xjNo,
+                        quotation.sourceQR,
+                        quotation.sourceQRNumber,
+                        quotation.requirementNo,
+                        quotation.quoteData?.sourceXJ,
+                        quotation.quoteData?.xjNumber,
+                        quotation.quoteData?.sourceQR,
+                      ]
                         .map((value) => String(value || '').trim())
                         .filter(Boolean),
                     ),
@@ -211,7 +300,7 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                   const relatedRefsExpanded = expandedRelatedIds.includes(quotation.id);
                   return (
                   <tr key={quotation.id} className={`border-b border-gray-100 hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
-                    <td className="py-2 px-2 text-center">
+                    <td className="py-2 px-2 text-left" style={getColumnStyle('selection')}>
                       <input
                         type="checkbox"
                         className="w-4 h-4 cursor-pointer appearance-none border-2 border-gray-600 bg-white rounded checked:bg-white checked:border-gray-600 checked:after:content-['✓'] checked:after:text-gray-600 checked:after:text-xs checked:after:flex checked:after:items-center checked:after:justify-center"
@@ -225,10 +314,10 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                         }}
                       />
                     </td>
-                    <td className="py-2 px-2 text-center text-gray-500">
+                    <td className="py-2 px-2 text-left text-gray-500" style={getColumnStyle('index')}>
                       {idx + 1}
                     </td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2" style={getColumnStyle('date')}>
                       <div className="text-gray-900">
                         <span className="mr-1 text-[12px] text-gray-500">报价日期</span>
                         {quotation.quotationDate}
@@ -238,7 +327,7 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                         {quotation.validUntil}
                       </div>
                     </td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2" style={getColumnStyle('number')}>
                       <div className="relative inline-block">
                       <button
                         onClick={() => {
@@ -280,30 +369,30 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                       ) : null}
                       </div>
                     </td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2" style={getColumnStyle('supplier')}>
                       <div className="text-gray-900">{supplierName || supplierCompany || '-'}</div>
                       {supplierCompany && supplierCompany !== supplierName ? (
                         <div className="text-[12px] text-gray-500">{supplierCompany}</div>
                       ) : null}
                     </td>
-                    <td className="py-2 px-2 text-right">
+                    <td className="py-2 px-2 text-left" style={getColumnStyle('amount')}>
                       <div className="font-semibold text-green-600">
                         {quotation.currency === 'CNY' ? '¥' : '$'}{quotation.totalAmount?.toLocaleString() || 0}
                       </div>
                       <div className="text-[12px] text-gray-500">{quotation.currency}</div>
                     </td>
-                    <td className="py-2 px-2 text-center">
+                    <td className="py-2 px-2 text-left" style={getColumnStyle('products')}>
                       <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-700 font-semibold">
                         {quotation.items?.length || 0}
                       </span>
                     </td>
-                    <td className="py-2 px-2">
+                    <td className="py-2 px-2" style={getColumnStyle('status')}>
                       <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[12px] border ${statusBadge.className}`}>
                         {statusBadge.label}
                       </span>
                     </td>
-                    <td className="py-2 px-2 text-center">
-                      <div className="flex gap-1 justify-center">
+                    <td className="py-2 px-2 text-left" style={getColumnStyle('actions')}>
+                      <div className="flex gap-1 justify-start">
                         <Button
                           size="sm"
                           variant="outline"
@@ -313,7 +402,6 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                           }}
                           className="h-6 text-[12px] px-2"
                         >
-                          <Eye className="w-3 h-3 mr-1" />
                           查看
                         </Button>
 
@@ -336,7 +424,6 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                               }}
                               className="h-6 text-[12px] bg-green-600 hover:bg-green-700 px-2"
                             >
-                              <CheckCircle2 className="w-3 h-3 mr-1" />
                               接受
                             </Button>
 
@@ -363,7 +450,6 @@ export const SupplierQuotationsTab: React.FC<SupplierQuotationsTabProps> = ({
                               }}
                               className="h-6 text-[12px] text-red-600 hover:text-red-700 hover:bg-red-50 px-2"
                             >
-                              <AlertCircle className="w-3 h-3 mr-1" />
                               拒绝
                             </Button>
                           </>

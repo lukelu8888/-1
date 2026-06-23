@@ -200,10 +200,29 @@ export function PushToXJDialog({ open, onClose, requirement }: PushToXJDialogPro
         const xjPayload = {
           id: `xj_${Date.now()}_${supplierId}`,
           xjNumber,
+          products: [{
+            id: requirement.id || `${xjNumber}-item-1`,
+            productName: requirement.productName,
+            productNameEn: (requirement as any).productNameEn || '',
+            productNameZh: (requirement as any).productNameZh || '',
+            modelNo: getFormalBusinessModelNo(requirement),
+            specification: requirement.specification || '',
+            specificationEn: (requirement as any).specificationEn || '',
+            specificationZh: (requirement as any).specificationZh || '',
+            quantity: requirement.quantity,
+            unit: requirement.unit,
+            targetPrice: targetPrice ? parseFloat(targetPrice) : requirement.targetPrice,
+            currency: requirement.currency || 'USD',
+          }],
           
           // 🔥 产品信息（来自采购需求）
           productName: requirement.productName,
+          productNameEn: (requirement as any).productNameEn || '',
+          productNameZh: (requirement as any).productNameZh || '',
           modelNo: getFormalBusinessModelNo(requirement),
+          specification: requirement.specification || '',
+          specificationEn: (requirement as any).specificationEn || '',
+          specificationZh: (requirement as any).specificationZh || '',
           quantity: requirement.quantity,
           unit: requirement.unit,
           

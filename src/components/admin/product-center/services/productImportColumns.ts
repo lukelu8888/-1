@@ -11,6 +11,7 @@
  * operators can use whatever they prefer.
  */
 import type { BulkImportRow, ProductExportRow } from './productCenterService';
+import type { ProductAttribute, ProductCategory } from '../context/types';
 
 /**
  * Column keys (must match `ProductExportRow` and `BulkImportRow` field
@@ -110,4 +111,109 @@ export function buildImportTemplate(): string {
     return '';
   }).join(',');
   return `${headers}\r\n${sample}\r\n`;
+}
+
+function csvEscape(value: string): string {
+  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+function htmlEscape(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function buildDynamicImportTemplate(
+  categories: ProductCategory[],
+  attributes: ProductAttribute[],
+): string {
+  const attrColumns = attributes
+    .filter((a) => a.includeInImport ?? true)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((a) => `属性:${a.code}`);
+  const headers = [...IMPORT_COLUMNS.map((k) => COLUMN_LABELS[k]), ...attrColumns];
+  const sample = headers.map((header) => {
+    if (header === COLUMN_LABELS.sku) return 'SKU-EXAMPLE-001';
+    if (header === COLUMN_LABELS.name) return '示例产品';
+    if (header === COLUMN_LABELS.nameEn) return 'Sample Product';
+    if (header === COLUMN_LABELS.status) return 'draft';
+    if (header === COLUMN_LABELS.region) return 'NA';
+    if (header === COLUMN_LABELS.currency) return 'USD';
+    if (header === COLUMN_LABELS.basePrice) return '99.99';
+    if (header === COLUMN_LABELS.primaryCategoryCode) {
+      return categories.find((c) => c.isActive)?.code ?? '';
+    }
+    return '';
+  });
+  return `${headers.map(csvEscape).join(',')}\r\n${sample.map(csvEscape).join(',')}\r\n`;
+}
+
+export function buildDynamicImportWorkbookHtml(
+  categories: ProductCategory[],
+  attributes: ProductAttribute[],
+): string {
+  const attrColumns = attributes
+    .filter((a) => a.includeInImport ?? true)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const headers = [...IMPORT_COLUMNS.map((k) => COLUMN_LABELS[k]), ...attrColumns.map((a) => `属性:${a.code}`)];
+  const leafCategoryIds = new Set(categories.map((c) => c.parentId).filter(Boolean));
+  const leafCategories = categories.filter((c) => c.isActive && !leafCategoryIds.has(c.id));
+  const categoryPath = (cat: ProductCategory): string => {
+    const byId = new Map(categories.map((c) => [c.id, c] as const));
+    const chain: string[] = [];
+    let cursor: ProductCategory | undefined = cat;
+    while (cursor) {
+      chain.unshift(cursor.name);
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+    }
+    return chain.join(' / ');
+  };
+
+  const headerCells = headers.map((h) => `<th>${htmlEscape(h)}</th>`).join('');
+  const sampleCells = headers.map((h) => {
+    const value =
+      h === COLUMN_LABELS.sku ? 'SKU-EXAMPLE-001'
+        : h === COLUMN_LABELS.name ? '示例产品'
+        : h === COLUMN_LABELS.nameEn ? 'Sample Product'
+        : h === COLUMN_LABELS.status ? 'draft'
+        : h === COLUMN_LABELS.region ? 'NA'
+        : h === COLUMN_LABELS.currency ? 'USD'
+        : h === COLUMN_LABELS.basePrice ? '99.99'
+        : h === COLUMN_LABELS.primaryCategoryCode ? (leafCategories[0]?.code ?? '')
+        : '';
+    return `<td>${htmlEscape(value)}</td>`;
+  }).join('');
+
+  const categoryRows = leafCategories
+    .map((c) => `<tr><td>${htmlEscape(c.code)}</td><td>${htmlEscape(c.name)}</td><td>${htmlEscape(c.nameEn ?? '')}</td><td>${htmlEscape(categoryPath(c))}</td></tr>`)
+    .join('');
+  const attrRows = attrColumns
+    .map((a) => `<tr><td>${htmlEscape(a.code)}</td><td>${htmlEscape(a.label)}</td><td>${htmlEscape(a.dataType)}</td><td>${htmlEscape(a.unit ?? '')}</td><td>${htmlEscape(a.options?.join(' / ') ?? '')}</td><td>${a.isRequired ? 'Y' : ''}</td><td>${htmlEscape((a.appliesToCategoryIds ?? []).join(', '))}</td></tr>`)
+    .join('');
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; margin-bottom: 24px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; mso-number-format:"\\@"; }
+    th { background: #e2e8f0; font-weight: 700; }
+    .title { font-size: 16px; font-weight: 700; margin: 16px 0 8px; }
+    .note { color: #64748b; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="title">产品导入模板</div>
+  <div class="note">请在“主类目编码”填写下方类目字典中的末级类目编码；属性列会随分类中心实时生成。</div>
+  <table><thead><tr>${headerCells}</tr></thead><tbody><tr>${sampleCells}</tr></tbody></table>
+  <div class="title">类目字典（末级类目）</div>
+  <table><thead><tr><th>类目编码</th><th>中文名</th><th>英文名</th><th>完整路径</th></tr></thead><tbody>${categoryRows}</tbody></table>
+  <div class="title">属性字典</div>
+  <table><thead><tr><th>属性编码</th><th>属性名称</th><th>类型</th><th>单位</th><th>可选项</th><th>必填</th><th>绑定类目ID</th></tr></thead><tbody>${attrRows}</tbody></table>
+</body>
+</html>`;
 }

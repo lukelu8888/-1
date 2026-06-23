@@ -14,10 +14,20 @@ import {
   type SourcePricingBasis,
 } from '../../types/pricingBasis';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { normalizeFlowProductCore } from '../../utils/documentDataAdapters';
 import {
   buildStructuredApprovalNotes,
   type StructuredApprovalDraft,
 } from '../../utils/approvalWorkflow';
+import type { PaymentMode } from '../../contexts/SalesQuotationContext';
+import {
+  BALANCE_TRIGGER_OPTIONS,
+  PAYMENT_MODE_OPTIONS,
+  buildPaymentTermsText,
+  deriveBalanceTrigger,
+  getPaymentModeLabel,
+  type BalanceTrigger,
+} from '../../lib/paymentFlow';
 
 /**
  * 🎯 智能报价创建页面 - 外贸价格核算专家系统
@@ -79,14 +89,18 @@ interface QuoteCreationIntelligentProps {
   requirementNo: string; // 采购需求单号（QR）
   requirement: any; // 采购需求单数据
   onClose: () => void;
-  onSubmit?: (quoteData: any) => void;
+  onSubmit?: (quoteData: any, action?: 'draft' | 'review') => void;
+  saving?: boolean;
+  savingAction?: 'draft' | 'review' | null;
 }
 
 export default function QuoteCreationIntelligent({
   requirementNo,
   requirement,
   onClose,
-  onSubmit
+  onSubmit,
+  saving = false,
+  savingAction = null,
 }: QuoteCreationIntelligentProps) {
   // 报价基本信息
   const [quoteNo, setQuoteNo] = useState('');
@@ -113,6 +127,15 @@ export default function QuoteCreationIntelligent({
     customerBackground: '',
     specialConsiderations: '',
     riskFocus: '',
+  });
+  const [paymentConfig, setPaymentConfig] = useState<{
+    paymentMode: PaymentMode;
+    balanceTrigger: BalanceTrigger;
+    paymentTerms: string;
+  }>({
+    paymentMode: 'tt_deposit_balance_before_shipment',
+    balanceTrigger: 'before_shipment',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
   });
   
   // 全局默认设置
@@ -299,6 +322,66 @@ export default function QuoteCreationIntelligent({
     };
   };
 
+  const isGenericProductPlaceholder = (value: unknown) => {
+    const text = String(value || '').trim();
+    return !text || text === '-' || text === '--' || /^n\/a$/i.test(text) || /^product\s*\d*$/i.test(text);
+  };
+
+  const normalizeMeaningfulProductText = (value: unknown) => {
+    const text = String(value || '').trim();
+    return isGenericProductPlaceholder(text) ? '' : text;
+  };
+
+  const resolveFeedbackProduct = (item: any, index: number) => {
+    const products = Array.isArray(requirement?.purchaserFeedback?.products)
+      ? requirement.purchaserFeedback.products
+      : [];
+    return products.find((fp: any) =>
+      String(fp?.productId || '').trim() && String(fp.productId).trim() === String(item?.id || '').trim()
+    ) || products[index] || null;
+  };
+
+  const resolveProductDisplay = (item: any, feedbackProduct: any, index: number) => {
+    const normalized = normalizeFlowProductCore({ ...(item || {}), ...(feedbackProduct || {}) }, index);
+    const productName = [
+      item?.productName,
+      item?.productNameEn,
+      item?.productNameZh,
+      feedbackProduct?.productName,
+      feedbackProduct?.productNameEn,
+      feedbackProduct?.productNameZh,
+      item?.name,
+      item?.description,
+      feedbackProduct?.name,
+      feedbackProduct?.description,
+      normalized.productName,
+      normalized.productNameEn,
+      normalized.productNameZh,
+    ]
+      .map(normalizeMeaningfulProductText)
+      .find(Boolean) || '';
+
+    return {
+      productName: productName || `Product ${index + 1}`,
+      specification:
+        [
+          item?.specification,
+          item?.specificationEn,
+          item?.specificationZh,
+          feedbackProduct?.specification,
+          feedbackProduct?.specificationEn,
+          feedbackProduct?.specificationZh,
+          normalized.specification,
+        ].map(normalizeMeaningfulProductText).find(Boolean) || '',
+      modelNo: [
+        getFormalBusinessModelNo(item),
+        getFormalBusinessModelNo(feedbackProduct),
+        normalized.modelNo,
+      ].map(normalizeMeaningfulProductText).find(Boolean) || '',
+      imageUrl: item?.imageUrl || feedbackProduct?.imageUrl || normalized.imageUrl,
+    };
+  };
+
   const normalizeItem = (item: QuoteItem): QuoteItem => {
     const exchangeRate = toSafeNumber(item.exchangeRate, 7.2);
     const safeExchangeRate = exchangeRate > 0 ? exchangeRate : 7.2;
@@ -392,6 +475,26 @@ export default function QuoteCreationIntelligent({
       
       // 🔥 判断是否是已有的报价单（编辑模式）还是新建报价单
       const isExistingQuotation = requirement.qtNumber !== undefined;
+      const requirementPaymentMode = String(
+        requirement.paymentMode || requirement.payment_mode || '',
+      ).trim() as PaymentMode;
+      const resolvedPaymentMode = PAYMENT_MODE_OPTIONS.some((option) => option.value === requirementPaymentMode)
+        ? requirementPaymentMode
+        : 'tt_deposit_balance_before_shipment';
+      const resolvedBalanceTrigger = deriveBalanceTrigger(
+        resolvedPaymentMode,
+        requirement.balanceTrigger || requirement.balance_trigger || null,
+      );
+      setPaymentConfig({
+        paymentMode: resolvedPaymentMode,
+        balanceTrigger: resolvedBalanceTrigger,
+        paymentTerms: String(
+          requirement.paymentTerms
+          || requirement.payment_terms
+          || requirement.purchaserFeedback?.paymentTerms
+          || buildPaymentTermsText(resolvedPaymentMode, resolvedBalanceTrigger),
+        ).trim(),
+      });
       
       if (isExistingQuotation) {
         // 🔥 编辑模式：从已有报价单加载数据
@@ -422,9 +525,8 @@ export default function QuoteCreationIntelligent({
         // 🔥 修复：编辑QT时，也应该从QR采购需求单中读取原始供货价，而不是从QT计算结果读取
         const existingItems: QuoteItem[] = requirement.items.map((item: any, index: number) => {
           // 查找采购反馈中的原始供货单价（与新建模式相同逻辑）
-          const feedbackProduct = requirement.purchaserFeedback?.products?.find(
-            (fp: any) => fp.productId === item.id
-          );
+          const feedbackProduct = resolveFeedbackProduct(item, index);
+          const display = resolveProductDisplay(item, feedbackProduct, index);
           
           const sourcePricing = resolveSourcePricing(
             feedbackProduct || item,
@@ -455,12 +557,12 @@ export default function QuoteCreationIntelligent({
           
           const existingItem: QuoteItem = {
             id: item.id || `item-${index}`,
-            productName: item.productName || '',
-            specification: item.specification || '',
-            modelNo: getFormalBusinessModelNo(item),
+            productName: display.productName,
+            specification: display.specification,
+            modelNo: display.modelNo,
             quantity: item.quantity || 0,
             unit: item.unit || 'PCS',
-            imageUrl: item.imageUrl,
+            imageUrl: display.imageUrl,
             
             // 🔥 成本参数：直接使用供应商报价传递的 priceType
             priceType: resolvedPriceType,
@@ -529,9 +631,8 @@ export default function QuoteCreationIntelligent({
 
         const initialItems: QuoteItem[] = requirement.items.map((item: any, index: number) => {
           // 查找采购反馈中的产品
-          const feedbackProduct = requirement.purchaserFeedback?.products?.find(
-            (fp: any) => fp.productId === item.id
-          );
+          const feedbackProduct = resolveFeedbackProduct(item, index);
+          const display = resolveProductDisplay(item, feedbackProduct, index);
           
           console.log(`🔍 [初始化产品${index + 1}] ${item.productName}:`, {
             '原始item': item,
@@ -551,12 +652,12 @@ export default function QuoteCreationIntelligent({
           
           const newItem: QuoteItem = {
             id: item.id || `item-${index}`,
-            productName: item.productName || '',
-            specification: item.specification || '',
-            modelNo: getFormalBusinessModelNo(item),
+            productName: display.productName,
+            specification: display.specification,
+            modelNo: display.modelNo,
             quantity: item.quantity || 0,
             unit: item.unit || 'PCS',
-            imageUrl: item.imageUrl,
+            imageUrl: display.imageUrl,
             
             // 🔥 成本参数：使用供应商报价传递的 priceType 和税务参数
             priceType: resolvedPriceType2,
@@ -632,6 +733,10 @@ export default function QuoteCreationIntelligent({
   // 批量应用全局默认值
   const applyGlobalDefaults = () => {
     const sourceItems = latestItemsRef.current;
+    if (!Array.isArray(sourceItems) || sourceItems.length === 0) {
+      toast.error('当前无产品项，无法批量应用默认值');
+      return;
+    }
     const updatedItems = sourceItems.map(item => {
         const lockedBySource = hasLockedSourcePricing(item);
         const newRate = globalDefaults.exchangeRate;
@@ -679,6 +784,7 @@ export default function QuoteCreationIntelligent({
 
   // 提交报价（保存草稿）
   const handleSaveDraft = () => {
+    if (isBusy) return;
     const computedItems = latestItemsRef.current.map(item => calculatePrice(item));
     latestItemsRef.current = computedItems;
     setItems(computedItems);
@@ -715,6 +821,9 @@ export default function QuoteCreationIntelligent({
       
       // 🔥 真实的客户和区域信息
       ...customerInfo,
+      paymentTerms: paymentConfig.paymentTerms.trim() || buildPaymentTermsText(paymentConfig.paymentMode, paymentConfig.balanceTrigger),
+      paymentMode: paymentConfig.paymentMode,
+      balanceTrigger: paymentConfig.balanceTrigger,
       
       // 🔥 产品信息（完整的核算数据）
       items: computedItems.map(item => ({
@@ -769,12 +878,12 @@ export default function QuoteCreationIntelligent({
       updatedAt: new Date().toISOString()
     };
     
-    console.log('💾 保存报价草稿:', quoteData);
-    onSubmit?.(quoteData);
+    onSubmit?.(quoteData, 'draft');
   };
 
   // 提交审核
   const handleSubmitForApproval = () => {
+    if (isBusy) return;
     const approvalSections = Object.values(approvalDraft).map((value) => String(value || '').trim());
     if (approvalSections.some((value) => !value)) {
       alert('请完整填写报价策略、客户背景、特殊考虑和风险点后再提交审核');
@@ -820,6 +929,9 @@ export default function QuoteCreationIntelligent({
       
       // 🔥 真实的客户和区域信息
       ...customerInfo,
+      paymentTerms: paymentConfig.paymentTerms.trim() || buildPaymentTermsText(paymentConfig.paymentMode, paymentConfig.balanceTrigger),
+      paymentMode: paymentConfig.paymentMode,
+      balanceTrigger: paymentConfig.balanceTrigger,
       
       // 🔥 产品信息（完整的核算数据）
       items: computedItems.map(item => ({
@@ -921,8 +1033,25 @@ export default function QuoteCreationIntelligent({
     
     alert(`✅ 报价已成功提交审核！\n\n${approvalMessage}`);
     
-    onSubmit?.(quoteData);
+    onSubmit?.(quoteData, 'review');
     onClose();
+  };
+
+  const handlePaymentModeChange = (nextMode: PaymentMode) => {
+    const nextTrigger = deriveBalanceTrigger(nextMode, null);
+    setPaymentConfig({
+      paymentMode: nextMode,
+      balanceTrigger: nextTrigger,
+      paymentTerms: buildPaymentTermsText(nextMode, nextTrigger),
+    });
+  };
+
+  const handleBalanceTriggerChange = (nextTrigger: BalanceTrigger) => {
+    setPaymentConfig((prev) => ({
+      ...prev,
+      balanceTrigger: nextTrigger,
+      paymentTerms: buildPaymentTermsText(prev.paymentMode, nextTrigger),
+    }));
   };
 
   // 计算总金额（实时联动）
@@ -930,6 +1059,9 @@ export default function QuoteCreationIntelligent({
   const totalCost = items.reduce((sum, item) => sum + (item.costUSD + item.domesticFeesCNY / item.exchangeRate) * item.quantity, 0);
   const totalProfit = totalAmount - totalCost;
   const overallMargin = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0;
+  const isBusy = saving || Boolean(savingAction);
+  const isSavingDraft = savingAction === 'draft';
+  const isSubmittingReview = savingAction === 'review';
   
   // 🔥 添加更新提示效果
   const [isUpdating, setIsUpdating] = React.useState(false);
@@ -1274,7 +1406,12 @@ export default function QuoteCreationIntelligent({
                       />
                       <span className="text-xs text-slate-600">%</span>
                     </div>
-                    <Button onClick={applyGlobalDefaults} size="sm" className="bg-slate-600 hover:bg-slate-700 h-6 text-xs px-2 ml-1">
+                    <Button
+                      onClick={applyGlobalDefaults}
+                      size="sm"
+                      disabled={items.length === 0}
+                      className="bg-slate-600 hover:bg-slate-700 h-6 text-xs px-2 ml-1 disabled:bg-slate-200 disabled:text-slate-400"
+                    >
                       批量应用
                     </Button>
                     {isUpdating && (
@@ -1283,6 +1420,57 @@ export default function QuoteCreationIntelligent({
                         <span>实时计算中...</span>
                       </div>
                     )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-3">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-[180px]">
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">付款方式主规则</label>
+                    <select
+                      value={paymentConfig.paymentMode}
+                      onChange={(e) => handlePaymentModeChange(e.target.value as PaymentMode)}
+                      className="w-full rounded border px-2 py-1.5 text-sm"
+                    >
+                      {PAYMENT_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {PAYMENT_MODE_OPTIONS.find((option) => option.value === paymentConfig.paymentMode)?.description}
+                    </p>
+                  </div>
+                  <div className="min-w-[180px]">
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">余款/信用证触发节点</label>
+                    <select
+                      value={paymentConfig.balanceTrigger}
+                      onChange={(e) => handleBalanceTriggerChange(e.target.value as BalanceTrigger)}
+                      className="w-full rounded border px-2 py-1.5 text-sm"
+                    >
+                      {BALANCE_TRIGGER_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {BALANCE_TRIGGER_OPTIONS.find((option) => option.value === paymentConfig.balanceTrigger)?.description}
+                    </p>
+                  </div>
+                  <div className="flex-1">
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">合同/报价展示用付款条款</label>
+                    <textarea
+                      value={paymentConfig.paymentTerms}
+                      onChange={(e) => setPaymentConfig((prev) => ({ ...prev, paymentTerms: e.target.value }))}
+                      rows={2}
+                      className="w-full rounded border px-2 py-1.5 text-sm"
+                      placeholder="付款条款文本会随 QT / SC 文档展示。"
+                    />
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      当前结构化模式：{getPaymentModeLabel(paymentConfig.paymentMode)}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1829,16 +2017,16 @@ export default function QuoteCreationIntelligent({
               {/* 🔥 按钮移到统计信息后面 */}
               <div className="w-px h-8 bg-slate-300" />
               <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={onClose} className="h-9">
+                <Button variant="outline" onClick={onClose} className="h-9" disabled={isBusy}>
                   取消
                 </Button>
-                <Button onClick={handleSaveDraft} className="bg-slate-500 hover:bg-slate-600 h-9">
+                <Button onClick={handleSaveDraft} className="bg-slate-500 hover:bg-slate-600 h-9" disabled={isBusy}>
                   <Save className="w-4 h-4 mr-1.5" />
-                  保存草稿
+                  {isSavingDraft ? '保存中...' : '保存草稿'}
                 </Button>
-                <Button onClick={handleSubmitForApproval} className="bg-orange-500 hover:bg-orange-600 h-9">
+                <Button onClick={handleSubmitForApproval} className="bg-orange-500 hover:bg-orange-600 h-9" disabled={isBusy}>
                   <Send className="w-4 h-4 mr-1.5" />
-                  提交复核
+                  {isSubmittingReview ? '处理中...' : '提交复核'}
                 </Button>
               </div>
             </div>

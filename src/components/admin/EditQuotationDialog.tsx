@@ -12,6 +12,14 @@ import { toast } from 'sonner@2.0.3';
 import type { Quotation } from './QuotationManagement';
 import QuotationTemplate from './QuotationTemplate';
 import QuotationTemplateA4 from './QuotationTemplateA4'; // 🔥 导入A4标准版本
+import type { PaymentMode } from '../../contexts/SalesQuotationContext';
+import {
+  BALANCE_TRIGGER_OPTIONS,
+  PAYMENT_MODE_OPTIONS,
+  buildPaymentTermsText,
+  deriveBalanceTrigger,
+  type BalanceTrigger,
+} from '../../lib/paymentFlow';
 
 interface EditQuotationDialogProps {
   quotation: Quotation | null;
@@ -33,7 +41,17 @@ export default function EditQuotationDialog({
 
   useEffect(() => {
     if (quotation) {
-      setFormData({ ...quotation });
+      const rawMode = String(quotation.paymentMode || '').trim() as PaymentMode;
+      const paymentMode = PAYMENT_MODE_OPTIONS.some((option) => option.value === rawMode)
+        ? rawMode
+        : 'tt_deposit_balance_before_shipment';
+      const balanceTrigger = deriveBalanceTrigger(paymentMode, quotation.balanceTrigger || null);
+      setFormData({
+        ...quotation,
+        paymentMode,
+        balanceTrigger,
+        paymentTerms: quotation.paymentTerms || buildPaymentTermsText(paymentMode, balanceTrigger),
+      });
     }
   }, [quotation]);
 
@@ -82,6 +100,27 @@ export default function EditQuotationDialog({
     toast.success('保存成功！', {
       description: '报价已保存为草稿',
       duration: 2000
+    });
+  };
+
+  const handlePaymentModeChange = (paymentMode: PaymentMode) => {
+    const balanceTrigger = deriveBalanceTrigger(paymentMode, null);
+    setFormData({
+      ...formData,
+      paymentMode,
+      balanceTrigger,
+      paymentTerms: buildPaymentTermsText(paymentMode, balanceTrigger),
+    });
+  };
+
+  const handleBalanceTriggerChange = (balanceTrigger: BalanceTrigger) => {
+    setFormData({
+      ...formData,
+      balanceTrigger,
+      paymentTerms: buildPaymentTermsText(
+        (formData.paymentMode as PaymentMode) || 'tt_deposit_balance_before_shipment',
+        balanceTrigger,
+      ),
     });
   };
 
@@ -248,11 +287,49 @@ export default function EditQuotationDialog({
             <div className="grid grid-cols-2 gap-4">
               <Card className="p-4 border-gray-200">
                 <h4 className="text-xs mb-2 text-gray-700">付款条款</h4>
+                <div className="mb-3 grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs text-gray-600">付款模式</Label>
+                    <Select
+                      value={(formData.paymentMode as string) || 'tt_deposit_balance_before_shipment'}
+                      onValueChange={(value) => handlePaymentModeChange(value as PaymentMode)}
+                    >
+                      <SelectTrigger className="mt-1 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_MODE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600">触发节点</Label>
+                    <Select
+                      value={(formData.balanceTrigger as string) || deriveBalanceTrigger(formData.paymentMode as PaymentMode, null)}
+                      onValueChange={(value) => handleBalanceTriggerChange(value as BalanceTrigger)}
+                    >
+                      <SelectTrigger className="mt-1 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BALANCE_TRIGGER_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
                 <Textarea
                   value={formData.paymentTerms}
                   onChange={(e) => setFormData({ ...formData, paymentTerms: e.target.value })}
                   className="text-xs min-h-20"
-                  placeholder="例如: 30% T/T预付，70%见提单副本付款"
+                  placeholder="例如: 定金30%，余款出货前支付 / 100% 信用证"
                 />
               </Card>
               <Card className="p-4 border-gray-200">

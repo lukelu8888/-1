@@ -11,15 +11,23 @@ import { QuoteRequirement } from '../../../contexts/QuoteRequirementContext';
 import { Supplier, findSupplier, toSupplierProfile } from '../../../data/suppliersData';
 import { XJ } from '../../../contexts/XJContext';
 import { getStoredAdminOrgProfile, getStoredAdminUserProfile } from '../../../contexts/AdminOrganizationContext';
+import { canonicalizePersonnelEmail } from '../../../lib/personnelEmail';
 import {
   buildBilingualTradingRequirementsText,
   buildProcurementConditionGroups,
   extractProcurementRequestContext,
   joinNonEmptyText,
 } from '../../../utils/procurementRequestContext';
+import {
+  inferSupplierDocumentLanguage,
+  normalizeFlowProductCore,
+  resolveFlowProductDisplay,
+} from '../../../utils/documentDataAdapters';
 import { desensitizePurchaserFeedbackText } from '../../../utils/purchaserFeedbackSanitizer';
 import { generateXJNumber } from '../../../utils/xjNumberGenerator';
-import { getFormalBusinessModelNo } from '../../../utils/productModelDisplay';
+import { getFactoryFacingModelNo, getFormalBusinessModelNo } from '../../../utils/productModelDisplay';
+import { buildPaymentTermsText, deriveBalanceTrigger } from '../../../lib/paymentFlow';
+import { matchesNormalizedQrNumber, normalizeLegacyQrNumber } from '../../../utils/quoteRequirementNumber';
 
 // 🔥 状态配置类型
 type POStatus = 'pending' | 'confirmed' | 'producing' | 'completed' | 'delayed';
@@ -126,12 +134,407 @@ const buildAdminCompanyContact = () => {
   };
 };
 
+const resolveBuyerCompanyDisplayByLanguage = (
+  adminCompany: ReturnType<typeof buildAdminCompanyContact>,
+  language: 'zh' | 'en',
+) => {
+  const useChinese = language === 'zh';
+
+  return {
+    name: useChinese
+      ? (adminCompany.nameCN || adminCompany.nameEN)
+      : (adminCompany.nameEN || adminCompany.nameCN),
+    nameEn: adminCompany.nameEN || adminCompany.nameCN,
+    address: useChinese
+      ? (adminCompany.addressCN || adminCompany.addressEN)
+      : (adminCompany.addressEN || adminCompany.addressCN),
+    addressEn: adminCompany.addressEN || adminCompany.addressCN,
+  };
+};
+
+const normalizeTextToken = (value: unknown) => String(value || '').trim();
+const PROCUREMENT_CREATOR_ROLES = new Set(['Procurement', 'Procurement_Manager']);
+const GENERIC_ADMIN_CONTACT_NAMES = new Set(['管理员', '系统管理员', 'admin', 'administrator']);
+
+const isGenericAdminContactName = (value: unknown) =>
+  GENERIC_ADMIN_CONTACT_NAMES.has(String(value || '').trim().toLowerCase());
+
+const resolvePurchaseOrderCreatorContact = (po: PurchaseOrderType) => {
+  const poAny = po as any;
+  const adminOrg = getStoredAdminOrgProfile();
+  const adminUser = getStoredAdminUserProfile();
+  const companyContact = buildAdminCompanyContact();
+  const contacts = Array.isArray(adminOrg.internalContacts) ? adminOrg.internalContacts : [];
+  const accounts = Array.isArray(adminOrg.internalAccounts) ? adminOrg.internalAccounts : [];
+  const region = normalizeTextToken(po.region || poAny.region_code || '');
+
+  const emailCandidates = [
+    poAny.authenticatedUserEmail,
+    poAny.authenticated_user_email,
+    poAny.actingUserEmail,
+    poAny.acting_user_email,
+    poAny.operatorEmail,
+    poAny.operator_email,
+    poAny.createdBy,
+    poAny.created_by,
+  ]
+    .map((value) => canonicalizePersonnelEmail(normalizeTextToken(value), region))
+    .filter(Boolean);
+
+  const idCandidates = [
+    poAny.authenticatedUserId,
+    poAny.authenticated_user_id,
+    poAny.actingUserId,
+    poAny.acting_user_id,
+    poAny.operatorUserId,
+    poAny.operator_user_id,
+    poAny.createdBy,
+    poAny.created_by,
+  ]
+    .map((value) => normalizeTextToken(value))
+    .filter(Boolean);
+
+  const nameCandidates = [
+    poAny.createdByName,
+    poAny.created_by_name,
+    poAny.operatorName,
+    poAny.operator_name,
+    poAny.authenticatedUserName,
+    poAny.authenticated_user_name,
+    poAny.createdBy,
+    poAny.created_by,
+  ]
+    .map((value) => normalizeTextToken(value))
+    .filter((value) => value && !value.includes('@'));
+
+  const matchedAccountCandidate =
+    accounts.find((account) => idCandidates.includes(normalizeTextToken(account.authUserId))) ||
+    accounts.find((account) => emailCandidates.includes(canonicalizePersonnelEmail(account.loginEmail, region))) ||
+    accounts.find((account) => nameCandidates.includes(normalizeTextToken(account.username)));
+
+  const matchedAccount = matchedAccountCandidate && PROCUREMENT_CREATOR_ROLES.has(normalizeTextToken(matchedAccountCandidate.role))
+    ? matchedAccountCandidate
+    : null;
+
+  const matchedContactByAccount = matchedAccount
+    ? contacts.find((contact) => normalizeTextToken(contact.id) === normalizeTextToken(matchedAccount.employeeId))
+    : null;
+
+  const matchedContact =
+    matchedContactByAccount ||
+    contacts.find((contact) =>
+      emailCandidates.includes(canonicalizePersonnelEmail(contact.email, region)) &&
+      PROCUREMENT_CREATOR_ROLES.has(
+        normalizeTextToken(
+          accounts.find((account) => normalizeTextToken(account.employeeId) === normalizeTextToken(contact.id))?.role,
+        ),
+      ),
+    ) ||
+    contacts.find((contact) =>
+      nameCandidates.includes(normalizeTextToken(contact.name)) &&
+      PROCUREMENT_CREATOR_ROLES.has(
+        normalizeTextToken(
+          accounts.find((account) => normalizeTextToken(account.employeeId) === normalizeTextToken(contact.id))?.role,
+        ),
+      ),
+    ) ||
+    null;
+
+  const resolvedName =
+    normalizeTextToken(matchedContact?.name) ||
+    normalizeTextToken(matchedAccount?.username) ||
+    companyContact.contactPerson ||
+    (isGenericAdminContactName(adminUser.name) ? '' : normalizeTextToken(adminUser.name));
+
+  const resolvedEmail =
+    canonicalizePersonnelEmail(matchedContact?.email, region) ||
+    canonicalizePersonnelEmail(matchedAccount?.loginEmail, region) ||
+    companyContact.email ||
+    canonicalizePersonnelEmail(adminUser.email, region);
+
+  const resolvedPhone =
+    normalizeTextToken(matchedContact?.phone) ||
+    companyContact.phone;
+
+  return {
+    contactPerson: resolvedName,
+    email: resolvedEmail,
+    tel: resolvedPhone,
+  };
+};
+
+const toFiniteNumber = (value: unknown) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const normalizeBankInfoValue = (value: unknown) => String(value ?? '').trim();
+
+const pickBankInfoValue = (...values: unknown[]) => {
+  for (const value of values) {
+    const normalized = normalizeBankInfoValue(value);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+const hasMeaningfulSupplierBankInfo = (bankInfo: any) => {
+  if (!bankInfo || typeof bankInfo !== 'object') return false;
+  return Boolean(
+    pickBankInfoValue(
+      bankInfo.bankName,
+      bankInfo.accountName,
+      bankInfo.accountNumber,
+      bankInfo.swiftCode,
+      bankInfo.swift,
+      bankInfo.bankAddress,
+      bankInfo.iban,
+      bankInfo.routingNumber,
+      bankInfo.paymentNote,
+    ),
+  );
+};
+
+const pickSnapshotTextValue = (primary: unknown, fallback: unknown) => {
+  const primaryText = String(primary || '').trim();
+  if (primaryText) return primaryText;
+  return String(fallback || '').trim();
+};
+
+const PURCHASE_ORDER_TERM_DEFAULTS: Partial<Record<keyof PurchaseOrderData['terms'], string>> = {
+  paymentTerms: '待采购确认',
+  deliveryTerms: '待采购确认',
+  deliveryAddress: '福建省福州市仓山区金山街道浦上大道216号',
+  qualityStandard: '符合国家标准及合同约定',
+  inspectionMethod: '到货验收',
+  packaging: '标准出口包装',
+  warrantyPeriod: '12个月',
+  warrantyTerms: '质量问题免费更换',
+  applicableLaw: '中华人民共和国合同法',
+  contractValidity: '订单确认后生效',
+};
+
+const pickSnapshotTermValue = (
+  field: keyof PurchaseOrderData['terms'],
+  primary: unknown,
+  fallback: unknown,
+) => {
+  const primaryText = String(primary || '').trim();
+  const fallbackText = String(fallback || '').trim();
+  const defaultText = String(PURCHASE_ORDER_TERM_DEFAULTS[field] || '').trim();
+
+  if (!primaryText) return fallbackText;
+  if (fallbackText && defaultText && primaryText === defaultText && fallbackText !== defaultText) {
+    return fallbackText;
+  }
+  return primaryText;
+};
+
+const mergePurchaseOrderTerms = (
+  liveTerms: PurchaseOrderData['terms'] | undefined,
+  existingTerms: PurchaseOrderData['terms'] | undefined,
+): PurchaseOrderData['terms'] => {
+  const next = (liveTerms || {}) as PurchaseOrderData['terms'];
+  const existing = (existingTerms || {}) as PurchaseOrderData['terms'];
+
+  return {
+    ...next,
+    paymentTerms: pickSnapshotTermValue('paymentTerms', next.paymentTerms, existing.paymentTerms),
+    deliveryTerms: pickSnapshotTermValue('deliveryTerms', next.deliveryTerms, existing.deliveryTerms),
+    deliveryAddress: pickSnapshotTermValue('deliveryAddress', next.deliveryAddress, existing.deliveryAddress),
+    qualityStandard: pickSnapshotTermValue('qualityStandard', next.qualityStandard, existing.qualityStandard),
+    inspectionMethod: pickSnapshotTermValue('inspectionMethod', next.inspectionMethod, existing.inspectionMethod),
+    packaging: pickSnapshotTermValue('packaging', next.packaging, existing.packaging),
+    shippingMarks: pickSnapshotTermValue('shippingMarks', next.shippingMarks, existing.shippingMarks),
+    deliveryPenalty: pickSnapshotTermValue('deliveryPenalty', next.deliveryPenalty, existing.deliveryPenalty),
+    qualityPenalty: pickSnapshotTermValue('qualityPenalty', next.qualityPenalty, existing.qualityPenalty),
+    warrantyPeriod: pickSnapshotTermValue('warrantyPeriod', next.warrantyPeriod, existing.warrantyPeriod),
+    warrantyTerms: pickSnapshotTermValue('warrantyTerms', next.warrantyTerms, existing.warrantyTerms),
+    returnPolicy: pickSnapshotTermValue('returnPolicy', next.returnPolicy, existing.returnPolicy),
+    confidentiality: pickSnapshotTermValue('confidentiality', next.confidentiality, existing.confidentiality),
+    ipRights: pickSnapshotTermValue('ipRights', next.ipRights, existing.ipRights),
+    forceMajeure: pickSnapshotTermValue('forceMajeure', next.forceMajeure, existing.forceMajeure),
+    disputeResolution: pickSnapshotTermValue('disputeResolution', next.disputeResolution, existing.disputeResolution),
+    applicableLaw: pickSnapshotTermValue('applicableLaw', next.applicableLaw, existing.applicableLaw),
+    contractValidity: pickSnapshotTermValue('contractValidity', next.contractValidity, existing.contractValidity),
+    modification: pickSnapshotTermValue('modification', next.modification, existing.modification),
+    termination: pickSnapshotTermValue('termination', next.termination, existing.termination),
+    incoterm: pickSnapshotTermValue('incoterm', next.incoterm, existing.incoterm),
+    portOfLoading: pickSnapshotTermValue('portOfLoading', next.portOfLoading, existing.portOfLoading),
+    portOfDestination: pickSnapshotTermValue('portOfDestination', next.portOfDestination, existing.portOfDestination),
+    taxTerms: pickSnapshotTermValue('taxTerms', next.taxTerms, existing.taxTerms),
+    bankTerms: pickSnapshotTermValue('bankTerms', next.bankTerms, existing.bankTerms),
+  };
+};
+
+const mergePurchaseOrderEditForm = (
+  nextForm: PurchaseOrderData['editForm'] | undefined,
+  existingForm: PurchaseOrderData['editForm'] | undefined,
+): PurchaseOrderData['editForm'] => {
+  const next = (nextForm || {}) as NonNullable<PurchaseOrderData['editForm']>;
+  const existing = (existingForm || {}) as NonNullable<PurchaseOrderData['editForm']>;
+
+  const mergeText = (field: keyof NonNullable<PurchaseOrderData['editForm']>) =>
+    pickSnapshotTextValue(next[field], existing[field]);
+
+  return {
+    poNumber: mergeText('poNumber'),
+    requirementNo: mergeText('requirementNo'),
+    xjNumber: mergeText('xjNumber'),
+    sourceRef: mergeText('sourceRef'),
+    supplierName: mergeText('supplierName'),
+    supplierCode: mergeText('supplierCode'),
+    supplierContact: mergeText('supplierContact'),
+    supplierPhone: mergeText('supplierPhone'),
+    supplierAddress: mergeText('supplierAddress'),
+    supplierBankName: mergeText('supplierBankName'),
+    supplierBankAccountName: mergeText('supplierBankAccountName'),
+    supplierBankAccountNumber: mergeText('supplierBankAccountNumber'),
+    supplierBankSwiftCode: mergeText('supplierBankSwiftCode'),
+    supplierBankAddress: mergeText('supplierBankAddress'),
+    supplierBankCurrency: mergeText('supplierBankCurrency'),
+    currency: mergeText('currency'),
+    paymentTerms: mergeText('paymentTerms'),
+    deliveryTerms: mergeText('deliveryTerms'),
+    deliveryAddress: mergeText('deliveryAddress'),
+    qualityStandard: mergeText('qualityStandard'),
+    inspectionMethod: mergeText('inspectionMethod'),
+    packaging: mergeText('packaging'),
+    shippingMarks: mergeText('shippingMarks'),
+    deliveryPenalty: mergeText('deliveryPenalty'),
+    qualityPenalty: mergeText('qualityPenalty'),
+    warrantyPeriod: mergeText('warrantyPeriod'),
+    warrantyTerms: mergeText('warrantyTerms'),
+    returnPolicy: mergeText('returnPolicy'),
+    confidentiality: mergeText('confidentiality'),
+    ipRights: mergeText('ipRights'),
+    forceMajeure: mergeText('forceMajeure'),
+    disputeResolution: mergeText('disputeResolution'),
+    applicableLaw: mergeText('applicableLaw'),
+    contractValidity: mergeText('contractValidity'),
+    modification: mergeText('modification'),
+    termination: mergeText('termination'),
+    incoterm: mergeText('incoterm'),
+    portOfLoading: mergeText('portOfLoading'),
+    portOfDestination: mergeText('portOfDestination'),
+    taxTerms: mergeText('taxTerms'),
+    bankTerms: mergeText('bankTerms'),
+    orderDate: mergeText('orderDate'),
+    expectedDate: mergeText('expectedDate'),
+    actualDate: mergeText('actualDate'),
+    status: mergeText('status'),
+    paymentStatus: mergeText('paymentStatus'),
+    remarks: mergeText('remarks'),
+  };
+};
+
+const hasMeaningfulProductPricing = (products: Array<{ unitPrice?: unknown; amount?: unknown }> | undefined | null) => {
+  return Array.isArray(products) && products.some((product) => {
+    return toFiniteNumber(product?.unitPrice) > 0 || toFiniteNumber(product?.amount) > 0;
+  });
+};
+
+const resolveSupplierProfile = (po: PurchaseOrderType) => {
+  const poAny = po as any;
+  const supplier = findSupplier({
+    code: po.supplierCode || null,
+    id: poAny.supplierId || poAny.supplier_id || null,
+    email: poAny.supplierEmail || poAny.supplier_email || null,
+    name: po.supplierName || null,
+  });
+  return supplier ? toSupplierProfile(supplier) : null;
+};
+
+const resolveSupplierBankInfo = (po: PurchaseOrderType, supplierProfile: ReturnType<typeof resolveSupplierProfile>) => {
+  const poAny = po as any;
+  const documentSnapshot = poAny.documentDataSnapshot || poAny.document_data_snapshot || null;
+  const explicitBankInfo =
+    poAny.supplierBankInfo ||
+    poAny.supplier_bank_info ||
+    poAny.bankInfo ||
+    poAny.bank_info ||
+    null;
+  const snapshotBankInfo = documentSnapshot?.supplier?.bankInfo || null;
+  const bankSource = hasMeaningfulSupplierBankInfo(explicitBankInfo)
+    ? explicitBankInfo
+    : (hasMeaningfulSupplierBankInfo(snapshotBankInfo) ? snapshotBankInfo : null);
+
+  return {
+    bankName: pickBankInfoValue(
+      bankSource?.bankName,
+      bankSource?.bank_name,
+      bankSource?.bankNameCN,
+      bankSource?.bankNameEN,
+    ),
+    accountName: pickBankInfoValue(
+      bankSource?.accountName,
+      bankSource?.account_name,
+      bankSource?.accountNameCN,
+      bankSource?.accountNameEN,
+      po.supplierName,
+      supplierProfile?.name,
+    ),
+    accountNumber: pickBankInfoValue(
+      bankSource?.accountNumber,
+      bankSource?.account_number,
+    ),
+    swiftCode: pickBankInfoValue(
+      bankSource?.swiftCode,
+      bankSource?.swift_code,
+      bankSource?.swift,
+    ),
+    bankAddress: pickBankInfoValue(
+      bankSource?.bankAddress,
+      bankSource?.bank_address,
+    ),
+    currency: pickBankInfoValue(
+      bankSource?.currency,
+      po.currency,
+    ),
+    iban: pickBankInfoValue(
+      bankSource?.iban,
+      bankSource?.IBAN,
+    ),
+    routingNumber: pickBankInfoValue(
+      bankSource?.routingNumber,
+      bankSource?.routing_number,
+    ),
+    paymentNote: pickBankInfoValue(
+      bankSource?.paymentNote,
+      bankSource?.payment_note,
+    ),
+  };
+};
+
 /**
  * 🔥 将采购订单数据转换为文档模板数据
  */
 export const convertToPOData = (po: PurchaseOrderType): PurchaseOrderData => {
   const poAny = po as any;
   const adminCompany = buildAdminCompanyContact();
+  const creatorContact = resolvePurchaseOrderCreatorContact(po);
+  const supplierProfile = resolveSupplierProfile(po);
+  const supplierBankInfo = resolveSupplierBankInfo(po, supplierProfile);
+  const resolvedOrderDate = String(
+    po.orderDate ||
+    poAny.order_date ||
+    poAny.createdDate ||
+    poAny.createdAt ||
+    poAny.created_at ||
+    '',
+  ).split('T')[0];
+  const resolvedExpectedDate = String(
+    po.expectedDate ||
+    poAny.expectedDeliveryDate ||
+    poAny.expected_delivery_date ||
+    '',
+  ).split('T')[0];
+  const procurementLanguage = inferSupplierDocumentLanguage({
+    ...po,
+    supplierProfile,
+    supplierRegion: supplierProfile?.address || po.supplierAddress || '',
+  });
+  const buyerCompanyDisplay = resolveBuyerCompanyDisplayByLanguage(adminCompany, procurementLanguage);
   const pick = (...values: unknown[]) => {
     for (const v of values) {
       const s = String(v ?? '').trim();
@@ -140,51 +543,50 @@ export const convertToPOData = (po: PurchaseOrderType): PurchaseOrderData => {
     return '';
   };
   // 🔥 转换产品列表格式
-  const products = po.items.map((item, index) => ({
-    no: index + 1,
-    modelNo: getFormalBusinessModelNo(item),
-    description: item.productName,
-    specification: item.specification || '标准规格',
-    quantity: item.quantity,
-    unit: item.unit,
-    unitPrice: item.unitPrice,
-    currency: item.currency,
-    amount: item.subtotal,
-    deliveryDate: po.expectedDate,
-    remarks: item.remarks || (po.sourceRef ? `关联销售订单: ${po.sourceRef}` : '')
-  }));
+  const products = po.items.map((item, index) => {
+    const normalized = resolveFlowProductDisplay(item, procurementLanguage);
+    return {
+      no: index + 1,
+      modelNo: normalized.modelNo || '-',
+      imageUrl: normalized.imageUrl || '',
+      description: normalized.productName || '-',
+      specification: normalized.specification || '标准规格',
+      quantity: normalized.quantity,
+      unit: normalized.unit || 'PCS',
+      unitPrice: item.unitPrice,
+      currency: item.currency,
+      amount: item.subtotal,
+      deliveryDate: resolvedExpectedDate,
+      remarks: normalized.remarks || item.remarks || (po.sourceRef ? `关联销售订单: ${po.sourceRef}` : ''),
+    };
+  });
 
   return {
     // 采购单基本信息
     poNo: po.poNumber,
-    poDate: po.orderDate,
-    requiredDeliveryDate: po.expectedDate,
+    poDate: resolvedOrderDate,
+    requiredDeliveryDate: resolvedExpectedDate,
     
     // 买方（公司）信息
     buyer: {
-      name: adminCompany.nameCN,
-      nameEn: adminCompany.nameEN,
-      address: adminCompany.addressCN,
-      addressEn: adminCompany.addressEN,
-      tel: adminCompany.phone,
-      email: adminCompany.email,
-      contactPerson: adminCompany.contactPerson
+      name: buyerCompanyDisplay.name,
+      nameEn: buyerCompanyDisplay.nameEn,
+      address: buyerCompanyDisplay.address,
+      addressEn: buyerCompanyDisplay.addressEn,
+      tel: pick(creatorContact.tel, adminCompany.phone),
+      email: pick(creatorContact.email, adminCompany.email),
+      contactPerson: pick(creatorContact.contactPerson, adminCompany.contactPerson),
     },
     
     // 卖方（供应商）信息
     supplier: {
-      companyName: po.supplierName,
-      address: po.supplierAddress || '供应商地址（待完善）',
-      contactPerson: po.supplierContact || '联系人',
-      tel: po.supplierPhone || '+86-xxx-xxxx-xxxx',
-      email: 'supplier@example.com',
-      supplierCode: po.supplierCode,
-      bankInfo: {
-        bankName: '中国工商银行',
-        accountName: po.supplierName,
-        accountNumber: '6222 xxxx xxxx xxxx',
-        currency: po.currency
-      }
+      companyName: pick(po.supplierName, supplierProfile?.name, '待采购分配'),
+      address: pick(po.supplierAddress, supplierProfile?.address, '供应商地址（待完善）'),
+      contactPerson: pick(po.supplierContact, supplierProfile?.contactPerson, '联系人'),
+      tel: pick(po.supplierPhone, supplierProfile?.phone, '+86-xxx-xxxx-xxxx'),
+      email: pick(poAny.supplierEmail, poAny.supplier_email, supplierProfile?.email, 'supplier@example.com'),
+      supplierCode: pick(po.supplierCode, supplierProfile?.code, 'TBD'),
+      bankInfo: supplierBankInfo
     },
     
     // 🔥 采购产品清单 - 使用转换后的products
@@ -213,17 +615,118 @@ export const convertToPOData = (po: PurchaseOrderType): PurchaseOrderData => {
       applicableLaw: pick(poAny.applicableLaw, '中华人民共和国合同法'),
       contractValidity: pick(poAny.contractValidity, '订单确认后生效'),
       modification: pick(poAny.modification),
-      termination: pick(poAny.termination)
-    }
+      termination: pick(poAny.termination),
+      incoterm: pick(poAny.incoterm),
+      portOfLoading: pick(poAny.portOfLoading),
+      portOfDestination: pick(poAny.portOfDestination),
+      taxTerms: pick(poAny.taxTerms),
+      bankTerms: pick(poAny.bankTerms),
+    },
+    editForm: {
+      poNumber: String(po.poNumber || '').trim(),
+      requirementNo: String(po.requirementNo || '').trim(),
+      xjNumber: String(po.xjNumber || '').trim(),
+      sourceRef: String(po.sourceRef || poAny.source_ref || po.salesContractNumber || po.sourceSONumber || '').trim(),
+      supplierName: String(po.supplierName || '').trim(),
+      supplierCode: String(po.supplierCode || '').trim(),
+      supplierContact: String(poAny.supplierContact || '').trim(),
+      supplierPhone: String(poAny.supplierPhone || '').trim(),
+      supplierAddress: String(poAny.supplierAddress || '').trim(),
+      supplierBankName: String(supplierBankInfo?.bankName || '').trim(),
+      supplierBankAccountName: String(supplierBankInfo?.accountName || '').trim(),
+      supplierBankAccountNumber: String(supplierBankInfo?.accountNumber || '').trim(),
+      supplierBankSwiftCode: String(supplierBankInfo?.swiftCode || supplierBankInfo?.swift || '').trim(),
+      supplierBankAddress: String(supplierBankInfo?.bankAddress || '').trim(),
+      supplierBankCurrency: String(supplierBankInfo?.currency || '').trim(),
+      currency: String(po.currency || '').trim(),
+      paymentTerms: pick(poAny.paymentTerms),
+      deliveryTerms: pick(poAny.deliveryTerms),
+      deliveryAddress: pick(poAny.deliveryAddress),
+      qualityStandard: pick(poAny.qualityStandard, poAny.qualityTerms),
+      inspectionMethod: pick(poAny.inspectionMethod, poAny.inspectionTerms),
+      packaging: pick(poAny.packaging, poAny.packagingTerms),
+      shippingMarks: pick(poAny.shippingMarks),
+      deliveryPenalty: pick(poAny.deliveryPenalty),
+      qualityPenalty: pick(poAny.qualityPenalty, poAny.penaltyTerms),
+      warrantyPeriod: pick(poAny.warrantyPeriod),
+      warrantyTerms: pick(poAny.warrantyTerms),
+      returnPolicy: pick(poAny.returnPolicy),
+      confidentiality: pick(poAny.confidentiality),
+      ipRights: pick(poAny.ipRights),
+      forceMajeure: pick(poAny.forceMajeure),
+      disputeResolution: pick(poAny.disputeResolution, poAny.disputeResolutionTerms),
+      applicableLaw: pick(poAny.applicableLaw),
+      contractValidity: pick(poAny.contractValidity),
+      modification: pick(poAny.modification),
+      termination: pick(poAny.termination),
+      incoterm: pick(poAny.incoterm),
+      portOfLoading: pick(poAny.portOfLoading),
+      portOfDestination: pick(poAny.portOfDestination),
+      taxTerms: pick(poAny.taxTerms),
+      bankTerms: pick(poAny.bankTerms),
+      orderDate: resolvedOrderDate,
+      expectedDate: resolvedExpectedDate,
+      actualDate: String(poAny.actualDate || '').trim(),
+      status: String(poAny.status || '').trim(),
+      paymentStatus: String(poAny.paymentStatus || '').trim(),
+      remarks: String(poAny.remarks || '').trim(),
+    },
   };
 };
 
-export const buildPurchaseOrderDocumentSnapshot = (po: PurchaseOrderType): PurchaseOrderData => {
+export const buildPurchaseOrderDocumentSnapshot = (
+  po: PurchaseOrderType,
+  options?: { preferLiveData?: boolean }
+): PurchaseOrderData => {
   const existing = (po as any).documentDataSnapshot || (po as any).document_data_snapshot || null;
-  if (existing && typeof existing === 'object' && Array.isArray((existing as any).products)) {
+  const liveSnapshot = convertToPOData(po);
+  const preferLiveData = options?.preferLiveData === true;
+  const existingProducts = Array.isArray((existing as any)?.products) ? (existing as any).products : null;
+  const shouldUseLiveData =
+    preferLiveData ||
+    !existingProducts ||
+    (
+      hasMeaningfulProductPricing(liveSnapshot.products as any) &&
+      !hasMeaningfulProductPricing(existingProducts as any)
+    );
+
+  if (!shouldUseLiveData && existing && typeof existing === 'object' && Array.isArray((existing as any).products)) {
     return existing as PurchaseOrderData;
   }
-  return convertToPOData(po);
+
+  const existingSupplierBankInfo = (existing as any)?.supplier?.bankInfo;
+  const mergedSnapshot: PurchaseOrderData = {
+    ...liveSnapshot,
+    poDate: pickSnapshotTextValue(liveSnapshot.poDate, (existing as any)?.poDate),
+    requiredDeliveryDate: pickSnapshotTextValue(
+      liveSnapshot.requiredDeliveryDate,
+      (existing as any)?.requiredDeliveryDate,
+    ),
+    terms: mergePurchaseOrderTerms(liveSnapshot.terms, (existing as any)?.terms),
+    editForm: mergePurchaseOrderEditForm(liveSnapshot.editForm, (existing as any)?.editForm),
+  };
+
+  if (
+    hasMeaningfulSupplierBankInfo(existingSupplierBankInfo) &&
+    !hasMeaningfulSupplierBankInfo(liveSnapshot.supplier?.bankInfo)
+  ) {
+    return {
+      ...mergedSnapshot,
+      supplier: {
+        ...mergedSnapshot.supplier,
+        bankInfo: {
+          ...existingSupplierBankInfo,
+          currency: pickBankInfoValue(
+            existingSupplierBankInfo?.currency,
+            liveSnapshot.supplier?.bankInfo?.currency,
+            mergedSnapshot.terms?.currency,
+          ),
+        },
+      },
+    };
+  }
+
+  return mergedSnapshot;
 };
 
 /**
@@ -237,6 +740,62 @@ export const desensitizeFeedback = (feedback: string, userRole?: string): string
  * 🔥 将采购需求数据转换为文档模板数据
  */
 export const convertToPRData = (req: QuoteRequirement, userRole?: string): QuoteRequirementDocumentData => {
+  const hasSupplierContext = Boolean(
+    (req as any)?.supplierName ||
+    (req as any)?.supplierCompany ||
+    (req as any)?.supplierCountryCode ||
+    (req as any)?.supplierLocale,
+  );
+  const procurementLanguage = hasSupplierContext ? inferSupplierDocumentLanguage(req) : 'zh';
+  const toNumberOrNull = (value: unknown) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+  const pickNumberOrNull = (...values: unknown[]) => {
+    for (const value of values) {
+      const parsed = toNumberOrNull(value);
+      if (parsed != null) return parsed;
+    }
+    return null;
+  };
+  const pickPositiveNumberOrNull = (...values: unknown[]) => {
+    for (const value of values) {
+      const parsed = toNumberOrNull(value);
+      if (parsed != null && parsed > 0) return parsed;
+    }
+    return null;
+  };
+  const resolveFeedbackUnitPrice = (feedbackProduct: any, item: any) => pickPositiveNumberOrNull(
+    feedbackProduct?.sourcePricing?.unitPrice,
+    feedbackProduct?.sourcePricing?.unit_price,
+    feedbackProduct?.sourcePricing?.price,
+    feedbackProduct?.sourcePricing?.quotedPrice,
+    feedbackProduct?.sourcePricing?.supplierPrice,
+    feedbackProduct?.costPrice,
+    feedbackProduct?.cost_price,
+    feedbackProduct?.supplierPrice,
+    feedbackProduct?.supplier_price,
+    feedbackProduct?.unitPrice,
+    feedbackProduct?.unit_price,
+    feedbackProduct?.quotedPrice,
+    feedbackProduct?.quoted_price,
+    feedbackProduct?.price,
+    feedbackProduct?.pricing?.unitPrice,
+    feedbackProduct?.pricing?.unit_price,
+    userRole === 'Sales_Rep' ? null : item?.targetPrice,
+  );
+  const resolveFeedbackAmount = (feedbackProduct: any) => pickPositiveNumberOrNull(
+    feedbackProduct?.amount,
+    feedbackProduct?.totalAmount,
+    feedbackProduct?.total_amount,
+    feedbackProduct?.totalPrice,
+    feedbackProduct?.total_price,
+    feedbackProduct?.lineAmount,
+    feedbackProduct?.line_amount,
+    feedbackProduct?.sourcePricing?.amount,
+    feedbackProduct?.sourcePricing?.totalAmount,
+    feedbackProduct?.sourcePricing?.total_amount,
+  );
   const reqCreatedDate = String(
     (req as any).createdDate ||
     (req as any).createdAt ||
@@ -307,6 +866,59 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
     }
     return '';
   };
+  const localizeQrDeliveryRequirement = (value: unknown) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const parsedDate = new Date(raw);
+    if (!Number.isNaN(parsedDate.getTime())) {
+      return raw;
+    }
+
+    const compact = raw.replace(/\s+/g, ' ').trim();
+    let matched = compact.match(/^(\d+)\s*-\s*(\d+)\s*days?\s+after\s+deposit(?:\s+received)?$/i);
+    if (matched) {
+      return `定金后${matched[1]}-${matched[2]}天`;
+    }
+
+    matched = compact.match(/^(\d+)\s*days?\s+after\s+deposit(?:\s+received)?$/i);
+    if (matched) {
+      return `定金后${matched[1]}天`;
+    }
+
+    matched = compact.match(/^(\d+)\s*-\s*(\d+)\s*days?\s+after\s+order(?:\s+confirmation)?$/i);
+    if (matched) {
+      return `订单确认后${matched[1]}-${matched[2]}天`;
+    }
+
+    matched = compact.match(/^(\d+)\s*days?\s+after\s+order(?:\s+confirmation)?$/i);
+    if (matched) {
+      return `订单确认后${matched[1]}天`;
+    }
+
+    return raw;
+  };
+  const resolveCreatedByDisplay = () => {
+    const candidates = [
+      (req as any).requestedByName,
+      (req as any).ownerName,
+      (req as any).salesPersonName,
+      (req as any).createdByName,
+      (req as any).submittedByName,
+      (req as any).requestedBy,
+      (req as any).ownerEmail,
+      (req as any).createdBy,
+    ];
+
+    for (const candidate of candidates) {
+      const text = String(candidate || '').trim();
+      if (!text) continue;
+      if (text.includes('@')) continue;
+      return text;
+    }
+
+    return String((req as any).requestedBy || (req as any).ownerEmail || req.createdBy || '').trim();
+  };
   const dedupeJoinedText = (...values: unknown[]) => {
     const result: string[] = [];
     const seen = new Set<string>();
@@ -359,7 +971,28 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
   
   // 🔥 转换产品列表格式 - 优先使用采购员反馈的价格
   const products = req.items?.map((item, index) => {
+    const normalizedItem = normalizeFlowProductCore(item, index);
     const feedbackProduct = findFeedbackProduct(item, index);
+    const feedbackQuantity = pickNumberOrNull(feedbackProduct?.quantity, item.quantity) || 0;
+    const feedbackAmount = resolveFeedbackAmount(feedbackProduct);
+    const derivedFeedbackUnitPrice =
+      feedbackAmount != null && feedbackQuantity > 0
+        ? feedbackAmount / feedbackQuantity
+        : null;
+    const resolvedUnitPrice =
+      resolveFeedbackUnitPrice(feedbackProduct, item) ??
+      derivedFeedbackUnitPrice ??
+      undefined;
+    const resolvedCurrency = String(
+      feedbackProduct?.sourcePricing?.currency ||
+      feedbackProduct?.sourcePricing?.currencyCode ||
+      feedbackProduct?.sourcePricing?.currency_code ||
+      feedbackProduct?.currency ||
+      feedbackProduct?.currencyCode ||
+      feedbackProduct?.currency_code ||
+      item.targetCurrency ||
+      'USD',
+    ).toUpperCase();
     const parsedLine = parseRequirementLine(productRequirementLines[index]);
     const parsedItemProductName = parseProductSummary(item.productName);
     const parsedItemNameAlias = parseProductSummary((item as any).name);
@@ -398,22 +1031,67 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
       parsedLine.specification,
     ) || '-';
     
+    const localizedDisplay = resolveFlowProductDisplay(
+      {
+        ...item,
+        productNameEn: (item as any)?.productNameEn,
+        productNameZh: (item as any)?.productNameZh,
+        specificationEn: (item as any)?.specificationEn,
+        specificationZh: (item as any)?.specificationZh,
+        productName:
+          procurementLanguage === 'zh'
+            ? pickText(
+                (item as any)?.productNameZh,
+                feedbackProduct?.productNameZh,
+                productName,
+                normalizedItem.productNameZh,
+                normalizedItem.productName,
+              )
+            : pickText(
+                (item as any)?.productNameEn,
+                feedbackProduct?.productNameEn,
+                productName,
+                normalizedItem.productNameEn,
+                normalizedItem.productName,
+              ),
+        specification:
+          procurementLanguage === 'zh'
+            ? pickText(
+                (item as any)?.specificationZh,
+                feedbackProduct?.specificationZh,
+                specification,
+                normalizedItem.specificationZh,
+                normalizedItem.specification,
+              )
+            : pickText(
+                (item as any)?.specificationEn,
+                feedbackProduct?.specificationEn,
+                specification,
+                normalizedItem.specificationEn,
+                normalizedItem.specification,
+              ),
+      },
+      procurementLanguage,
+    );
+
     return {
       no: index + 1,
-      modelNo,
-      imageUrl: item.imageUrl || (item as any).imageUrl || (item as any).image || (item as any).productImage,
-      productName,
-      specification,
-      quantity: feedbackProduct?.quantity || item.quantity,
-      unit: feedbackProduct?.unit || item.unit || (item as any).uom || 'pcs',
-      // 🔥 优先使用采购反馈的成本价，否则使用目标价
-      unitPrice: feedbackProduct?.costPrice || item.targetPrice,
-      currency: feedbackProduct?.currency || item.targetCurrency || 'USD',
+      modelNo: modelNo || normalizedItem.modelNo || '-',
+      imageUrl: normalizedItem.imageUrl || '',
+      productName: localizedDisplay.productName || productName || normalizedItem.productName,
+      specification: localizedDisplay.specification || specification || normalizedItem.specification,
+      quantity: feedbackProduct?.quantity || normalizedItem.quantity,
+      unit: feedbackProduct?.unit || normalizedItem.unit || 'pcs',
+      // 🔥 优先使用 BJ/sourcePricing 单价，其次采购反馈成本价，最后才回退询报池目标价
+      unitPrice: resolvedUnitPrice,
+      currency: resolvedCurrency,
       moq: feedbackProduct?.moq,
       leadTime: feedbackProduct?.leadTime,
-      totalPrice: feedbackProduct?.costPrice 
-        ? feedbackProduct.costPrice * (feedbackProduct.quantity || item.quantity)
-        : (item.targetPrice ? item.targetPrice * item.quantity : undefined),
+      totalPrice:
+        feedbackAmount ??
+        (resolvedUnitPrice != null
+          ? resolvedUnitPrice * (feedbackProduct?.quantity || item.quantity)
+          : undefined),
       remarks: feedbackProduct?.remarks || item.remarks
     };
   }) || [];
@@ -437,11 +1115,11 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
 
   return {
     // 采购需求单基本信息
-    requirementNo: req.requirementNo,
+    requirementNo: normalizeLegacyQrNumber(req.requirementNo),
     requirementDate: reqCreatedDate.split('T')[0],
     sourceInquiryNo: req.sourceInquiryNumber || req.sourceRef || '-',
     requiredResponseDate: (req as any).expectedQuoteDate || req.requiredDate,
-    requiredDeliveryDate: (req as any).deliveryDate || req.requiredDate,
+    requiredDeliveryDate: localizeQrDeliveryRequirement((req as any).deliveryDate || req.requiredDate),
     
     // 客户信息
     customer: {
@@ -459,7 +1137,12 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
     // 客户需求要素
     customerRequirements: {
       deliveryTerms: (req as any).tradeTerms || 'FOB',
-      paymentTerms: (req as any).paymentTerms || '30% T/T预付，70%见提单副本付款',
+      paymentTerms:
+        (req as any).paymentTerms
+        || buildPaymentTermsText(
+          (req as any).paymentMode,
+          deriveBalanceTrigger((req as any).paymentMode, (req as any).balanceTrigger || null),
+        ),
       qualityStandard: (req as any).qualityRequirements || '符合国际标准',
       packaging: (req as any).packagingRequirements || '标准出口包装',
       specialRequirements: req.specialRequirements
@@ -480,7 +1163,7 @@ export const convertToPRData = (req: QuoteRequirement, userRole?: string): Quote
     ),
     
     urgency: req.urgency,
-    createdBy: req.createdBy
+    createdBy: resolveCreatedByDisplay()
   };
 };
 
@@ -572,6 +1255,12 @@ export const generateXJDocumentData = (
     },
     remarks: joinNonEmptyText(purchaseRemarks, (requirement as any).remarks),
   };
+  const procurementLanguage = inferSupplierDocumentLanguage({
+    supplierProfile,
+    supplierName: supplier.name,
+    supplierAddress: supplier.address,
+    supplierRegion: supplier.region,
+  });
   
   return {
     xjNo: xjNo,
@@ -603,27 +1292,23 @@ export const generateXJDocumentData = (
       address: supplierProfile?.address || supplier.address || '供应商地址'
     },
     
-    products: selectedProducts.map((item, index) => ({
-      no: index + 1,
-      imageUrl:
-        item.imageUrl ||
-        (item as any).image ||
-        (item as any).image_url ||
-        (item as any).photoUrl ||
-        (item as any).productImage ||
-        (item as any).product_image ||
-        undefined,
-      description: item.productName || '-',
-      modelNo: getFormalBusinessModelNo(item) || '-',
-      specification: item.specification || '-',
-      quantity: item.quantity,
-      unit: item.unit,
-      targetPrice:
-        visibility?.maskCustomerPublicPrice || item.targetPrice == null
-          ? undefined
-          : String(item.targetPrice),
-      remarks: item.remarks
-    })),
+    products: selectedProducts.map((item, index) => {
+      const normalized = resolveFlowProductDisplay(item, procurementLanguage);
+      return {
+        no: index + 1,
+        imageUrl: normalized.imageUrl || undefined,
+        description: normalized.productName || '-',
+        modelNo: normalized.modelNo || getFormalBusinessModelNo(item) || '-',
+        specification: normalized.specification || '-',
+        quantity: normalized.quantity,
+        unit: normalized.unit,
+        targetPrice:
+          visibility?.maskCustomerPublicPrice || item.targetPrice == null
+            ? undefined
+            : String(item.targetPrice),
+        remarks: normalized.remarks || item.remarks,
+      };
+    }),
     
     inquiryDescription: inquiryDescription,
     conditionGroups: buildProcurementConditionGroups(xjConditionSource, 'xj'),
@@ -633,7 +1318,16 @@ export const generateXJDocumentData = (
         commercialTerms.targetCostRange && exposeInternalTargetToSupplier
           ? '请按邀约条件报价'
           : ((requirement as any).currency || 'USD'),
-      paymentTerms: commercialTerms.paymentTerms || (requirement as any).paymentTerms || 'T/T 30% 预付，70% 发货前付清',
+      paymentTerms:
+        commercialTerms.paymentTerms
+        || (requirement as any).paymentTerms
+        || buildPaymentTermsText(
+          commercialTerms.paymentMode || (requirement as any).paymentMode,
+          deriveBalanceTrigger(
+            commercialTerms.paymentMode || (requirement as any).paymentMode,
+            commercialTerms.balanceTrigger || (requirement as any).balanceTrigger || null,
+          ),
+        ),
       deliveryTerms: commercialTerms.tradeTerms || (requirement as any).tradeTerms || 'EXW 工厂交货',
       deliveryAddress: (requirement as any).deliveryAddress || '福建省福州市仓山区仓山工业区',
       deliveryRequirement: commercialTerms.deliveryDate || `收到订单后${(requirement as any).leadTime || 30}天内交货`,
@@ -686,6 +1380,12 @@ export const buildXJDocumentSnapshot = (xj: XJ): XJData => {
     : Array.isArray(xj.products)
       ? xj.products
       : [];
+  const procurementLanguage = inferSupplierDocumentLanguage({
+    supplier: rawSupplier,
+    supplierName: xj.supplierName,
+    supplierEmail: xj.supplierEmail,
+    supplierAddress: rawSupplier.address || supplierProfile?.address || xj.supplierName || '',
+  });
   const fallbackDate = String(xj.quotationDeadline || xj.expectedDate || xj.createdDate || '').split('T')[0];
 
   return {
@@ -711,30 +1411,25 @@ export const buildXJDocumentSnapshot = (xj: XJ): XJData => {
       email: String(rawSupplier.email || supplierProfile?.email || xj.supplierEmail || ''),
       supplierCode: String(rawSupplier.supplierCode || supplierProfile?.code || xj.supplierCode || ''),
     },
-    products: sourceProducts.map((item: any, index: number) => ({
-      no: index + 1,
-      modelNo: getFormalBusinessModelNo(item) || undefined,
-      imageUrl: item?.imageUrl
-        ? String(item.imageUrl)
-        : item?.image
-          ? String(item.image)
-          : item?.image_url
-            ? String(item.image_url)
-            : item?.photoUrl
-              ? String(item.photoUrl)
-              : item?.productImage
-                ? String(item.productImage)
-                : item?.product_image
-                  ? String(item.product_image)
-                  : undefined,
-      itemCode: item?.itemCode ? String(item.itemCode) : undefined,
-      description: String(item?.description || item?.productName || ''),
-      specification: String(item?.specification || '-'),
-      quantity: Number(item?.quantity || 0),
-      unit: String(item?.unit || 'PCS'),
-      targetPrice: item?.targetPrice != null ? String(item.targetPrice) : undefined,
-      remarks: item?.remarks ? String(item.remarks) : undefined,
-    })),
+    products: sourceProducts.map((item: any, index: number) => {
+      const normalized = resolveFlowProductDisplay(item, procurementLanguage);
+      const factoryModelNo = getFactoryFacingModelNo(item) || normalized.factoryModelNo || normalized.modelNo || '';
+      return {
+        no: index + 1,
+        modelNo: factoryModelNo || undefined,
+        imageUrl: normalized.imageUrl || undefined,
+        itemCode: item?.itemCode ? String(item.itemCode) : (factoryModelNo || undefined),
+        internalModelNo: item?.internalModelNo || item?.masterRef?.internalModelNo || normalized.modelNo || undefined,
+        customerModelNo: item?.customerModelNo || item?.displayModelNo || undefined,
+        factoryModelNo: factoryModelNo || undefined,
+        description: normalized.productName || '',
+        specification: normalized.specification || '-',
+        quantity: Number(normalized.quantity || 0),
+        unit: String(normalized.unit || 'PCS'),
+        targetPrice: item?.targetPrice != null ? String(item.targetPrice) : undefined,
+        remarks: normalized.remarks || undefined,
+      };
+    }),
     conditionGroups: Array.isArray(raw.conditionGroups) ? raw.conditionGroups : [],
     terms: {
       paymentTerms: rawTerms.paymentTerms ? String(rawTerms.paymentTerms) : undefined,
@@ -775,19 +1470,21 @@ export const getXJKey = (xj: any): string => String(xj?.supplierXjNo || xj?.xjNu
 export const getQuotationXJKey = (q: any): string => String(q?.sourceXJ || q?.sourceXJNumber || '').trim();
 
 /**
- * Human-readable label for a procurementRequestStatus value.
- * Phase 4: all 8 values are mapped explicitly.
- * PR-tier (on PR records): pending_procurement_assignment | partial_allocated | allocated_completed
- * CG-tier (on CG records): draft_allocated | pending_boss_approval | approved_boss | rejected_boss | pushed_supplier
+ * Human-readable label for procurement runtime / workflow statuses.
+ * New split-field statuses are preferred, while legacy procurementRequestStatus values remain supported.
  */
 export const getProcurementRequestStatusText = (status: string): string => {
+  if (status === 'pending_assignment')            return '待分配供应商';
+  if (status === 'partially_allocated')           return '部分已分配';
+  if (status === 'fully_allocated')               return '已分配完成';
   // PR-tier
   if (status === 'pending_procurement_assignment') return '待分配供应商';
   if (status === 'partial_allocated')              return '部分已分配';
   if (status === 'allocated_completed')            return '已分配完成';
   // CG-tier
-  if (status === 'draft_allocated')               return '草稿·待提交审核';
-  if (status === 'pending_boss_approval')         return '待老板审核';
+  if (status === 'draft_allocated')               return 'CG草稿·待提交审核';
+  if (status === 'pending_manager_approval')      return '待采购主管审核';
+  if (status === 'pending_ceo_approval')          return '待 CEO 二审';
   if (status === 'approved_boss')                 return '审核通过·可下推';
   if (status === 'rejected_boss')                 return '审核驳回';
   if (status === 'pushed_supplier')               return '已推供应商';
@@ -883,7 +1580,7 @@ export const buildXJPreviewData = (xj: XJ, purchaseRequirements: QuoteRequiremen
       (xj as any).sourceRef,
     ]
       .filter(Boolean)
-      .includes(req.requirementNo),
+      .some((value) => matchesNormalizedQrNumber(value, req.requirementNo, (xj as any).region, req.region)),
   );
   const fallbackConditionSource = relatedRequirement || {
     tradeTerms: rawTerms.deliveryTerms,
@@ -934,7 +1631,13 @@ export const buildXJPreviewData = (xj: XJ, purchaseRequirements: QuoteRequiremen
         ? raw.conditionGroups
         : buildProcurementConditionGroups(fallbackConditionSource, 'xj'),
     terms: {
-      paymentTerms: String(rawTerms.paymentTerms || 'T/T 30% 预付，70% 发货前付清'),
+      paymentTerms: String(
+        rawTerms.paymentTerms
+          || buildPaymentTermsText(
+            rawTerms.paymentMode,
+            deriveBalanceTrigger(rawTerms.paymentMode, rawTerms.balanceTrigger || null),
+          ),
+      ),
       deliveryTerms: String(rawTerms.deliveryTerms || 'EXW 工厂交货'),
       currency: String(rawTerms.currency || 'USD'),
       deliveryAddress: rawTerms.deliveryAddress ? String(rawTerms.deliveryAddress) : undefined,

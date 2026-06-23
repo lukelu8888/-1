@@ -7,6 +7,7 @@ import { Textarea } from '../../ui/textarea';
 import { TemplateTableColumnsPanel } from './TemplateTableColumnsPanel';
 import { TemplateVersionActionsCard } from './TemplateVersionActionsCard';
 import { WorkspaceLayoutPanel } from './WorkspaceLayoutPanel';
+import { buildPaymentTermsText } from '../../../lib/paymentFlow';
 
 interface WorkspacePreviewLayout {
   canvasWidthMm: number;
@@ -318,6 +319,28 @@ export function ScTemplateEditorPanel({
           </div>
           <div>
             <Label className="text-[11px] text-gray-500">付款条款</Label>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {[
+                ['定金+出货前余款', buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment')],
+                ['定金+见提单余款', buildPaymentTermsText('tt_deposit_balance_against_bl', 'after_shipment')],
+                ['定金+信用证', buildPaymentTermsText('deposit_plus_lc', 'lc_ready')],
+                ['100%信用证', buildPaymentTermsText('lc_100', 'lc_ready')],
+              ].map(([label, value]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() =>
+                    updateScTemplateData('terms', {
+                      ...scTemplateData.terms,
+                      paymentTerms: String(value),
+                    })
+                  }
+                  className="rounded border border-gray-300 px-2 py-1 text-[10px] text-gray-600 hover:bg-gray-50"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <Textarea
               value={scTemplateData.terms.paymentTerms}
               onChange={(e) =>

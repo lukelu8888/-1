@@ -122,6 +122,12 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 /** Roles that can approve/reject products. */
 const REVIEW_PRIVILEGED: UserRole[] = ['reviewer', 'admin'];
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string) => UUID_PATTERN.test(value);
+
+const createPersistentId = () => crypto.randomUUID();
+
 interface State {
   products: Product[];
   categories: ProductCategory[];
@@ -302,7 +308,10 @@ interface Actions {
 
   // categories
   upsertCategory: (cat: ProductCategory) => void;
+  saveCategory: (cat: ProductCategory) => Promise<ProductCategory>;
   removeCategory: (id: string) => void;
+  upsertAttribute: (attr: ProductAttribute) => void;
+  removeAttribute: (id: string) => void;
 
   // campaigns
   upsertCampaign: (cmp: Campaign) => void;
@@ -382,7 +391,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>(mockProducts);
   const [categories, setCategories] = useState<ProductCategory[]>(mockCategories);
   const [categoryRelations, setCategoryRelations] = useState<ProductCategoryRelation[]>(mockCategoryRelations);
-  const [attributes] = useState<ProductAttribute[]>(mockAttributes);
+  const [attributes, setAttributes] = useState<ProductAttribute[]>(mockAttributes);
   const [attributeValues, setAttributeValues] = useState<ProductAttributeValue[]>(mockAttributeValues);
   const [media, setMedia] = useState<ProductMedia[]>(mockMedia);
   const [documents] = useState<ProductDocument[]>(mockDocuments);
@@ -424,7 +433,8 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   const usingSupabase = PRODUCT_CENTER_BACKEND === 'supabase';
   const serviceRef = useRef(getProductCenterService());
   const [bootstrapLoading, setBootstrapLoading] = useState<boolean>(usingSupabase);
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [supabaseOfflineReason, setSupabaseOfflineReason] = useState<string | null>(null);
+  const effectiveSupabase = usingSupabase && !supabaseOfflineReason;
 
   /**
    * Re-pulls a tenant-scoped snapshot from the service and replaces every
@@ -433,12 +443,13 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
    * mock mode where the in-memory state is already authoritative.
    */
   const refreshAll = useCallback(async (): Promise<void> => {
-    if (!usingSupabase) return;
+    if (!effectiveSupabase) return;
     const svc = serviceRef.current;
     if (!svc.loadAll) return;
     const snap = await svc.loadAll();
     setProducts(snap.products);
     setCategories(snap.categories);
+    setAttributes(snap.attributes);
     setAttributeValues(snap.attributeValues);
     setMedia(snap.media);
     setRegionPrices(snap.regionPrices);
@@ -454,7 +465,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     setPriceHistory(snap.priceHistory);
     setSupplierQuotes(snap.supplierQuotes);
     setReviewHistory(snap.reviewHistory);
-  }, [usingSupabase]);
+  }, [effectiveSupabase]);
 
   useEffect(() => {
     if (!usingSupabase) return;
@@ -472,9 +483,9 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         const msg = (err as Error)?.message ?? 'unknown error';
         // eslint-disable-next-line no-console
         console.error('[product-center] loadAll failed', err);
-        setBootstrapError(msg);
+        setSupabaseOfflineReason(msg);
         setBootstrapLoading(false);
-        toast.error(`数据加载失败：${msg}`);
+        toast.error('Supabase 暂不可用，已切换为本地预览模式。详情见页面顶部提示。');
       });
     return () => {
       cancelled = true;
@@ -493,6 +504,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
   const persist = useCallback(
     <T,>(label: string, fn: () => Promise<T>): void => {
       if (!usingSupabase) return;
+      if (!effectiveSupabase) return;
       void fn().catch((err: unknown) => {
         const msg = (err as Error)?.message ?? 'unknown error';
         // eslint-disable-next-line no-console
@@ -500,7 +512,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
         toast.error(`${label} 同步失败：${msg}`);
       });
     },
-    [usingSupabase],
+    [effectiveSupabase, usingSupabase],
   );
 
   // ── helpers ────────────────────────────────────────────────────────────────
@@ -1121,7 +1133,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
 
   const bulkUpsertProducts = useCallback(
     async (rows: BulkImportRow[]): Promise<BulkImportResult> => {
-      if (usingSupabase) {
+      if (effectiveSupabase) {
         const res = await serviceRef.current.bulkUpsertProducts(rows);
         try {
           await refreshAll();
@@ -1279,7 +1291,7 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
 
       return { created, updated, errors };
     },
-    [appendAudit, categories, currentUser.name, products, refreshAll, usingSupabase],
+    [appendAudit, categories, currentUser.name, effectiveSupabase, products, refreshAll],
   );
 
   // ── supplier quotes (Phase 3) ─────────────────────────────────────────────
@@ -1649,8 +1661,72 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const removeCategory = useCallback((id: string) => {
-    setCategories((prev) => prev.filter((c) => c.id !== id));
+  const saveCategory = useCallback(
+    async (cat: ProductCategory) => {
+      const normalizedCode = cat.code.trim();
+      if (!normalizedCode) {
+        throw new Error('分类编码不能为空');
+      }
+      const duplicate = categories.find(
+        (item) =>
+          item.id !== cat.id &&
+          item.tenantId === cat.tenantId &&
+          item.code.trim() === normalizedCode,
+      );
+      if (duplicate) {
+        const duplicateName = duplicate.nameEn ? `${duplicate.name} / ${duplicate.nameEn}` : duplicate.name;
+        throw new Error(`分类编码已存在：${normalizedCode}（${duplicateName}）`);
+      }
+      if (!effectiveSupabase) {
+        toast.warning('当前商品中心是本地模式，未连接 Supabase，刷新后不会永久保留。');
+        return { ...cat, code: normalizedCode };
+      }
+      const previousId = cat.id;
+      const normalizedCategory = { ...cat, code: normalizedCode };
+      const categoryToSave = isUuid(cat.id)
+        ? normalizedCategory
+        : { ...normalizedCategory, id: createPersistentId() };
+      const saved = await serviceRef.current.upsertCategory(categoryToSave);
+      setCategories((prev) => {
+        const normalized = prev.map((item) => {
+          if (item.id === previousId) return saved;
+          if (item.parentId === previousId) return { ...item, parentId: saved.id };
+          return item;
+        });
+        const idx = normalized.findIndex((c) => c.id === saved.id);
+        if (idx === -1) return [...normalized, saved];
+        const next = [...normalized];
+        next[idx] = saved;
+        return next;
+      });
+      toast.success('分类已永久保存到 Supabase');
+      return saved;
+    },
+    [categories, effectiveSupabase],
+  );
+
+  const removeCategory = useCallback(
+    (id: string) => {
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+      persist('删除分类', () => serviceRef.current.removeCategory(id));
+    },
+    [persist],
+  );
+
+  const upsertAttribute = useCallback((attr: ProductAttribute) => {
+    setAttributes((prev) => {
+      const idx = prev.findIndex((a) => a.id === attr.id);
+      const stamped = { ...attr, updatedAt: nowIso() };
+      if (idx === -1) return [...prev, { ...stamped, createdAt: nowIso() }];
+      const next = [...prev];
+      next[idx] = stamped;
+      return next;
+    });
+  }, []);
+
+  const removeAttribute = useCallback((id: string) => {
+    setAttributes((prev) => prev.filter((a) => a.id !== id));
+    setAttributeValues((prev) => prev.filter((v) => v.attributeId !== id));
   }, []);
 
   const upsertCampaign = useCallback(
@@ -1968,7 +2044,10 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       attachMedia,
 
       upsertCategory,
+      saveCategory,
       removeCategory,
+      upsertAttribute,
+      removeAttribute,
 
       upsertCampaign,
       setCampaignStatus,
@@ -2148,7 +2227,10 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
       attachMedia,
 
       upsertCategory,
+      saveCategory,
       removeCategory,
+      upsertAttribute,
+      removeAttribute,
 
       upsertCampaign,
       setCampaignStatus,
@@ -2173,13 +2255,17 @@ export function ProductCenterProvider({ children }: { children: ReactNode }) {
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
           <div className="text-sm">正在从 Supabase 加载产品中心数据…</div>
         </div>
-      ) : bootstrapError ? (
-        <div className="m-6 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          <div className="mb-1 font-semibold">数据加载失败</div>
-          <div className="font-mono text-[12px]">{bootstrapError}</div>
-          <div className="mt-2 text-rose-500">
-            请检查 Supabase 连接、RLS 策略和 <code>VITE_PC_BACKEND</code> 配置后刷新。
+      ) : supabaseOfflineReason ? (
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="mx-3 mt-3 shrink-0 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <div className="mb-1 font-semibold">Supabase 暂不可用，当前为本地预览模式</div>
+            <div className="break-words font-mono text-[12px]">{supabaseOfflineReason}</div>
+            <div className="mt-2 text-amber-700">
+              页面可继续查看和编辑，但刷新后不会永久保留。需要恢复永久保存，请先处理 Supabase
+              配额/项目限制后再刷新。
+            </div>
           </div>
+          <div className="min-h-0 flex-1">{children}</div>
         </div>
       ) : (
         children

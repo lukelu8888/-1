@@ -3,23 +3,24 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { 
-  DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock, 
+  DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock,
   FileText, CreditCard, PieChart, BarChart3, Download,
-  Calendar, Search, Filter, RefreshCw, Eye, Plus, Send,
-  Receipt, ArrowUpRight, ArrowDownRight, Wallet, Globe
+  Search, RefreshCw,
+  Receipt, ArrowUpRight, ArrowDownRight, Wallet, Globe,
+  Sparkles
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Progress } from '../ui/progress';
 import { AccountsReceivableList } from './AccountsReceivableList'; // 🔥 新增
 import CollectionManagement from './CollectionManagement'; // 🔥 真实收款管理组件
-import InvoiceManagement from './InvoiceManagement'; // 🔥 真实发票管理组件
-import DocumentCenter from './DocumentCenter'; // 🔥 单证中心
 import PayableManagement from './PayableManagement'; // 🔥 新增：应付账款管理
 import PaymentRecordManagement from './PaymentRecordManagement'; // 🔥 新增：付款记录管理
 import CompliancePacketsTab from './CompliancePacketsTab';
 import { useAuth } from '../../hooks/useAuth'; // 🔥 导入认证钩子
+
+// 🆕 内部管理财务中心 — 业财一体化 + AI 分析的"管理侧"
+const LazyManagementFinanceCenter = React.lazy(() => import('../management-finance'));
 
 // 收款记录接口
 interface PaymentRecord {
@@ -91,7 +92,7 @@ interface ExchangeRate {
 
 export default function FinanceManagement() {
   const { currentUser } = useAuth(); // 🔥 获取当前用户
-  const [activeTab, setActiveTab] = useState<'payments' | 'receivables' | 'invoices' | 'profit' | 'reports' | 'payables' | 'payment-records' | 'documents' | 'compliance-packets'>('payments');
+  const [activeTab, setActiveTab] = useState<'payments' | 'receivables' | 'invoices' | 'profit' | 'reports' | 'payables' | 'payment-records' | 'compliance-packets' | 'management-finance'>('payments');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
@@ -123,7 +124,7 @@ export default function FinanceManagement() {
     if (!currentUser) return;
     
     // 如果当前标签对当前角色不可见，切换到可见的第一个标签
-    if (activeTab === 'payments' || activeTab === 'receivables' || activeTab === 'invoices' || activeTab === 'profit' || activeTab === 'reports' || activeTab === 'documents' || activeTab === 'compliance-packets') {
+    if (activeTab === 'payments' || activeTab === 'receivables' || activeTab === 'invoices' || activeTab === 'profit' || activeTab === 'reports' || activeTab === 'compliance-packets') {
       if (!canViewFrontOfficeFinance()) {
         setActiveTab('payables'); // 切换到应付账款
       }
@@ -445,271 +446,234 @@ export default function FinanceManagement() {
     return symbols[currency as keyof typeof symbols] || currency;
   };
 
+
+  // 分组导航配置
+  const navGroups = [
+    ...(canViewFrontOfficeFinance() ? [{
+      label: '收入侧',
+      color: 'text-emerald-700',
+      items: [
+        { value: 'payments', label: '收款与核销', icon: CreditCard },
+        { value: 'receivables', label: '应收账款', icon: Wallet },
+        { value: 'invoices', label: '发票与税务', icon: Receipt },
+        { value: 'compliance-packets', label: '合规文件包', icon: FileText },
+      ]
+    }] : []),
+    ...(canViewBackOfficeFinance() ? [{
+      label: '支出侧',
+      color: 'text-rose-700',
+      items: [
+        { value: 'payables', label: '应付账款', icon: DollarSign },
+        { value: 'payment-records', label: '付款录入中心', icon: CreditCard },
+      ]
+    }] : []),
+    ...(canViewFrontOfficeFinance() ? [{
+      label: '管理侧',
+      color: 'text-indigo-700',
+      items: [
+        { value: 'profit', label: '财务风控', icon: PieChart },
+        { value: 'reports', label: '执行报表', icon: BarChart3 },
+      ]
+    }] : []),
+    // 🆕 内部管理财务 — 业财一体化 + AI（费用 / 工资 / 资产 / 预算 / 利润 / 自动凭证）
+    ...(canViewFrontOfficeFinance() || canViewBackOfficeFinance() ? [{
+      label: '内部管理',
+      color: 'text-purple-700',
+      items: [
+        { value: 'management-finance', label: '管理财务中心', icon: Sparkles },
+      ]
+    }] : []),
+  ];
+
   return (
-    <div className="space-y-4">
-      {/* 🔥 标题栏 - 参考业务员模块设计 */}
+    <div className="space-y-3">
+      {/* ── 标题栏 ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-            <DollarSign className="w-6 h-6 text-blue-600" />
+          <h2 className="text-[15px] font-semibold text-gray-900 flex items-center gap-1.5">
+            <DollarSign className="w-4 h-4 text-blue-600" />
             财务管理中心
+            <span className="text-[10px] font-normal text-gray-400 ml-0.5">新</span>
           </h2>
-          <p className="text-sm text-gray-600 mt-1">
-            全流程财务监控与资金管理
+          <p className="text-[11px] text-gray-400 mt-0.5">
+            赵敏 · 收入侧 / 支出侧 / 资金侧 / 管理侧一体化专业作业中心。
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {/* 🔥 时间范围筛选器 */}
-          <Select value={timeRange} onValueChange={setTimeRange}>
-            <SelectTrigger className="h-8 w-[100px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="q1" className="text-xs">Q1季度</SelectItem>
-              <SelectItem value="q2" className="text-xs">Q2季度</SelectItem>
-              <SelectItem value="q3" className="text-xs">Q3季度</SelectItem>
-              <SelectItem value="q4" className="text-xs">Q4季度</SelectItem>
-              <SelectItem value="ytd" className="text-xs">本年至今</SelectItem>
-              <SelectItem value="year" className="text-xs">全年</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* 🔥 区域筛选器 */}
-          <Select value={selectedRegion} onValueChange={setSelectedRegion}>
-            <SelectTrigger className="h-8 w-[100px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">全部区域</SelectItem>
-              <SelectItem value="NA" className="text-xs">🇺🇸 北美</SelectItem>
-              <SelectItem value="EA" className="text-xs">🇪🇺 欧非</SelectItem>
-              <SelectItem value="SA" className="text-xs">🇧🇷 南美</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* 🔥 业务类型筛选器 */}
-          <Select value={selectedBusinessType} onValueChange={setSelectedBusinessType}>
-            <SelectTrigger className="h-8 w-[120px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">全部业务</SelectItem>
-              <SelectItem value="trading" className="text-xs">🛒 直接采购</SelectItem>
-              <SelectItem value="inspection" className="text-xs">🔍 验货服务</SelectItem>
-              <SelectItem value="agency" className="text-xs">🤝 代理服务</SelectItem>
-              <SelectItem value="project" className="text-xs">🌟 一站式项目</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* 🔥 货币筛选器 */}
-          <Select value={selectedCurrency} onValueChange={setSelectedCurrency}>
-            <SelectTrigger className="h-8 w-[100px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">全部货币</SelectItem>
-              <SelectItem value="USD" className="text-xs">💵 美元 USD</SelectItem>
-              <SelectItem value="EUR" className="text-xs">💶 欧元 EUR</SelectItem>
-              <SelectItem value="GBP" className="text-xs">💷 英镑 GBP</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button variant="outline" size="sm" className="h-8 text-xs">
-            <Download className="w-3.5 h-3.5 mr-1.5" />
-            导出报表
-          </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs">
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-            刷新数据
-          </Button>
-        </div>
+        <span className="text-[10px] font-medium text-gray-400 border border-gray-200 rounded px-2 py-0.5 bg-gray-50 tracking-wider">
+          MOCK DATA
+        </span>
       </div>
 
-      {/* 顶部信息栏 - 超紧凑布局 */}
-      <div className="grid grid-cols-7 gap-2">
-        {/* 统计卡片 */}
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">总收入</span>
-            <DollarSign className="w-3 h-3 text-emerald-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">¥{(stats.totalRevenue / 10000).toFixed(1)}万</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">已收款（CNY）</p>
-        </div>
+      {/* ── 筛选器栏 ── */}
+      <div className="flex items-center gap-2 bg-white border border-gray-200 rounded px-3 py-1.5">
+        <Select value={timeRange} onValueChange={setTimeRange}>
+          <SelectTrigger className="h-7 w-[88px] text-[11px] border-gray-200 bg-gray-50">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="q1" className="text-xs">Q1季度</SelectItem>
+            <SelectItem value="q2" className="text-xs">Q2季度</SelectItem>
+            <SelectItem value="q3" className="text-xs">Q3季度</SelectItem>
+            <SelectItem value="q4" className="text-xs">Q4季度</SelectItem>
+            <SelectItem value="ytd" className="text-xs">本年至今</SelectItem>
+            <SelectItem value="year" className="text-xs">全年</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={selectedRegion} onValueChange={setSelectedRegion}>
+          <SelectTrigger className="h-7 w-[88px] text-[11px] border-gray-200 bg-gray-50">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-xs">全部区域</SelectItem>
+            <SelectItem value="NA" className="text-xs">北美</SelectItem>
+            <SelectItem value="EA" className="text-xs">欧非</SelectItem>
+            <SelectItem value="SA" className="text-xs">南美</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={selectedBusinessType} onValueChange={setSelectedBusinessType}>
+          <SelectTrigger className="h-7 w-[88px] text-[11px] border-gray-200 bg-gray-50">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-xs">全部业务</SelectItem>
+            <SelectItem value="trading" className="text-xs">直接采购</SelectItem>
+            <SelectItem value="inspection" className="text-xs">验货服务</SelectItem>
+            <SelectItem value="agency" className="text-xs">代理服务</SelectItem>
+            <SelectItem value="project" className="text-xs">一站式项目</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={selectedCurrency} onValueChange={setSelectedCurrency}>
+          <SelectTrigger className="h-7 w-[88px] text-[11px] border-gray-200 bg-gray-50">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-xs">全部货币</SelectItem>
+            <SelectItem value="USD" className="text-xs">USD 美元</SelectItem>
+            <SelectItem value="EUR" className="text-xs">EUR 欧元</SelectItem>
+            <SelectItem value="GBP" className="text-xs">GBP 英镑</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="flex-1" />
+        <Button variant="outline" size="sm" className="h-7 text-[11px] border-gray-200 gap-1 px-3">
+          <Download className="w-3 h-3" />
+          导出报表
+        </Button>
+        <Button variant="outline" size="sm" className="h-7 text-[11px] border-gray-200 gap-1 px-3">
+          <RefreshCw className="w-3 h-3" />
+          刷新数据
+        </Button>
+      </div>
 
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">应收</span>
-            <Wallet className="w-3 h-3 text-blue-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">${(stats.totalReceivables / 1000).toFixed(0)}K</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">待收款</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">逾期</span>
-            <AlertCircle className="w-3 h-3 text-rose-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">{stats.overduePayments}</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">需跟进</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">利润率</span>
-            <TrendingUp className="w-3 h-3 text-purple-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">{stats.avgProfitMargin.toFixed(1)}%</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">平均毛利</p>
-        </div>
-
-        {/* 汇率卡片 */}
-        {exchangeRates.map((rate) => (
-          <div key={rate.currency} className="bg-white border border-gray-200 rounded p-2.5">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-gray-500">{rate.currency}/CNY</span>
-              <Globe className="w-3 h-3 text-indigo-600" />
+      {/* ── 核心指标栏（单行）── */}
+      <div className="flex divide-x divide-gray-200 bg-white border border-gray-200 rounded overflow-hidden">
+        {[
+          { label: '总收入', value: `¥${(stats.totalRevenue / 10000).toFixed(1)}万`, sub: '已收款 CNY', icon: DollarSign, accent: 'text-emerald-600', bg: 'bg-emerald-50' },
+          { label: '应收', value: `$${(stats.totalReceivables / 1000).toFixed(0)}K`, sub: '待收款', icon: Wallet, accent: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: '逾期', value: `${stats.overduePayments}`, sub: '需跟进', icon: AlertCircle, accent: 'text-rose-600', bg: 'bg-rose-50' },
+          { label: '利润率', value: `${stats.avgProfitMargin.toFixed(1)}%`, sub: '平均毛利', icon: TrendingUp, accent: 'text-purple-600', bg: 'bg-purple-50' },
+        ].map((item) => (
+          <div key={item.label} className="flex-1 px-4 py-3 flex items-center gap-3">
+            <div className={`w-8 h-8 rounded flex items-center justify-center flex-shrink-0 ${item.bg}`}>
+              <item.icon className={`w-4 h-4 ${item.accent}`} />
             </div>
-            <p className="text-lg font-bold text-gray-900">{rate.rate.toFixed(2)}</p>
-            <div className={`flex items-center gap-0.5 text-[10px] mt-0.5 ${rate.change24h >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-              {rate.change24h >= 0 ? <ArrowUpRight className="w-2.5 h-2.5" /> : <ArrowDownRight className="w-2.5 h-2.5" />}
-              {Math.abs(rate.change24h)}%
+            <div>
+              <p className="text-[10px] text-gray-400 leading-none mb-1">{item.label}</p>
+              <p className="text-base font-bold text-gray-900 leading-none">{item.value}</p>
+              <p className="text-[10px] text-gray-400 mt-1">{item.sub}</p>
+            </div>
+          </div>
+        ))}
+        {/* 汇率区与KPI区的视觉分隔 */}
+        <div className="flex items-center px-2 self-stretch bg-gray-50">
+          <span className="text-[10px] text-gray-400 font-medium writing-mode-vertical" style={{ writingMode: 'vertical-rl', fontSize: '9px', letterSpacing: '0.05em' }}>汇率</span>
+        </div>
+        {exchangeRates.map((rate) => (
+          <div key={rate.currency} className="px-4 py-3 flex items-center gap-2.5">
+            <div>
+              <p className="text-[10px] text-gray-400 leading-none mb-1">{rate.currency}/CNY</p>
+              <p className="text-base font-bold text-gray-900 leading-none">{rate.rate.toFixed(2)}</p>
+              <div className={`flex items-center gap-0.5 text-[10px] mt-1 ${rate.change24h >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {rate.change24h >= 0 ? <ArrowUpRight className="w-2.5 h-2.5" /> : <ArrowDownRight className="w-2.5 h-2.5" />}
+                {Math.abs(rate.change24h)}%
+              </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* 主内容区 */}
-      <div className="bg-white border border-gray-200 rounded">
-        {/* 标签页 */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-          <div className="border-b border-gray-200 px-3">
-            <TabsList className="bg-transparent h-auto p-0 gap-4">
-              {/* 🔥 前台财务标签（销售、CEO、CFO、财务可见） */}
-              {canViewFrontOfficeFinance() && (
-                <>
-                  <TabsTrigger 
-                    value="payments" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-emerald-600 data-[state=active]:bg-transparent data-[state=active]:text-emerald-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
-                  >
-                    <CreditCard className="w-3 h-3 mr-1" />
-                    收款管理
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="receivables" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:bg-transparent data-[state=active]:text-blue-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
-                  >
-                    <Wallet className="w-3 h-3 mr-1" />
-                    应收账款
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="invoices" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-purple-600 data-[state=active]:bg-transparent data-[state=active]:text-purple-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
-                  >
-                    <FileText className="w-3 h-3 mr-1" />
-                    发票管理
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="documents" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-cyan-600 data-[state=active]:bg-transparent data-[state=active]:text-cyan-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
-                  >
-                    <FileText className="w-3 h-3 mr-1" />
-                    单证中心
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="compliance-packets" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-teal-600 data-[state=active]:bg-transparent data-[state=active]:text-teal-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
-                  >
-                    <FileText className="w-3 h-3 mr-1" />
-                    合规文件包
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="profit" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-orange-600 data-[state=active]:bg-transparent data-[state=active]:text-orange-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
-                  >
-                    <PieChart className="w-3 h-3 mr-1" />
-                    利润分析
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="reports" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-transparent data-[state=active]:text-indigo-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
-                  >
-                    <BarChart3 className="w-3 h-3 mr-1" />
-                    财务报表
-                  </TabsTrigger>
-                </>
-              )}
-              
-              {/* 🔥 后台财务标签（采购、CEO、CFO、财务可见） */}
-              {canViewBackOfficeFinance() && (
-                <>
-                  <TabsTrigger 
-                    value="payables" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-red-600 data-[state=active]:bg-transparent data-[state=active]:text-red-700 rounded-none px-0 pb-2 pt-2 text-[18px] font-medium"
-                  >
-                    <DollarSign className="w-4 h-4 mr-1.5" />
-                    应付账款
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="payment-records" 
-                    className="bg-transparent border-b-2 border-transparent data-[state=active]:border-pink-600 data-[state=active]:bg-transparent data-[state=active]:text-pink-700 rounded-none px-0 pb-2 pt-2 text-[18px] font-medium"
-                  >
-                    <CreditCard className="w-4 h-4 mr-1.5" />
-                    付款记录
-                  </TabsTrigger>
-                </>
-              )}
-            </TabsList>
+      {/* ── 主内容区 ── */}
+      <div className="bg-white border border-gray-200 rounded overflow-hidden">
+        {/* 分组导航栏（单行） */}
+        <div className="border-b border-gray-200 bg-gray-50 flex items-stretch overflow-x-auto">
+          {navGroups.map((group, gi) => (
+            <React.Fragment key={group.label}>
+              {gi > 0 && <div className="w-px bg-gray-200 self-stretch flex-shrink-0" />}
+              <div className="flex items-center flex-shrink-0">
+                <span className={`text-[10px] font-semibold ${group.color} whitespace-nowrap px-2.5 border-r border-gray-200 self-stretch flex items-center`}>
+                  {group.label}
+                </span>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.value;
+                  return (
+                    <button
+                      key={item.value}
+                      onClick={() => setActiveTab(item.value as any)}
+                      className={`flex items-center gap-1 px-3 py-2.5 text-[11px] font-medium border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                        isActive
+                          ? 'border-blue-500 text-blue-700 bg-white'
+                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-white/70'
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+
+        {/* 内容面板 */}
+        {activeTab === 'payments' && (
+          <div className="p-4"><CollectionManagement /></div>
+        )}
+        {activeTab === 'receivables' && (
+          <div className="p-4"><AccountsReceivableList /></div>
+        )}
+        {activeTab === 'invoices' && (
+          <div className="p-4">
+            <div className="rounded border border-slate-200 bg-slate-50 p-5">
+              <h3 className="text-sm font-semibold text-slate-900 mb-1">发票与税务</h3>
+              <p className="text-xs text-slate-500">
+                原"单证管理中心"已拆出为独立模块，此处保留发票/税务能力入口，后续可接入销项/进项发票及税务资料管理。
+              </p>
+            </div>
           </div>
-
-          {/* 收款管理标签页 - 🔥 使用真实收款管理组件 */}
-          <TabsContent value="payments" className="m-0 p-4">
-            <CollectionManagement />
-          </TabsContent>
-
-          {/* 应收账款标签页 - 🔥 使用真实数据 */}
-          <TabsContent value="receivables" className="m-0 p-4">
-            <AccountsReceivableList />
-          </TabsContent>
-
-          {/* 发票管理标签页 - 🔥 使用真实发票管理组件 */}
-          <TabsContent value="invoices" className="m-0 p-4">
-            <InvoiceManagement />
-          </TabsContent>
-
-          {/* 单证中心标签页 - 🔥 财务只读视图 */}
-          <TabsContent value="documents" className="m-0 p-4">
-            <DocumentCenter userRole="finance" />
-          </TabsContent>
-
-          <TabsContent value="compliance-packets" className="m-0 p-4">
-            <CompliancePacketsTab />
-          </TabsContent>
-
-          {/* 利润分析标签页 */}
-          <TabsContent value="profit" className="m-0">
+        )}
+        {activeTab === 'compliance-packets' && (
+          <div className="p-4"><CompliancePacketsTab /></div>
+        )}
+        {activeTab === 'profit' && (
+          <div>
             <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
-                  <Input
-                    placeholder="搜索订单号、客户..."
-                    className="pl-7 h-7 text-[11px] border-gray-300"
-                  />
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 w-3 h-3" />
+                  <Input placeholder="搜索订单号、客户..." className="pl-7 h-7 text-[11px] border-gray-300" />
                 </div>
                 <Select>
                   <SelectTrigger className="w-[100px] h-7 text-[11px] border-gray-300">
                     <SelectValue placeholder="排序" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="high" style={{ fontSize: '11px' }}>高→低</SelectItem>
-                    <SelectItem value="low" style={{ fontSize: '11px' }}>低→高</SelectItem>
+                    <SelectItem value="high" className="text-xs">高→低</SelectItem>
+                    <SelectItem value="low" className="text-xs">低→高</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
-
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -733,176 +697,108 @@ export default function FinanceManagement() {
                         <p className="text-[11px] text-gray-900">{profit.customerName}</p>
                       </TableCell>
                       <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-900">
-                          {getCurrencySymbol(profit.currency)}{profit.revenue.toLocaleString()}
-                        </p>
+                        <p className="text-[11px] text-gray-900">{getCurrencySymbol(profit.currency)}{profit.revenue.toLocaleString()}</p>
                       </TableCell>
                       <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-600">
-                          {getCurrencySymbol(profit.currency)}{profit.cost.toLocaleString()}
-                        </p>
+                        <p className="text-[11px] text-gray-600">{getCurrencySymbol(profit.currency)}{profit.cost.toLocaleString()}</p>
                       </TableCell>
                       <TableCell className="py-1.5">
-                        <p className="text-[11px] font-bold text-emerald-600">
-                          {getCurrencySymbol(profit.currency)}{profit.profit.toLocaleString()}
-                        </p>
+                        <p className="text-[11px] font-bold text-emerald-600">{getCurrencySymbol(profit.currency)}{profit.profit.toLocaleString()}</p>
                       </TableCell>
                       <TableCell className="py-1.5">
                         <div className="flex items-center gap-1.5">
-                          <div className="w-12">
-                            <Progress value={profit.profitMargin} className="h-1" />
-                          </div>
+                          <div className="w-12"><Progress value={profit.profitMargin} className="h-1" /></div>
                           <Badge className={`h-4 px-1.5 text-[10px] border ${
                             profit.profitMargin >= 35 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                             profit.profitMargin >= 30 ? 'bg-blue-50 text-blue-700 border-blue-200' :
                             'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}>
-                            {profit.profitMargin.toFixed(1)}%
-                          </Badge>
+                          }`}>{profit.profitMargin.toFixed(1)}%</Badge>
                         </div>
                       </TableCell>
                       <TableCell className="py-1.5 text-right">
-                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]">
-                          详情
-                        </Button>
+                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]">详情</Button>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
-          </TabsContent>
-
-          {/* 财务报表标签页 */}
-          <TabsContent value="reports" className="m-0">
-            <div className="p-3 space-y-2">
+          </div>
+        )}
+        {activeTab === 'reports' && (
+          <div className="p-3 space-y-2">
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: '月度收入', value: '¥118.5万', sub: '2025年11月', extra: '环比 +15.3%', extraUp: true, icon: BarChart3, color: 'text-blue-600' },
+                { label: '应收汇总', value: '$407K', sub: '待收款总额', icon: Wallet, color: 'text-orange-600',
+                  rows: [{ k: '正常', v: '$295K', vc: 'text-gray-900' }, { k: '逾期', v: '$112K', vc: 'text-rose-600' }] },
+                { label: '利润分析', value: '31.8%', sub: '平均毛利率', icon: PieChart, color: 'text-emerald-600',
+                  rows: [{ k: '总营收', v: '$483K', vc: 'text-gray-900' }, { k: '总利润', v: '$150K', vc: 'text-emerald-600' }] },
+                { label: '现金流', value: '¥81.9万', sub: '本月流入', icon: TrendingUp, color: 'text-purple-600',
+                  rows: [{ k: '定金', v: '¥46.5万', vc: 'text-gray-900' }, { k: '尾款', v: '¥35.4万', vc: 'text-gray-900' }] },
+              ].map((card) => (
+                <div key={card.label} className="bg-white border border-gray-200 rounded p-2.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] text-gray-600 font-medium">{card.label}</span>
+                    <card.icon className={`w-3.5 h-3.5 ${card.color}`} />
+                  </div>
+                  <p className="text-xl font-bold text-gray-900">{card.value}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{card.sub}</p>
+                  {card.extra && (
+                    <div className="mt-1.5 flex items-center gap-1">
+                      <ArrowUpRight className="w-2.5 h-2.5 text-emerald-600" />
+                      <span className="text-[10px] text-emerald-600">{card.extra}</span>
+                    </div>
+                  )}
+                  {card.rows && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {card.rows.map((r) => (
+                        <div key={r.k} className="flex justify-between text-[10px]">
+                          <span className="text-gray-500">{r.k}</span>
+                          <span className={`font-medium ${r.vc}`}>{r.v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <Button variant="outline" size="sm" className="w-full mt-2 h-6 text-[10px] border-gray-300 gap-1">
+                    <Download className="w-2.5 h-2.5" />
+                    导出
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <div className="bg-gray-50 border border-gray-200 rounded p-2.5">
+              <p className="text-[11px] text-gray-600 font-medium mb-2">快捷导出</p>
               <div className="grid grid-cols-4 gap-2">
-                {/* 月度收入 */}
-                <div className="bg-white border border-gray-200 rounded p-2.5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] text-gray-600 font-medium">月度收入</span>
-                    <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
-                  </div>
-                  <p className="text-xl font-bold text-gray-900">¥118.5万</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">2025年11月</p>
-                  <div className="mt-1.5 flex items-center gap-1">
-                    <ArrowUpRight className="w-2.5 h-2.5 text-emerald-600" />
-                    <span className="text-[10px] text-emerald-600">环比 +15.3%</span>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full mt-2 h-6 text-[10px] border-gray-300">
-                    <Download className="w-2.5 h-2.5 mr-1" />
-                    导出
+                {['年度报表', '季度报表', '客户对账', '税务报表'].map((label) => (
+                  <Button key={label} variant="outline" size="sm" className="h-6 text-[10px] border-gray-300 gap-1">
+                    <FileText className="w-2.5 h-2.5" />
+                    {label}
                   </Button>
-                </div>
-
-                {/* 应收汇总 */}
-                <div className="bg-white border border-gray-200 rounded p-2.5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] text-gray-600 font-medium">应收汇总</span>
-                    <Wallet className="w-3.5 h-3.5 text-orange-600" />
-                  </div>
-                  <p className="text-xl font-bold text-gray-900">$407K</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">待收款总额</p>
-                  <div className="mt-1.5 space-y-0.5">
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-gray-600">正常</span>
-                      <span className="text-gray-900 font-medium">$295K</span>
-                    </div>
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-gray-600">逾期</span>
-                      <span className="text-rose-600 font-medium">$112K</span>
-                    </div>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full mt-2 h-6 text-[10px] border-gray-300">
-                    <Download className="w-2.5 h-2.5 mr-1" />
-                    导出
-                  </Button>
-                </div>
-
-                {/* 利润分析 */}
-                <div className="bg-white border border-gray-200 rounded p-2.5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] text-gray-600 font-medium">利润分析</span>
-                    <PieChart className="w-3.5 h-3.5 text-emerald-600" />
-                  </div>
-                  <p className="text-xl font-bold text-gray-900">31.8%</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">平均毛利率</p>
-                  <div className="mt-1.5 space-y-0.5">
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-gray-600">总营收</span>
-                      <span className="text-gray-900 font-medium">$483K</span>
-                    </div>
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-gray-600">总利润</span>
-                      <span className="text-emerald-600 font-medium">$150K</span>
-                    </div>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full mt-2 h-6 text-[10px] border-gray-300">
-                    <Download className="w-2.5 h-2.5 mr-1" />
-                    导出
-                  </Button>
-                </div>
-
-                {/* 现金流 */}
-                <div className="bg-white border border-gray-200 rounded p-2.5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] text-gray-600 font-medium">现金流</span>
-                    <TrendingUp className="w-3.5 h-3.5 text-purple-600" />
-                  </div>
-                  <p className="text-xl font-bold text-gray-900">¥81.9万</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">本月流入</p>
-                  <div className="mt-1.5 space-y-0.5">
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-gray-600">定金</span>
-                      <span className="text-gray-900 font-medium">¥46.5万</span>
-                    </div>
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-gray-600">尾款</span>
-                      <span className="text-gray-900 font-medium">¥35.4万</span>
-                    </div>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full mt-2 h-6 text-[10px] border-gray-300">
-                    <Download className="w-2.5 h-2.5 mr-1" />
-                    导出
-                  </Button>
-                </div>
-              </div>
-
-              {/* 快捷导出 */}
-              <div className="bg-gray-50 border border-gray-200 rounded p-2.5">
-                <p className="text-[11px] text-gray-600 font-medium mb-2">快捷导出</p>
-                <div className="grid grid-cols-4 gap-2">
-                  <Button variant="outline" size="sm" className="h-6 text-[10px] border-gray-300">
-                    <FileText className="w-2.5 h-2.5 mr-1" />
-                    年度报表
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-6 text-[10px] border-gray-300">
-                    <FileText className="w-2.5 h-2.5 mr-1" />
-                    季度报表
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-6 text-[10px] border-gray-300">
-                    <Receipt className="w-2.5 h-2.5 mr-1" />
-                    客户对账
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-6 text-[10px] border-gray-300">
-                    <FileText className="w-2.5 h-2.5 mr-1" />
-                    税务报表
-                  </Button>
-                </div>
+                ))}
               </div>
             </div>
-          </TabsContent>
-
-          {/* 应付账款标签页 */}
-          <TabsContent value="payables" className="m-0 p-4">
-            <PayableManagement />
-          </TabsContent>
-
-          {/* 付款记录标签页 */}
-          <TabsContent value="payment-records" className="m-0 p-4">
-            <PaymentRecordManagement />
-          </TabsContent>
-        </Tabs>
+          </div>
+        )}
+        {activeTab === 'payables' && (
+          <div className="p-4"><PayableManagement /></div>
+        )}
+        {activeTab === 'payment-records' && (
+          <div className="p-4"><PaymentRecordManagement /></div>
+        )}
+        {activeTab === 'management-finance' && (
+          <div className="p-0">
+            <React.Suspense
+              fallback={
+                <div className="flex h-[320px] items-center justify-center text-[12px] text-slate-400">
+                  正在加载内部管理财务中心...
+                </div>
+              }
+            >
+              <LazyManagementFinanceCenter />
+            </React.Suspense>
+          </div>
+        )}
       </div>
     </div>
   );

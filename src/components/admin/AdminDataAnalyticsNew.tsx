@@ -14,6 +14,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { canViewSensitiveField, getDataFilter, ROLE_LABELS, BusinessType, BUSINESS_TYPE_LABELS } from '../../lib/rbac-config';
 import { getRoleAnalyticsConfig, KPI_METADATA, KPIType } from '../../lib/role-analytics-config';
 import { getBusinessTypeKPIs, getBusinessTypeChartData, BUSINESS_TYPE_INSIGHTS } from '../../lib/business-type-analytics';
+import { getErpKpiSnapshot, type ErpKpiSnapshot, type ErpKpiTimeWindow } from '../../lib/services/erpKpiSnapshotService';
 import { Alert, AlertDescription } from '../ui/alert';
 import BusinessTypeView from './BusinessTypeView'; // 🔥 业务类型专属视图
 // ❌ 已禁用：暂时注释，可能是 Vite 缓存问题
@@ -92,6 +93,9 @@ const IconMap: Record<string, React.ComponentType<any>> = {
 
 export default function AdminDataAnalyticsNew() {
   const { currentUser } = useAuth();
+  const [erpSnapshot, setErpSnapshot] = useState<ErpKpiSnapshot | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
   
   // 🔥 筛选状态
   const [selectedRegion, setSelectedRegion] = useState<string>('all');
@@ -193,6 +197,54 @@ export default function AdminDataAnalyticsNew() {
     setSelectedSalesRep('all');
   };
 
+  const snapshotRegion = selectedRegion === 'all' ? null : selectedRegion;
+  const snapshotUserEmail = dataFilter.type === 'own' ? currentUser?.email || null : null;
+  const canUseScopedSnapshot = selectedCountry === 'all'
+    && selectedCustomer === 'all'
+    && (selectedSalesRep === 'all' || Boolean(snapshotUserEmail && selectedSalesRep === currentUser?.id));
+
+  const snapshotTimeWindow: ErpKpiTimeWindow = useMemo(() => {
+    if (timeRange === 'week') return 'week';
+    if (timeRange === 'month') return 'month';
+    if (timeRange === 'quarter') return 'quarter';
+    return 'all';
+  }, [timeRange]);
+
+  React.useEffect(() => {
+    if (!canUseScopedSnapshot) return;
+
+    let cancelled = false;
+
+    const loadSnapshot = async () => {
+      setSnapshotLoading(true);
+      setSnapshotError(null);
+      try {
+        const snapshot = await getErpKpiSnapshot({
+          timeWindow: snapshotTimeWindow,
+          region: snapshotRegion,
+          userEmail: snapshotUserEmail,
+        });
+        if (!cancelled) {
+          setErpSnapshot(snapshot);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSnapshotError(error instanceof Error ? error.message : 'KPI snapshot load failed');
+        }
+      } finally {
+        if (!cancelled) {
+          setSnapshotLoading(false);
+        }
+      }
+    };
+
+    void loadSnapshot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseScopedSnapshot, snapshotRegion, snapshotTimeWindow, snapshotUserEmail]);
+
   // 🔥 模拟数据 - 根据角色返回不同的KPI值
   const getKPIValue = (kpiType: KPIType): number => {
     const mockData: Record<KPIType, number> = {
@@ -215,13 +267,35 @@ export default function AdminDataAnalyticsNew() {
     return mockData[kpiType];
   };
 
+  const getSnapshotKpiValue = (kpiType: KPIType): number | null => {
+    if (!erpSnapshot || !canUseScopedSnapshot) return null;
+
+    const metricMap = {
+      inquiries: 'inquiry_submitted_count',
+      quotations: 'quotation_total_count',
+      orders: 'order_total_count',
+      purchase_orders: 'purchase_order_total_count',
+      customers: 'customer_total_count',
+      suppliers: 'supplier_total_count',
+      pending_approval: 'approval_pending_count',
+      receivables: 'receivable_unpaid_amount',
+      pending_payment: 'receivable_unpaid_amount',
+      conversion_rate: 'inquiry_to_approved_quote_conversion_rate',
+    } as const satisfies Partial<Record<KPIType, keyof ErpKpiSnapshot['metrics']>>;
+
+    const metricId = metricMap[kpiType];
+    if (!metricId) return null;
+    return erpSnapshot.metrics[metricId]?.value ?? null;
+  };
+
   // 🔥 动态生成KPI卡片数据
   const kpiCards = useMemo(() => {
     if (!roleConfig) return [];
     
     return roleConfig.kpis.map(kpiType => {
       const metadata = KPI_METADATA[kpiType];
-      const value = getKPIValue(kpiType);
+      const snapshotValue = getSnapshotKpiValue(kpiType);
+      const value = snapshotValue ?? getKPIValue(kpiType);
       const change = Math.random() > 0.2 ? `+${(Math.random() * 30).toFixed(1)}%` : `-${(Math.random() * 10).toFixed(1)}%`;
       const trend = change.startsWith('+') ? 'up' : 'down';
       
@@ -230,13 +304,14 @@ export default function AdminDataAnalyticsNew() {
         label: metadata.label,
         value: metadata.formatter(value, currentRegionConfig?.currency),
         rawValue: value,
+        dataSource: snapshotValue !== null ? 'snapshot' : 'fallback',
         change,
         trend,
         icon: metadata.icon,
         color: metadata.color,
       };
     });
-  }, [roleConfig, currentRegionConfig]);
+  }, [roleConfig, currentRegionConfig, erpSnapshot, canUseScopedSnapshot]);
 
   // 🔥 图表数据
   const monthlyData = [
@@ -348,6 +423,19 @@ export default function AdminDataAnalyticsNew() {
           </div>
         </div>
       </div>
+
+      {canUseScopedSnapshot && (
+        <Alert className="border-slate-200 bg-slate-50">
+          <AlertDescription className="text-xs text-slate-700">
+            当前已接入第一版统一 KPI 口径快照。已接入口径的指标优先显示真实汇总值；区域维度和当前登录业务员本人视角已接入统一快照，国家、客户和手工指定其他业务员时仍保留展示回退值。
+            当前时间窗口：{snapshotTimeWindow === 'all' ? '累计' : snapshotTimeWindow === 'week' ? '本周' : snapshotTimeWindow === 'month' ? '本月' : '本季度'}。
+            {snapshotRegion ? ` 当前区域：${snapshotRegion}。` : ' 当前区域：全局。'}
+            {snapshotUserEmail ? ' 当前人员范围：本人。' : ''}
+            {snapshotLoading ? ' 正在刷新口径快照…' : ''}
+            {snapshotError ? ` KPI 快照加载失败：${snapshotError}` : ''}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* 🔥 CEO战略分析 - 完整独立视图 */}
       {/* 已禁用：CEO现在使用通用视图 */}

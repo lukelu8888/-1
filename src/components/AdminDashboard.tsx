@@ -1,6 +1,6 @@
 import React, { Suspense, useEffect, useState } from 'react';
 // 🔥 Import all required icons including Sparkles for Pro features
-import { LayoutDashboard, LayoutGrid, Users, Package, BarChart3, Bell, Mail, LogOut, ChevronLeft, ChevronRight, Building2, Box, Share2, GripVertical, Ship, Activity, Wallet, Factory, Truck, ChevronDown, ChevronUp, Database, Shield, Target, Radio, HeartPulse, Workflow, FileText, FolderOpen, Globe, Navigation, DollarSign, TrendingUp, Settings, Terminal, GitBranch, Sparkles, Wand2, UserCheck, Waves, UserPlus, Megaphone, ClipboardCheck, Edit, Hash } from 'lucide-react';
+import { LayoutDashboard, LayoutGrid, Users, Package, BarChart3, Bell, Mail, LogOut, ChevronLeft, ChevronRight, Building2, Box, Share2, GripVertical, Ship, Activity, Wallet, Factory, Truck, ChevronDown, ChevronUp, Database, Shield, Target, Radio, HeartPulse, Workflow, FileText, FolderOpen, Globe, Navigation, DollarSign, TrendingUp, Settings, Terminal, GitBranch, Sparkles, Wand2, UserCheck, Waves, UserPlus, Megaphone, ClipboardCheck, ClipboardList, Edit, Hash } from 'lucide-react';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
@@ -118,6 +118,8 @@ const LazyInvoiceManagement = React.lazy(() => import('./admin/InvoiceManagement
 const LazyZhaoMinFinanceWorkbench = React.lazy(() => import('./finance-v2/ZhaoMinFinanceWorkbench'));
 const LazyZhaoMinFinanceTodoCenter = React.lazy(() => import('./finance-v2/ZhaoMinFinanceTodoCenter'));
 const LazyZhaoMinFinanceManagementCenter = React.lazy(() => import('./finance-v2/ZhaoMinFinanceManagementCenter'));
+const LazyManagementFinanceCenter = React.lazy(() => import('./management-finance'));
+const LazyExpenseManagementStandalone = React.lazy(() => import('./management-finance/ExpenseManagementStandalone'));
 const LazyRolePermissionCenterProMax = React.lazy(() => import('./admin/RolePermissionCenterProMax'));
 const LazyPermissionCenterV1 = React.lazy(() => import('./admin/PermissionCenterV1'));
 const LazyRealEnterpriseBackupCenter = React.lazy(() => import('./admin/RealEnterpriseBackupCenter'));
@@ -141,6 +143,7 @@ const LazySalesTodoCenter = React.lazy(() =>
 const LazySalesManagerTodoCenter = React.lazy(() => import('./admin/SalesManagerTodoCenter'));
 const LazyAdminOrganizationProfile = React.lazy(() => import('./admin/AdminOrganizationProfile'));
 const LazySalesForecastingTargetsProMaxEditable = React.lazy(() => import('./admin/SalesForecastingTargetsProMaxEditable'));
+const LazyMarketCategoryResearch = React.lazy(() => import('../features/market-category-research/MarketCategoryResearchShell'));
 
 function PeopleAdminCenter({ role, onNavigate }: { role?: string; onNavigate: (tab: string) => void }) {
   const title = '人事中心';
@@ -510,8 +513,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       'analytics',
       // 🔥 移除：order-flow-center 应该允许Admin访问（用于流程监控）
       // 'order-flow-center',
-      'finance-management',
-      // finance-v2：赵敏 mock 骨架，允许 Admin 进入便于联调（旧「财务管理」仍排除）
+      // finance-management / finance-v2 / management-finance：Admin 需可进入便于实施与演示
       'lead-conversion',
       'global-bi-dashboard',
       'customer-health-monitor',
@@ -771,6 +773,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       requiredPermission: 'access:product_management' as Permission // 🔥 运营专员权限
     },
     { 
+      id: 'market-category-research', 
+      label: '市场类目研究', 
+      enLabel: 'Market Category Research', 
+      icon: TrendingUp,
+      badge: 'NEW' as any,
+      requiredPermission: 'access:product_management' as Permission
+    },
+    { 
       id: 'product-push', 
       label: '产品推送', 
       enLabel: 'Product Push', 
@@ -830,6 +840,22 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       enLabel: 'Finance Management Center (New)', 
       icon: LayoutGrid,
       badge: 'V2' as any,
+      requiredPermission: 'access:finance_management' as Permission
+    },
+    {
+      id: 'expense-management-center',
+      label: '费用管理中心',
+      enLabel: 'Expense Management Center',
+      icon: ClipboardList,
+      badge: '业财' as any,
+      requiredPermission: 'access:finance_management' as Permission
+    },
+    {
+      id: 'management-finance-center',
+      label: '内部管理财务中心',
+      enLabel: 'Management Finance Center',
+      icon: Sparkles,
+      badge: 'AI' as any,
       requiredPermission: 'access:finance_management' as Permission
     },
     { 
@@ -963,6 +989,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           'finance-v2-workbench',
           'finance-v2-todo-center',
           'finance-v2-management-center',
+          'expense-management-center',
+          'management-finance-center',
         ] as const;
         const missingV2 = financeV2Ids.filter((id) => !order.includes(id));
         if (missingV2.length > 0) {
@@ -1025,12 +1053,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         // 🎯 运营专员 (Marketing_Ops) - 产品管理、社媒营销、客户录入
         if (currentUser.role === 'Marketing_Ops') {
           const allowedModules = [
-            'overview',                  // ✅ 工作台
-            'crm',                       // ✅ CRM（客户录入）
-            'product-management',        // ✅ 产品管理
-            'product-push',              // ✅ 产品推送
-            'social-media-marketing',    // ✅ 社交媒体营销（含客户录入）
-            'messaging',                 // ✅ 消息中心
+            'overview',                      // ✅ 工作台
+            'crm',                           // ✅ CRM（客户录入）
+            'product-management',            // ✅ 产品管理
+            'market-category-research',      // ✅ 市场类目研究
+            'product-push',                  // ✅ 产品推送
+            'social-media-marketing',        // ✅ 社交媒体营销（含客户录入）
+            'messaging',                     // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
         }
@@ -1038,12 +1067,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         // 📝 运营助理 (Marketing_Assistant) - 营销协助执行
         if (currentUser.role === 'Marketing_Assistant') {
           const allowedModules = [
-            'overview',                  // ✅ 工作台
-            'crm',                       // ✅ CRM
-            'product-management',        // ✅ 产品管理
-            'product-push',              // ✅ 产品推送
-            'social-media-marketing',    // ✅ 社交媒体营销
-            'messaging',                 // ✅ 消息中心
+            'overview',                      // ✅ 工作台
+            'crm',                           // ✅ CRM
+            'product-management',            // ✅ 产品管理
+            'market-category-research',      // ✅ 市场类目研究
+            'product-push',                  // ✅ 产品推送
+            'social-media-marketing',        // ✅ 社交媒体营销
+            'messaging',                     // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
         }
@@ -1057,6 +1087,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'finance-v2-workbench',
             'finance-v2-todo-center',
             'finance-v2-management-center',
+            'management-finance-center',
+            'expense-management-center',
             'messaging',             // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
@@ -1125,6 +1157,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'finance-v2-workbench',
             'finance-v2-todo-center',
             'finance-v2-management-center',
+            'management-finance-center',
+            'expense-management-center',
             'document-numbering-center',
             'messaging',               // ✅ 消息中心
           ];
@@ -1140,10 +1174,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'shipping-document-management',  // ✅ 发货管理
             'analytics',                     // ✅ 数据分析（CEO战略驾驶舱）
             'global-bi-dashboard',           // ✅ 全局BI仪表盘
+            'product-management',            // ✅ 产品管理
+            'market-category-research',      // ✅ 市场类目研究
             'finance-management',            // ✅ 财务管理（查看）
             'finance-v2-workbench',
             'finance-v2-todo-center',
             'finance-v2-management-center',
+            'management-finance-center',
+            'expense-management-center',
             'document-numbering-center',
             'messaging',                     // ✅ 消息中心
           ];
@@ -1165,9 +1203,14 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             'supabase-diagnostic',           // ✅ Supabase诊断面板
             'multi-language-currency',       // ✅ 多语言/多货币
             'full-process-demo-v5',          // 🧪 全流程演示沙盘 V5（Mock Only）
+            'product-management',            // ✅ 产品管理
+            'market-category-research',      // ✅ 市场类目研究
             'finance-v2-workbench',
             'finance-v2-todo-center',
             'finance-v2-management-center',
+            'finance-management',
+            'management-finance-center',
+            'expense-management-center',
             'messaging',                     // ✅ 消息中心
           ];
           return allowedModules.includes(item.id);
@@ -1365,6 +1408,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         return <div className="p-8 text-center text-gray-500">状态流转模拟器组件暂不可用</div>;
       case 'product-management':
         return <LazyProductManagement />;
+      case 'market-category-research':
+        return <LazyMarketCategoryResearch />;
       case 'product-push':
         return <LazyProductPush />;
       case 'messaging':
@@ -1403,6 +1448,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         return <LazyZhaoMinFinanceTodoCenter />;
       case 'finance-v2-management-center':
         return <LazyZhaoMinFinanceManagementCenter />;
+      case 'expense-management-center':
+        return <LazyExpenseManagementStandalone />;
+      case 'management-finance-center':
+        return <LazyManagementFinanceCenter />;
       case 'permission-center':
         return <LazyPermissionCenterV1 />;
       case 'role-permission': // 🔥 新增：角色权限管理中心 Pro Max版
@@ -1715,12 +1764,12 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         <main
           translate="no"
           className={`flex-1 min-h-0 overflow-x-hidden bg-gray-50 ${
-            activeTab === 'template-workbench' || activeTab === 'permission-center' || activeTab === 'purchase-order-management' ? 'overflow-hidden' : 'overflow-y-auto'
+            activeTab === 'template-workbench' || activeTab === 'permission-center' || activeTab === 'purchase-order-management' || activeTab === 'product-management' || activeTab === 'market-category-research' ? 'overflow-hidden' : 'overflow-y-auto'
           } notranslate`}
           style={{ maxWidth: '100%', width: '100%' }}
         >
           <div
-            className={activeTab === 'template-workbench' || activeTab === 'permission-center' || activeTab === 'order-management-center' || activeTab === 'purchase-order-management' ? 'flex h-full min-h-0 flex-col p-6' : 'p-6'}
+            className={activeTab === 'template-workbench' || activeTab === 'permission-center' || activeTab === 'order-management-center' || activeTab === 'purchase-order-management' || activeTab === 'product-management' || activeTab === 'market-category-research' ? 'flex h-full min-h-0 flex-col p-6' : 'p-6'}
             style={{ maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}
           >
             <Suspense fallback={<AdminDashboardContentFallback />}>

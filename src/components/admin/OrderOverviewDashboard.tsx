@@ -5,63 +5,178 @@ import React, { useState } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { 
-  TrendingUp, TrendingDown, AlertTriangle, Download, RefreshCw, 
-  FileText, Receipt, Package, DollarSign, Calendar, Filter, Settings,
-  Clock, CheckCircle2, XCircle, AlertCircle, Eye, ArrowUpRight, Users
+  TrendingUp, AlertTriangle, Download, RefreshCw,
+  FileText, Package, Calendar, Filter, Settings,
+  Clock, AlertCircle, Eye, ArrowUpRight
 } from 'lucide-react';
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { computeOrderOverviewViewModel } from '../../lib/services/orderManagementOverviewService';
+import { CompactDetailsPopover } from '../shared/CompactDetailsPopover';
 
-export default function OrderOverviewDashboard() {
+interface OrderOverviewDashboardProps {
+  pendingCounts?: {
+    inquiries: number
+    costInquiry: number
+    quotations: number
+    orders: number
+    collections: number
+    approvals?: number
+    exportService?: number
+    overview: number
+  }
+  snapshot?: {
+    inquiries?: any[]
+    quoteRequirements?: any[]
+    quotationRequests?: any[]
+    quotations?: any[]
+    contracts?: any[]
+    purchaseOrders?: any[]
+    payments?: any[]
+    exportServiceOrders?: any[]
+  }
+  onRefresh?: () => Promise<void> | void
+  refreshing?: boolean
+}
+
+const hasMeaningfulDisplayValue = (value: unknown) => {
+  const normalized = String(value || '').trim()
+  if (!normalized) return false
+  return !['n/a', 'na', 'null', 'undefined', '-'].includes(normalized.toLowerCase())
+}
+
+const displayValue = (value: unknown, fallback = '-') => (
+  hasMeaningfulDisplayValue(value) ? String(value).trim() : fallback
+)
+
+export default function OrderOverviewDashboard({ pendingCounts, snapshot, onRefresh, refreshing = false }: OrderOverviewDashboardProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'funnel' | 'performance' | 'risk'>('overview');
   const [timeRange, setTimeRange] = useState('本月');
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedRegion, setSelectedRegion] = useState('all');
+  const [selectedStage, setSelectedStage] = useState('all');
 
-  // 数据
-  const funnelData = [
-    { stage: '询价', count: 248, amount: 2850000, conversion: 100, trend: '+12%', status: 'normal' },
-    { stage: '报价', count: 186, amount: 2100000, conversion: 75, trend: '+8%', status: 'normal' },
-    { stage: '合同', count: 124, amount: 1980000, conversion: 67, trend: '+5%', status: 'normal' },
-    { stage: '订单', count: 98, amount: 1560000, conversion: 79, trend: '+15%', status: 'good' },
-    { stage: '收款', count: 76, amount: 1180000, conversion: 78, trend: '+10%', status: 'good' },
-  ];
+  const livePendingCounts = pendingCounts || {
+    inquiries: 0,
+    costInquiry: 0,
+    quotations: 0,
+    orders: 0,
+    collections: 0,
+    approvals: 0,
+    exportService: 0,
+    overview: 0,
+  }
 
-  const regionData = [
-    { region: '北美', inquiries: 132, quotations: 98, contracts: 68, orders: 54, revenue: 850000, growth: '+18%' },
-    { region: '欧非', inquiries: 76, quotations: 58, contracts: 38, orders: 30, revenue: 480000, growth: '+12%' },
-    { region: '南美', inquiries: 40, quotations: 30, contracts: 18, orders: 14, revenue: 230000, growth: '+8%' },
-  ];
+  const overviewModel = React.useMemo(() => computeOrderOverviewViewModel({
+    snapshot: {
+      inquiries: snapshot?.inquiries || [],
+      quoteRequirements: snapshot?.quoteRequirements || [],
+      quotationRequests: snapshot?.quotationRequests || [],
+      quotations: snapshot?.quotations || [],
+      contracts: snapshot?.contracts || [],
+      purchaseOrders: snapshot?.purchaseOrders || [],
+      payments: snapshot?.payments || [],
+      exportServiceOrders: snapshot?.exportServiceOrders || [],
+    },
+    pendingCounts: livePendingCounts,
+  }), [livePendingCounts, snapshot])
 
-  const customerData = [
-    { name: 'ABC Trading Ltd.', region: '北美', orders: 24, amount: 560000, paid: 420000, pending: 140000, status: '正常', risk: 'low' },
-    { name: 'Global Import Co.', region: '北美', orders: 18, amount: 420000, paid: 380000, pending: 40000, status: '正常', risk: 'low' },
-    { name: 'Premium Supplies Inc.', region: '欧非', orders: 15, amount: 380000, paid: 280000, pending: 100000, status: '延迟', risk: 'medium' },
-    { name: 'Euro Distribution', region: '欧非', orders: 12, amount: 290000, paid: 290000, pending: 0, status: '完成', risk: 'low' },
-    { name: 'South American Trading', region: '南美', orders: 10, amount: 210000, paid: 120000, pending: 90000, status: '逾期', risk: 'high' },
-    { name: 'Pacific Imports LLC', region: '北美', orders: 9, amount: 180000, paid: 180000, pending: 0, status: '完成', risk: 'low' },
-    { name: 'Continental Supply', region: '欧非', orders: 8, amount: 160000, paid: 120000, pending: 40000, status: '正常', risk: 'low' },
-    { name: 'Latin America Dist.', region: '南美', orders: 7, amount: 140000, paid: 70000, pending: 70000, status: '延迟', risk: 'medium' },
-  ];
+  const regionOptions = React.useMemo(
+    () => ['all', ...overviewModel.regionRows.map((item) => item.region)],
+    [overviewModel.regionRows],
+  )
 
-  const salesData = [
-    { name: '张伟', region: '北美', inquiries: 58, quotations: 44, contracts: 32, orders: 28, revenue: 480000, conversion: 76, target: 500000 },
-    { name: '李娜', region: '欧非', inquiries: 52, quotations: 38, contracts: 28, orders: 24, revenue: 420000, conversion: 72, target: 400000 },
-    { name: '王强', region: '北美', inquiries: 48, quotations: 36, contracts: 24, orders: 20, revenue: 360000, conversion: 68, target: 380000 },
-    { name: 'Maria Garcia', region: '南美', inquiries: 42, quotations: 30, contracts: 18, orders: 16, revenue: 270000, conversion: 64, target: 280000 },
-    { name: 'John Smith', region: '欧非', inquiries: 38, quotations: 28, contracts: 18, orders: 14, revenue: 225000, conversion: 60, target: 250000 },
-  ];
+  const filteredStageRows = React.useMemo(
+    () => overviewModel.stageRows.filter((item) => selectedStage === 'all' || item.stage === selectedStage),
+    [overviewModel.stageRows, selectedStage],
+  )
 
-  const riskData = [
-    { type: '逾期询价', count: 12, amount: 0, days: '7-15天', handler: '张伟, 李娜', priority: 'medium' },
-    { type: '即将过期报价', count: 8, amount: 280000, days: '3-7天', handler: '王强, Maria', priority: 'high' },
-    { type: '延迟订单', count: 5, amount: 450000, days: '5-12天', handler: 'John Smith', priority: 'high' },
-    { type: '逾期应收款', count: 15, amount: 380000, days: '15-45天', handler: '财务部', priority: 'critical' },
-  ];
+  const filteredDistribution = React.useMemo(
+    () => overviewModel.distribution.filter((item) => selectedStage === 'all' || item.stage === selectedStage),
+    [overviewModel.distribution, selectedStage],
+  )
 
-  const trendData = [
-    { week: 'W1', inquiries: 45, quotations: 32, contracts: 21, orders: 18 },
-    { week: 'W2', inquiries: 52, quotations: 38, contracts: 25, orders: 20 },
-    { week: 'W3', inquiries: 58, quotations: 42, contracts: 28, orders: 22 },
-    { week: 'W4', inquiries: 63, quotations: 48, contracts: 32, orders: 24 },
-  ];
+  const filteredRegionRows = React.useMemo(
+    () => overviewModel.regionRows.filter((item) => selectedRegion === 'all' || item.region === selectedRegion),
+    [overviewModel.regionRows, selectedRegion],
+  )
+
+  const filteredCustomerRows = React.useMemo(
+    () => overviewModel.customerRows.filter((item) => selectedRegion === 'all' || item.region === selectedRegion),
+    [overviewModel.customerRows, selectedRegion],
+  )
+
+  const filteredModuleRanking = React.useMemo(
+    () => overviewModel.moduleRanking.filter((item) => selectedStage === 'all' || item.name.includes(selectedStage)),
+    [overviewModel.moduleRanking, selectedStage],
+  )
+
+  const filteredRiskRows = React.useMemo(
+    () => overviewModel.riskRows.filter((item) => selectedStage === 'all' || item.type.includes(selectedStage)),
+    [overviewModel.riskRows, selectedStage],
+  )
+
+  const exportRows = React.useMemo(() => {
+    if (activeTab === 'funnel') {
+      return filteredStageRows.map((item) => ({
+        流程阶段: item.stage,
+        当前单量: item.total,
+        待处理: item.pending,
+        待处理占比: `${item.pendingRate}%`,
+        规则说明: item.note,
+        状态: item.status === 'busy' ? '积压中' : item.status === 'watch' ? '处理中' : '已清空',
+      }))
+    }
+    if (activeTab === 'performance') {
+      return filteredModuleRanking.map((item, index) => ({
+        排名: index + 1,
+        模块: item.name,
+        待处理数量: item.count,
+      }))
+    }
+    if (activeTab === 'risk') {
+      return filteredRiskRows.map((item) => ({
+        风险类型: item.type,
+        数量: item.count,
+        责任人: item.handler,
+        规则说明: item.note,
+        优先级: item.priority,
+      }))
+    }
+    return filteredCustomerRows.map((item) => ({
+      客户名称: item.name,
+      区域: item.region,
+      询价: item.inquiries,
+      报价: item.quotations,
+      合同: item.contracts,
+      订单: item.orders,
+      待收款: item.pending,
+    }))
+  }, [activeTab, filteredCustomerRows, filteredModuleRanking, filteredRiskRows, filteredStageRows])
+
+  const handleExport = React.useCallback(() => {
+    if (exportRows.length === 0) return
+    const headers = Object.keys(exportRows[0])
+    const csv = [
+      headers.join(','),
+      ...exportRows.map((row) =>
+        headers
+          .map((header) => `"${String((row as Record<string, unknown>)[header] ?? '').replace(/"/g, '""')}"`)
+          .join(','),
+      ),
+    ].join('\n')
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `order-overview-${activeTab}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }, [activeTab, exportRows])
+
+  const clearFilters = () => {
+    setSelectedRegion('all')
+    setSelectedStage('all')
+  }
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -90,15 +205,15 @@ export default function OrderOverviewDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="gap-1.5 h-8">
+            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => setShowFilters((prev) => !prev)}>
               <Filter className="w-3.5 h-3.5" />
               筛选
             </Button>
-            <Button size="sm" variant="outline" className="gap-1.5 h-8">
+            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => void onRefresh?.()} disabled={refreshing}>
               <RefreshCw className="w-3.5 h-3.5" />
-              刷新
+              {refreshing ? '刷新中' : '刷新'}
             </Button>
-            <Button size="sm" variant="outline" className="gap-1.5 h-8">
+            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={handleExport} disabled={exportRows.length === 0}>
               <Download className="w-3.5 h-3.5" />
               导出
             </Button>
@@ -107,6 +222,34 @@ export default function OrderOverviewDashboard() {
             </Button>
           </div>
         </div>
+
+        {showFilters && (
+          <div className="px-4 pb-3 flex flex-wrap items-center gap-3">
+            <select
+              value={selectedStage}
+              onChange={(e) => setSelectedStage(e.target.value)}
+              className="text-sm border border-gray-300 rounded px-2 py-1 bg-white"
+            >
+              <option value="all">全部流程</option>
+              {overviewModel.stageRows.map((item) => (
+                <option key={item.stage} value={item.stage}>{item.stage}</option>
+              ))}
+            </select>
+            <select
+              value={selectedRegion}
+              onChange={(e) => setSelectedRegion(e.target.value)}
+              className="text-sm border border-gray-300 rounded px-2 py-1 bg-white"
+            >
+              <option value="all">全部区域</option>
+              {regionOptions.filter((item) => item !== 'all').map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+            <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={clearFilters}>
+              清空筛选
+            </Button>
+          </div>
+        )}
 
         {/* 标签页 */}
         <div className="px-4 flex gap-1">
@@ -143,18 +286,18 @@ export default function OrderOverviewDashboard() {
             {/* KPI指标栏 */}
             <div className="grid grid-cols-6 gap-3">
               {[
-                { label: '总询价', value: 248, trend: '+12%' },
-                { label: '总报价', value: 186, trend: '+8%' },
-                { label: '总合同', value: 124, trend: '+5%' },
-                { label: '总订单', value: 98, trend: '+15%' },
-                { label: '总收款', value: 76, trend: '+10%' },
-                { label: '端到端转化', value: '31%', trend: '+3%' },
+                { label: '待处理总数', value: livePendingCounts.overview, trend: '' },
+                { label: '待处理询价', value: livePendingCounts.inquiries, trend: '' },
+                { label: '待处理成本询报', value: livePendingCounts.costInquiry, trend: '' },
+                { label: '待处理报价', value: livePendingCounts.quotations, trend: '' },
+                { label: '待处理订单', value: livePendingCounts.orders, trend: '' },
+                { label: '待处理收款/出口', value: `${livePendingCounts.collections + (livePendingCounts.exportService || 0)}`, trend: '' },
               ].map((kpi, idx) => (
                 <div key={idx} className="border border-gray-200 rounded bg-white p-3">
                   <div className="text-xs text-gray-500 mb-1.5">{kpi.label}</div>
                   <div className="flex items-baseline justify-between">
                     <div className="text-xl font-bold text-gray-900">{kpi.value}</div>
-                    <div className="text-xs text-gray-500">{kpi.trend}</div>
+                    <div className="text-xs text-gray-400">{kpi.trend || '实时'}</div>
                   </div>
                 </div>
               ))}
@@ -165,14 +308,14 @@ export default function OrderOverviewDashboard() {
               {/* 趋势图 */}
               <div className="col-span-2 border border-gray-200 rounded bg-white">
                 <div className="border-b border-gray-200 px-4 py-2.5 flex items-center justify-between bg-gray-50">
-                  <div className="font-medium text-sm">每周业务趋势</div>
-                  <div className="text-xs text-gray-500">Weekly Trend</div>
+                  <div className="font-medium text-sm">当前流程分布</div>
+                  <div className="text-xs text-gray-500">Current Workflow Snapshot</div>
                 </div>
                 <div className="p-4">
                   <ResponsiveContainer width="100%" height={180}>
-                    <AreaChart data={trendData}>
+                    <BarChart data={filteredDistribution}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                      <XAxis dataKey="week" stroke="#9CA3AF" style={{ fontSize: '11px' }} />
+                      <XAxis dataKey="stage" stroke="#9CA3AF" style={{ fontSize: '11px' }} />
                       <YAxis stroke="#9CA3AF" style={{ fontSize: '11px' }} />
                       <Tooltip 
                         contentStyle={{ 
@@ -182,10 +325,9 @@ export default function OrderOverviewDashboard() {
                           backgroundColor: '#FFF'
                         }} 
                       />
-                      <Area type="monotone" dataKey="inquiries" stroke="#9CA3AF" strokeWidth={1} fill="#F3F4F6" />
-                      <Area type="monotone" dataKey="quotations" stroke="#6B7280" strokeWidth={1} fill="#E5E7EB" />
-                      <Area type="monotone" dataKey="orders" stroke="#F96302" strokeWidth={2} fill="none" />
-                    </AreaChart>
+                      <Bar dataKey="total" fill="#E5E7EB" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="pending" fill="#F96302" radius={[3, 3, 0, 0]} />
+                    </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
@@ -196,15 +338,22 @@ export default function OrderOverviewDashboard() {
                   <div className="font-medium text-sm">区域分布</div>
                 </div>
                 <div className="divide-y divide-gray-100">
-                  {regionData.map((region, idx) => (
+                  {filteredRegionRows.map((region, idx) => (
                     <div key={idx} className="px-4 py-2.5 hover:bg-gray-50 transition-colors">
-                      <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center justify-between gap-2">
                         <div className="font-medium text-sm text-gray-900">{region.region}</div>
-                        <div className="text-xs text-gray-500">{region.growth}</div>
-                      </div>
-                      <div className="flex items-center justify-between text-xs text-gray-600">
-                        <span>{region.orders} 订单</span>
-                        <span className="font-medium text-gray-900">${(region.revenue / 1000).toFixed(0)}K</span>
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-xs text-gray-500">待处理 {region.pending}</div>
+                          <CompactDetailsPopover
+                            align="end"
+                            items={[
+                              { label: '询价', value: `ING ${region.inquiries}` },
+                              { label: '报价', value: `QT ${region.quotations}` },
+                              { label: '合同', value: `SC ${region.contracts}` },
+                              { label: '订单', value: `PO ${region.orders}` },
+                            ]}
+                          />
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -215,7 +364,7 @@ export default function OrderOverviewDashboard() {
             {/* 客户数据表格 */}
             <div className="border border-gray-200 rounded bg-white">
               <div className="border-b border-gray-200 px-4 py-2.5 flex items-center justify-between bg-gray-50">
-                <div className="font-medium text-sm">Top客户订单明细</div>
+                <div className="font-medium text-sm">Top客户待处理明细</div>
                 <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 hover:bg-white">
                   查看全部 <ArrowUpRight className="w-3 h-3" />
                 </Button>
@@ -226,9 +375,9 @@ export default function OrderOverviewDashboard() {
                     <tr>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">客户名称</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">区域</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">订单数</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">订单金额</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">已收款</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">询价</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">报价</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">合同/订单</th>
                       <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">待收款</th>
                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-600">状态</th>
                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-600">风险</th>
@@ -236,29 +385,28 @@ export default function OrderOverviewDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {customerData.map((customer, idx) => (
+                    {filteredCustomerRows.map((customer, idx) => (
                       <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-2.5 text-sm text-gray-900">{customer.name}</td>
+                        <td className="px-4 py-2.5 text-sm text-gray-900">{displayValue(customer.name)}</td>
                         <td className="px-4 py-2.5 text-sm text-gray-600">{customer.region}</td>
-                        <td className="px-4 py-2.5 text-sm text-right text-gray-900">{customer.orders}</td>
-                        <td className="px-4 py-2.5 text-sm text-right text-gray-900">${(customer.amount / 1000).toFixed(1)}K</td>
-                        <td className="px-4 py-2.5 text-sm text-right text-gray-600">${(customer.paid / 1000).toFixed(1)}K</td>
-                        <td className="px-4 py-2.5 text-sm text-right text-gray-600">${(customer.pending / 1000).toFixed(1)}K</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-gray-900">{customer.inquiries}</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-gray-900">{customer.quotations}</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-gray-600">{customer.contracts + customer.orders}</td>
+                        <td className="px-4 py-2.5 text-sm text-right text-gray-600">{customer.pending}</td>
                         <td className="px-4 py-2.5 text-center">
                           <span className={`text-xs ${
-                            customer.status === '完成' ? 'text-gray-500' :
-                            customer.status === '正常' ? 'text-gray-900' :
-                            customer.status === '延迟' ? 'text-gray-600' :
-                            'text-gray-900'
+                            customer.pending > 0 ? 'text-orange-600' :
+                            customer.contracts + customer.orders > 0 ? 'text-gray-900' :
+                            'text-gray-500'
                           }`}>
-                            {customer.status}
+                            {customer.pending > 0 ? '待跟进' : customer.contracts + customer.orders > 0 ? '推进中' : '观察中'}
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-center">
                           <div className={`inline-flex w-1.5 h-1.5 rounded-full ${
-                            customer.risk === 'low' ? 'bg-gray-400' :
-                            customer.risk === 'medium' ? 'bg-gray-600' :
-                            'bg-gray-900'
+                            customer.pending > 0 ? 'bg-orange-500' :
+                            customer.contracts + customer.orders > 0 ? 'bg-gray-700' :
+                            'bg-gray-400'
                           }`} />
                         </td>
                         <td className="px-4 py-2.5 text-center">
@@ -287,34 +435,40 @@ export default function OrderOverviewDashboard() {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">流程阶段</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">数量</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">金额</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">转化率</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">环比增长</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">当前单量</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">待处理</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">待处理占比</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">规则说明</th>
                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-600">状态</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {funnelData.map((item, idx) => (
+                    {filteredStageRows.map((item, idx) => (
                       <tr key={idx} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{item.stage}</td>
-                        <td className="px-4 py-3 text-sm text-right font-bold text-gray-900">{item.count}</td>
-                        <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">${(item.amount / 1000000).toFixed(2)}M</td>
+                        <td className="px-4 py-3 text-sm text-right font-bold text-gray-900">{item.total}</td>
+                        <td className="px-4 py-3 text-sm text-right font-medium text-orange-600">{item.pending}</td>
                         <td className="px-4 py-3 text-sm text-right">
                           <div className="flex items-center justify-end gap-2">
                             <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                              <div className="h-full bg-orange-500 rounded-full" style={{ width: `${item.conversion}%` }} />
+                              <div className="h-full bg-orange-500 rounded-full" style={{ width: `${item.pendingRate}%` }} />
                             </div>
-                            <span className="font-medium text-gray-900">{item.conversion}%</span>
+                            <span className="font-medium text-gray-900">{item.pendingRate}%</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm text-right font-medium text-green-600">{item.trend}</td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="text-sm font-medium text-gray-600">规则</span>
+                            <CompactDetailsPopover align="end" items={[{ label: '说明', value: item.note }]} />
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-center">
                           <Badge className={`text-xs ${
-                            item.status === 'good' ? 'bg-green-100 text-green-700 border-green-200' :
-                            'bg-blue-100 text-blue-700 border-blue-200'
+                            item.status === 'busy' ? 'bg-orange-100 text-orange-700 border-orange-200' :
+                            item.status === 'watch' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                            'bg-gray-100 text-gray-600 border-gray-200'
                           }`}>
-                            {item.status === 'good' ? '优秀' : '正常'}
+                            {item.status === 'busy' ? '积压中' : item.status === 'watch' ? '处理中' : '已清空'}
                           </Badge>
                         </td>
                       </tr>
@@ -331,28 +485,22 @@ export default function OrderOverviewDashboard() {
           <div className="p-4">
             <div className="border border-gray-200 rounded bg-white">
               <div className="border-b border-gray-200 px-4 py-2.5">
-                <div className="font-medium text-sm">业务员业绩排行</div>
+                <div className="font-medium text-sm">模块待处理排行</div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">排名</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">业务员</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">区域</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">询价</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">报价</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">合同</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">订单</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">营收</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">目标</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">转化率</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">完成度</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">模块</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">说明</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">待处理数量</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">占比</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {salesData.map((sales, idx) => {
-                      const completion = Math.round((sales.revenue / sales.target) * 100);
+                    {filteredModuleRanking.map((module, idx) => {
+                      const completion = livePendingCounts.overview > 0 ? Math.round((module.count / livePendingCounts.overview) * 100) : 0;
                       return (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-4 py-3 text-center">
@@ -365,21 +513,20 @@ export default function OrderOverviewDashboard() {
                               {idx + 1}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{sales.name}</td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{sales.region}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900">{sales.inquiries}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900">{sales.quotations}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900">{sales.contracts}</td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">{sales.orders}</td>
-                          <td className="px-4 py-3 text-sm text-right font-bold text-orange-600">${(sales.revenue / 1000).toFixed(0)}K</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-600">${(sales.target / 1000).toFixed(0)}K</td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-green-600">{sales.conversion}%</td>
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{module.name}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm text-gray-600">统一规则</span>
+                              <CompactDetailsPopover items={[{ label: '说明', value: '基于统一待处理规则计算' }]} />
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">{module.count}</td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-2">
                               <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                <div className={`h-full rounded-full ${completion >= 100 ? 'bg-green-500' : 'bg-orange-500'}`} style={{ width: `${Math.min(completion, 100)}%` }} />
+                                <div className={`h-full rounded-full ${completion >= 50 ? 'bg-orange-500' : 'bg-gray-700'}`} style={{ width: `${Math.min(completion, 100)}%` }} />
                               </div>
-                              <span className={`text-xs font-medium ${completion >= 100 ? 'text-green-600' : 'text-orange-600'}`}>
+                              <span className={`text-xs font-medium ${completion >= 50 ? 'text-orange-600' : 'text-gray-700'}`}>
                                 {completion}%
                               </span>
                             </div>
@@ -408,14 +555,14 @@ export default function OrderOverviewDashboard() {
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">风险类型</th>
                       <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">数量</th>
                       <th className="px-4 py-2 text-right text-xs font-medium text-gray-600">涉及金额</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">时间范围</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">规则说明</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-600">责任人</th>
                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-600">优先级</th>
                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-600">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {riskData.map((risk, idx) => (
+                    {filteredRiskRows.map((risk, idx) => (
                       <tr key={idx} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm font-medium text-gray-900 flex items-center gap-2">
                           {risk.priority === 'critical' && <AlertTriangle className="w-4 h-4 text-red-600" />}
@@ -424,18 +571,22 @@ export default function OrderOverviewDashboard() {
                           {risk.type}
                         </td>
                         <td className="px-4 py-3 text-sm text-right font-bold text-gray-900">{risk.count}</td>
-                        <td className="px-4 py-3 text-sm text-right font-medium text-orange-600">
-                          {risk.amount > 0 ? `$${(risk.amount / 1000).toFixed(0)}K` : '-'}
+                        <td className="px-4 py-3 text-sm text-right font-medium text-orange-600">-</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm text-gray-600">规则</span>
+                            <CompactDetailsPopover items={[{ label: '说明', value: risk.note }]} />
+                          </div>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-600">{risk.days}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{risk.handler}</td>
                         <td className="px-4 py-3 text-center">
                           <Badge className={`text-xs ${
                             risk.priority === 'critical' ? 'bg-red-100 text-red-700 border-red-200' :
                             risk.priority === 'high' ? 'bg-orange-100 text-orange-700 border-orange-200' :
-                            'bg-yellow-100 text-yellow-700 border-yellow-200'
+                            risk.priority === 'medium' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
+                            'bg-gray-100 text-gray-600 border-gray-200'
                           }`}>
-                            {risk.priority === 'critical' ? '紧急' : risk.priority === 'high' ? '高' : '中'}
+                            {risk.priority === 'critical' ? '紧急' : risk.priority === 'high' ? '高' : risk.priority === 'medium' ? '中' : '低'}
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-center">

@@ -24,6 +24,7 @@ import {
 import { type PackingListData } from '../../documents/templates/PackingListDocument';
 import { type StatementOfAccountData } from '../../documents/templates/StatementOfAccountDocument';
 import {
+  DEFAULT_CUSTOMER_INQUIRY_TYPOGRAPHY,
   DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS,
   type CustomerInquiryData,
 } from '../../documents/templates/CustomerInquiryDocument';
@@ -32,6 +33,7 @@ import {
   type QuotationData,
 } from '../../documents/templates/QuotationDocument';
 import { type SupplierQuotationData } from '../../documents/templates/SupplierQuotationDocument';
+import { buildPaymentTermsText } from '../../../lib/paymentFlow';
 
 // 模板中心 seed 不是演示数据，而是当前确认无误的基线模板。
 // 规则：
@@ -254,7 +256,7 @@ export const BASELINE_XJ_TEMPLATE_SEED: XJData = {
   ],
   terms: {
     currency: 'USD',
-    paymentTerms: 'T/T 30% 预付，70% 发货前付清',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     deliveryTerms: 'EXW 工厂交货',
     deliveryAddress: '福建省福州市仓山区金山工业区',
     qualityStandard: '产品需符合国家GB/T 27922-2011标准，并优先提供 ISO 9001 / CE 等认证材料。',
@@ -322,7 +324,7 @@ export const BASELINE_BJ_TEMPLATE_SEED: SupplierQuotationData = {
     },
   ],
   terms: {
-    paymentTerms: 'T/T 30% 预付，70% 发货前付清',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     deliveryTerms: 'EXW 深圳工厂',
     deliveryTime: '收到预付款后 15-20 天',
     deliveryAddress: '福建省福州市仓山区金山工业区',
@@ -418,7 +420,7 @@ export const BASELINE_SC_TEMPLATE_SEED: SalesContractData = {
     totalAmount: 34225,
     currency: 'USD',
     tradeTerms: 'FOB Xiamen, China',
-    paymentTerms: '30% T/T deposit upon order confirmation, 70% T/T before shipment',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     depositAmount: 10267.5,
     balanceAmount: 23957.5,
     deliveryTime: '35-45 days after receiving deposit',
@@ -485,7 +487,7 @@ export const BASELINE_CG_TEMPLATE_SEED: PurchaseOrderData = {
       quantity: 5000,
       unit: 'pcs',
       unitPrice: 1.85,
-      currency: 'USD',
+      currency: 'CNY',
       amount: 9250,
       deliveryDate: '2026-01-20',
       remarks: 'White color, with mounting holes',
@@ -498,7 +500,7 @@ export const BASELINE_CG_TEMPLATE_SEED: PurchaseOrderData = {
       quantity: 5000,
       unit: 'pcs',
       unitPrice: 0.95,
-      currency: 'USD',
+      currency: 'CNY',
       amount: 4750,
       deliveryDate: '2026-01-20',
     },
@@ -510,14 +512,14 @@ export const BASELINE_CG_TEMPLATE_SEED: PurchaseOrderData = {
       quantity: 100,
       unit: 'kg',
       unitPrice: 8.5,
-      currency: 'USD',
+      currency: 'CNY',
       amount: 850,
       deliveryDate: '2026-01-15',
     },
   ],
   terms: {
     totalAmount: 14850,
-    currency: 'USD',
+    currency: 'CNY',
     paymentTerms: '30 days after delivery and inspection',
     deliveryTerms: 'EXW Shenzhen Factory',
     deliveryAddress: '',
@@ -551,7 +553,7 @@ export const XJ_TERMS_PRESETS: XjTermsPreset[] = [
     description: '适合插座、开关、五金电工类采购询价',
     terms: {
       currency: 'USD',
-      paymentTerms: 'T/T 30% 预付，70% 发货前付清。',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
       deliveryTerms: 'EXW 工厂交货',
       deliveryAddress: '福建省福州市仓山区金山工业区',
       deliveryRequirement: '要求交货日期需明确标注，如无法按期交货需提前7天书面通知。',
@@ -574,7 +576,7 @@ export const XJ_TERMS_PRESETS: XjTermsPreset[] = [
     description: '适合大部分标准出口采购场景',
     terms: {
       currency: 'USD',
-      paymentTerms: 'T/T 30% 预付款，70% 尾款见出货资料后支付。',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_against_bl', 'after_shipment'),
       deliveryTerms: 'FOB 中国港口',
       deliveryRequirement: '供应商需按确认交期出货，延误须提前说明原因并给出补救计划。',
       packaging: '出口标准包装，满足海运或陆运要求，外箱需贴产品标签。',
@@ -871,62 +873,61 @@ export const BASELINE_SOA_TEMPLATE_SEED: StatementOfAccountData = {
 };
 
 export const BASELINE_ING_TEMPLATE_SEED: CustomerInquiryData = {
-  inquiryNo: 'ING-NA-20251210-001',
-  inquiryDate: '2025-12-10',
+  inquiryNo: 'ING-NA-260411-9995',
+  inquiryDate: '2026-04-11',
   region: 'NA',
   customer: {
-    companyName: 'ABC Trading Corporation',
-    contactPerson: 'John Smith',
+    companyName: 'Citybuilders Inc.',
+    contactPerson: 'Talal Abi Faraj',
     position: 'Purchasing Manager',
-    email: 'john.smith@abctrading.com',
-    phone: '+1-323-555-0123',
-    address: '123 Main Street, Suite 500, Los Angeles, CA 90001',
-    country: 'United States',
+    email: 'talal@citybuilders.biz',
+    phone: '+231 6888888',
+    address: 'Freeport, Free Trade Zone, Freeport, Liberia',
+    country: 'Liberia',
   },
   products: [
     {
       no: 1,
-      productName: 'GFCI Outlet',
-      specification: '20A, 125V, Tamper-Resistant, Weather-Resistant, UL Listed',
-      quantity: 5000,
+      modelNo: 'TF-20',
+      productName: 'Top Freezer Refrigerator 20 cu.ft',
+      specification: 'Color: Silver | Capacity: 20 cu.ft | Material: Premium Quality | Warranty: 1 Year | Certification: CE, ISO',
+      quantity: 100,
       unit: 'pcs',
-      targetPrice: 2.5,
+      targetPrice: 799,
       currency: 'USD',
-      description: 'White color with LED indicator, standard duplex size',
     },
     {
       no: 2,
-      productName: 'Weather-Resistant Cover',
-      specification: 'IP66 rated, for single gang outlet, clear polycarbonate',
-      quantity: 2000,
+      modelNo: 'TF-18',
+      productName: 'Top Freezer Refrigerator 18 cu.ft',
+      specification: 'Color: Green | Capacity: 18 cu.ft | Material: Premium Quality | Warranty: 1 Year | Certification: CE, ISO',
+      quantity: 100,
       unit: 'pcs',
-      targetPrice: 1.45,
+      targetPrice: 699,
       currency: 'USD',
-    },
-    {
-      no: 3,
-      productName: 'Decora Wall Plate',
-      specification: 'Standard size, screwless design, UV resistant',
-      quantity: 3000,
-      unit: 'pcs',
-      targetPrice: 0.85,
-      currency: 'USD',
-      description: 'Colors: white, ivory, light almond (1000pcs each)',
     },
   ],
   requirements: {
-    deliveryTime: 'Within 30 days after order confirmation',
-    portOfDestination: 'Los Angeles / Jebel Ali / Door delivery to Houston',
-    paymentTerms: '30% T/T deposit, 70% before shipment',
-    tradeTerms: 'FOB Xiamen / CIF Los Angeles',
+    incoterm: 'CIF',
+    locationLabel: 'Destination Port',
+    locationValue: 'Monrovia, Liberia',
+    finalDestinationPlan: 'Abu Dhabi, UAE',
+    deliveryTime: '33 days after downpayment',
+    portOfDestination: 'Monrovia, Liberia',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
+    tradeTerms: 'CIF Monrovia, Liberia',
+    paymentMode: 'tt_deposit_balance_before_shipment',
+    balanceTrigger: 'before_shipment',
+    documentReleasePreference: 'original_bl_required',
     packingRequirements: 'Export cartons with pallet, each carton with SKU label',
-    certifications: ['UL', 'ETL', 'CE', 'FCC', 'RoHS'],
+    certifications: ['CE', 'ISO'],
     otherRequirements: 'Need logo printing, English manual, and sample approval before mass production',
   },
   templateSettings: {
     productTableColumns: DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS,
+    typography: DEFAULT_CUSTOMER_INQUIRY_TYPOGRAPHY,
   },
-  remarks: 'This is our first order with your company. We are a well-established distributor in the Los Angeles area with 15 years of experience. Quality and on-time delivery are critical to our business. We are looking for a long-term supplier and expect to place regular orders if this trial order is successful. Please provide your best pricing and confirm your production capacity.',
+  remarks: 'This sample keeps the ING workspace baseline aligned with the current customer-side preview so future admin publishes do not revert column titles, structured trade terms, or product model presentation.',
 };
 
 export const buildQrSalesDeptNotesFromInquiry = (inquiry: CustomerInquiryData): string => {
@@ -993,7 +994,7 @@ export const BASELINE_QT_TEMPLATE_SEED: QuotationData = {
   ],
   tradeTerms: {
     incoterms: 'FOB Xiamen, China',
-    paymentTerms: '30% T/T deposit upon order confirmation, 70% T/T before shipment',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     deliveryTime: '25-30 days after receiving deposit',
     packing: 'Export standard carton with wooden pallets, shrink-wrapped',
     portOfLoading: 'Xiamen Port, China',

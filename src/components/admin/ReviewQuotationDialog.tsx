@@ -9,6 +9,8 @@ import { CheckCircle2, XCircle, Eye } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import type { Quotation } from './QuotationManagement';
 import QuotationTemplate from './QuotationTemplate';
+import { Badge } from '../ui/badge';
+import { BALANCE_TRIGGER_OPTIONS, getPaymentModeLabel } from '../../lib/paymentFlow';
 
 interface ReviewQuotationDialogProps {
   quotation: Quotation | null;
@@ -128,6 +130,16 @@ export default function ReviewQuotationDialog({
             <div className="grid grid-cols-2 gap-4">
               <Card className="p-4 border-gray-200">
                 <h4 className="text-xs mb-2 text-gray-700">付款条款</h4>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="text-xs">
+                    付款模式：{getPaymentModeLabel(quotation.paymentMode)}
+                  </Badge>
+                  {quotation.balanceTrigger && (
+                    <Badge variant="outline" className="text-xs">
+                      触发节点：{BALANCE_TRIGGER_OPTIONS.find((option) => option.value === quotation.balanceTrigger)?.label || quotation.balanceTrigger}
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-xs text-gray-900">{quotation.paymentTerms}</p>
               </Card>
               <Card className="p-4 border-gray-200">

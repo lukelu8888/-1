@@ -20,12 +20,17 @@ import { Input } from '../../ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../ui/dialog';
 import { useBusinessEvent } from '../../../lib/business-event-bus';
 import { documentationService } from '../../../lib/services/documentation-service';
+import { exportDocumentationBridgeService } from '../../../lib/services/export-service/exportDocumentationBridgeService';
 import { toast } from 'sonner';
 import { IntegrationFlowPanel } from './IntegrationFlowPanel';
 import { DocumentMatrixView } from './DocumentMatrixView';
 import { DocumentLibrary } from './DocumentLibrary';
 import { DocumentationReports } from './DocumentationReports';
+import { ExportDocumentationBridgePanel } from './ExportDocumentationBridgePanel';
+import { DocumentTaskPanel } from './DocumentTaskPanel';
 import { DocumentTemplateSelector } from '../../documents/DocumentTemplateSelector';
+import { usePurchaseOrders } from '../../../contexts/PurchaseOrderContext';
+import { deriveDocumentationTaskSummary } from '../../../lib/services/documentationTaskCenterService';
 
 // 🔥 13项标准出口单证清单（完整业务逻辑）
 const DOCUMENT_CHECKLIST = [
@@ -522,35 +527,43 @@ const mockOrders: ShipmentOrder[] = [
 ];
 
 export function DocumentationWorkbenchUltimate() {
+  const { purchaseOrders } = usePurchaseOrders();
   const [activeView, setActiveView] = useState<'order_detail' | 'document_library' | 'reports' | 'templates'>('document_library');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [showAlertPanel, setShowAlertPanel] = useState(false);
+  const [bridgeVersion, setBridgeVersion] = useState(0);
+  const refreshBridgeRecords = () => setBridgeVersion((current) => current + 1);
+  const allOrders = useMemo(() => [...exportDocumentationBridgeService.list(), ...mockOrders], [bridgeVersion]);
+  const documentationTaskSummary = useMemo(() => deriveDocumentationTaskSummary(purchaseOrders), [purchaseOrders]);
+  const { taskCenter } = documentationTaskSummary;
+  const derivedTasks = documentationTaskSummary.tasks;
+  const collaborationSections = taskCenter.collaborationSections;
 
   // 统计数据
   const stats = useMemo(() => {
-    const total = mockOrders.length;
-    const current = mockOrders.filter(o => o.status !== 'completed').length;
-    const overdue = mockOrders.filter(o => o.status === 'overdue').length;
-    const processing = mockOrders.filter(o => o.status === 'processing').length;
-    const completed = mockOrders.filter(o => o.status === 'completed').length;
-    const avgCompletion = Math.round(mockOrders.reduce((sum, o) => sum + o.completionRate, 0) / total);
-    const totalMissing = mockOrders.reduce((sum, o) => sum + o.missingDocs, 0);
-    const totalAlerts = mockOrders.reduce((sum, o) => sum + o.alerts.length, 0);
-    const criticalAlerts = mockOrders.reduce((sum, o) => sum + o.alerts.filter(a => a.severity === 'critical').length, 0);
+    const total = allOrders.length;
+    const current = allOrders.filter(o => o.status !== 'completed').length;
+    const overdue = allOrders.filter(o => o.status === 'overdue').length;
+    const processing = allOrders.filter(o => o.status === 'processing').length;
+    const completed = allOrders.filter(o => o.status === 'completed').length;
+    const avgCompletion = total > 0 ? Math.round(allOrders.reduce((sum, o) => sum + o.completionRate, 0) / total) : 0;
+    const totalMissing = allOrders.reduce((sum, o) => sum + o.missingDocs, 0);
+    const totalAlerts = allOrders.reduce((sum, o) => sum + o.alerts.length, 0);
+    const criticalAlerts = allOrders.reduce((sum, o) => sum + o.alerts.filter(a => a.severity === 'critical').length, 0);
     
     return { total, current, overdue, processing, completed, avgCompletion, totalMissing, totalAlerts, criticalAlerts };
-  }, []);
+  }, [allOrders]);
 
   // 紧急预警
   const criticalAlerts = useMemo(() => {
     const alerts: Array<{ orderId: string; alert: any }> = [];
-    mockOrders.forEach(order => {
+    allOrders.forEach(order => {
       order.alerts.filter(a => a.severity === 'critical').forEach(alert => {
         alerts.push({ orderId: order.orderId, alert });
       });
     });
     return alerts;
-  }, []);
+  }, [allOrders]);
 
   // 🔥 监听：合同签订事件（实时刷新订单列表）
   useBusinessEvent('CONTRACT_SIGNED', (payload) => {
@@ -669,6 +682,7 @@ export function DocumentationWorkbenchUltimate() {
                 )}
               </button>
               <button 
+                onClick={refreshBridgeRecords}
                 className="h-8 px-3 rounded text-xs transition-all flex items-center gap-2"
                 style={{ 
                   background: 'rgba(51, 65, 85, 0.5)',
@@ -858,7 +872,7 @@ export function DocumentationWorkbenchUltimate() {
                 onClick={() => {
                   setActiveView(view.id as any);
                   if (view.id === 'order_detail' && !selectedOrderId) {
-                    setSelectedOrderId(mockOrders[0]?.orderId || null);
+                    setSelectedOrderId(allOrders[0]?.orderId || null);
                   }
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded text-xs font-medium transition-all"
@@ -886,6 +900,61 @@ export function DocumentationWorkbenchUltimate() {
         <div className="p-3 w-full max-w-full min-w-0">
           {/* 主工作区 */}
           <div className="space-y-3 min-w-0 max-w-full">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-semibold text-slate-900">单证风险摘要</div>
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                    <div className="text-xs text-indigo-700">L/C 交单跟进</div>
+                    <div className="mt-1 text-xl font-semibold text-indigo-900">{documentationTaskSummary.riskSummary.lcBankFollowUp}</div>
+                  </div>
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                    <div className="text-xs text-red-700">放单阻断</div>
+                    <div className="mt-1 text-xl font-semibold text-red-900">{documentationTaskSummary.riskSummary.releaseBlocked}</div>
+                  </div>
+                  <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3">
+                    <div className="text-xs text-cyan-700">到港归档待确认</div>
+                    <div className="mt-1 text-xl font-semibold text-cyan-900">{documentationTaskSummary.riskSummary.arrivalArchivePending}</div>
+                  </div>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <div className="text-xs text-amber-700">清关资料协同</div>
+                    <div className="mt-1 text-xl font-semibold text-amber-900">{documentationTaskSummary.riskSummary.clearanceCoordination}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-semibold text-slate-900">协同角色入口</div>
+                  <Users className="h-4 w-4 text-slate-600" />
+                </div>
+                <div className="space-y-2">
+                  {collaborationSections.map((section) => (
+                    <div key={section.key} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-slate-900">{section.label}</div>
+                          <div className="mt-0.5 text-xs text-slate-600">{section.roles.join(' / ')}</div>
+                        </div>
+                        <div className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-700 border border-slate-200">
+                          {section.count}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {collaborationSections.length === 0 && (
+                    <div className="text-xs text-slate-500">暂无待协同事项</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <ExportDocumentationBridgePanel onChanged={refreshBridgeRecords} />
+            <DocumentTaskPanel onChanged={refreshBridgeRecords} derivedTasks={derivedTasks} />
+
             {activeView === 'order_detail' && (
               <DocumentMatrixView 
                 onBack={() => {
@@ -904,7 +973,7 @@ export function DocumentationWorkbenchUltimate() {
                   <div className="space-y-2">
                     <p className="text-xs text-gray-600 mb-3">或者快速选择最近的订单：</p>
                     <div className="grid grid-cols-3 gap-2 max-w-2xl mx-auto">
-                      {mockOrders.slice(0, 6).map((order) => (
+                      {allOrders.slice(0, 6).map((order) => (
                         <button
                           key={order.orderId}
                           onClick={() => {

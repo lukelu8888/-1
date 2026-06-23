@@ -176,6 +176,7 @@ export function buildTemplateEditorContentProps(source: any): TemplateEditorCont
       productTableColumns: source.inquiryProductTableColumns,
       moveProductTableColumn: source.moveInquiryProductTableColumn,
       updateProductTableColumn: source.updateInquiryProductTableColumn,
+      publishValidation: source.inquiryPublishValidation,
       requirementFields: source.CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
       activeRequirementField: source.activeInquiryRequirementField,
       setActiveRequirementField: source.setActiveInquiryRequirementField,

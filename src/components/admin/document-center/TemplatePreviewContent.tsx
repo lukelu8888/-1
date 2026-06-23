@@ -1,8 +1,9 @@
 import React from 'react';
 
 import type { CommercialInvoiceData } from '../../documents/templates/CommercialInvoiceDocument';
-import type {
-  CustomerInquiryData,
+import {
+  prepareCustomerInquiryDocumentData,
+  type CustomerInquiryData,
 } from '../../documents/templates/CustomerInquiryDocument';
 import type { PackingListData } from '../../documents/templates/PackingListDocument';
 import type { ProformaInvoiceData } from '../../documents/templates/ProformaInvoiceDocument';
@@ -134,7 +135,8 @@ export function TemplatePreviewContent({
     return <StatementOfAccountDocumentA4Pages data={soaTemplateData} />;
   }
   if (activeTemplate.id === 'ing') {
-    return <CustomerInquiryDocumentA4Pages data={inquiryTemplateData} />;
+    const preparedInquiryTemplateData = prepareCustomerInquiryDocumentData(inquiryTemplateData);
+    return preparedInquiryTemplateData ? <CustomerInquiryDocumentA4Pages data={preparedInquiryTemplateData} /> : null;
   }
   if (activeTemplate.id === 'qt') {
     return <QuotationDocumentA4Pages data={quotationTemplateData} layout={quotationTemplateLayout} />;

@@ -27,6 +27,7 @@ import type {
   ReviewHistoryEntry,
   SupplierQuote,
 } from './types';
+import { buildWebsiteAttributes, buildWebsiteCategories } from './websiteCategorySeed';
 
 const TENANT = 'tenant_default';
 const NOW = new Date().toISOString();
@@ -35,129 +36,11 @@ const lastWeek = new Date(Date.now() - 7 * 86400e3).toISOString();
 
 // ─── Categories ──────────────────────────────────────────────────────────────
 
-export const mockCategories: ProductCategory[] = [
-  {
-    id: 'cat_lighting',
-    tenantId: TENANT,
-    parentId: null,
-    level: 1,
-    code: 'lighting',
-    name: '照明',
-    nameEn: 'Lighting',
-    sortOrder: 1,
-    isActive: true,
-    seoTitle: 'Wholesale Lighting & LED Fixtures',
-    seoDescription: 'Bulk lighting & LED fixtures for B2B and contractor markets.',
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-  {
-    id: 'cat_lighting_indoor',
-    tenantId: TENANT,
-    parentId: 'cat_lighting',
-    level: 2,
-    code: 'lighting.indoor',
-    name: '室内灯具',
-    nameEn: 'Indoor Lighting',
-    sortOrder: 1,
-    isActive: true,
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-  {
-    id: 'cat_lighting_indoor_panel',
-    tenantId: TENANT,
-    parentId: 'cat_lighting_indoor',
-    level: 3,
-    code: 'lighting.indoor.panel',
-    name: 'LED 面板灯',
-    nameEn: 'LED Panel Lights',
-    sortOrder: 1,
-    isActive: true,
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-  {
-    id: 'cat_appliance',
-    tenantId: TENANT,
-    parentId: null,
-    level: 1,
-    code: 'appliance',
-    name: '小家电',
-    nameEn: 'Small Appliances',
-    sortOrder: 2,
-    isActive: true,
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-  {
-    id: 'cat_appliance_kitchen',
-    tenantId: TENANT,
-    parentId: 'cat_appliance',
-    level: 2,
-    code: 'appliance.kitchen',
-    name: '厨房电器',
-    nameEn: 'Kitchen Appliances',
-    sortOrder: 1,
-    isActive: true,
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-  {
-    id: 'cat_furniture',
-    tenantId: TENANT,
-    parentId: null,
-    level: 1,
-    code: 'furniture',
-    name: '家具',
-    nameEn: 'Furniture',
-    sortOrder: 3,
-    isActive: true,
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-];
+export const mockCategories: ProductCategory[] = buildWebsiteCategories();
 
 // ─── Attributes ──────────────────────────────────────────────────────────────
 
-export const mockAttributes: ProductAttribute[] = [
-  {
-    id: 'attr_color',
-    tenantId: TENANT,
-    code: 'color',
-    label: '颜色',
-    dataType: 'enum',
-    options: ['白色', '黑色', '银灰', '香槟金'],
-    isFilterable: true,
-    sortOrder: 1,
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-  {
-    id: 'attr_voltage',
-    tenantId: TENANT,
-    code: 'voltage',
-    label: '电压',
-    dataType: 'enum',
-    unit: 'V',
-    options: ['110V', '220V', '110-240V'],
-    isFilterable: true,
-    sortOrder: 2,
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-  {
-    id: 'attr_material',
-    tenantId: TENANT,
-    code: 'material',
-    label: '材质',
-    dataType: 'text',
-    isFilterable: false,
-    sortOrder: 3,
-    createdAt: lastWeek,
-    updatedAt: NOW,
-  },
-];
+export const mockAttributes: ProductAttribute[] = buildWebsiteAttributes(mockCategories);
 
 // ─── Products ────────────────────────────────────────────────────────────────
 
@@ -191,7 +74,7 @@ export const mockProducts: Product[] = [
     keywords: ['led panel', 'office light', '40w'],
     tags: ['hot', 'b2b'],
     thumbnailUrl: 'https://picsum.photos/seed/cos-led-pnl/200',
-    primaryCategoryId: 'cat_lighting_indoor_panel',
+    primaryCategoryId: 'cat_electrical_lighting-ceiling-fans_indoor-lighting',
     internalCategory: 'L1.LIGHTING',
     status: 'active',
     reviewStatus: 'approved',
@@ -220,7 +103,7 @@ export const mockProducts: Product[] = [
     productType: 'Standard',
     shortDescription: '5L 大容量、数显、12 项预设菜单',
     thumbnailUrl: 'https://picsum.photos/seed/cos-airfry/200',
-    primaryCategoryId: 'cat_appliance_kitchen',
+    primaryCategoryId: 'cat_appliances_kitchen-appliances',
     internalCategory: 'L1.APPLIANCE',
     tags: ['promo', 'b2c'],
     status: 'active',
@@ -240,7 +123,7 @@ export const mockProducts: Product[] = [
     name: '1.4 米升降工作桌',
     nameEn: '1.4m Height-Adjustable Desk',
     brand: 'Cosun Office',
-    primaryCategoryId: 'cat_furniture',
+    primaryCategoryId: 'cat_decor-and-furniture',
     internalCategory: 'L1.FURNITURE',
     thumbnailUrl: 'https://picsum.photos/seed/cos-desk/200',
     status: 'draft',
@@ -255,7 +138,7 @@ export const mockProducts: Product[] = [
     name: 'A60 LED 灯泡 9W',
     nameEn: 'A60 LED Bulb 9W',
     brand: 'Cosun',
-    primaryCategoryId: 'cat_lighting',
+    primaryCategoryId: 'cat_electrical_lighting-ceiling-fans_light-bulbs',
     internalCategory: 'L1.LIGHTING',
     thumbnailUrl: '', // 缺图，演示告警
     status: 'active',

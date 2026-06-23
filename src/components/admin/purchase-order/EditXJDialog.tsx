@@ -14,16 +14,15 @@ import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Textarea } from '../../ui/textarea';
 import { TERMS_OPTIONS } from './purchaseOrderConstants';
-import { authorizedUsers } from '../../../data/authorizedUsers';
-
-// Derive supplier company names from authorised users list
-const SUPPLIER_COMPANY_OPTIONS: string[] = Array.from(
-  new Set(
-    authorizedUsers
-      .filter((u: any) => u.role === 'supplier' && u.company)
-      .map((u: any) => u.company as string)
-  )
-).sort();
+import { externalPortalDirectoryService } from '../../../lib/services/profileDirectoryServices';
+import type { PaymentMode } from '../../../contexts/SalesQuotationContext';
+import {
+  BALANCE_TRIGGER_OPTIONS,
+  PAYMENT_MODE_OPTIONS,
+  buildPaymentTermsText,
+  deriveBalanceTrigger,
+  type BalanceTrigger,
+} from '../../../lib/paymentFlow';
 
 type EditXJDialogProps = {
   showEditXJDialog: boolean;
@@ -40,6 +39,46 @@ export const EditXJDialog: React.FC<EditXJDialogProps> = ({
   setEditXJData,
   handleSaveEditXJ,
 }) => {
+  const [supplierCompanyOptions, setSupplierCompanyOptions] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    let alive = true;
+
+    const loadSupplierCompanies = async () => {
+      try {
+        const suppliers = await externalPortalDirectoryService.listByPortalRole('supplier');
+        if (!alive) return;
+        const options = Array.from(
+          new Set(
+            suppliers
+              .map((supplier) => String(supplier.company || '').trim())
+              .filter(Boolean),
+          ),
+        ).sort((a, b) => a.localeCompare(b));
+        setSupplierCompanyOptions(options);
+      } catch (error) {
+        console.warn('[EditXJDialog] failed to load supplier company options:', error);
+        if (alive) setSupplierCompanyOptions([]);
+      }
+    };
+
+    void loadSupplierCompanies();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const updateTerms = (patch: Record<string, unknown>) => {
+    setEditXJData({
+      ...editXJData,
+      terms: {
+        ...editXJData?.terms,
+        ...patch,
+      },
+    });
+  };
+
   return (
     <Dialog open={showEditXJDialog} onOpenChange={setShowEditXJDialog}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
@@ -79,7 +118,7 @@ export const EditXJDialog: React.FC<EditXJDialogProps> = ({
                   label="公司名称"
                   value={editXJData.supplier?.companyName || ''}
                   onChange={(val) => setEditXJData({ ...editXJData, supplier: { ...editXJData.supplier, companyName: val } })}
-                  options={SUPPLIER_COMPANY_OPTIONS}
+                  options={supplierCompanyOptions}
                   placeholder="搜索或输入供应商名称..."
                   searchable
                 />
@@ -285,22 +324,61 @@ export const EditXJDialog: React.FC<EditXJDialogProps> = ({
               <h4 className="text-xs font-semibold text-yellow-900 mb-3">📜 报价条款（16条）</h4>
               <div className="grid grid-cols-2 gap-3">
                 <EditableSelect label="1. 报价币种" value={editXJData.terms?.currency || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, currency: val } })} options={TERMS_OPTIONS.currency} placeholder="选择或输入币种..." />
-                <EditableSelect label="2. 付款方式" value={editXJData.terms?.paymentTerms || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, paymentTerms: val } })} options={TERMS_OPTIONS.paymentTerms} placeholder="选择或输入付款方式..." />
-                <EditableSelect label="3. 交货条款" value={editXJData.terms?.deliveryTerms || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, deliveryTerms: val } })} options={TERMS_OPTIONS.deliveryTerms} placeholder="选择或输入交货条款..." />
-                <EditableSelect label="4. 交货地址" value={editXJData.terms?.deliveryAddress || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, deliveryAddress: val } })} options={TERMS_OPTIONS.deliveryAddress} placeholder="选择或输入交货地址..." />
-                <EditableSelect label="5. 交货时间" value={editXJData.terms?.deliveryRequirement || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, deliveryRequirement: val } })} options={TERMS_OPTIONS.deliveryRequirement} placeholder="选择或输入交货时间..." />
-                <EditableSelect label="6. 产品质量标准" value={editXJData.terms?.qualityStandard || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, qualityStandard: val } })} options={TERMS_OPTIONS.qualityStandard} placeholder="选择或输入质量标准..." />
-                <EditableSelect label="7. 验收标准" value={editXJData.terms?.inspectionMethod || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, inspectionMethod: val } })} options={TERMS_OPTIONS.inspectionMethod} placeholder="选择或输入验收标准..." />
-                <EditableSelect label="8. 包装要求" value={editXJData.terms?.packaging || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, packaging: val } })} options={TERMS_OPTIONS.packaging} placeholder="选择或输入包装要求..." />
-                <EditableSelect label="9. 唛头要求" value={editXJData.terms?.shippingMarks || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, shippingMarks: val } })} options={TERMS_OPTIONS.shippingMarks} placeholder="选择或输入唛头要求..." />
-                <EditableSelect label="10. 验货要求" value={editXJData.terms?.inspectionRequirement || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, inspectionRequirement: val } })} options={TERMS_OPTIONS.inspectionRequirement} placeholder="选择或输入验货要求..." />
-                <EditableSelect label="11. 技术文件" value={editXJData.terms?.technicalDocuments || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, technicalDocuments: val } })} options={TERMS_OPTIONS.technicalDocuments} placeholder="选择或输入技术文件要求..." />
-                <EditableSelect label="12. 知识产权" value={editXJData.terms?.ipRights || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, ipRights: val } })} options={TERMS_OPTIONS.ipRights} placeholder="选择或输入知识产权要求..." />
-                <EditableSelect label="13. 保密条款" value={editXJData.terms?.confidentiality || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, confidentiality: val } })} options={TERMS_OPTIONS.confidentiality} placeholder="选择或输入保密条款..." />
-                <EditableSelect label="14. 样品要求" value={editXJData.terms?.sampleRequirement || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, sampleRequirement: val } })} options={TERMS_OPTIONS.sampleRequirement} placeholder="选择或输入样品要求..." />
-                <EditableSelect label="15. 最小起订量（MOQ）" value={editXJData.terms?.moq || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, moq: val } })} options={TERMS_OPTIONS.moq} placeholder="选择或输入MOQ..." />
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-gray-600">2. 付款主规则</Label>
+                  <select
+                    value={editXJData.terms?.paymentMode || 'tt_deposit_balance_before_shipment'}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as PaymentMode;
+                      const nextTrigger = deriveBalanceTrigger(nextMode, editXJData.terms?.balanceTrigger || null);
+                      updateTerms({
+                        paymentMode: nextMode,
+                        balanceTrigger: nextTrigger,
+                        paymentTerms: buildPaymentTermsText(nextMode, nextTrigger),
+                      });
+                    }}
+                    className="w-full text-[10px] h-7 border border-input bg-background px-2 rounded-md"
+                  >
+                    {PAYMENT_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-gray-600">3. 触发节点</Label>
+                  <select
+                    value={editXJData.terms?.balanceTrigger || deriveBalanceTrigger(editXJData.terms?.paymentMode || 'tt_deposit_balance_before_shipment', null)}
+                    onChange={(e) => {
+                      const nextTrigger = e.target.value as BalanceTrigger;
+                      const nextMode = (editXJData.terms?.paymentMode || 'tt_deposit_balance_before_shipment') as PaymentMode;
+                      updateTerms({
+                        balanceTrigger: nextTrigger,
+                        paymentTerms: buildPaymentTermsText(nextMode, nextTrigger),
+                      });
+                    }}
+                    className="w-full text-[10px] h-7 border border-input bg-background px-2 rounded-md"
+                  >
+                    {BALANCE_TRIGGER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <EditableSelect label="4. 付款条款文本" value={editXJData.terms?.paymentTerms || ''} onChange={(val) => updateTerms({ paymentTerms: val })} options={TERMS_OPTIONS.paymentTerms} placeholder="选择或输入付款方式..." />
+                <EditableSelect label="5. 交货条款" value={editXJData.terms?.deliveryTerms || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, deliveryTerms: val } })} options={TERMS_OPTIONS.deliveryTerms} placeholder="选择或输入交货条款..." />
+                <EditableSelect label="6. 交货地址" value={editXJData.terms?.deliveryAddress || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, deliveryAddress: val } })} options={TERMS_OPTIONS.deliveryAddress} placeholder="选择或输入交货地址..." />
+                <EditableSelect label="7. 交货时间" value={editXJData.terms?.deliveryRequirement || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, deliveryRequirement: val } })} options={TERMS_OPTIONS.deliveryRequirement} placeholder="选择或输入交货时间..." />
+                <EditableSelect label="8. 产品质量标准" value={editXJData.terms?.qualityStandard || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, qualityStandard: val } })} options={TERMS_OPTIONS.qualityStandard} placeholder="选择或输入质量标准..." />
+                <EditableSelect label="9. 验收标准" value={editXJData.terms?.inspectionMethod || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, inspectionMethod: val } })} options={TERMS_OPTIONS.inspectionMethod} placeholder="选择或输入验收标准..." />
+                <EditableSelect label="10. 包装要求" value={editXJData.terms?.packaging || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, packaging: val } })} options={TERMS_OPTIONS.packaging} placeholder="选择或输入包装要求..." />
+                <EditableSelect label="11. 唛头要求" value={editXJData.terms?.shippingMarks || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, shippingMarks: val } })} options={TERMS_OPTIONS.shippingMarks} placeholder="选择或输入唛头要求..." />
+                <EditableSelect label="12. 验货要求" value={editXJData.terms?.inspectionRequirement || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, inspectionRequirement: val } })} options={TERMS_OPTIONS.inspectionRequirement} placeholder="选择或输入验货要求..." />
+                <EditableSelect label="13. 技术文件" value={editXJData.terms?.technicalDocuments || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, technicalDocuments: val } })} options={TERMS_OPTIONS.technicalDocuments} placeholder="选择或输入技术文件要求..." />
+                <EditableSelect label="14. 知识产权" value={editXJData.terms?.ipRights || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, ipRights: val } })} options={TERMS_OPTIONS.ipRights} placeholder="选择或输入知识产权要求..." />
+                <EditableSelect label="15. 保密条款" value={editXJData.terms?.confidentiality || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, confidentiality: val } })} options={TERMS_OPTIONS.confidentiality} placeholder="选择或输入保密条款..." />
+                <EditableSelect label="16. 样品要求" value={editXJData.terms?.sampleRequirement || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, sampleRequirement: val } })} options={TERMS_OPTIONS.sampleRequirement} placeholder="选择或输入样品要求..." />
+                <EditableSelect label="17. 最小起订量（MOQ）" value={editXJData.terms?.moq || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, moq: val } })} options={TERMS_OPTIONS.moq} placeholder="选择或输入MOQ..." />
                 <div className="col-span-2">
-                  <EditableSelect label="16. 其他说明" value={editXJData.terms?.remarks || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, remarks: val } })} options={TERMS_OPTIONS.remarks} placeholder="选择或输入其他说明..." />
+                  <EditableSelect label="18. 其他说明" value={editXJData.terms?.remarks || ''} onChange={(val) => setEditXJData({ ...editXJData, terms: { ...editXJData.terms, remarks: val } })} options={TERMS_OPTIONS.remarks} placeholder="选择或输入其他说明..." />
                 </div>
               </div>
             </div>

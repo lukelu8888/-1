@@ -6,6 +6,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { getUserRoleLabel } from '../../lib/rbac-config'; // 🔥 导入getUserRoleLabel
 import { PERMISSION_CENTER_ROLES } from '../../lib/services/permissionCenterService';
 import { useAdminOrganization } from '../../contexts/AdminOrganizationContext';
+import { canUseRoleSwitcherForUser } from '../../config/adminPortalPolicy';
+import { buildLinkedPersonCenterRows } from './admin-organization-profile/peopleCenterShared';
 
 type SwitchableUser = {
   id: string;
@@ -62,62 +64,8 @@ const regionDisplayMap: Record<string, string> = {
 export default function UserRoleSwitcher() {
   const { currentUser, switchUser } = useAuth();
   const { adminOrg } = useAdminOrganization();
-
-  const normalizeRole = (source?: string): string => {
-    const normalizedSource = String(source || '').trim();
-    if (!normalizedSource) return '';
-    const roleMap: Record<string, string> = {
-      CEO: 'CEO',
-      CFO: 'CFO',
-      Admin: 'Admin',
-      Sales_Director: 'Sales_Director',
-      Regional_Manager: 'Regional_Manager',
-      Sales_Manager: 'Sales_Manager',
-      Sales_Rep: 'Sales_Rep',
-      Sales_Assistant: 'Sales_Assistant',
-      Finance: 'Finance',
-      External_Accountant: 'External_Accountant',
-      Procurement_Manager: 'Procurement_Manager',
-      Procurement: 'Procurement',
-      Documentation_Officer: 'Documentation_Officer',
-      Marketing_Ops: 'Marketing_Ops',
-      Marketing_Assistant: 'Marketing_Assistant',
-      QC: 'QC',
-      Warehouse_Ops: 'Warehouse_Ops',
-      HR_Admin: 'HR_Admin',
-      Admin_Ops: 'Admin_Ops',
-      company_admin: 'CEO',
-      standard_user: '',
-      系统管理员: 'Admin',
-      管理员: 'Admin',
-      销售总监: 'Sales_Director',
-      区域业务经理: 'Regional_Manager',
-      区域主管: 'Regional_Manager',
-      销售经理: 'Sales_Manager',
-      业务员: 'Sales_Rep',
-      业务助理: 'Sales_Assistant',
-      财务专员: 'Finance',
-      内部财务: 'Finance',
-      代理记账财务: 'External_Accountant',
-      采购经理: 'Procurement_Manager',
-      采购主管: 'Procurement_Manager',
-      采购专员: 'Procurement',
-      采购员: 'Procurement',
-      单证员: 'Documentation_Officer',
-      Order_Coordinator: 'Documentation_Officer',
-      跟单员: 'Documentation_Officer',
-      运营专员: 'Marketing_Ops',
-      运营助理: 'Marketing_Assistant',
-      验货员: 'QC',
-      质检: '',
-      仓配运营: 'Warehouse_Ops',
-      人事主管: 'HR_Admin',
-      人力资源: 'HR_Admin',
-      行政专员: 'Admin_Ops',
-    };
-
-    return roleMap[normalizedSource] ?? normalizedSource;
-  };
+  const contacts = adminOrg?.internalContacts || [];
+  const internalAccounts = adminOrg?.internalAccounts || [];
 
   const normalizeRegion = (region?: string): string => {
     const value = String(region || '').trim();
@@ -133,88 +81,29 @@ export default function UserRoleSwitcher() {
     [],
   );
 
-  const getRegionalRoleDisplayName = (code: string, region?: string, fallbackName?: string) => {
-    const normalizedRegion = normalizeRegion(region);
-    const regionLabel = regionDisplayMap[normalizedRegion];
-    if (!regionLabel) {
-      return fallbackName || permissionRoleMap[code]?.name || code;
-    }
-    if (code === 'Sales_Rep') return `${regionLabel}业务员`;
-    if (code === 'Regional_Manager') return `${regionLabel}区域主管`;
-    if (code === 'Sales_Assistant') return `${regionLabel}业务助理`;
-    return fallbackName || permissionRoleMap[code]?.name || code;
-  };
-
-  const resolvePermissionRole = (rawRole?: string, title?: string, department?: string, region?: string) => {
-    const normalizedRole = normalizeRole(rawRole);
-    if (normalizedRole && normalizedRole !== 'Unassigned') {
-      return {
-        code: normalizedRole,
-        name: getRegionalRoleDisplayName(normalizedRole, region, permissionRoleMap[normalizedRole]?.name || normalizedRole),
-      };
-    }
-
-    const normalizedTitle = normalizeRole(title);
-    if (normalizedTitle && normalizedTitle !== 'Unassigned') {
-      return {
-        code: normalizedTitle,
-        name: getRegionalRoleDisplayName(normalizedTitle, region, permissionRoleMap[normalizedTitle]?.name || normalizedTitle),
-      };
-    }
-
-    const normalizedDepartment = String(department || '').trim();
-    const departmentFallbackMap: Record<string, string> = {
-      行政部: 'Admin_Ops',
-      人力资源: 'HR_Admin',
-      财务部: 'Finance',
-      采购部: 'Procurement_Manager',
-      销售部: 'Sales_Director',
-    };
-    const fallbackCode = departmentFallbackMap[normalizedDepartment] || '';
-    if (fallbackCode) {
-      return {
-        code: fallbackCode,
-        name: getRegionalRoleDisplayName(fallbackCode, region, permissionRoleMap[fallbackCode]?.name || fallbackCode),
-      };
-    }
-
-    return {
-      code: 'Unassigned',
-      name: '未分配',
-    };
-  };
+  const linkedRows = useMemo(
+    () => buildLinkedPersonCenterRows(contacts, internalAccounts, permissionRoleMap),
+    [contacts, internalAccounts, permissionRoleMap],
+  );
 
   const internalAccountUsers = useMemo(() => {
     if (!currentUser) return [];
 
-    const contacts = adminOrg?.internalContacts || [];
-    const activeAccounts = (adminOrg?.internalAccounts || []).filter(
-      (account) => account.canLogin && account.accountStatus === 'active',
-    );
-
-    return contacts
-      .map((contact) => {
-        const linkedAccount = activeAccounts.find((account) => {
-          if (account.employeeId === contact.id) return true;
-          if (!account.employeeId && contact.email) {
-            return String(account.loginEmail || '').trim().toLowerCase() === String(contact.email || '').trim().toLowerCase();
-          }
-          return false;
-        });
-        if (!linkedAccount) return null;
-
-        const resolvedRole = resolvePermissionRole(linkedAccount.role, contact.title, contact.department, linkedAccount.region);
-        if (!resolvedRole.code || resolvedRole.code === 'Unassigned') return null;
+    return linkedRows
+      .map((row) => {
+        const primaryAccount = row.linkedAccounts[0];
+        if (!primaryAccount || !primaryAccount.canLogin || primaryAccount.accountStatus !== 'active') return null;
+        if (!row.permissionRole.code || row.permissionRole.code === 'Unassigned') return null;
 
         return {
-          id: linkedAccount.authUserId || linkedAccount.id || linkedAccount.loginEmail,
-          name: contact.name || linkedAccount.username || linkedAccount.loginEmail,
-          email: linkedAccount.loginEmail,
-          role: resolvedRole.code,
-          displayRoleName: resolvedRole.name,
-          region: normalizeRegion(linkedAccount.region),
-          avatar: roleAvatarMap[resolvedRole.code] || '👤',
-          employeeNo: contact.employeeNo || '',
+          id: primaryAccount.authUserId || primaryAccount.id || primaryAccount.loginEmail,
+          name: row.name || primaryAccount.username || primaryAccount.loginEmail,
+          email: primaryAccount.loginEmail,
+          role: row.permissionRole.code,
+          displayRoleName: row.permissionRole.name,
+          region: normalizeRegion(primaryAccount.region || row.region),
+          avatar: roleAvatarMap[row.permissionRole.code] || '👤',
+          employeeNo: row.employeeNo || '',
         } satisfies SwitchableUser;
       })
       .filter((user): user is SwitchableUser => Boolean(user))
@@ -224,7 +113,7 @@ export default function UserRoleSwitcher() {
         if (leftNo !== rightNo) return leftNo - rightNo;
         return left.name.localeCompare(right.name, 'zh-CN');
       });
-  }, [adminOrg, currentUser]);
+  }, [currentUser, linkedRows]);
 
   const switchableUsers = useMemo(() => {
     if (!currentUser) return [];
@@ -251,9 +140,9 @@ export default function UserRoleSwitcher() {
       if (user.id === currentUser.id) return true;
       return String(user.email || '').trim().toLowerCase() === normalizedCurrentEmail;
     }) || null;
-  }, [currentUser.email, currentUser.id, switchableUsers]);
+  }, [currentUser?.email, currentUser?.id, switchableUsers]);
 
-  if (!currentUser) return null;
+  if (!currentUser || !canUseRoleSwitcherForUser(currentUser.email)) return null;
 
   const getRoleColor = () => {
     const roleLabel = getUserRoleLabel(currentUser); // 🔥 使用新函数
@@ -316,6 +205,7 @@ export default function UserRoleSwitcher() {
       </div>
 
       <Select 
+        key={`${contacts.length}-${internalAccounts.length}-${switchableUsers.length}`}
         value={switchableUsers.find((user) => user.email === currentUser.email)?.id || currentUser.id} 
         onValueChange={(id) => {
           const user = switchableUsers.find(u => u.id === id);

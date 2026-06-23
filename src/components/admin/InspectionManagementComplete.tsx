@@ -48,6 +48,22 @@ import {
   shipmentDocumentSetService,
   shippingOrderService,
 } from '../../lib/supabaseService';
+import { deriveQCTaskSummary } from '../../lib/services/qcTaskCenterService';
+
+const LC_DISCREPANCY_MARKER = '[LC_DISCREPANCY]';
+
+function hasOpenLcDiscrepancy(remarks: unknown) {
+  const raw = String(remarks || '').trim();
+  if (!raw) return false;
+  const markerLine = raw.split('\n').find((line) => line.startsWith(LC_DISCREPANCY_MARKER));
+  if (!markerLine) return false;
+  try {
+    const parsed = JSON.parse(markerLine.slice(LC_DISCREPANCY_MARKER.length));
+    return ['open', 'pending', 'raised'].includes(String(parsed?.status || ''));
+  } catch {
+    return false;
+  }
+}
 
 // 类型定义
 type BusinessType = 'standard' | 'inspection-only' | 'agency' | 'project';
@@ -476,37 +492,10 @@ function ExecutionQcTab() {
   const [shipmentRemark, setShipmentRemark] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const executionOrders = useMemo(() => {
-    const visibleStatuses = new Set([
-      'supplier_confirmed',
-      'pre_production_sample_pending',
-      'pre_production_sample_sent',
-      'production_in_progress',
-      'supplier_self_inspection_submitted',
-      'qc_pending',
-      'qc_failed',
-      'qc_passed',
-      'finished_goods_ready',
-      'awaiting_loading',
-      'loaded',
-    ]);
-    const normalizedKeyword = keyword.trim().toLowerCase();
-
-    return purchaseOrders.filter((po) => {
-      const reqStatus = String(po.procurementRequestStatus || '').trim();
-      const executionStatus = String(po.executionStatus || '').trim();
-      if (reqStatus !== 'pushed_supplier') return false;
-      if (!visibleStatuses.has(executionStatus)) return false;
-      if (!normalizedKeyword) return true;
-
-      return (
-        String(po.poNumber || '').toLowerCase().includes(normalizedKeyword) ||
-        String(po.sourceRef || po.salesContractNumber || '').toLowerCase().includes(normalizedKeyword) ||
-        String(po.supplierName || '').toLowerCase().includes(normalizedKeyword) ||
-        (po.items || []).some((item) => String(item.productName || '').toLowerCase().includes(normalizedKeyword))
-      );
-    });
-  }, [keyword, purchaseOrders]);
+  const qcTaskSummary = useMemo(() => deriveQCTaskSummary(purchaseOrders, keyword), [keyword, purchaseOrders]);
+  const { taskCenter } = qcTaskSummary;
+  const executionOrders = qcTaskSummary.executionOrders;
+  const collaborationSections = taskCenter.collaborationSections;
 
   const getExecutionStatusMeta = (executionStatus?: string) => {
     switch (String(executionStatus || '')) {
@@ -745,6 +734,7 @@ function ExecutionQcTab() {
       await updatePurchaseOrder(selectedOrder.id, {
         sampleRequired: shouldSample,
         preProductionSampleStatus: shouldSample ? 'pending' : 'not_required',
+        sealStatus: shouldSample ? 'pending' : 'not_required',
         preProductionSampleNo: shouldSample ? (preProductionSampleNo.trim() || buildPreProductionSampleNo()) : null,
         sampleRound: shouldSample ? Number(sampleRound || 1) : 1,
         executionStatus: shouldSample ? 'pre_production_sample_pending' : 'production_in_progress',
@@ -764,6 +754,7 @@ function ExecutionQcTab() {
       await updatePurchaseOrder(order.id, {
         executionStatus: 'pre_production_sample_sent',
         preProductionSampleStatus: 'sent',
+        sealStatus: 'sealed',
         preProductionSampleSentAt: new Date().toISOString(),
         updatedDate: new Date().toISOString(),
       } as any);
@@ -779,8 +770,11 @@ function ExecutionQcTab() {
       await updatePurchaseOrder(order.id, {
         executionStatus: 'production_in_progress',
         preProductionSampleStatus: 'approved',
+        sealStatus: 'confirmed',
         sampleConfirmedAt: now,
         sealConfirmedAt: now,
+        sealedSampleConfirmedAt: now,
+        sealedSampleConfirmedBy: user?.email || user?.name || 'qc-admin',
         productionStartedAt: now,
         updatedDate: now,
       } as any);
@@ -827,6 +821,24 @@ function ExecutionQcTab() {
             bankSubmissionStatus: 'pending_submission',
             documentReleaseStatus: 'blocked',
             shipmentReadinessStatus: consolidationRequired ? 'lc_pending_before_transfer' : 'lc_pending_before_booking',
+            bookingStatus: 'ready_to_book',
+          };
+        case 'dp_collection':
+          return {
+            documentReleaseMode: 'release_after_dp_collection',
+            customerBalanceGateStatus: 'pending_collection_release',
+            bankSubmissionStatus: 'pending_submission',
+            documentReleaseStatus: 'blocked',
+            shipmentReadinessStatus: consolidationRequired ? 'collection_pending_after_shipment' : 'booking_allowed_collection_controlled',
+            bookingStatus: 'ready_to_book',
+          };
+        case 'da_acceptance':
+          return {
+            documentReleaseMode: 'release_after_da_acceptance',
+            customerBalanceGateStatus: 'pending_acceptance_release',
+            bankSubmissionStatus: 'pending_submission',
+            documentReleaseStatus: 'blocked',
+            shipmentReadinessStatus: consolidationRequired ? 'collection_pending_after_shipment' : 'booking_allowed_collection_controlled',
             bookingStatus: 'ready_to_book',
           };
         case 'dp_or_other_collection':
@@ -921,37 +933,113 @@ function ExecutionQcTab() {
     }
   };
 
+  const deriveCustomerBalanceGateUpdates = (order: any, confirmed: boolean) => {
+    const mode = String(order?.collectionControlMode || '');
+    const lcDiscrepancyOpen = hasOpenLcDiscrepancy(order?.executionRemarks);
+
+    switch (mode) {
+      case 'prepaid_before_booking':
+        return confirmed
+          ? {
+              customerBalanceGateStatus: 'finance_confirmed_before_booking',
+              bookingStatus: 'ready_to_book',
+              documentReleaseStatus: order?.documentReleaseStatus === 'released' ? 'released' : 'ready_to_release',
+            }
+          : {
+              customerBalanceGateStatus: 'pending_before_booking',
+              bookingStatus: 'blocked_by_payment',
+              documentReleaseStatus: 'blocked',
+            };
+      case 'post_tt_before_obl_release':
+        return confirmed
+          ? {
+              customerBalanceGateStatus: 'finance_confirmed_before_obl_release',
+              documentReleaseStatus: order?.documentReleaseStatus === 'released' ? 'released' : 'ready_to_release',
+            }
+          : {
+              customerBalanceGateStatus: 'pending_before_obl_release',
+              documentReleaseStatus: 'blocked',
+            };
+      case 'lc_bank_negotiation':
+        return confirmed
+          ? {
+              customerBalanceGateStatus: 'finance_confirmed_lc_receipt',
+              bankSubmissionStatus: order?.bankSubmissionStatus && order.bankSubmissionStatus !== 'not_required'
+                ? order.bankSubmissionStatus
+                : 'pending_submission',
+              documentReleaseStatus: order?.documentReleaseStatus === 'released'
+                ? 'released'
+                : (lcDiscrepancyOpen ? 'blocked' : 'blocked'),
+            }
+          : {
+              customerBalanceGateStatus: 'pending_lc_issuance',
+              bankSubmissionStatus: 'pending_submission',
+              documentReleaseStatus: 'blocked',
+            };
+      case 'dp_collection':
+        return confirmed
+          ? {
+              customerBalanceGateStatus: 'finance_confirmed_collection_receipt',
+              bankSubmissionStatus: order?.bankSubmissionStatus && order.bankSubmissionStatus !== 'not_required'
+                ? order.bankSubmissionStatus
+                : 'pending_submission',
+              documentReleaseStatus: order?.documentReleaseStatus === 'released' ? 'released' : 'blocked',
+            }
+          : {
+              customerBalanceGateStatus: 'pending_collection_release',
+              bankSubmissionStatus: 'pending_submission',
+              documentReleaseStatus: 'blocked',
+            };
+      case 'da_acceptance':
+        return confirmed
+          ? {
+              customerBalanceGateStatus: 'finance_confirmed_acceptance_receipt',
+              bankSubmissionStatus: order?.bankSubmissionStatus && order.bankSubmissionStatus !== 'not_required'
+                ? order.bankSubmissionStatus
+                : 'accepted',
+              documentReleaseStatus: order?.documentReleaseStatus === 'released' ? 'released' : 'ready_to_release',
+            }
+          : {
+              customerBalanceGateStatus: 'pending_acceptance_release',
+              bankSubmissionStatus: 'pending_submission',
+              documentReleaseStatus: 'blocked',
+            };
+      case 'dp_or_other_collection':
+        return confirmed
+          ? {
+              customerBalanceGateStatus: 'finance_confirmed_collection_receipt',
+              bankSubmissionStatus: order?.bankSubmissionStatus && order.bankSubmissionStatus !== 'not_required'
+                ? order.bankSubmissionStatus
+                : 'pending_submission',
+              documentReleaseStatus: order?.documentReleaseStatus === 'released' ? 'released' : 'blocked',
+            }
+          : {
+              customerBalanceGateStatus: 'pending_collection_release',
+              bankSubmissionStatus: 'pending_submission',
+              documentReleaseStatus: 'blocked',
+            };
+      default:
+        return confirmed
+          ? { customerBalanceGateStatus: 'finance_confirmed' }
+          : { customerBalanceGateStatus: 'pending' };
+    }
+  };
+
   const handleFinanceConfirmReceived = async () => {
     if (!selectedOrder) return;
     if (String(selectedOrder.collectionControlMode || '') !== 'prepaid_before_booking') {
       toast.error('当前阶段的财务确认到款，仅适用于前 T/T 订舱前放行');
       return;
     }
-
-    const nextGateStatus = (() => {
-      switch (String(selectedOrder.collectionControlMode || '')) {
-        case 'prepaid_before_booking':
-          return 'finance_confirmed_before_booking';
-        case 'post_tt_before_obl_release':
-          return 'finance_confirmed_before_obl_release';
-        case 'lc_bank_negotiation':
-          return 'finance_confirmed_lc_receipt';
-        case 'dp_or_other_collection':
-          return 'finance_confirmed_collection_receipt';
-        default:
-          return 'finance_confirmed';
-      }
-    })();
-
     try {
+      const gateUpdates = deriveCustomerBalanceGateUpdates(selectedOrder, true);
       await updatePurchaseOrder(selectedOrder.id, {
         customerBalanceStatus: 'finance_confirmed',
-        customerBalanceGateStatus: nextGateStatus,
+        ...gateUpdates,
         customerBalanceConfirmedAt: new Date().toISOString(),
         customerPaymentReceivedAt: new Date().toISOString(),
         customerPaymentConfirmedAt: new Date().toISOString(),
         financeConfirmedReceivedBy: user?.name || user?.email || 'finance',
-        bookingStatus: 'ready_to_book',
         executionRemarks: financeRemark.trim() || selectedOrder.executionRemarks,
         updatedDate: new Date().toISOString(),
       } as any);
@@ -977,8 +1065,10 @@ function ExecutionQcTab() {
         toast.success(`已更新 ${selectedOrder.poNumber} 的采购付款节点`);
       } else if (paymentNodeType === 'customer_balance') {
         const confirmed = ['finance_confirmed', 'paid', 'balance_paid'].includes(paymentStatusDraft);
+        const gateUpdates = deriveCustomerBalanceGateUpdates(selectedOrder, confirmed);
         await updatePurchaseOrder(selectedOrder.id, {
           customerBalanceStatus: paymentStatusDraft,
+          ...gateUpdates,
           customerBalanceConfirmedAt: confirmed ? now : selectedOrder.customerBalanceConfirmedAt,
           customerPaymentReceivedAt: confirmed ? now : selectedOrder.customerPaymentReceivedAt,
           customerPaymentConfirmedAt: confirmed ? now : selectedOrder.customerPaymentConfirmedAt,
@@ -1964,7 +2054,9 @@ function ExecutionQcTab() {
                   <SelectItem value="prepaid_before_booking">前 T/T：余款到账后再订舱</SelectItem>
                   <SelectItem value="post_tt_before_obl_release">后 T/T：可出运，放正本提单前收余款</SelectItem>
                   <SelectItem value="lc_bank_negotiation">L/C：出运后交单银行议付再放单</SelectItem>
-                  <SelectItem value="dp_or_other_collection">D/P 或其它：出运后按托收结果放单</SelectItem>
+                  <SelectItem value="dp_collection">D/P：出运后按托收赎单放单</SelectItem>
+                  <SelectItem value="da_acceptance">D/A：出运后按承兑确认放单</SelectItem>
+                  <SelectItem value="dp_or_other_collection">兼容旧数据：D/P 或其它</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1972,7 +2064,9 @@ function ExecutionQcTab() {
               {collectionControlMode === 'prepaid_before_booking' && '前T/T：主线要求先收齐余款，再进入订舱与装货。'}
               {collectionControlMode === 'post_tt_before_obl_release' && '后T/T：允许订舱装货，但在给客户正本提单前必须收齐余款。'}
               {collectionControlMode === 'lc_bank_negotiation' && 'L/C：先确认信用证可用，出运后需交单银行议付或收汇，再放正本单证。'}
-              {collectionControlMode === 'dp_or_other_collection' && 'D/P或其它：允许先出运，但单证释放受托收/承兑结果控制。'}
+              {collectionControlMode === 'dp_collection' && 'D/P：允许先出运，但单证释放受客户赎单/托收到账控制。'}
+              {collectionControlMode === 'da_acceptance' && 'D/A：允许先出运，但必须先完成承兑确认后才能放单，到期再跟踪付款。'}
+              {collectionControlMode === 'dp_or_other_collection' && '兼容旧数据：允许先出运，但单证释放受托收/承兑结果控制。'}
             </div>
             {fulfillmentMode !== 'factory_direct' && (
               <>
@@ -2995,6 +3089,62 @@ export function InspectionManagementComplete() {
               <p className="text-xs text-slate-500 mt-1">
                 已收 {((statistics.paidFees / statistics.totalFees) * 100).toFixed(0)}%
               </p>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <Card className="p-3 border-slate-300 bg-white">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <AlertTriangle className="size-4 text-amber-600" />
+                  <span>QC 风险摘要</span>
+                </h3>
+                <Badge className="bg-amber-100 text-amber-700">实时派生</Badge>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                  <p className="text-xs text-red-700">QC 阻断</p>
+                  <p className="mt-1 text-xl font-bold text-red-900">{qcTaskSummary.riskSummary.qcBlocked}</p>
+                </div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                  <p className="text-xs text-blue-700">待封样/样品</p>
+                  <p className="mt-1 text-xl font-bold text-blue-900">{qcTaskSummary.riskSummary.pendingSample}</p>
+                </div>
+                <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+                  <p className="text-xs text-orange-700">QC 不通过</p>
+                  <p className="mt-1 text-xl font-bold text-orange-900">{qcTaskSummary.riskSummary.failedQc}</p>
+                </div>
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                  <p className="text-xs text-emerald-700">待装柜衔接</p>
+                  <p className="mt-1 text-xl font-bold text-emerald-900">{qcTaskSummary.riskSummary.pendingLoading}</p>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-3 border-slate-300 bg-white">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <Users className="size-4 text-slate-700" />
+                  <span>协同角色入口</span>
+                </h3>
+                <Badge className="bg-slate-100 text-slate-700">不固化布局</Badge>
+              </div>
+              <div className="space-y-2">
+                {collaborationSections.map((section) => (
+                  <div key={section.key} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{section.label}</p>
+                        <p className="text-xs text-slate-600 mt-0.5">{section.roles.join(' / ')}</p>
+                      </div>
+                      <Badge className="bg-white text-slate-700 border border-slate-200">{section.count}</Badge>
+                    </div>
+                  </div>
+                ))}
+                {collaborationSections.length === 0 && (
+                  <div className="text-xs text-slate-500">暂无待协同事项</div>
+                )}
+              </div>
             </Card>
           </div>
         </TabsContent>

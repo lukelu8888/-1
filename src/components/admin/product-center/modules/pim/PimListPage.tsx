@@ -7,6 +7,7 @@ import {
   Eye,
   FilePlus2,
   Filter,
+  Globe,
   Image as ImageIcon,
   Layers,
   PackagePlus,
@@ -63,7 +64,24 @@ import {
   IMPORT_COLUMNS,
 } from '../../services/productImportColumns';
 import { BulkImportDialog } from '../../shared/BulkImportDialog';
+import { PriceHistoryDialog } from '../../shared/PriceHistoryDialog';
+import { SupplierQuoteDialog } from '../../shared/SupplierQuoteDialog';
+import {
+  AuditSection,
+  BasicInfoSection,
+  CampaignSection,
+  CategoryAttrsSection,
+  DocumentsSection,
+  MediaSection,
+  PackagingSection,
+  PublishSettingsSection,
+  RegionPricesSection,
+  SeoSection,
+  SpecsSection,
+  SuppliersSection,
+} from './PimDetailPage';
 import type {
+  Product,
   ProductListFilters,
   PublishStatus,
   RegionCode,
@@ -91,6 +109,35 @@ const REVIEW_STATUS_OPTIONS: { value: ReviewStatus | 'ALL'; label: string }[] = 
   { value: 'approved', label: '已通过' },
   { value: 'rejected', label: '已拒绝' },
 ];
+
+function createBlankProduct(createdBy: string): Product {
+  const now = new Date().toISOString();
+  const suffix = Date.now().toString().slice(-6);
+  return {
+    id: `p_new_${suffix}`,
+    tenantId: 'tenant_default',
+    sku: `NEW-${suffix}`,
+    spu: `NEW-${suffix}`,
+    name: '',
+    nameEn: '',
+    nameZh: '',
+    brand: '',
+    productType: 'Standard',
+    shortDescription: '',
+    longDescription: '',
+    keywords: [],
+    tags: [],
+    status: 'draft',
+    reviewStatus: 'not_submitted',
+    campaignStatus: 'no_campaign',
+    unit: 'pcs',
+    createdAt: now,
+    updatedAt: now,
+    createdBy,
+    updatedBy: createdBy,
+    archivedAt: null,
+  };
+}
 
 export function PimListPage({ onOpenProduct }: Props) {
   const ctx = useProductCenter();
@@ -138,6 +185,10 @@ export function PimListPage({ onOpenProduct }: Props) {
   const [previewProductId, setPreviewProductId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [creationWizardOpen, setCreationWizardOpen] = useState(false);
+  const [creationDraft, setCreationDraft] = useState<Product>(() =>
+    createBlankProduct(ctx.currentUser.name),
+  );
 
   /**
    * Pull a wide row set through the service layer (mock or supabase) and
@@ -173,6 +224,42 @@ export function PimListPage({ onOpenProduct }: Props) {
     }
   };
 
+  const openCreationWizard = () => {
+    setCreationDraft(createBlankProduct(ctx.currentUser.name));
+    setCreationWizardOpen(true);
+  };
+
+  const saveCreationDraft = (status: Product['status'] = 'draft') => {
+    const productName = creationDraft.name.trim() || creationDraft.nameEn?.trim() || creationDraft.sku;
+    const product: Product = {
+      ...creationDraft,
+      name: productName,
+      nameEn: creationDraft.nameEn?.trim() || productName,
+      status,
+      updatedAt: new Date().toISOString(),
+      updatedBy: ctx.currentUser.name,
+    };
+
+    ctx.upsertProduct(product);
+    setCreationWizardOpen(false);
+    toast.success(status === 'active' ? '新产品已创建' : '产品草稿已创建');
+    onOpenProduct(product.id);
+  };
+
+  if (creationWizardOpen) {
+    return (
+      <DetailedProductCreationWizard
+        product={creationDraft}
+        update={(field, value) =>
+          setCreationDraft((draft) => ({ ...draft, [field]: value }))
+        }
+        onCancel={() => setCreationWizardOpen(false)}
+        onSaveDraft={() => saveCreationDraft('draft')}
+        onCreate={() => saveCreationDraft('active')}
+      />
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       <PageHeading
@@ -198,7 +285,7 @@ export function PimListPage({ onOpenProduct }: Props) {
               <Download className="mr-1 h-3.5 w-3.5" />
               {exporting ? '导出中…' : '导出'}
             </Button>
-            <Button size="sm" className="h-8" onClick={() => toast.info('新建产品向导：Phase 1 接通现有 ProductCreationWizard')}>
+            <Button size="sm" className="h-8" onClick={openCreationWizard}>
               <FilePlus2 className="mr-1 h-3.5 w-3.5" /> 新建产品
             </Button>
           </>
@@ -784,6 +871,247 @@ export function PimListPage({ onOpenProduct }: Props) {
         onClose={() => setPreviewProductId(null)}
       />
       <BulkImportDialog open={importOpen} onOpenChange={setImportOpen} />
+    </div>
+  );
+}
+
+interface DetailedProductCreationWizardProps {
+  product: Product;
+  update: <K extends keyof Product>(field: K, value: Product[K]) => void;
+  onCancel: () => void;
+  onSaveDraft: () => void;
+  onCreate: () => void;
+}
+
+function DetailedProductCreationWizard({
+  product,
+  update,
+  onCancel,
+  onSaveDraft,
+  onCreate,
+}: DetailedProductCreationWizardProps) {
+  const [step, setStep] = useState(0);
+  const [priceHistoryOpen, setPriceHistoryOpen] = useState(false);
+  const [supplierQuoteOpen, setSupplierQuoteOpen] = useState(false);
+
+  const steps = [
+    {
+      label: '产品归属',
+      labelEn: 'Identity & Category',
+      icon: Layers,
+      sections: (
+        <>
+          <CategoryAttrsSection product={product} update={update} />
+          <BasicInfoSection product={product} update={update} />
+        </>
+      ),
+    },
+    {
+      label: '规格与物流',
+      labelEn: 'Specs & Logistics',
+      icon: PackagePlus,
+      sections: (
+        <>
+          <SpecsSection product={product} update={update} />
+          <PackagingSection product={product} update={update} />
+        </>
+      ),
+    },
+    {
+      label: '媒体与文件',
+      labelEn: 'Media & Documents',
+      icon: ImageIcon,
+      sections: (
+        <>
+          <MediaSection productId={product.id} thumbnailUrl={product.thumbnailUrl} />
+          <DocumentsSection productId={product.id} />
+        </>
+      ),
+    },
+    {
+      label: '供应商与价格',
+      labelEn: 'Suppliers & Prices',
+      icon: Settings2,
+      sections: (
+        <>
+          <SuppliersSection
+            productId={product.id}
+            onOpenQuotes={() => setSupplierQuoteOpen(true)}
+          />
+          <RegionPricesSection
+            productId={product.id}
+            onOpenHistory={() => setPriceHistoryOpen(true)}
+          />
+        </>
+      ),
+    },
+    {
+      label: '发布与 SEO',
+      labelEn: 'Publishing & SEO',
+      icon: Globe,
+      sections: (
+        <>
+          <PublishSettingsSection productId={product.id} />
+          <SeoSection productId={product.id} />
+        </>
+      ),
+    },
+    {
+      label: '活动设置',
+      labelEn: 'Campaign',
+      icon: Tag,
+      sections: <CampaignSection productId={product.id} />,
+    },
+    {
+      label: '预览收尾',
+      labelEn: 'Review & Audit',
+      icon: Eye,
+      sections: (
+        <>
+          <CreationCompletenessPanel product={product} />
+          <AuditSection productId={product.id} />
+        </>
+      ),
+    },
+  ];
+
+  const current = steps[step];
+  const progress = ((step + 1) / steps.length) * 100;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-slate-50">
+      <div className="border-b border-slate-200 bg-white">
+        <div className="flex items-center justify-between px-3 py-2">
+          <div>
+            <h1 className="text-[16px] font-semibold text-slate-900">新建产品</h1>
+            <p className="text-[12px] text-slate-500">
+              先选类目与产品身份，再按图1完整 PIM 明细补齐主数据
+            </p>
+          </div>
+          <Button variant="outline" size="sm" className="h-8" onClick={onCancel}>
+            <X className="mr-1 h-3.5 w-3.5" /> 返回产品库
+          </Button>
+        </div>
+
+        <div className="px-3 pb-3">
+          <div className="mb-2 flex items-center justify-between text-[12px]">
+            <span className="font-medium text-slate-700">
+              步骤 {step + 1} / {steps.length}：{current.label}
+            </span>
+            <span className="font-mono text-slate-400">{product.sku}</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded bg-slate-200">
+            <div
+              className="h-full rounded bg-slate-900 transition-all"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+
+          <div className="mt-3 grid grid-cols-4 gap-2 lg:grid-cols-8">
+            {steps.map((item, index) => {
+              const Icon = item.icon;
+              const active = index === step;
+              const done = index < step;
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => setStep(index)}
+                  className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded border px-2 py-2 text-center transition-colors ${
+                    active
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : done
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="text-[11px] font-medium">{item.label}</span>
+                  <span className={`text-[10px] ${active ? 'text-white/70' : 'text-slate-400'}`}>
+                    {item.labelEn}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        <div className="space-y-3 p-3">{current.sections}</div>
+      </div>
+
+      <div className="flex items-center justify-between border-t border-slate-200 bg-white px-3 py-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8"
+          onClick={() => setStep((v) => Math.max(0, v - 1))}
+          disabled={step === 0}
+        >
+          上一步
+        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-8" onClick={onSaveDraft}>
+            保存草稿
+          </Button>
+          {step < steps.length - 1 ? (
+            <Button size="sm" className="h-8" onClick={() => setStep((v) => v + 1)}>
+              下一步
+            </Button>
+          ) : (
+            <Button size="sm" className="h-8" onClick={onCreate}>
+              <Send className="mr-1 h-3.5 w-3.5" /> 创建并进入详情
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <PriceHistoryDialog
+        productId={priceHistoryOpen ? product.id : null}
+        onClose={() => setPriceHistoryOpen(false)}
+      />
+      <SupplierQuoteDialog
+        productId={supplierQuoteOpen ? product.id : null}
+        onClose={() => setSupplierQuoteOpen(false)}
+      />
+    </div>
+  );
+}
+
+function CreationCompletenessPanel({ product }: { product: Product }) {
+  const checks = [
+    { label: '产品名称', ok: Boolean(product.name.trim() || product.nameEn?.trim()) },
+    { label: 'SKU', ok: Boolean(product.sku.trim()) },
+    { label: '官网分类', ok: Boolean(product.primaryCategoryId) },
+    { label: '产品类型', ok: Boolean(product.productType) },
+    { label: '产品状态', ok: Boolean(product.status) },
+  ];
+  const done = checks.filter((item) => item.ok).length;
+
+  return (
+    <div className="rounded border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 px-3 py-2">
+        <h2 className="text-[13px] font-semibold text-slate-800">创建完成度检查</h2>
+      </div>
+      <div className="grid grid-cols-1 gap-2 p-3 text-[12px] sm:grid-cols-2 lg:grid-cols-5">
+        {checks.map((item) => (
+          <div
+            key={item.label}
+            className={`rounded border px-3 py-2 ${
+              item.ok
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-rose-200 bg-rose-50 text-rose-700'
+            }`}
+          >
+            <span className="font-medium">{item.label}</span>
+            <span className="ml-2">{item.ok ? '已完成' : '待补充'}</span>
+          </div>
+        ))}
+      </div>
+      <div className="border-t border-slate-200 px-3 py-2 text-[11px] text-slate-500">
+        已完成 {done} / {checks.length} 项。保存草稿不强制完整；提交审核和发布建议先补齐缺失项。
+      </div>
     </div>
   );
 }

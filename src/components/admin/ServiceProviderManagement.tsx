@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -18,6 +18,48 @@ import { Textarea } from '../ui/textarea';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import ThirdPartyWarehouseModule from './service-provider/ThirdPartyWarehouseModule';
+import {
+  getSupplierMasterRequests,
+  SUPPLIER_MASTER_REQUESTS_UPDATED_EVENT,
+  updateSupplierMasterRequestStatus,
+  type SupplierMasterRequest,
+} from '../../lib/supplier-store';
+import {
+  getFinancePayeeApprovalStatusLabel,
+  getFinancePayeeCategoryLabel,
+  getFinancePayeeEntityTypeLabel,
+} from '../finance-v2/data/financePayeeMasterData';
+import { loadFinanceV2PayeeMasters, saveFinanceV2PayeeMasters } from '../finance-v2/data/financeV2FinanceStorage';
+
+const SERVICE_PROVIDER_MANAGEMENT_STORAGE_KEY = 'gsd_service_provider_management_records_v1';
+
+function buildThirdPartyPendingRequestsSnapshot() {
+  const stored = getSupplierMasterRequests();
+  const financePending = loadFinanceV2PayeeMasters()
+    .filter((item) => item.partySide === 'third_party' && item.approvalStatus === 'pending_approval')
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      partySide: item.partySide,
+      entityType: item.entityType,
+      category: item.category,
+      expenseScope: item.expenseScope,
+      expenseSubject: item.expenseSubject,
+      department: item.department,
+      costCenter: item.costCenter,
+      routingNote: item.routingNote,
+      approvalStatus: 'pending_approval' as const,
+      submittedBy: '赵敏',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+
+  const merged = new Map<string, SupplierMasterRequest>();
+  [...stored, ...financePending].forEach((item) => {
+    if (item.partySide === 'third_party') merged.set(item.id, item);
+  });
+  return Array.from(merged.values());
+}
 
 // 服务商类型枚举
 export enum ServiceProviderType {
@@ -101,6 +143,22 @@ interface ServiceProviderPerformance {
   totalAmount: number;
   rating: number;
 }
+
+type ServiceProviderFormState = {
+  name: string;
+  code: string;
+  nameEn: string;
+  type: ServiceProviderType;
+  level: ServiceProvider['level'];
+  contact: string;
+  phone: string;
+  email: string;
+  address: string;
+  businessLicense: string;
+  serviceScope: string;
+  pricingModel: string;
+  status: ServiceProvider['status'];
+};
 
 // 模拟数据
 const mockServiceProviders: ServiceProvider[] = [
@@ -290,15 +348,107 @@ const serviceTypeIcons = {
   [ServiceProviderType.TRANSLATION]: FileText,
 };
 
+function readStoredServiceProviders(): ServiceProvider[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SERVICE_PROVIDER_MANAGEMENT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ServiceProvider[]) : null;
+  } catch (error) {
+    console.warn('[ServiceProviderManagement] failed to parse stored rows:', error);
+    return null;
+  }
+}
+
+function writeStoredServiceProviders(records: ServiceProvider[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(SERVICE_PROVIDER_MANAGEMENT_STORAGE_KEY, JSON.stringify(records));
+}
+
+function buildServiceProviderForm(provider?: ServiceProvider | null): ServiceProviderFormState {
+  return {
+    name: provider?.name || '',
+    code: provider?.code || '',
+    nameEn: provider?.nameEn || '',
+    type: provider?.type || ServiceProviderType.FREIGHT_FORWARDER,
+    level: provider?.level || 'B',
+    contact: provider?.contact || '',
+    phone: provider?.phone || '',
+    email: provider?.email || '',
+    address: provider?.address || '',
+    businessLicense: provider?.businessLicense || '',
+    serviceScope: provider?.serviceScope.join('、') || '',
+    pricingModel: provider?.pricingModel || '',
+    status: provider?.status || 'active',
+  };
+}
+
+function buildServiceProviderFromMasterRequest(
+  request: SupplierMasterRequest,
+  fallbackCode: string,
+  type: ServiceProviderType,
+): ServiceProvider {
+  return {
+    id: request.masterCode || fallbackCode,
+    name: request.name,
+    code: request.masterCode || fallbackCode,
+    nameEn: request.name,
+    type,
+    level: 'C',
+    contact: '待补充',
+    phone: '待补充',
+    email: '',
+    address: '待补充',
+    businessLicense: '',
+    certifications: [],
+    cooperationYears: 0,
+    totalServices: 0,
+    totalAmount: 0,
+    onTimeRate: 0,
+    satisfactionRate: 0,
+    status: 'active',
+    serviceScope: [getFinancePayeeCategoryLabel(request.category as any)],
+    pricingModel: '待补充',
+  };
+}
+
 export default function ServiceProviderManagement() {
   const [activeTab, setActiveTab] = useState('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [selectedProvider, setSelectedProvider] = useState<ServiceProvider | null>(null);
+  const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>(mockServiceProviders);
+  const [masterRequests, setMasterRequests] = useState<SupplierMasterRequest[]>(() => buildThirdPartyPendingRequestsSnapshot());
+  const pendingRequestCountRef = useRef(
+    buildThirdPartyPendingRequestsSnapshot().filter((item) => item.partySide === 'third_party' && item.approvalStatus === 'pending_approval').length,
+  );
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [providerForm, setProviderForm] = useState<ServiceProviderFormState>(() => buildServiceProviderForm());
+
+  useEffect(() => {
+    setMasterRequests(buildThirdPartyPendingRequestsSnapshot());
+    setServiceProviders((current) => hydrateAuthorizedServiceProviders(readStoredServiceProviders() || current));
+  }, []);
+
+  useEffect(() => {
+    const refreshMasterRequests = () => {
+      setMasterRequests(buildThirdPartyPendingRequestsSnapshot());
+      setServiceProviders((current) => hydrateAuthorizedServiceProviders(current));
+    };
+
+    window.addEventListener(SUPPLIER_MASTER_REQUESTS_UPDATED_EVENT, refreshMasterRequests);
+    window.addEventListener('storage', refreshMasterRequests);
+    return () => {
+      window.removeEventListener(SUPPLIER_MASTER_REQUESTS_UPDATED_EVENT, refreshMasterRequests);
+      window.removeEventListener('storage', refreshMasterRequests);
+    };
+  }, []);
 
   // 筛选服务商
-  const filteredProviders = mockServiceProviders.filter(provider => {
+  const filteredProviders = serviceProviders.filter(provider => {
     const matchesSearch = provider.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          provider.code.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = filterType === 'all' || provider.type === filterType;
@@ -306,16 +456,244 @@ export default function ServiceProviderManagement() {
     return matchesSearch && matchesType && matchesLevel;
   });
 
+  const pendingMasterRequests = useMemo(
+    () => masterRequests.filter((item) => item.partySide === 'third_party' && item.approvalStatus === 'pending_approval'),
+    [masterRequests],
+  );
+
+  useEffect(() => {
+    const nextCount = pendingMasterRequests.length;
+    if (nextCount > pendingRequestCountRef.current) {
+      toast.info(`收到 ${nextCount - pendingRequestCountRef.current} 条新的第三方主档待授权申请`, {
+        description: '请在服务商管理模块完成审核后生效。',
+      });
+    }
+    pendingRequestCountRef.current = nextCount;
+  }, [pendingMasterRequests]);
+
+  useEffect(() => {
+    writeStoredServiceProviders(serviceProviders);
+  }, [serviceProviders]);
+
   // 统计数据
   const stats = {
-    total: mockServiceProviders.length,
-    active: mockServiceProviders.filter(p => p.status === 'active').length,
-    forwarders: mockServiceProviders.filter(p => p.type === ServiceProviderType.FREIGHT_FORWARDER).length,
-    trucking: mockServiceProviders.filter(p => p.type === ServiceProviderType.TRUCKING).length,
-    customs: mockServiceProviders.filter(p => p.type === ServiceProviderType.CUSTOMS_BROKER).length,
-    inspection: mockServiceProviders.filter(p => p.type === ServiceProviderType.INSPECTION).length,
-    totalAmount: mockServiceProviders.reduce((sum, p) => sum + p.totalAmount, 0),
-    avgSatisfaction: mockServiceProviders.reduce((sum, p) => sum + p.satisfactionRate, 0) / mockServiceProviders.length,
+    total: serviceProviders.length,
+    active: serviceProviders.filter(p => p.status === 'active').length,
+    forwarders: serviceProviders.filter(p => p.type === ServiceProviderType.FREIGHT_FORWARDER).length,
+    trucking: serviceProviders.filter(p => p.type === ServiceProviderType.TRUCKING).length,
+    customs: serviceProviders.filter(p => p.type === ServiceProviderType.CUSTOMS_BROKER).length,
+    inspection: serviceProviders.filter(p => p.type === ServiceProviderType.INSPECTION).length,
+    totalAmount: serviceProviders.reduce((sum, p) => sum + p.totalAmount, 0),
+    avgSatisfaction: serviceProviders.length ? serviceProviders.reduce((sum, p) => sum + p.satisfactionRate, 0) / serviceProviders.length : 0,
+  };
+
+  const mapRequestToProviderType = (category: SupplierMasterRequest['category']): ServiceProviderType => {
+    switch (category) {
+      case 'trucking':
+        return ServiceProviderType.TRUCKING;
+      case 'freight_forwarder':
+        return ServiceProviderType.FREIGHT_FORWARDER;
+      case 'customs_broker':
+        return ServiceProviderType.CUSTOMS_BROKER;
+      case 'inspection_authority':
+      case 'inspection_service':
+      case 'testing_agency':
+        return ServiceProviderType.INSPECTION;
+      case 'property_management':
+      case 'landlord':
+        return ServiceProviderType.WAREHOUSE;
+      default:
+        return ServiceProviderType.CERTIFICATION;
+    }
+  };
+
+  const hydrateAuthorizedServiceProviders = (base: ServiceProvider[]) => {
+    const merged = [...base];
+    const names = new Set(base.map((item) => item.name));
+    const approvedRequests = getSupplierMasterRequests().filter(
+      (item) => item.partySide === 'third_party' && item.approvalStatus === 'approved',
+    );
+
+    approvedRequests.forEach((item, index) => {
+      if (names.has(item.name)) return;
+      const fallbackCode = item.masterCode || `SP-${String(base.length + index + 1).padStart(3, '0')}`;
+      merged.unshift(buildServiceProviderFromMasterRequest(item, fallbackCode, mapRequestToProviderType(item.category)));
+      names.add(item.name);
+    });
+
+    loadFinanceV2PayeeMasters()
+      .filter((item) => item.partySide === 'third_party' && item.approvalStatus === 'active')
+      .forEach((item, index) => {
+        if (names.has(item.name)) return;
+        const fallbackCode = item.masterCode || `SP-${String(base.length + approvedRequests.length + index + 1).padStart(3, '0')}`;
+        merged.unshift(
+          buildServiceProviderFromMasterRequest(
+            {
+              id: item.id,
+              name: item.name,
+              partySide: 'third_party',
+              entityType: item.entityType,
+              category: item.category,
+              expenseScope: item.expenseScope,
+              expenseSubject: item.expenseSubject,
+              masterCode: item.masterCode || fallbackCode,
+              department: item.department,
+              costCenter: item.costCenter,
+              routingNote: item.routingNote,
+              approvalStatus: 'approved',
+              submittedBy: '系统同步',
+              approvedAt: undefined,
+              financeNotifiedAt: undefined,
+              createdAt: item.createdAt,
+              updatedAt: item.updatedAt,
+            },
+            fallbackCode,
+            mapRequestToProviderType(item.category as any),
+          ),
+        );
+        names.add(item.name);
+      });
+
+    return merged;
+  };
+
+  const handleApproveMasterRequest = (request: SupplierMasterRequest) => {
+    const nextCode = `SP-${String(serviceProviders.length + 1).padStart(3, '0')}`;
+    const approved = updateSupplierMasterRequestStatus(request.id, 'approved', {
+      masterCode: nextCode,
+      approvedAt: new Date().toISOString(),
+    });
+    if (!approved) {
+      toast.error('第三方主档申请不存在或已被处理');
+      return;
+    }
+
+    const payeeMasters = loadFinanceV2PayeeMasters();
+    const nextPayeeMasters = payeeMasters.map((item) =>
+      item.id === request.id ? { ...item, approvalStatus: 'active' as const, masterCode: nextCode } : item,
+    );
+    saveFinanceV2PayeeMasters(nextPayeeMasters);
+    setMasterRequests(getSupplierMasterRequests());
+
+    if (!serviceProviders.some((item) => item.name === request.name)) {
+      const type = mapRequestToProviderType(request.category);
+      const providerToAdd: ServiceProvider = {
+        id: nextCode,
+        name: request.name,
+        code: nextCode,
+        nameEn: request.name,
+        type,
+        level: 'C',
+        contact: '待补充',
+        phone: '待补充',
+        email: '',
+        address: '待补充',
+        businessLicense: '',
+        certifications: [],
+        cooperationYears: 0,
+        totalServices: 0,
+        totalAmount: 0,
+        onTimeRate: 0,
+        satisfactionRate: 0,
+        status: 'active',
+        serviceScope: [getFinancePayeeCategoryLabel(request.category as any)],
+        pricingModel: '待补充',
+      };
+      setServiceProviders((current) => [providerToAdd, ...current]);
+    }
+
+    toast.success(`第三方主档已授权生效，系统编号 ${nextCode}`);
+  };
+
+  const openCreateProviderDialog = () => {
+    setEditingProviderId(null);
+    setProviderForm(buildServiceProviderForm());
+    setProviderDialogOpen(true);
+  };
+
+  const openEditProviderDialog = (provider: ServiceProvider) => {
+    setEditingProviderId(provider.id);
+    setProviderForm(buildServiceProviderForm(provider));
+    setProviderDialogOpen(true);
+  };
+
+  const handleProviderFormChange = <K extends keyof ServiceProviderFormState>(field: K, value: ServiceProviderFormState[K]) => {
+    setProviderForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleSaveProvider = () => {
+    if (!providerForm.name.trim()) {
+      toast.error('请填写服务商名称');
+      return;
+    }
+    if (!providerForm.code.trim()) {
+      toast.error('请填写服务商编号');
+      return;
+    }
+    if (!providerForm.contact.trim()) {
+      toast.error('请填写联系人');
+      return;
+    }
+    if (!providerForm.phone.trim()) {
+      toast.error('请填写联系电话');
+      return;
+    }
+
+    const scopeItems = providerForm.serviceScope
+      .split(/[、,，/]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const nextProvider: ServiceProvider = {
+      id: editingProviderId || `SP${String(Date.now())}`,
+      name: providerForm.name.trim(),
+      code: providerForm.code.trim(),
+      nameEn: providerForm.nameEn.trim() || providerForm.name.trim(),
+      type: providerForm.type,
+      level: providerForm.level,
+      contact: providerForm.contact.trim(),
+      phone: providerForm.phone.trim(),
+      email: providerForm.email.trim(),
+      address: providerForm.address.trim(),
+      businessLicense: providerForm.businessLicense.trim(),
+      certifications:
+        editingProviderId
+          ? (serviceProviders.find((item) => item.id === editingProviderId)?.certifications || [])
+          : [],
+      cooperationYears:
+        editingProviderId
+          ? (serviceProviders.find((item) => item.id === editingProviderId)?.cooperationYears || 0)
+          : 0,
+      totalServices:
+        editingProviderId
+          ? (serviceProviders.find((item) => item.id === editingProviderId)?.totalServices || 0)
+          : 0,
+      totalAmount:
+        editingProviderId
+          ? (serviceProviders.find((item) => item.id === editingProviderId)?.totalAmount || 0)
+          : 0,
+      onTimeRate:
+        editingProviderId
+          ? (serviceProviders.find((item) => item.id === editingProviderId)?.onTimeRate || 0)
+          : 0,
+      satisfactionRate:
+        editingProviderId
+          ? (serviceProviders.find((item) => item.id === editingProviderId)?.satisfactionRate || 0)
+          : 0,
+      status: providerForm.status,
+      serviceScope: scopeItems,
+      pricingModel: providerForm.pricingModel.trim(),
+    };
+
+    setServiceProviders((current) => {
+      if (!editingProviderId) return [nextProvider, ...current];
+      return current.map((item) => (item.id === editingProviderId ? nextProvider : item));
+    });
+    setSelectedProvider((current) => (current?.id === nextProvider.id ? nextProvider : current));
+    setProviderDialogOpen(false);
+    setEditingProviderId(null);
+    setProviderForm(buildServiceProviderForm());
+    toast.success(editingProviderId ? '服务商信息已更新' : '服务商添加成功');
   };
 
   return (
@@ -328,34 +706,34 @@ export default function ServiceProviderManagement() {
             管理物流、报关、验货等服务提供商
           </p>
         </div>
-        <Dialog>
+        <Dialog open={providerDialogOpen} onOpenChange={setProviderDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-[#F96302] hover:bg-[#E55A02]">
+            <Button className="bg-[#F96302] hover:bg-[#E55A02]" onClick={openCreateProviderDialog}>
               <Plus className="w-4 h-4 mr-2" />
               添加服务商
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>添加新服务商</DialogTitle>
+              <DialogTitle>{editingProviderId ? '编辑服务商' : '添加新服务商'}</DialogTitle>
               <DialogDescription>填写服务商基本信息</DialogDescription>
             </DialogHeader>
             <div className="grid grid-cols-2 gap-4 py-4">
               <div>
                 <Label>服务商名称（中文）*</Label>
-                <Input placeholder="例如：DHL全球货代" className="mt-1" />
+                <Input placeholder="例如：DHL全球货代" className="mt-1" value={providerForm.name} onChange={(e) => handleProviderFormChange('name', e.target.value)} />
               </div>
               <div>
                 <Label>服务商名称（英文）</Label>
-                <Input placeholder="例如：DHL Global Forwarding" className="mt-1" />
+                <Input placeholder="例如：DHL Global Forwarding" className="mt-1" value={providerForm.nameEn} onChange={(e) => handleProviderFormChange('nameEn', e.target.value)} />
               </div>
               <div>
                 <Label>服务商编号*</Label>
-                <Input placeholder="例如：DHL-GF-001" className="mt-1" />
+                <Input placeholder="例如：DHL-GF-001" className="mt-1" value={providerForm.code} onChange={(e) => handleProviderFormChange('code', e.target.value)} />
               </div>
               <div>
                 <Label>服务类型*</Label>
-                <Select>
+                <Select value={providerForm.type} onValueChange={(value) => handleProviderFormChange('type', value as ServiceProviderType)}>
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="选择服务类型" />
                   </SelectTrigger>
@@ -368,23 +746,23 @@ export default function ServiceProviderManagement() {
               </div>
               <div>
                 <Label>联系人*</Label>
-                <Input placeholder="联系人姓名" className="mt-1" />
+                <Input placeholder="联系人姓名" className="mt-1" value={providerForm.contact} onChange={(e) => handleProviderFormChange('contact', e.target.value)} />
               </div>
               <div>
                 <Label>联系电话*</Label>
-                <Input placeholder="+86-xxx-xxxx-xxxx" className="mt-1" />
+                <Input placeholder="+86-xxx-xxxx-xxxx" className="mt-1" value={providerForm.phone} onChange={(e) => handleProviderFormChange('phone', e.target.value)} />
               </div>
               <div className="col-span-2">
                 <Label>联系邮箱*</Label>
-                <Input type="email" placeholder="email@example.com" className="mt-1" />
+                <Input type="email" placeholder="email@example.com" className="mt-1" value={providerForm.email} onChange={(e) => handleProviderFormChange('email', e.target.value)} />
               </div>
               <div className="col-span-2">
                 <Label>公司地址</Label>
-                <Input placeholder="详细地址" className="mt-1" />
+                <Input placeholder="详细地址" className="mt-1" value={providerForm.address} onChange={(e) => handleProviderFormChange('address', e.target.value)} />
               </div>
               <div>
                 <Label>服务等级</Label>
-                <Select defaultValue="B">
+                <Select value={providerForm.level} onValueChange={(value) => handleProviderFormChange('level', value as ServiceProvider['level'])}>
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
@@ -397,24 +775,35 @@ export default function ServiceProviderManagement() {
               </div>
               <div>
                 <Label>营业执照号</Label>
-                <Input placeholder="统一社会信用代码" className="mt-1" />
+                <Input placeholder="统一社会信用代码" className="mt-1" value={providerForm.businessLicense} onChange={(e) => handleProviderFormChange('businessLicense', e.target.value)} />
               </div>
               <div className="col-span-2">
                 <Label>服务范围</Label>
-                <Textarea placeholder="描述服务范围，例如：海运、空运、铁路运输" className="mt-1" rows={2} />
+                <Textarea placeholder="描述服务范围，例如：海运、空运、铁路运输" className="mt-1" rows={2} value={providerForm.serviceScope} onChange={(e) => handleProviderFormChange('serviceScope', e.target.value)} />
               </div>
               <div className="col-span-2">
                 <Label>计费模式</Label>
-                <Input placeholder="例如：按立方米/重量计费" className="mt-1" />
+                <Input placeholder="例如：按立方米/重量计费" className="mt-1" value={providerForm.pricingModel} onChange={(e) => handleProviderFormChange('pricingModel', e.target.value)} />
+              </div>
+              <div>
+                <Label>状态</Label>
+                <Select value={providerForm.status} onValueChange={(value) => handleProviderFormChange('status', value as ServiceProvider['status'])}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">活跃</SelectItem>
+                    <SelectItem value="inactive">暂停</SelectItem>
+                    <SelectItem value="suspended">禁用</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline">取消</Button>
+              <Button variant="outline" onClick={() => setProviderDialogOpen(false)}>取消</Button>
               <Button 
                 className="bg-[#F96302] hover:bg-[#E55A02]"
-                onClick={() => {
-                  toast.success('服务商添加成功！');
-                }}
+                onClick={handleSaveProvider}
               >
                 保存
               </Button>
@@ -474,7 +863,7 @@ export default function ServiceProviderManagement() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="bg-gray-100">
-            <TabsTrigger value="list">服务商列表</TabsTrigger>
+            <TabsTrigger value="list">服务商列表{pendingMasterRequests.length > 0 ? ` (${pendingMasterRequests.length})` : ''}</TabsTrigger>
             <TabsTrigger value="third-party-warehouse">第三方仓/集货计划</TabsTrigger>
             <TabsTrigger value="orders">服务订单</TabsTrigger>
             <TabsTrigger value="payments">应付账款</TabsTrigger>
@@ -483,6 +872,52 @@ export default function ServiceProviderManagement() {
 
         {/* 服务商列表 */}
         <TabsContent value="list" className="space-y-4">
+          {pendingMasterRequests.length > 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-amber-900">待授权第三方主档申请</div>
+                  <div className="text-xs text-amber-700">财务新增的第三方公司/个人主档需在这里授权后生效；审核通过时系统会生成第三方编号。</div>
+                </div>
+                <Badge className="border-amber-200 bg-white text-amber-700">{pendingMasterRequests.length} 条待处理</Badge>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-amber-50">
+                      <TableHead>名称</TableHead>
+                      <TableHead>生效编号</TableHead>
+                      <TableHead>主档类型</TableHead>
+                      <TableHead>第三方类别</TableHead>
+                      <TableHead>费用归属</TableHead>
+                      <TableHead>默认科目</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pendingMasterRequests.map((request) => (
+                      <TableRow key={request.id}>
+                        <TableCell className="text-sm font-medium text-gray-900">{request.name}</TableCell>
+                        <TableCell className="font-mono text-sm text-gray-500">审核通过后生成</TableCell>
+                        <TableCell className="text-sm text-gray-700">{getFinancePayeeEntityTypeLabel(request.entityType as any)}</TableCell>
+                        <TableCell className="text-sm text-gray-700">{getFinancePayeeCategoryLabel(request.category as any)}</TableCell>
+                        <TableCell className="text-sm text-gray-700">{request.expenseScope === 'management' ? '管理费用' : '业务费用'}</TableCell>
+                        <TableCell className="text-sm text-gray-700">{request.expenseSubject}</TableCell>
+                        <TableCell className="text-sm text-gray-700">{getFinancePayeeApprovalStatusLabel(request.approvalStatus as any)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" className="bg-amber-600 hover:bg-amber-700" onClick={() => handleApproveMasterRequest(request)}>
+                            授权生效
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : null}
+
           {/* 搜索和筛选 */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <div className="flex gap-3">
@@ -684,7 +1119,7 @@ export default function ServiceProviderManagement() {
                               )}
                             </DialogContent>
                           </Dialog>
-                          <Button size="sm" variant="ghost">
+                          <Button size="sm" variant="ghost" onClick={() => openEditProviderDialog(provider)}>
                             <Edit className="w-4 h-4" />
                           </Button>
                         </div>

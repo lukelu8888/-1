@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { WorkflowPipelineBanner, MAIN_WORKFLOW_STEPS } from '../shared/WorkflowPipelineBanner';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -16,7 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-import { Search, Filter, Eye, Reply, CheckCircle, XCircle, Clock, FileText, AlertCircle, TestTube, ChevronDown, ChevronUp, Send, Trash2 } from 'lucide-react';
+import { Search, Filter, Eye, Reply, CheckCircle, XCircle, Clock, FileText, AlertCircle, TestTube, ChevronUp, Send, Trash2 } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { CustomerInquiryView } from '../dashboard/CustomerInquiryView';
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport';
@@ -31,11 +32,13 @@ import { CreateQuotationRequestDialog } from './CreateQuotationRequestDialog';
 import { useQuotationRequests } from '../../contexts/QuotationRequestContext';
 import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { useAdminOrganization } from '../../contexts/AdminOrganizationContext';
+import { useUser } from '../../contexts/UserContext';
 import { generateQRNumber } from '../../utils/xjNumberGenerator';
 import { extractModelNo, extractSpecification } from '../../utils/productDataExtractor';
 import { approvalRecordService, quoteRequirementService, sharedRoleUiPreferenceService, staffDirectoryService, type StaffDirectoryProfile } from '../../lib/supabaseService';
 import { buildQuoteRequirementDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
 import { normalizeFlowProductCore } from '../../utils/documentDataAdapters';
+import { getFactoryFacingModelNo } from '../../utils/productModelDisplay';
 import { matchesBusinessOwnerEmail, resolveInquirySalesOwner } from '../../utils/quotationOwnership';
 import { normalizePersonnelEmail } from '../../lib/notification-rules';
 import { getCurrentUser } from '../../utils/dataIsolation';
@@ -49,8 +52,10 @@ import { getColumnStyle, renderColumnResizeHandle } from './admin-organization-p
 import {
   ERP_LIST_DELETE_BUTTON_CLASS,
   ERP_LIST_DELETE_BUTTON_STYLE,
+  ERP_LIST_FILTER_PILL_INACTIVE_CLASS,
   ERP_LIST_UI_SPEC_V1,
 } from '../shared/erpListUiSpec';
+import { CompactDetailsPopover } from '../shared/CompactDetailsPopover';
 
 interface AdminInquiryManagementProps {
   onCreateQuotation?: (inquiry: any) => void;
@@ -210,6 +215,22 @@ const formatInquiryManagementDateOnly = (value?: string | null) => {
   return text.includes('T') ? text.slice(0, 10) : text;
 };
 
+const getInquiryManagementRowKey = (inquiry: any, index?: number) => {
+  const parts = [
+    inquiry?.id,
+    inquiry?.inquiryNumber,
+    inquiry?.date,
+    inquiry?.userEmail || inquiry?.customerEmail || inquiry?.buyerInfo?.email,
+    Number.isFinite(Number(index)) ? String(index) : '',
+  ]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join('::') : `inquiry-row-${index ?? 'unknown'}`;
+};
+
+const getInquiryDeleteTarget = (inquiry: any) =>
+  String(inquiry?.inquiryNumber || inquiry?.id || '').trim();
+
 export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCostInquiry, highlightInquiryNumber }: AdminInquiryManagementProps = {}) {
   const inquiryTableContainerRef = React.useRef<HTMLDivElement | null>(null);
   const inquiryColumnResizeRef = React.useRef<{
@@ -255,16 +276,23 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   const [managerAssignedInquiryNumbers, setManagerAssignedInquiryNumbers] = useState<Set<string>>(new Set());
   const [regionalSalesRepOptions, setRegionalSalesRepOptions] = useState<StaffDirectoryProfile[]>([]);
   const [pushingInquiryId, setPushingInquiryId] = useState<string | null>(null);
+  const [pushStartedAt, setPushStartedAt] = useState<number | null>(null);
   const [inquiryTableContainerWidth, setInquiryTableContainerWidth] = useState(0);
   const [inquiryColumnWidths, setInquiryColumnWidths] = useState<Record<InquiryManagementColumnKey, number>>(INQUIRY_MANAGEMENT_TABLE_DEFAULT_WIDTHS);
   const [inquiryHasCustomWidths, setInquiryHasCustomWidths] = useState(false);
   const [inquiryPreferenceHydrated, setInquiryPreferenceHydrated] = useState(false);
   const inquiryPreviewRef = React.useRef<HTMLDivElement | null>(null);
   const { adminOrg } = useAdminOrganization();
+  const { user: authUser, authLoading } = useUser();
   
   // 🚀 Use unified InquiryContext - only show submitted inquiries
   const { addInquiry, getSubmittedInquiries, deleteInquiry, refreshInquiries, updateInquiry } = useInquiry();
+  const refreshInquiriesRef = React.useRef(refreshInquiries);
   const inquiries = getSubmittedInquiries();
+
+  useEffect(() => {
+    refreshInquiriesRef.current = refreshInquiries;
+  }, [refreshInquiries]);
   
   useEffect(() => {
     if (inquiries.length > 0) return;
@@ -286,25 +314,39 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     refreshQuoteRequirementsFromApi,
   } = useQuoteRequirements();
   const [actingStaffUser, setActingStaffUser] = useState<any>(() => getCurrentUser());
+  const [isScopedInquiryRefreshing, setIsScopedInquiryRefreshing] = useState(true);
   const actingUserEmail = String(actingStaffUser?.email || '').trim().toLowerCase();
   const actingUserId = actingStaffUser?.id || null;
+
+  useEffect(() => {
+    if (!pushingInquiryId || !pushStartedAt) return;
+    const timer = window.setTimeout(() => {
+      setPushingInquiryId(null);
+      setPushStartedAt(null);
+      toast.error('下推状态已自动复位，请刷新成本询报列表确认结果');
+    }, 18000);
+    return () => window.clearTimeout(timer);
+  }, [pushingInquiryId, pushStartedAt]);
   
   // 🔥 批量删除处理函数
   const handleBulkDelete = async () => {
-    const visibleSelectedIds = Array.from(selectedIds).filter((id) =>
-      filteredInquiries.some((inquiry) => inquiry.id === id),
+    const selectedInquiries = filteredInquiries.filter((inquiry, index) =>
+      selectedIds.has(getInquiryManagementRowKey(inquiry, index)),
+    );
+    const deleteTargets = Array.from(
+      new Set(selectedInquiries.map(getInquiryDeleteTarget).filter(Boolean)),
     );
 
-    if (visibleSelectedIds.length === 0) {
+    if (deleteTargets.length === 0) {
       toast.error('请先选择要删除的询价单');
       return;
     }
 
-    if (window.confirm(`确认将选中的 ${visibleSelectedIds.length} 条询价单从当前业务员视图隐藏吗？不会影响客户侧原始询价单。`)) {
+    if (window.confirm(`确认将选中的 ${deleteTargets.length} 条询价单从当前业务员视图隐藏吗？不会影响客户侧原始询价单。`)) {
       try {
-        await Promise.all(visibleSelectedIds.map((id) => deleteInquiry(id)));
+        await Promise.all(deleteTargets.map((target) => deleteInquiry(target)));
         setSelectedIds(new Set());
-        toast.success(`✅ 已从当前视图隐藏 ${visibleSelectedIds.length} 条询价单`);
+        toast.success(`已从当前视图隐藏 ${deleteTargets.length} 条询价单`);
       } catch (error: any) {
         toast.error(error?.message || '隐藏询价单失败');
       }
@@ -314,7 +356,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   // 🔥 全选/取消全选
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allIds = new Set(filteredInquiries.map(inq => inq.id));
+      const allIds = new Set(filteredInquiries.map((inq, index) => getInquiryManagementRowKey(inq, index)));
       setSelectedIds(allIds);
     } else {
       setSelectedIds(new Set());
@@ -337,6 +379,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     if (pushingInquiryId === inquiry.id) return;
     try {
       setPushingInquiryId(inquiry.id);
+      setPushStartedAt(Date.now());
       // QR 的 documentDataSnapshot 由 buildQuoteRequirementDocumentSnapshot 重新生成，
       // 不依赖 ING 的快照，因此无需检查 ING 是否有快照。
       const regionCode = inquiry.region === 'South America' ? 'SA' : inquiry.region === 'Europe & Africa' ? 'EA' : 'NA';
@@ -379,6 +422,18 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
             productNameEn: normalized.productNameEn,
             productNameZh: normalized.productNameZh,
             modelNo: extractModelNo({ ...p, modelNo: normalized.modelNo }, idx),
+            factoryModelNo:
+              getFactoryFacingModelNo(p) ||
+              normalized.factoryModelNo ||
+              p?.inquirySnapshot?.factoryModelNo ||
+              p?.inquirySnapshotDraft?.factoryModelNo ||
+              '',
+            internalModelNo:
+              p?.internalModelNo ||
+              p?.inquirySnapshot?.masterRef?.internalModelNo ||
+              p?.inquirySnapshotDraft?.masterRef?.internalModelNo ||
+              normalized.modelNo ||
+              '',
             specification: extractSpecification({ ...p, specification: normalized.specification }),
             specificationEn: normalized.specificationEn,
             specificationZh: normalized.specificationZh,
@@ -397,13 +452,14 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
         documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(newQR as any),
       }), 15000, '下推成本询报');
       void withOperationTimeout(refreshQuoteRequirementsFromApi(), 5000, '刷新成本询报列表').catch(() => null);
-      toast.success(`✅ 成功下推到成本询报！QR单号：${qrNumber}`);
+      toast.success(`成功下推到成本询报！QR单号：${qrNumber}`);
       if (onSwitchToCostInquiry) setTimeout(() => onSwitchToCostInquiry(), 500);
     } catch (error: any) {
       console.error('❌ [下推成本询报] 失败:', error);
-      toast.error(`❌ 下推失败: ${error.message || '未知错误'}`);
+      toast.error(`下推失败: ${error.message || '未知错误'}`);
     } finally {
       setPushingInquiryId((current) => (current === inquiry.id ? null : current));
+      setPushStartedAt(null);
     }
   };
 
@@ -531,7 +587,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
 
   // 从 Supabase Auth 同步用户区域和角色
   useEffect(() => {
-    const runtimeUser = getCurrentUser();
+    const runtimeUser = getCurrentUser() || authUser;
     setActingStaffUser(runtimeUser);
     if (runtimeUser) {
       const fullRegionName = regionCodeToFullName((runtimeUser as any).region || '');
@@ -547,7 +603,51 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     };
     window.addEventListener('userChanged', handleUserChanged);
     return () => window.removeEventListener('userChanged', handleUserChanged);
-  }, []);
+  }, [authUser?.email, authUser?.id, authUser?.region, authUser?.role, authUser?.userRole]);
+
+  const scopedInquiryIdentityKey = useMemo(() => {
+    const runtimeUser = actingStaffUser || authUser;
+    return JSON.stringify({
+      id: runtimeUser?.id || null,
+      email: String(runtimeUser?.email || '').trim().toLowerCase(),
+      role: runtimeUser?.role || runtimeUser?.userRole || null,
+      region: runtimeUser?.region || null,
+    });
+  }, [actingStaffUser, authUser]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (authLoading) {
+      setIsScopedInquiryRefreshing(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const runtimeUser = getCurrentUser() || authUser;
+    if (!runtimeUser?.email) {
+      setIsScopedInquiryRefreshing(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setIsScopedInquiryRefreshing(true);
+    refreshInquiriesRef.current()
+      .catch((error) => {
+        console.warn('[AdminInquiryManagementNew] scoped inquiry refresh failed:', error);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsScopedInquiryRefreshing(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, scopedInquiryIdentityKey]);
 
   // Helper: normalize region for matching (supports both codes and full names)
   const normalizeRegionForMatch = (r: string | null | undefined): string[] => {
@@ -627,42 +727,6 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
       inquiryDate: inq.date,
       priority: 'Medium'
     }));
-
-  useEffect(() => {
-    console.info('[AdminInquiryManagementNew][render]', {
-      actingUser: actingStaffUser
-        ? {
-            id: actingStaffUser.id || null,
-            email: actingStaffUser.email || null,
-            role: actingStaffUser.role || actingStaffUser.userRole || null,
-            region: actingStaffUser.region || null,
-          }
-        : null,
-      currentUserRole,
-      currentUserRegion,
-      submittedInquiryCount: inquiries.length,
-      assignmentFilteredCount: assignmentFilteredInquiries.length,
-      regionFilteredCount: regionFilteredInquiries.length,
-      displayCount: displayInquiries.length,
-      firstRows: displayInquiries.slice(0, 5).map((inquiry) => ({
-        id: inquiry.id,
-        inquiryNumber: inquiry.inquiryNumber || null,
-        status: inquiry.status,
-        region: inquiry.region,
-        assignedTo: inquiry.assignedTo || null,
-        salesRepEmail: inquiry.salesRepEmail || null,
-        ownerEmail: inquiry.ownerEmail || null,
-      })),
-    });
-  }, [
-    actingStaffUser,
-    currentUserRole,
-    currentUserRegion,
-    inquiries,
-    assignmentFilteredInquiries,
-    regionFilteredInquiries,
-    displayInquiries,
-  ]);
 
 
   // 🎯 从数据中提取唯一值
@@ -768,10 +832,18 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
 
   // Filter logic
   const filteredInquiries = displayInquiries.filter((inquiry) => {
-    const matchesSearch = searchTerm === '' || 
-      inquiry.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inquiry.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inquiry.id.toLowerCase().includes(searchTerm.toLowerCase());
+    const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+    const searchableValues = [
+      inquiry.id,
+      inquiry.inquiryNumber,
+      inquiry.customer?.name,
+      inquiry.customer?.email,
+      inquiry.customerName,
+      inquiry.customerEmail,
+      inquiry.subject,
+    ].map((value) => String(value || '').toLowerCase());
+    const matchesSearch = normalizedSearchTerm === '' ||
+      searchableValues.some((value) => value.includes(normalizedSearchTerm));
     
     const matchesFilter = filterStatus === 'all' || inquiry.status === filterStatus;
     const matchesRegion = filterRegion === 'all' || inquiry.region === filterRegion;
@@ -822,6 +894,65 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     return matchesSearch && matchesFilter && matchesRegion && matchesCustomer && matchesSalesRep && matchesCountry && matchesDateRange && matchesOem && matchesOemProcessing;
   });
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.info('[AdminInquiryManagementNew][render]', {
+      actingUser: actingStaffUser
+        ? {
+            id: actingStaffUser.id || null,
+            email: actingStaffUser.email || null,
+            role: actingStaffUser.role || actingStaffUser.userRole || null,
+            region: actingStaffUser.region || null,
+          }
+        : null,
+      currentUserRole,
+      currentUserRegion,
+      activeFilters: {
+        searchTerm,
+        filterStatus,
+        filterRegion,
+        filterSalesRep,
+        filterCustomer,
+        filterCountry,
+        filterDateRange,
+        filterOem,
+        filterOemProcessing,
+      },
+      submittedInquiryCount: inquiries.length,
+      assignmentFilteredCount: assignmentFilteredInquiries.length,
+      regionFilteredCount: regionFilteredInquiries.length,
+      displayCountBeforeToolbarFilters: displayInquiries.length,
+      tableRowCount: filteredInquiries.length,
+      firstTableRows: filteredInquiries.slice(0, 5).map((inquiry) => ({
+        id: inquiry.id,
+        inquiryNumber: inquiry.inquiryNumber || null,
+        status: inquiry.status,
+        region: inquiry.region,
+        assignedTo: inquiry.assignedTo || null,
+        salesRepEmail: inquiry.salesRepEmail || null,
+        ownerEmail: inquiry.ownerEmail || null,
+      })),
+    });
+  }, [
+    actingStaffUser,
+    currentUserRole,
+    currentUserRegion,
+    searchTerm,
+    filterStatus,
+    filterRegion,
+    filterSalesRep,
+    filterCustomer,
+    filterCountry,
+    filterDateRange,
+    filterOem,
+    filterOemProcessing,
+    inquiries.length,
+    assignmentFilteredInquiries.length,
+    regionFilteredInquiries.length,
+    displayInquiries.length,
+    filteredInquiries.length,
+  ]);
+
 
   const handleStatusChange = (newStatus: string) => {
     if (!selectedInquiry) return;
@@ -858,7 +989,7 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
         setManagerAssignedInquiryNumbers((prev) => new Set(prev).add(inquiryNumber));
       }
       await refreshInquiries().catch(() => {});
-      toast.success(`✅ 已分配给业务员：${selectedSalesRep?.name || selectedSalesRepEmail}`);
+      toast.success(`已分配给业务员：${selectedSalesRep?.name || selectedSalesRepEmail}`);
     } catch (error: any) {
       setSalesRepAssignments((prev) => {
         if (!(inquiry.id in prev)) return prev;
@@ -905,8 +1036,12 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   };
 
   // 计算全选状态
-  const isAllSelected = filteredInquiries.length > 0 && selectedIds.size === filteredInquiries.length;
-  const isSomeSelected = selectedIds.size > 0 && selectedIds.size < filteredInquiries.length;
+  const visibleSelectionKeys = filteredInquiries.map((inquiry, index) =>
+    getInquiryManagementRowKey(inquiry, index),
+  );
+  const visibleSelectedCount = visibleSelectionKeys.filter((key) => selectedIds.has(key)).length;
+  const isAllSelected = filteredInquiries.length > 0 && visibleSelectedCount === filteredInquiries.length;
+  const isSomeSelected = visibleSelectedCount > 0 && visibleSelectedCount < filteredInquiries.length;
 
   useEffect(() => {
     const target = String(highlightInquiryNumber || '').trim();
@@ -919,7 +1054,9 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
   }, [displayInquiries, highlightInquiryNumber]);
 
   useEffect(() => {
-    const visibleIds = new Set(filteredInquiries.map((inquiry) => inquiry.id));
+    const visibleIds = new Set(
+      filteredInquiries.map((inquiry, index) => getInquiryManagementRowKey(inquiry, index)),
+    );
     setSelectedIds(prev => {
       const next = new Set(Array.from(prev).filter(id => visibleIds.has(id)));
       return next.size !== prev.size ? next : prev;
@@ -1115,8 +1252,25 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
     );
   };
 
+  const shouldWaitForScopedInquiries = (authLoading && !currentUserRole) || !currentUserRole;
+
   return (
     <div className="flex flex-1 min-h-0 flex-col space-y-4">
+      {/* 🔥 业务链路进度 */}
+      <WorkflowPipelineBanner
+        steps={MAIN_WORKFLOW_STEPS}
+        currentKey="ing"
+        hint="当前：客户询价 → 下推成本询报"
+      />
+      {shouldWaitForScopedInquiries ? (
+        <div className="flex min-h-[calc(100dvh-360px)] items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="text-center">
+            <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-orange-500" />
+            <p className="text-sm font-semibold text-slate-700">正在加载当前账号的询价数据...</p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* 🎨 业务统计 */}
       {currentUserRole !== 'Sales_Rep' && (
         <div className="bg-white border border-gray-300 rounded">
@@ -1183,11 +1337,15 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                 variant="outline"
                 size="sm"
                 onClick={handleBulkDelete}
-                disabled={selectedIds.size === 0}
-                style={ERP_LIST_DELETE_BUTTON_STYLE}
-                className={ERP_LIST_DELETE_BUTTON_CLASS}
+                disabled={visibleSelectedCount === 0}
+                style={visibleSelectedCount > 0 ? ERP_LIST_DELETE_BUTTON_STYLE : undefined}
+                className={
+                  visibleSelectedCount > 0
+                    ? ERP_LIST_DELETE_BUTTON_CLASS
+                    : `h-9 shrink-0 whitespace-nowrap gap-1 rounded-xl border px-3 text-[12px] font-semibold shadow-sm disabled:opacity-100 ${ERP_LIST_FILTER_PILL_INACTIVE_CLASS}`
+                }
               >
-                批量删除 {selectedIds.size > 0 && `(${selectedIds.size})`}
+                批量删除 {visibleSelectedCount > 0 && `(${visibleSelectedCount})`}
               </Button>
 
               {/* 状态筛选 */}
@@ -1397,17 +1555,18 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                   String(qr?.sourceInquiryId || '').trim() === String(inquiry.id || '').trim()
                 );
                 
-                const isSelected = selectedIds.has(inquiry.id);
+                const rowKey = getInquiryManagementRowKey(inquiry, index);
+                const isSelected = selectedIds.has(rowKey);
                 
                 const isHighlighted = highlightedId === String(inquiry.id);
                 return (
-                  <TableRow key={inquiry.id} className={`border-b border-slate-200/90 hover:bg-slate-50/70 ${isSelected ? 'bg-blue-50' : ''} ${isHighlighted ? 'bg-yellow-100 border-2 border-yellow-400 shadow-lg' : ''}`}>
+                  <TableRow key={rowKey} className={`border-b border-slate-200/90 hover:bg-slate-50/70 ${isSelected ? 'bg-blue-50' : ''} ${isHighlighted ? 'bg-yellow-100 border-2 border-yellow-400 shadow-lg' : ''}`}>
                     <TableCell className="py-4" style={getInquiryColumnStyle('select')}>
                       <div className="flex items-center justify-center pr-4">
                         <Checkbox
                           checked={isSelected}
-                          onCheckedChange={(checked) => handleSelectOne(inquiry.id, checked as boolean)}
-                          aria-label={`选择 ${inquiry.id}`}
+                          onCheckedChange={(checked) => handleSelectOne(rowKey, checked as boolean)}
+                          aria-label={`选择 ${inquiry.inquiryNumber || inquiry.id}`}
                         />
                       </div>
                     </TableCell>
@@ -1439,10 +1598,10 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                         {inquiry.inquiryNumber || inquiry.id}
                       </button>
                     </TableCell>
-                    <TableCell className="py-4 overflow-hidden" style={getInquiryColumnStyle('customer')}>
-                      <div>
-                        <p className="text-[12px] font-semibold text-slate-900">{inquiry.customer.name}</p>
-                        <p className="text-[12px] text-slate-500">{inquiry.customer.email}</p>
+                    <TableCell className="py-4 overflow-hidden align-middle" style={getInquiryColumnStyle('customer')}>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <p className="truncate text-[12px] font-semibold text-slate-900">{inquiry.customer.name}</p>
+                        <CompactDetailsPopover items={[{ label: '邮箱', value: inquiry.customer.email, className: 'break-all text-slate-500' }]} />
                       </div>
                     </TableCell>
                     <TableCell className="py-4 overflow-hidden" style={getInquiryColumnStyle('subject')}>
@@ -1458,15 +1617,13 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                         {statusConfig.label}
                       </Badge>
                     </TableCell>
-                    <TableCell className="py-4 text-center" style={getInquiryColumnStyle('oem')}>
+                    <TableCell className="py-4 text-center align-middle" style={getInquiryColumnStyle('oem')}>
                       {inquiry.oemEnabled ? (
-                        <div className="flex flex-col gap-1">
+                        <div className="flex items-center justify-center gap-1.5">
                           <Badge className="h-5 w-fit px-2 text-[12px] border bg-indigo-100 text-indigo-800 border-indigo-300">
                             OEM
                           </Badge>
-                          <Badge className="h-5 w-fit px-2 text-[12px] border bg-slate-100 text-slate-700 border-slate-300">
-                            {inquiry.oemProcessingStatus}
-                          </Badge>
+                          <CompactDetailsPopover align="center" items={[{ label: '处理', value: inquiry.oemProcessingStatus }]} />
                         </div>
                       ) : (
                         <span className="text-[12px] text-slate-400">-</span>
@@ -1487,19 +1644,21 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
                           hasQR ? (
                             <Button
                               size="sm"
-                              className="h-7 px-2 text-xs bg-gray-300 text-gray-500 cursor-not-allowed"
+                              className="h-7 px-2 text-xs bg-emerald-100 text-emerald-700 border border-emerald-300 cursor-default"
                               disabled
+                              title="已生成成本询报单(QR)，可前往「成本询报」Tab查看"
                             >
-                              已下推成本询报
+                              ✓ 已下推成本询报
                             </Button>
                           ) : (
                             <Button
                               size="sm"
-                              className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700"
+                              className="h-7 px-2 text-xs bg-[#F96302] hover:bg-[#e05a02] text-white font-medium"
                               disabled={pushingInquiryId === inquiry.id}
                               onClick={() => handlePushToCostInquiry(inquiry)}
+                              title="下推到成本询报(QR)，成功后自动切换到成本询报 Tab"
                             >
-                              {pushingInquiryId === inquiry.id ? '下推中...' : '下推成本询报'}
+                              {pushingInquiryId === inquiry.id ? '下推中...' : '下推 → 成本询报'}
                             </Button>
                           )
                         )}
@@ -1628,6 +1787,8 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
         }}
         inquiry={xjInquiry}
       />
+        </>
+      )}
     </div>
   );
 }

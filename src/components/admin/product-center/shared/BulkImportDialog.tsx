@@ -55,7 +55,8 @@ import {
   COLUMN_LABELS,
   IMPORT_COLUMNS,
   REQUIRED_COLUMNS,
-  buildImportTemplate,
+  buildDynamicImportTemplate,
+  buildDynamicImportWorkbookHtml,
   normalizeImportRow,
 } from '../services/productImportColumns';
 import type {
@@ -121,7 +122,12 @@ export function BulkImportDialog({ open, onOpenChange }: Props) {
       const skuToProduct = new Map(
         ctx.products.map((p) => [p.sku.toLowerCase(), p] as const),
       );
-      const knownCodes = new Set(ctx.categories.map((c) => c.code));
+      const parentCategoryIds = new Set(ctx.categories.map((c) => c.parentId).filter(Boolean));
+      const knownCodes = new Set(
+        ctx.categories
+          .filter((c) => c.isActive && !parentCategoryIds.has(c.id))
+          .map((c) => c.code),
+      );
 
       const previewRows: PreviewRow[] = parsed.map((raw, i) => {
         const row = normalizeImportRow(raw);
@@ -137,7 +143,7 @@ export function BulkImportDialog({ open, onOpenChange }: Props) {
           row.primaryCategoryCode &&
           !knownCodes.has(String(row.primaryCategoryCode))
         ) {
-          error = `未知主类目编码：${row.primaryCategoryCode}`;
+          error = `未知或非末级主类目编码：${row.primaryCategoryCode}`;
           fate = 'skip';
         } else if (skuToProduct.has(sku.toLowerCase())) {
           fate = 'update';
@@ -260,8 +266,17 @@ export function BulkImportDialog({ open, onOpenChange }: Props) {
                 handleFileChosen(e.target.files?.[0])
               }
               fileInputRef={fileInputRef}
-              onDownloadTemplate={() => {
-                downloadCsv(buildImportTemplate(), 'product_import_template');
+              onDownloadCsvTemplate={() => {
+                downloadCsv(
+                  buildDynamicImportTemplate(ctx.categories, ctx.attributes),
+                  'product_import_template',
+                );
+              }}
+              onDownloadExcelTemplate={() => {
+                downloadExcelHtml(
+                  buildDynamicImportWorkbookHtml(ctx.categories, ctx.attributes),
+                  'product_import_template',
+                );
               }}
             />
           )}
@@ -327,7 +342,8 @@ function UploadStep(props: {
   onPickClick: () => void;
   onChange: (e: ChangeEvent<HTMLInputElement>) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
-  onDownloadTemplate: () => void;
+  onDownloadCsvTemplate: () => void;
+  onDownloadExcelTemplate: () => void;
 }) {
   return (
     <div className="space-y-3">
@@ -380,10 +396,18 @@ function UploadStep(props: {
           size="sm"
           variant="outline"
           className="h-7 text-[12px]"
-          onClick={props.onDownloadTemplate}
+          onClick={props.onDownloadCsvTemplate}
         >
           <Download className="mr-1 h-3.5 w-3.5" />
-          下载模板
+          下载 CSV
+        </Button>
+        <Button
+          size="sm"
+          className="h-7 text-[12px]"
+          onClick={props.onDownloadExcelTemplate}
+        >
+          <Download className="mr-1 h-3.5 w-3.5" />
+          下载 Excel 字典模板
         </Button>
       </div>
 
@@ -414,6 +438,18 @@ function UploadStep(props: {
       </div>
     </div>
   );
+}
+
+function downloadExcelHtml(html: string, filename: string) {
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function PreviewStep(props: {

@@ -104,7 +104,7 @@ export interface ProductCategory {
   id: string;
   tenantId: string;
   parentId: string | null;
-  level: 1 | 2 | 3;
+  level: number;
   code: string;
   name: string;
   nameEn?: string;
@@ -134,6 +134,8 @@ export interface ProductAttribute {
   dataType: AttributeDataType;
   unit?: string;
   isFilterable: boolean;
+  isRequired?: boolean;
+  includeInImport?: boolean;
   options?: string[];            // for enum types
   appliesToCategoryIds?: string[];
   sortOrder: number;

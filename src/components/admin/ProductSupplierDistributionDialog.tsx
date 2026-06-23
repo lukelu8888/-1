@@ -316,8 +316,12 @@ export function ProductSupplierDistributionDialog({
           products: group.products.map(p => ({
             id: p.id,
             productName: p.productName,
+            productNameEn: p.productNameEn || '',
+            productNameZh: p.productNameZh || '',
             modelNo: getFormalBusinessModelNo(p),
             specification: p.specification || '',
+            specificationEn: p.specificationEn || '',
+            specificationZh: p.specificationZh || '',
             quantity: p.quantity,
             unit: p.unit,
             targetPrice: p.targetPrice,
@@ -326,9 +330,14 @@ export function ProductSupplierDistributionDialog({
           
           // 保留旧字段以兼容（使用第一个产品的信息）
           productName: group.products[0].productName,
+          productNameEn: group.products[0].productNameEn || '',
+          productNameZh: group.products[0].productNameZh || '',
           modelNo: getFormalBusinessModelNo(group.products[0]),
           quantity: group.products.reduce((sum, p) => sum + p.quantity, 0),
           unit: group.products[0].unit,
+          specification: group.products[0].specification || '',
+          specificationEn: group.products[0].specificationEn || '',
+          specificationZh: group.products[0].specificationZh || '',
           
           // 🔥 状态信息
           status: 'pending',

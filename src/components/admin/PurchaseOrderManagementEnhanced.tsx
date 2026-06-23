@@ -111,6 +111,7 @@ import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
 import { resolveQuoteRequirementOwner } from '../../utils/quotationOwnership';
 import { buildSourcePricingBasis, normalizePriceType } from '../../types/pricingBasis';
 import { derivePurchaseOrderWorkflowFields } from '../../lib/services/purchaseOrderQuoteRequirementServices';
+import { getQrNumberAliases, matchesNormalizedQrNumber } from '../../utils/quoteRequirementNumber';
 
 /**
  * 🔥 采购订单管理 - 台湾大厂风格
@@ -184,7 +185,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             const qrNo = String(quotation?.sourceQR || quotation?.requirementNo || '').trim();
             const xjNo = String(quotation?.sourceXJ || quotation?.xjNumber || '').trim();
             return Boolean(
-              (requirementNo && qrNo === requirementNo) ||
+              matchesNormalizedQrNumber(qrNo, requirementNo, (quotation as any)?.region, req.region) ||
               (linkedBJList.length > 0 && linkedBJList.includes(quotationNo)) ||
               (sourceInquiryNo && xjNo === sourceInquiryNo)
             );
@@ -508,6 +509,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 供应商报价 - 搜索和批量删除状态
   const [quotationSearchTerm, setQuotationSearchTerm] = useState('');
   const [selectedQuotationIds, setSelectedQuotationIds] = useState<string[]>([]);
+  const [feedbackPreferredBJNumber, setFeedbackPreferredBJNumber] = useState('');
 
   // 🔥 采购订单 - 搜索和批量删除状态
   const [orderSearchTerm, setOrderSearchTerm] = useState('');
@@ -630,16 +632,28 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const reqNo = String(req?.requirementNo || '').trim();
     const list = Array.isArray(xjList) ? xjList : xjs;
     if (!reqNo) return false;
-    return list.some((x) => String(x?.requirementNo || '').trim() === reqNo);
+    return list.some((x) =>
+      [
+        x?.requirementNo,
+        (x as any)?.sourceQRNumber,
+        (x as any)?.sourceQrNumber,
+      ].some((value) => matchesNormalizedQrNumber(value, reqNo, (x as any)?.region, req.region)),
+    );
   }, [xjs]);
 
   const recomputeRequirementStatusByXJ = React.useCallback((reqNoList: string[], xjList?: XJ[]) => {
     const list = Array.isArray(xjList) ? xjList : xjs;
     const uniqueReqNos = Array.from(new Set(reqNoList.map((r) => String(r || '').trim()).filter(Boolean)));
     uniqueReqNos.forEach((reqNo) => {
-      const req = requirements.find((r) => String(r.requirementNo || '').trim() === reqNo);
+      const req = requirements.find((r) => matchesNormalizedQrNumber(r.requirementNo, reqNo, r.region, null));
       if (!req) return;
-      const activeXJCount = list.filter((x) => String(x?.requirementNo || '').trim() === reqNo).length;
+      const activeXJCount = list.filter((x) =>
+        [
+          x?.requirementNo,
+          (x as any)?.sourceQRNumber,
+          (x as any)?.sourceQrNumber,
+        ].some((value) => matchesNormalizedQrNumber(value, reqNo, (x as any)?.region, req.region)),
+      ).length;
       const nextStatus: QuoteRequirement['status'] = activeXJCount > 0 ? 'processing' : 'pending';
       if ((req.status as any) !== nextStatus) {
         void updateRequirement(req.id, { status: nextStatus }).catch((error: any) => {
@@ -659,7 +673,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       ''
     ).trim();
     if (quotedRequirementNo) {
-      const byRequirementNo = requirements.find((req) => String(req.requirementNo || '').trim() === quotedRequirementNo);
+      const byRequirementNo = requirements.find((req) => matchesNormalizedQrNumber(req.requirementNo, quotedRequirementNo, req.region, quotation?.region));
       if (byRequirementNo) return byRequirementNo;
     }
 
@@ -680,7 +694,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
     const xjRequirementNo = String(relatedXJ.requirementNo || relatedXJ.sourceQRNumber || '').trim();
     if (!xjRequirementNo) return undefined;
-    return requirements.find((req) => String(req.requirementNo || '').trim() === xjRequirementNo);
+    return requirements.find((req) => matchesNormalizedQrNumber(req.requirementNo, xjRequirementNo, req.region, (relatedXJ as any).region));
   }, [requirements, xjs]);
 
   const navigateAcceptedQuotationToFeedback = React.useCallback(() => {
@@ -694,9 +708,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     }
     if (!ensureBoundQuoteRequirementSnapshot(matchedRequirement)) return;
 
+    setFeedbackPreferredBJNumber('');
     setFeedbackRequirement(matchedRequirement);
     setShowFeedbackForm(true);
-  }, [acceptedSupplierQuotation, findRequirementForSupplierQuotation, selectedSupplierQuotation]);
+  }, [acceptedSupplierQuotation, ensureBoundQuoteRequirementSnapshot, findRequirementForSupplierQuotation, selectedSupplierQuotation]);
   
   useEffect(() => {
     let cancelled = false;
@@ -1064,7 +1079,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   const requirementByNo = useMemo(() => {
     const byNo = new Map<string, QuoteRequirement>();
     purchaseRequirements.forEach((req) => {
-      if (req.requirementNo) byNo.set(req.requirementNo, req);
+      getQrNumberAliases(req.requirementNo, req.region).forEach((alias) => byNo.set(alias, req));
     });
     return byNo;
   }, [purchaseRequirements]);
@@ -1077,8 +1092,10 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
   const findRequirementForPO = (po: PurchaseOrderType): QuoteRequirement | undefined => {
     const requirementNo = getRequirementNoFromPO(po);
-    if (requirementNo && requirementByNo.has(requirementNo)) {
-      return requirementByNo.get(requirementNo);
+    const requirementAliases = getQrNumberAliases(requirementNo, po.region);
+    const matchedByAlias = requirementAliases.map((alias) => requirementByNo.get(alias)).find(Boolean);
+    if (matchedByAlias) {
+      return matchedByAlias;
     }
     const refs = [
       String(po.salesContractNumber || '').trim(),
@@ -1094,20 +1111,42 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         String(req.sourceRef || '').trim(),
         String(req.quotationNumber || '').trim(),
       ];
-      return refs.some((ref) => reqRefs.includes(ref));
+      return (
+        refs.some((ref) => reqRefs.includes(ref)) ||
+        Boolean(requirementNo && matchesNormalizedQrNumber(requirementNo, req.requirementNo, po.region, req.region))
+      );
     });
   };
 
   const getXJNumberByRequirementNo = (requirementNo: string): string => {
     if (!requirementNo) return '';
-    const matchedXJ = xjs.find((xj) => String(xj.requirementNo || '').trim() === requirementNo);
+    const matchedXJ = xjs.find((xj) =>
+      [
+        xj.requirementNo,
+        (xj as any).sourceQRNumber,
+        (xj as any).sourceQrNumber,
+      ].some((value) => matchesNormalizedQrNumber(value, requirementNo, (xj as any).region, null)),
+    );
     const candidate = String(
       (matchedXJ as any)?.sourceInquiryNumber ||
       matchedXJ?.sourceInquiryNumber ||
+      matchedXJ?.sourceRef ||
       matchedXJ?.xjNumber ||
       '',
     ).trim();
     return candidate.startsWith('ING-') ? candidate : '';
+  };
+
+  const getSupplierXJNumberByRequirementNo = (requirementNo: string): string => {
+    if (!requirementNo) return '';
+    const matchedXJ = xjs.find((xj) =>
+      [
+        xj.requirementNo,
+        (xj as any).sourceQRNumber,
+        (xj as any).sourceQrNumber,
+      ].some((value) => matchesNormalizedQrNumber(value, requirementNo, (xj as any).region, null)),
+    );
+    return String(matchedXJ?.supplierXjNo || matchedXJ?.xjNumber || '').trim();
   };
 
   const getInquiryByContractRef = (po: PurchaseOrderType): string => {
@@ -1154,7 +1193,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     const refs = new Set<string>();
     const addRef = (v: unknown) => {
       const s = String(v || '').trim().toUpperCase();
-      if (s) refs.add(s);
+      if (!s) return;
+      refs.add(s);
+      getQrNumberAliases(s, po.region).forEach((alias) => refs.add(alias));
     };
     addRef(resolveInquirySourceRef(po));
     addRef(po.xjNumber);
@@ -1225,6 +1266,30 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       candidate?.sourceXJNumber ||
       candidate?.xjNumber ||
       po.xjNumber ||
+      '',
+    ).trim();
+  }, [getPOQuoteCandidates]);
+
+  const resolvePreferredBJNumberForPO = React.useCallback((po: PurchaseOrderType): string => {
+    const selectedBjId = String(po.selectedBjId || '').trim();
+    const candidates = getPOQuoteCandidates(po, po.supplierCode);
+    const preferredCandidate = selectedBjId
+      ? candidates.find((candidate: any) => {
+          const refs = [
+            candidate?.id,
+            candidate?.quotationNo,
+            candidate?.quotationNumber,
+            candidate?.bjNumber,
+          ].map((value) => String(value || '').trim());
+          return refs.includes(selectedBjId);
+        })
+      : null;
+
+    const resolvedCandidate = preferredCandidate || candidates[0];
+    return String(
+      resolvedCandidate?.quotationNo ||
+      resolvedCandidate?.bjNumber ||
+      resolvedCandidate?.quotationNumber ||
       '',
     ).trim();
   }, [getPOQuoteCandidates]);
@@ -1604,7 +1669,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           prValidatedBy: validatedBy,
         } as any)));
       } catch (error: any) {
-        toast.error('自动检查采购草稿失败', {
+        toast.error('自动完成比价依据校验失败', {
           description: error?.message || 'Supabase 写入失败',
           duration: 5000,
         });
@@ -1742,9 +1807,9 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         prValidatedAt: validationTimestamp,
         prValidatedBy: validatedBy,
       } as any)));
-      toast.success(`检查已通过（${groupPOs.length}张采购单）`);
+      toast.success(`比价依据校验已通过（${groupPOs.length}张采购单）`);
     } catch (error: any) {
-      toast.error('同步检查状态失败', {
+      toast.error('同步比价依据校验状态失败', {
         description: error?.message || 'Supabase 写入失败',
         duration: 5000,
       });
@@ -2457,8 +2522,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
         const xjProducts: XJProduct[] = selectedProducts.map(item => ({
           id: String(item.id),
           productName: item.productName,
+          productNameEn: (item as any).productNameEn || '',
+          productNameZh: (item as any).productNameZh || '',
           modelNo: getFormalBusinessModelNo(item),
           specification: item.specification || '',
+          specificationEn: (item as any).specificationEn || '',
+          specificationZh: (item as any).specificationZh || '',
           quantity: item.quantity,
           unit: item.unit,
           targetPrice: item.targetPrice,
@@ -2479,7 +2548,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
           requirementNo: selectedRequirementForXJ.requirementNo, // QR-xxx（关联采购需求）
           sourceQRNumber: selectedRequirementForXJ.requirementNo, // 溯源链：QR → XJ
           sourceRef: selectedRequirementForXJ.sourceRef,
-          customerName: (selectedRequirementForXJ as any).customerName,
+          customerName: xjDocumentData.buyer?.name || xjDocumentData.buyer?.companyName || (selectedRequirementForXJ as any).customerName,
+          customerCompany: xjDocumentData.buyer?.name || xjDocumentData.buyer?.companyName || '',
+          buyerCompany: xjDocumentData.buyer?.name || xjDocumentData.buyer?.companyName || '',
+          buyerContact: xjDocumentData.buyer?.contactPerson || '',
+          buyerEmail: xjDocumentData.buyer?.email || '',
+          buyerAddress: xjDocumentData.buyer?.address || '',
           customerRegion: selectedRequirementForXJ.region,
           projectId: projectExecutionBaseline?.projectId || null,
           projectCode: projectExecutionBaseline?.projectCode || null,
@@ -2496,8 +2570,12 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
 
           // 🔥 主产品信息（兼容旧字段）
           productName: mainProduct.productName,
+          productNameEn: (mainProduct as any).productNameEn || '',
+          productNameZh: (mainProduct as any).productNameZh || '',
           modelNo: getFormalBusinessModelNo(mainProduct),
           specification: mainProduct.specification || '',
+          specificationEn: (mainProduct as any).specificationEn || '',
+          specificationZh: (mainProduct as any).specificationZh || '',
           quantity: mainProduct.quantity,
           unit: mainProduct.unit,
           targetPrice: mainProduct.targetPrice,
@@ -3323,6 +3401,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       poNumber: newPONumber,
       requirementNo: selectedRequirement.requirementNo, // 🔥 关联采购需求编号
       sourceRef: getXJNumberByRequirementNo(selectedRequirement.requirementNo) || selectedRequirement.sourceInquiryNumber || selectedRequirement.sourceRef,
+      xjNumber: getSupplierXJNumberByRequirementNo(selectedRequirement.requirementNo),
       
       // 供应商信息
       supplierName: createOrderForm.supplierName,
@@ -3435,7 +3514,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
     toast.success('请从报价请求池中选择需求创建订单');
   };
 
-  const ensureBoundQuoteRequirementSnapshot = (req: QuoteRequirement | null | undefined) => {
+  function ensureBoundQuoteRequirementSnapshot(req: QuoteRequirement | null | undefined) {
     if (!req) return false;
     const templateSnapshot = (req as any).templateSnapshot || (req as any).template_snapshot || null;
     const templateVersion = templateSnapshot?.version || null;
@@ -3445,7 +3524,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       return false;
     }
     return true;
-  };
+  }
 
   const hasPositiveQrPricingPayload = React.useCallback((req: QuoteRequirement) => {
     const feedbackProducts = Array.isArray(req.purchaserFeedback?.products)
@@ -3461,9 +3540,25 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
   // 🔥 处理智能采购反馈 - 一键流转
   const handleSmartFeedback = (req: QuoteRequirement) => {
     if (!ensureBoundQuoteRequirementSnapshot(req)) return;
+    setFeedbackPreferredBJNumber('');
     setFeedbackRequirement(req);
     setShowFeedbackForm(true);
   };
+
+  const handleViewComparisonForPO = React.useCallback((po: PurchaseOrderType) => {
+    const matchedRequirement = findRequirementForPO(po);
+    if (!matchedRequirement) {
+      toast.error('未找到该采购单对应的询价要求单', {
+        description: '请先检查 CG 与 QR/XJ/BJ 的关联编号是否完整',
+      });
+      return;
+    }
+    if (!ensureBoundQuoteRequirementSnapshot(matchedRequirement)) return;
+
+    setFeedbackPreferredBJNumber(resolvePreferredBJNumberForPO(po));
+    setFeedbackRequirement(matchedRequirement);
+    setShowFeedbackForm(true);
+  }, [ensureBoundQuoteRequirementSnapshot, findRequirementForPO, resolvePreferredBJNumberForPO]);
 
   // 🔥 下推业务员询报（采购侧仅做下推动作，不创建业务员报价）
   const handlePushToSalesInquiry = async (req: QuoteRequirement) => {
@@ -3845,6 +3940,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             openSupplierAllocationDialog={openSupplierAllocationDialog}
             hasDownstreamPOForProcurementRequest={hasDownstreamPOForProcurementRequest}
             handleDeleteProcurementRequest={handleDeleteProcurementRequest}
+            onSwitchToOrdersTab={() => setActiveTab('orders')}
           />
 
           <PurchaseOrdersTab
@@ -3857,6 +3953,7 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
             filteredOrders={filteredOrders}
             handleViewPODocument={handleViewPODocument}
             handleOpenEditPO={handleOpenEditPO}
+            handleViewComparisonForPO={handleViewComparisonForPO}
             handlePushPurchaseToSupplier={handlePushPurchaseToSupplier}
             handleApplyBossApproval={handleApplyBossApproval}
             handleValidateProcurementRequest={handleValidateProcurementRequest}
@@ -4023,11 +4120,14 @@ const PurchaseOrderManagementEnhanced: React.FC = () => {
       {feedbackRequirement && (
         <PurchaserFeedbackForm
           open={showFeedbackForm}
-          onOpenChange={setShowFeedbackForm}
+          onOpenChange={(open) => {
+            setShowFeedbackForm(open);
+            if (!open) setFeedbackPreferredBJNumber('');
+          }}
           qr={feedbackRequirement}
           onSubmit={handleSubmitFeedback}
           currentUserName={user?.name || '采购员'}
-          preferredBJNumber={acceptedSupplierQuotation?.quotationNo}
+          preferredBJNumber={feedbackPreferredBJNumber || acceptedSupplierQuotation?.quotationNo}
         />
       )}
 

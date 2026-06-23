@@ -7,7 +7,7 @@ import {
   FileText, Download, Send, Eye, Filter, Calendar,
   Search, Globe, Building2, Package, Ship, FileCheck,
   Clock, CheckCircle2, MailCheck, FolderOpen,
-  Archive, Users, X, ChevronRight, ChevronLeft,
+  Archive, Users, X, ChevronRight, ChevronLeft, ChevronDown,
   Layers, AlertCircle, ExternalLink, MoreVertical, Settings2,
   ArrowUp, ArrowDown,
   GripVertical, Pencil, Check
@@ -60,6 +60,7 @@ import { type StatementOfAccountData } from '../documents/templates/StatementOfA
 import {
   CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
   DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS,
+  prepareCustomerInquiryDocumentData,
   type CustomerInquiryData,
 } from '../documents/templates/CustomerInquiryDocument';
 import { DEFAULT_COMMERCIAL_INVOICE_GOODS_TABLE_COLUMNS } from '../documents/templates/CommercialInvoiceDocument';
@@ -87,13 +88,18 @@ import {
   INITIAL_QR_TEXT_OVERRIDES,
   XJ_TERMS_PRESETS,
 } from './document-center/templateCenterSeeds';
+import { resolveUsdSellerBankInfo } from '../../utils/documentBankInfo';
 import { VersionHistoryPanel } from './document-center/VersionHistoryPanel';
 import { buildTemplateEditorContentProps } from './document-center/buildTemplateEditorContentProps';
 import { buildTemplatePreviewContentProps } from './document-center/buildTemplatePreviewContentProps';
 import { TemplateEditorContent } from './document-center/TemplateEditorContent';
 import { TemplatePreviewContent } from './document-center/TemplatePreviewContent';
 import { TemplateCenterPreviewViewport } from '../documents/TemplateCenterPreviewViewport';
-import { useAdminOrganization, type AdminOrgProfile } from '../../contexts/AdminOrganizationContext';
+import {
+  getStoredAdminOrgProfile,
+  useAdminOrganization,
+  type AdminOrgProfile,
+} from '../../contexts/AdminOrganizationContext';
 import { getCustomerProfile } from '../dashboard/CustomerProfile';
 import { findSupplier, toSupplierProfile } from '../../data/suppliersData';
 
@@ -304,6 +310,7 @@ interface QuotationTemplateVersionRecord {
 }
 
 interface LoadedTemplateVersionMeta {
+  templateId?: string;
   version: string;
   status: TemplatePublishStatus;
   savedAt: string;
@@ -447,44 +454,40 @@ const normalizeScSellerFromAdminOrg = (
   data: SalesContractData,
   adminOrg: AdminOrgProfile,
   adminUserEmail?: string,
-): SalesContractData => ({
-  ...data,
-  seller: {
-    ...data.seller,
-    name: adminOrg.nameCN || data.seller.name,
-    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.seller.nameEn,
-    address: adminOrg.addressCN || adminOrg.addressEN || data.seller.address,
-    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.seller.addressEn,
-    tel: adminOrg.phone || data.seller.tel,
-    fax: '',
-    email: adminOrg.email || adminUserEmail || data.seller.email,
-    businessLicense: adminOrg.taxId || data.seller.businessLicense,
-    legalRepresentative:
-      adminOrg.contactPerson ||
-      adminOrg.documentDefaults.defaultSignatory ||
-      data.seller.legalRepresentative,
-    bankInfo: {
-      ...(data.seller.bankInfo || {}),
-      bankName: adminOrg.bankUSD.bankName || data.seller.bankInfo?.bankName || '',
-      accountName: adminOrg.bankUSD.accountName || data.seller.bankInfo?.accountName || '',
-      accountNumber: adminOrg.bankUSD.accountNumber || data.seller.bankInfo?.accountNumber || '',
-      swiftCode: adminOrg.bankUSD.swift || data.seller.bankInfo?.swiftCode || '',
-      bankAddress: adminOrg.bankUSD.bankAddress || data.seller.bankInfo?.bankAddress || '',
-      currency: data.seller.bankInfo?.currency || 'USD',
-      routingNumber: data.seller.bankInfo?.routingNumber || '',
-      iban: data.seller.bankInfo?.iban || '',
-      paymentNote: data.seller.bankInfo?.paymentNote || adminOrg.bankUSD.paymentNote || '',
+): SalesContractData => {
+  const bankInfo = resolveUsdSellerBankInfo(
+    adminOrg,
+    data.seller.bankInfo,
+    data.seller.nameEn || data.seller.name || '',
+  );
+  return {
+    ...data,
+    seller: {
+      ...data.seller,
+      name: adminOrg.nameCN || data.seller.name,
+      nameEn: adminOrg.nameEN || adminOrg.nameCN || data.seller.nameEn,
+      address: adminOrg.addressCN || adminOrg.addressEN || data.seller.address,
+      addressEn: adminOrg.addressEN || adminOrg.addressCN || data.seller.addressEn,
+      tel: adminOrg.phone || data.seller.tel,
+      fax: '',
+      email: adminOrg.email || adminUserEmail || data.seller.email,
+      businessLicense: adminOrg.taxId || data.seller.businessLicense,
+      legalRepresentative:
+        adminOrg.contactPerson ||
+        adminOrg.documentDefaults.defaultSignatory ||
+        data.seller.legalRepresentative,
+      bankInfo,
     },
-  },
-  signature: {
-    ...data.signature,
-    sellerSignatory:
-      adminOrg.documentDefaults.defaultSignatory ||
-      adminOrg.contactPerson ||
-      data.signature?.sellerSignatory ||
-      '',
-  },
-});
+    signature: {
+      ...data.signature,
+      sellerSignatory:
+        adminOrg.documentDefaults.defaultSignatory ||
+        adminOrg.contactPerson ||
+        data.signature?.sellerSignatory ||
+        '',
+    },
+  };
+};
 
 const normalizeCgBuyerFromAdminOrg = (
   data: PurchaseOrderData,
@@ -511,37 +514,39 @@ const normalizePiFromAdminOrg = (
   data: ProformaInvoiceData,
   adminOrg: AdminOrgProfile,
   adminUserEmail?: string,
-): ProformaInvoiceData => ({
-  ...data,
-  seller: {
-    ...data.seller,
-    name: adminOrg.nameCN || data.seller.name,
-    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.seller.nameEn,
-    address: adminOrg.addressCN || adminOrg.addressEN || data.seller.address,
-    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.seller.addressEn,
-    unit: data.seller.unit,
-    building: data.seller.building,
-    zone: data.seller.zone,
-    plaza: data.seller.plaza,
-    district: data.seller.district,
-    city: data.seller.city,
-    province: data.seller.province,
-    country: data.seller.country,
-    cell: adminOrg.phone || data.seller.cell,
-    email: adminOrg.email || adminUserEmail || data.seller.email,
-    logoUrl: adminOrg.logoUrl || data.seller.logoUrl,
-  },
-  bankInfo: {
-    ...data.bankInfo,
-    beneficiary: adminOrg.bankUSD.accountName || data.bankInfo.beneficiary,
-    beneficiaryAddress:
-      adminOrg.addressEN || adminOrg.addressCN || data.bankInfo.beneficiaryAddress,
-    accountNo: adminOrg.bankUSD.accountNumber || data.bankInfo.accountNo,
-    bank: adminOrg.bankUSD.bankName || data.bankInfo.bank,
-    bankAddress: adminOrg.bankUSD.bankAddress || data.bankInfo.bankAddress,
-    swiftCode: adminOrg.bankUSD.swift || data.bankInfo.swiftCode,
-  },
-});
+): ProformaInvoiceData => {
+  const bankInfo = resolveUsdSellerBankInfo(adminOrg, undefined, data.seller.nameEn || data.seller.name || '');
+  return {
+    ...data,
+    seller: {
+      ...data.seller,
+      name: adminOrg.nameCN || data.seller.name,
+      nameEn: adminOrg.nameEN || adminOrg.nameCN || data.seller.nameEn,
+      address: adminOrg.addressCN || adminOrg.addressEN || data.seller.address,
+      addressEn: adminOrg.addressEN || adminOrg.addressCN || data.seller.addressEn,
+      unit: data.seller.unit,
+      building: data.seller.building,
+      zone: data.seller.zone,
+      plaza: data.seller.plaza,
+      district: data.seller.district,
+      city: data.seller.city,
+      province: data.seller.province,
+      country: data.seller.country,
+      cell: adminOrg.phone || data.seller.cell,
+      email: adminOrg.email || adminUserEmail || data.seller.email,
+      logoUrl: adminOrg.logoUrl || data.seller.logoUrl,
+    },
+    bankInfo: {
+      ...data.bankInfo,
+      beneficiary: bankInfo.accountName,
+      beneficiaryAddress: adminOrg.addressEN || adminOrg.addressCN || data.bankInfo.beneficiaryAddress,
+      accountNo: bankInfo.accountNumber,
+      bank: bankInfo.bankName,
+      bankAddress: bankInfo.bankAddress,
+      swiftCode: bankInfo.swiftCode,
+    },
+  };
+};
 
 const normalizeCiExporterFromAdminOrg = (
   data: CommercialInvoiceData,
@@ -575,24 +580,27 @@ const normalizeSoaCompanyFromAdminOrg = (
   data: StatementOfAccountData,
   adminOrg: AdminOrgProfile,
   adminUserEmail?: string,
-): StatementOfAccountData => ({
-  ...data,
-  company: {
-    ...data.company,
-    name: adminOrg.nameCN || data.company.name,
-    nameEn: adminOrg.nameEN || adminOrg.nameCN || data.company.nameEn,
-    address: adminOrg.addressCN || adminOrg.addressEN || data.company.address,
-    addressEn: adminOrg.addressEN || adminOrg.addressCN || data.company.addressEn,
-    tel: adminOrg.phone || data.company.tel,
-    email: adminOrg.email || adminUserEmail || data.company.email,
-    accountName: adminOrg.bankUSD.accountName || data.company.accountName,
-    bankName: adminOrg.bankUSD.bankName || data.company.bankName,
-    accountNumber: adminOrg.bankUSD.accountNumber || data.company.accountNumber,
-    swiftCode: adminOrg.bankUSD.swift || data.company.swiftCode,
-    bankAddress: adminOrg.bankUSD.bankAddress || data.company.bankAddress,
-    paymentNote: adminOrg.bankUSD.paymentNote || data.company.paymentNote,
-  },
-});
+): StatementOfAccountData => {
+  const bankInfo = resolveUsdSellerBankInfo(adminOrg, undefined, data.company.nameEn || data.company.name || '');
+  return {
+    ...data,
+    company: {
+      ...data.company,
+      name: adminOrg.nameCN || data.company.name,
+      nameEn: adminOrg.nameEN || adminOrg.nameCN || data.company.nameEn,
+      address: adminOrg.addressCN || adminOrg.addressEN || data.company.address,
+      addressEn: adminOrg.addressEN || adminOrg.addressCN || data.company.addressEn,
+      tel: adminOrg.phone || data.company.tel,
+      email: adminOrg.email || adminUserEmail || data.company.email,
+      accountName: bankInfo.accountName,
+      bankName: bankInfo.bankName,
+      accountNumber: bankInfo.accountNumber,
+      swiftCode: bankInfo.swiftCode,
+      bankAddress: bankInfo.bankAddress,
+      paymentNote: bankInfo.paymentNote,
+    },
+  };
+};
 const normalizeQrPreviewLayout = (
   layout?: Partial<QuoteRequirementPreviewLayout> | null
 ): QuoteRequirementPreviewLayout => ({
@@ -609,6 +617,8 @@ const formatVersionTime = () =>
     hour: '2-digit',
     minute: '2-digit',
   });
+
+const TEMPLATE_CENTER_LOCAL_DRAFT_PREFIX = 'template_center_local_draft_v1:';
 
 const bumpSemanticVersion = (version: string, mode: 'patch' | 'minor') => {
   const match = version.match(/^v(\d+)\.(\d+)\.(\d+)/i);
@@ -723,9 +733,19 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     templateKey: string;
     status: QrVersionRecordStatus;
   } | null>(null);
+  const persistingTemplateActionRef = useRef<{
+    templateKey: string;
+    status: QrVersionRecordStatus;
+  } | null>(null);
+  const lastTemplatePersistTriggerRef = useRef<{
+    templateKey: string;
+    status: QrVersionRecordStatus;
+    at: number;
+  } | null>(null);
   const [loadedTemplateVersionMap, setLoadedTemplateVersionMap] = useState<Record<string, LoadedTemplateVersionMeta>>({});
   const [templateHubView, setTemplateHubView] = useState<'detail' | 'editor'>('detail');
   const [previewScale, setPreviewScale] = useState(80);
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [editingTemplateTabId, setEditingTemplateTabId] = useState<string | null>(null);
@@ -980,6 +1000,14 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     return cloneQrState(incomingData as T);
   };
 
+  const normalizeInquiryTemplateWorkspaceData = (incomingData: unknown): CustomerInquiryData => {
+    const resolved = resolveTemplateWorkspaceRecordData(
+      cloneQrState(BASELINE_ING_TEMPLATE_SEED),
+      cloneQrState(incomingData),
+    );
+    return prepareCustomerInquiryDocumentData(resolved as CustomerInquiryData) || cloneQrState(BASELINE_ING_TEMPLATE_SEED);
+  };
+
   const applyWorkspaceRecords = <TRecord extends { data: any; layout: WorkspacePreviewLayout }>(
     records: any[] | null,
     fallbackData: any,
@@ -1009,11 +1037,12 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
 
   const updateLoadedTemplateVersion = (
     templateKey: string,
-    record: { version: string; status: QrVersionRecordStatus; savedAt: string; savedBy: string; note: string },
+    record: { templateId?: string; version: string; status: QrVersionRecordStatus; savedAt: string; savedBy: string; note: string },
   ) => {
     setLoadedTemplateVersionMap((prev) => ({
       ...prev,
       [templateKey]: {
+        templateId: record.templateId,
         version: record.version,
         status: record.status === 'published' ? 'published' : 'draft',
         savedAt: record.savedAt,
@@ -1354,6 +1383,11 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   const openSendDialog = (doc: Document) => {
     setSelectedDoc(doc);
     setSendDialogOpen(true);
+  };
+
+  const openPreviewDialog = (doc: Document) => {
+    setSelectedDoc(doc);
+    setPreviewDialogOpen(true);
   };
 
   // 获取单证状态徽章
@@ -1966,7 +2000,14 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         return;
       }
       if (templateKey === 'ing') {
-        applyWorkspaceRecords<InquiryTemplateVersionRecord>(records, BASELINE_ING_TEMPLATE_SEED, setInquiryVersionHistory, setInquiryTemplateData, setInquiryTemplateLayout);
+        applyWorkspaceRecords<InquiryTemplateVersionRecord>(
+          records,
+          BASELINE_ING_TEMPLATE_SEED,
+          setInquiryVersionHistory,
+          setInquiryTemplateData,
+          setInquiryTemplateLayout,
+          normalizeInquiryTemplateWorkspaceData,
+        );
         if (records[0]) {
           updateLoadedTemplateVersion('ing', records[0] as InquiryTemplateVersionRecord);
           syncTemplateVersionNote('ing', (records[0] as InquiryTemplateVersionRecord).note);
@@ -2004,6 +2045,8 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   const isPersistingActiveTemplate = activeTemplate
     ? persistingTemplateAction?.templateKey === activeTemplate.id
     : false;
+  const isPersistingActiveTemplateDraft = isPersistingActiveTemplate && persistingTemplateAction?.status === 'draft';
+  const isPersistingActiveTemplatePublished = isPersistingActiveTemplate && persistingTemplateAction?.status === 'published';
 
   const templateWorkspaceStats = {
     total: templateWorkspaceItems.length,
@@ -2604,27 +2647,32 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     templateKey: 'qr' | 'pr' | 'xj' | 'bj' | 'sc' | 'cg' | 'pi' | 'ci' | 'pl' | 'soa' | 'ing' | 'qt';
     status: QrVersionRecordStatus;
     baseVersion: string;
+    templateId?: string;
     note: string;
     savedBy: string;
     data: Record<string, any>;
     layout: WorkspacePreviewLayout | QuoteRequirementPreviewLayout;
     textOverrides?: Record<string, any> | null;
   }) => {
-    const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number) => {
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      try {
-        return await Promise.race<T>([
-          promise,
-          new Promise<T>((_, reject) => {
-            timeoutId = setTimeout(() => {
-              reject(new Error(`模板保存超时（>${Math.round(timeoutMs / 1000)}秒），请重试`));
-            }, timeoutMs);
-          }),
-        ]);
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId);
-      }
-    };
+    const now = Date.now();
+    const lastTrigger = lastTemplatePersistTriggerRef.current;
+    if (
+      lastTrigger?.templateKey === options.templateKey &&
+      now - lastTrigger.at < 1500
+    ) {
+      console.info(
+        `[TemplateCenter] ignore rapid re-trigger for ${options.templateKey}; last=${lastTrigger.status}, next=${options.status}, delta=${now - lastTrigger.at}ms`,
+      );
+      return null;
+    }
+
+    const activePersist = persistingTemplateActionRef.current;
+    if (activePersist?.templateKey === options.templateKey) {
+      console.info(
+        `[TemplateCenter] skip duplicate persist for ${options.templateKey}; ${activePersist.status} already in progress`,
+      );
+      return null;
+    }
 
     const version =
       options.status === 'published'
@@ -2632,13 +2680,23 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         : `${bumpSemanticVersion(options.baseVersion, 'patch')}-draft`;
     const note = options.note.trim() || (options.status === 'published' ? '发布版本' : '保存草稿');
 
+    lastTemplatePersistTriggerRef.current = {
+      templateKey: options.templateKey,
+      status: options.status,
+      at: now,
+    };
+    persistingTemplateActionRef.current = {
+      templateKey: options.templateKey,
+      status: options.status,
+    };
     setPersistingTemplateAction({
       templateKey: options.templateKey,
       status: options.status,
     });
     try {
-      const persistedRecord = await withTimeout(templateCenterService.saveVersion({
+      const persistedRecord = await templateCenterService.saveVersion({
         templateKey: options.templateKey,
+        templateId: options.templateId,
         version,
         status: options.status,
         note,
@@ -2646,7 +2704,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         data: cloneQrState(options.data),
         layout: cloneQrState(options.layout),
         textOverrides: options.textOverrides || null,
-      }), options.status === 'published' ? 60000 : 60000);
+      });
 
       if (!persistedRecord) {
         toast.error(`Supabase 保存失败，${version} 未写入。`);
@@ -2672,6 +2730,42 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       };
     } catch (error) {
       const msg = error instanceof Error ? error.message : '';
+      const isTransientTemplateCenterFailure =
+        msg.includes('Supabase unreachable') ||
+        msg.includes('unreachable') ||
+        msg.includes('timed out') ||
+        msg.includes('超时');
+
+      if (options.status === 'draft' && isTransientTemplateCenterFailure) {
+        const localDraftRecord = {
+          id: `local-${options.templateKey}-${Date.now()}`,
+          templateId: options.templateId,
+          version,
+          status: 'draft' as const,
+          savedAt: formatVersionTime(),
+          savedBy: options.savedBy || 'Template Center Local Cache',
+          note: options.note.trim() || '数据库超时，已暂存到本地草稿。',
+          data: cloneQrState(options.data),
+          layout:
+            options.templateKey === 'qr' || options.templateKey === 'pr'
+              ? normalizeQrPreviewLayout(options.layout as QuoteRequirementPreviewLayout)
+              : normalizeWorkspacePreviewLayout(options.layout as WorkspacePreviewLayout),
+          ...(options.textOverrides
+            ? { textOverrides: cloneQrState(options.textOverrides) }
+            : {}),
+        };
+
+        try {
+          window.localStorage.setItem(
+            `${TEMPLATE_CENTER_LOCAL_DRAFT_PREFIX}${options.templateKey}`,
+            JSON.stringify(localDraftRecord),
+          );
+        } catch {}
+
+        toast.warning(`⚠️ 数据库暂时不可用，已保存到本地草稿 ${version}`);
+        return localDraftRecord;
+      }
+
       if (msg.includes('Supabase unreachable') || msg.includes('unreachable')) {
         toast.error('⚠️ 数据库暂时无法连接，模板未保存。请稍后重试，或联系管理员检查 Supabase 服务状态。');
       } else if (msg.includes('timed out') || msg.includes('超时')) {
@@ -2681,6 +2775,9 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       }
       return null;
     } finally {
+      if (persistingTemplateActionRef.current?.templateKey === options.templateKey) {
+        persistingTemplateActionRef.current = null;
+      }
       setPersistingTemplateAction((current) => (
         current?.templateKey === options.templateKey ? null : current
       ));
@@ -2693,6 +2790,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'qr',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.qr?.templateId || (latestQrPublishedRecord as any)?.templateId || (latestQrDraftRecord as any)?.templateId,
       note: qrTemplateVersionNote,
       savedBy: userEmail || 'Template Admin',
       data: qrTemplateData,
@@ -2711,6 +2809,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'pr',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.pr?.templateId || (latestPrPublishedRecord as any)?.templateId || (latestPrDraftRecord as any)?.templateId,
       note: prTemplateVersionNote,
       savedBy: userEmail || 'Procurement Admin',
       data: prTemplateData,
@@ -2749,6 +2848,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'xj',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.xj?.templateId || (latestXjPublishedRecord as any)?.templateId || (latestXjDraftRecord as any)?.templateId,
       note: xjTemplateVersionNote,
       savedBy: userEmail || 'Procurement Admin',
       data: normalizedXjTemplateData,
@@ -2787,6 +2887,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'bj',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.bj?.templateId || (latestBjPublishedRecord as any)?.templateId || (latestBjDraftRecord as any)?.templateId,
       note: bjTemplateVersionNote,
       savedBy: userEmail || 'Sales Admin',
       data: normalizedBjTemplateData,
@@ -2819,6 +2920,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'sc',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.sc?.templateId || (latestScPublishedRecord as any)?.templateId || (latestScDraftRecord as any)?.templateId,
       note: scTemplateVersionNote,
       savedBy: userEmail || 'Contract Admin',
       data: normalizedScTemplateData,
@@ -2855,6 +2957,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'cg',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.cg?.templateId || (latestCgPublishedRecord as any)?.templateId || (latestCgDraftRecord as any)?.templateId,
       note: cgTemplateVersionNote,
       savedBy: userEmail || 'Procurement Admin',
       data: normalizedCgTemplateData,
@@ -2887,6 +2990,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'pi',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.pi?.templateId || (latestPiPublishedRecord as any)?.templateId || (latestPiDraftRecord as any)?.templateId,
       note: piTemplateVersionNote,
       savedBy: userEmail || 'Finance Admin',
       data: normalizedPiTemplateData,
@@ -2913,6 +3017,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'ci',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.ci?.templateId || (latestCiPublishedRecord as any)?.templateId || (latestCiDraftRecord as any)?.templateId,
       note: ciTemplateVersionNote,
       savedBy: userEmail || 'Docs Admin',
       data: normalizedCiTemplateData,
@@ -2939,6 +3044,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'pl',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.pl?.templateId || (latestPlPublishedRecord as any)?.templateId || (latestPlDraftRecord as any)?.templateId,
       note: plTemplateVersionNote,
       savedBy: userEmail || 'Docs Admin',
       data: normalizedPlTemplateData,
@@ -2971,6 +3077,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'soa',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.soa?.templateId || (latestSoaPublishedRecord as any)?.templateId || (latestSoaDraftRecord as any)?.templateId,
       note: soaTemplateVersionNote,
       savedBy: userEmail || 'Finance Admin',
       data: normalizedSoaTemplateData,
@@ -2984,28 +3091,111 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
   };
 
   const applyInquiryVersionRecord = (record: InquiryTemplateVersionRecord) => {
-    setInquiryTemplateData(resolveTemplateWorkspaceRecordData(cloneQrState(BASELINE_ING_TEMPLATE_SEED), cloneQrState(record.data)));
+    setInquiryTemplateData(normalizeInquiryTemplateWorkspaceData(record.data));
     setInquiryTemplateLayout(cloneQrState(normalizeWorkspacePreviewLayout(record.layout)));
     updateLoadedTemplateVersion('ing', record);
     syncTemplateVersionNote('ing', record.note);
   };
 
+  const validateIngTemplateBeforePublish = (data: CustomerInquiryData) => {
+    const columns = Array.isArray(data.templateSettings?.productTableColumns) && data.templateSettings?.productTableColumns.length
+      ? data.templateSettings.productTableColumns
+      : DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS;
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const totalWidth = columns.reduce((sum, column) => sum + Number(column?.widthPercent || 0), 0);
+
+    if (Math.abs(totalWidth - 100) > 0.5) {
+      errors.push(`产品表格列宽总和必须接近 100%，当前为 ${totalWidth.toFixed(2)}%。`);
+    }
+
+    const minWidthByKey: Partial<Record<string, number>> = {
+      no: 6,
+      modelNo: 10,
+      image: 8,
+      itemNameSpecification: 28,
+      quantity: 10,
+      unit: 8,
+      targetPrice: 13,
+      estimatedValue: 14,
+    };
+
+    const highRiskColumns = new Set(['targetPrice', 'estimatedValue']);
+
+    columns.forEach((column) => {
+      const key = String(column?.key || '').trim();
+      const label = String(column?.label || '').trim();
+      const width = Number(column?.widthPercent || 0);
+      const minWidth = Number(minWidthByKey[key] || 0);
+
+      if (!key) {
+        errors.push('存在未定义 key 的列配置。');
+        return;
+      }
+
+      if (!label) {
+        errors.push(`列 ${key} 的标题不能为空。`);
+      }
+
+      if (!Number.isFinite(width) || width <= 0) {
+        errors.push(`列 ${label || key} 的宽度无效。`);
+        return;
+      }
+
+      if (minWidth > 0 && width < minWidth) {
+        errors.push(`列 ${label || key} 宽度过小：当前 ${width}% ，至少需要 ${minWidth}%。`);
+      }
+
+      if (highRiskColumns.has(key) && label.length >= 10 && width <= minWidth) {
+        errors.push(`列 ${label} 标题较长且宽度不足，发布后客户侧容易溢出。请继续加宽该列。`);
+        return;
+      }
+
+      if (label.length >= 10 && width < minWidth + 1) {
+        warnings.push(`列 ${label} 标题较长且当前宽度偏窄，客户侧容易挤压。`);
+      }
+    });
+
+    return {
+      ok: errors.length === 0,
+      errors,
+      warnings,
+    };
+  };
+
   const saveInquiryVersion = async (status: QrVersionRecordStatus) => {
+    if (status === 'published') {
+      const validation = validateIngTemplateBeforePublish(inquiryTemplateData);
+      if (!validation.ok) {
+        toast.error(`ING 模版未发布：${validation.errors[0]}`);
+        return;
+      }
+      if (validation.warnings.length > 0) {
+        toast.warning(`ING 模版发布提醒：${validation.warnings[0]}`);
+      }
+    }
+
     const baseVersion = latestInquiryPublishedRecord?.version || 'v1.0.0';
+    const normalizedInquiryTemplateData = normalizeInquiryTemplateWorkspaceData(inquiryTemplateData);
     const record = await persistTemplateVersion({
       templateKey: 'ing',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.ing?.templateId || (latestInquiryPublishedRecord as any)?.templateId || (latestInquiryDraftRecord as any)?.templateId,
       note: inquiryTemplateVersionNote,
       savedBy: userEmail || 'Admin',
-      data: inquiryTemplateData,
+      data: normalizedInquiryTemplateData,
       layout: inquiryTemplateLayout,
     });
     if (!record) return;
+    setInquiryTemplateData(normalizedInquiryTemplateData);
     setInquiryVersionHistory((prev) => [record as InquiryTemplateVersionRecord, ...prev]);
     updateLoadedTemplateVersion('ing', record as InquiryTemplateVersionRecord);
     toast.success(status === 'published' ? `已发布 ${record.version}` : `已保存草稿 ${record.version}`);
   };
+
+  const inquiryPublishValidation = validateIngTemplateBeforePublish(inquiryTemplateData);
 
   const applyQuotationVersionRecord = (record: QuotationTemplateVersionRecord) => {
     setQuotationTemplateData(
@@ -3031,6 +3221,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
       templateKey: 'qt',
       status,
       baseVersion,
+      templateId: loadedTemplateVersionMap.qt?.templateId || (latestQuotationPublishedRecord as any)?.templateId || (latestQuotationDraftRecord as any)?.templateId,
       note: quotationTemplateVersionNote,
       savedBy: userEmail || 'Sales Admin',
       data: normalizedQuotationTemplateData,
@@ -3230,7 +3421,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         baseVersion: latestInquiryPublishedRecord?.version || record.version || 'v1.0.0',
         note: buildRestoreVersionNote(record),
         savedBy: userEmail || 'Admin',
-        data: cloneQrState(record.data || BASELINE_ING_TEMPLATE_SEED),
+        data: normalizeInquiryTemplateWorkspaceData(record.data || BASELINE_ING_TEMPLATE_SEED),
         layout: cloneQrState(normalizeWorkspacePreviewLayout(record.layout)),
       });
       if (!restored) return;
@@ -3327,6 +3518,38 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
     if (!latestQuotationVersionRecord) return;
     applyQuotationVersionRecord(latestQuotationVersionRecord);
     toast.success(`已恢复最近版本 ${latestQuotationVersionRecord.version}`);
+  };
+
+  const dispatchTemplatePersistAction = (status: QrVersionRecordStatus) => {
+    if (!activeTemplate?.id) return;
+
+    const templateKey = activeTemplate.id;
+    const activePersist = persistingTemplateActionRef.current;
+    if (activePersist?.templateKey === templateKey) {
+      console.info(
+        `[TemplateCenter] blocked duplicate action while ${templateKey} is persisting; current=${activePersist.status}, requested=${status}`,
+      );
+      return;
+    }
+
+    const lastTrigger = lastTemplatePersistTriggerRef.current;
+    if (
+      lastTrigger?.templateKey === templateKey &&
+      lastTrigger.status !== status &&
+      Date.now() - lastTrigger.at < 5000
+    ) {
+      console.info(
+        `[TemplateCenter] blocked ghost cross-action for ${templateKey}; last=${lastTrigger.status}, requested=${status}`,
+      );
+      return;
+    }
+
+    if (status === 'draft') {
+      handleTemplateDraftSave();
+      return;
+    }
+
+    handleTemplatePublish();
   };
 
   const handleTemplateDraftSave = () => {
@@ -3653,6 +3876,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         inquiryProductTableColumns: inquiryTemplateData.templateSettings?.productTableColumns || DEFAULT_CUSTOMER_INQUIRY_PRODUCT_TABLE_COLUMNS,
         moveInquiryProductTableColumn,
         updateInquiryProductTableColumn,
+        inquiryPublishValidation,
         CUSTOMER_INQUIRY_REQUIREMENT_FIELDS,
         activeInquiryRequirementField,
         setActiveInquiryRequirementField,
@@ -3726,23 +3950,41 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
             )}
             <div className="ml-auto flex items-center gap-2">
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 className="h-7 text-xs border-violet-300 text-violet-700 hover:bg-violet-50"
-                onClick={handleTemplateDraftSave}
-                disabled={isPersistingActiveTemplate}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dispatchTemplatePersistAction('draft');
+                }}
+                disabled={isPersistingActiveTemplateDraft}
               >
-                {isPersistingActiveTemplate && persistingTemplateAction?.status === 'draft'
+                {isPersistingActiveTemplateDraft
                   ? '保存中...'
                   : '保存草稿'}
               </Button>
               <Button
+                type="button"
                 size="sm"
                 className="h-7 text-xs bg-violet-600 hover:bg-violet-700"
-                onClick={handleTemplatePublish}
-                disabled={isPersistingActiveTemplate}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dispatchTemplatePersistAction('published');
+                }}
+                disabled={isPersistingActiveTemplatePublished}
               >
-                {isPersistingActiveTemplate && persistingTemplateAction?.status === 'published'
+                {isPersistingActiveTemplatePublished
                   ? '发布中...'
                   : '发布版本'}
               </Button>
@@ -3763,7 +4005,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
             </div>
             <div className="min-h-0 flex-1 overflow-hidden bg-slate-100 p-6">
               <div
-                className="h-full min-h-0 overflow-hidden rounded-[24px] p-8 shadow-inner"
+                className="relative h-full min-h-0 overflow-hidden rounded-[24px] p-8 shadow-inner"
                 style={{ backgroundColor: '#525659' }}
               >
                 <TemplateCenterPreviewViewport
@@ -4031,7 +4273,7 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
         {activeTemplate && (
           <div className="min-h-0 flex-1 overflow-hidden bg-slate-100 p-6">
             <div
-              className="h-full min-h-0 overflow-hidden rounded-[24px] p-8 shadow-inner"
+              className="relative h-full min-h-0 overflow-hidden rounded-[24px] p-8 shadow-inner"
               style={{ backgroundColor: '#525659' }}
             >
               <TemplateCenterPreviewViewport
@@ -4302,7 +4544,25 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
                           </td>
                           <td className="p-2">
                             <div className="flex items-center justify-end gap-0.5">
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0"><Eye className="w-3 h-3" /></Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                                onClick={() => {
+                                  const primaryDoc =
+                                    group.documents.SC ||
+                                    group.documents.CI ||
+                                    group.documents.PL ||
+                                    group.documents.BL;
+                                  if (primaryDoc) {
+                                    openPreviewDialog(primaryDoc);
+                                  } else {
+                                    toast.error('当前合同暂无可预览单证');
+                                  }
+                                }}
+                              >
+                                <Eye className="w-3 h-3" />
+                              </Button>
                               <Button variant="ghost" size="sm" className="h-6 w-6 p-0"><Download className="w-3 h-3" /></Button>
                               {userRole !== 'customer' && (
                                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0"><Send className="w-3 h-3" /></Button>
@@ -4341,7 +4601,14 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
                                         <p className="text-[11px] text-green-600 font-medium">已发 {doc.sentHistory.length}次</p>
                                       )}
                                       <div className="flex gap-0.5">
-                                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0"><Eye className="w-3 h-3" /></Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 w-6 p-0"
+                                          onClick={() => openPreviewDialog(doc)}
+                                        >
+                                          <Eye className="w-3 h-3" />
+                                        </Button>
                                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0"><Download className="w-3 h-3" /></Button>
                                         {userRole !== 'customer' && (
                                           <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openSendDialog(doc)}>
@@ -4371,10 +4638,86 @@ export default function DocumentCenter({ userRole = 'admin', userEmail }: Docume
           <span>共 {filteredDocuments.length} 份单证</span>
         </div>
 
+        {/* 预览对话框 */}
+        <DocumentPreviewDialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen} document={selectedDoc} />
+
         {/* 发送对话框 */}
         <SendDocumentDialog open={sendDialogOpen} onOpenChange={setSendDialogOpen} document={selectedDoc} />
       </div>
     </TooltipProvider>
+  );
+}
+
+function DocumentPreviewDialog({ open, onOpenChange, document }: any) {
+  if (!document) return null;
+
+  const latestSent = Array.isArray(document.sentHistory) && document.sentHistory.length > 0
+    ? document.sentHistory[document.sentHistory.length - 1]
+    : null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Eye className="w-5 h-5 text-blue-600" />
+            单证预览
+          </DialogTitle>
+          <DialogDescription>
+            {document.documentNumber} · {document.customerName}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm">
+            <div>单证编号: {document.documentNumber}</div>
+            <div>单证类型: {document.documentType}</div>
+            <div>合同编号: {document.contractNumber}</div>
+            <div>客户名称: {document.customerName}</div>
+            <div>客户邮箱: {document.customerEmail}</div>
+            <div>区域: {document.region}</div>
+            <div>出货日期: {document.shipmentDate}</div>
+            <div>生成日期: {document.generatedDate}</div>
+            <div>状态: {document.status}</div>
+            <div>文件大小: {document.fileSize ? `${document.fileSize}KB` : '未记录'}</div>
+          </div>
+
+          <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/60 p-6">
+            <div className="mb-3 flex items-center gap-2 text-blue-900">
+              <FileText className="h-5 w-5" />
+              <span className="font-medium">预览摘要</span>
+            </div>
+            <div className="space-y-2 text-sm text-gray-700">
+              <p>当前单证: {document.documentType} / {document.documentNumber}</p>
+              <p>对应合同: {document.contractNumber}</p>
+              <p>客户: {document.customerName}</p>
+              {document.metadata?.portOfLoading && <p>起运港: {document.metadata.portOfLoading}</p>}
+              {document.metadata?.portOfDischarge && <p>目的港: {document.metadata.portOfDischarge}</p>}
+              {latestSent && <p>最近发送: {latestSent.sentAt} 发给 {latestSent.sentTo}</p>}
+              {!document.fileUrl && (
+                <p className="pt-2 text-xs text-gray-500">
+                  当前这批数据尚未绑定真实文件地址，所以先展示单证业务摘要预览；后续接入真实 PDF/HTML 文件后，这里可以直接打开文件。
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+              关闭
+            </Button>
+            {document.fileUrl && (
+              <Button
+                size="sm"
+                onClick={() => window.open(document.fileUrl, '_blank', 'noopener,noreferrer')}
+              >
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                打开文件
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

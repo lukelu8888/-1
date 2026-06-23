@@ -348,7 +348,7 @@ function rowToCategory(row: Record<string, unknown>): ProductCategory {
     id: row.id as string,
     tenantId: row.tenant_id as string,
     parentId: (row.parent_id as string) ?? null,
-    level: row.level as 1 | 2 | 3,
+    level: Number(row.level ?? 1),
     code: row.code as string,
     name: row.name as string,
     nameEn: (row.name_en as string) ?? undefined,
@@ -834,6 +834,33 @@ export const supabaseProductCenterService: ProductCenterService = {
   async removeAttributeValue(id) {
     const res = await supabase.from('pc_product_attribute_values').delete().eq('id', id);
     if (res.error) throw new PcSupabaseError('removeAttributeValue', res.error);
+  },
+
+  // ── Categories ────────────────────────────────────────────────────────
+  async upsertCategory(input) {
+    const payload = stripUndefined({
+      id: input.id,
+      tenant_id: input.tenantId,
+      parent_id: input.parentId,
+      level: input.level,
+      code: input.code,
+      name: input.name,
+      name_en: input.nameEn,
+      sort_order: input.sortOrder,
+      seo_title: input.seoTitle,
+      seo_description: input.seoDescription,
+      is_active: input.isActive,
+    });
+    const res = await supabase
+      .from('pc_product_categories')
+      .upsert(payload, { onConflict: 'id' })
+      .select('*')
+      .single();
+    return rowToCategory(unwrap(res, 'upsertCategory') as Record<string, unknown>);
+  },
+  async removeCategory(id) {
+    const res = await supabase.from('pc_product_categories').delete().eq('id', id);
+    if (res.error) throw new PcSupabaseError('removeCategory', res.error);
   },
 
   // ── Suppliers ──────────────────────────────────────────────────────────

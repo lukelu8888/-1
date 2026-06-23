@@ -818,7 +818,7 @@ export default function PermissionCenterV1() {
             />
           </TabsContent>
 
-          <TabsContent value={TAB_VALUE.actions} className="m-0 p-3">
+          <TabsContent value={TAB_VALUE.actions} className="m-0 flex-1 min-h-0 overflow-hidden p-3">
             <ActionsDataScopeTab
               matrixSearch={matrixSearch}
               onMatrixSearchChange={setMatrixSearch}

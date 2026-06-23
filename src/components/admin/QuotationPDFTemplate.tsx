@@ -1,5 +1,6 @@
 import React from 'react';
 import { format } from 'date-fns';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 
 interface QuotationPDFTemplateProps {
   quotation: any;
@@ -199,7 +200,7 @@ export const QuotationPDFTemplate = React.forwardRef<HTMLDivElement, QuotationPD
           </h3>
           <ul style={{ margin: '0', paddingLeft: '20px', lineHeight: '1.6' }}>
             <li><strong>Price Terms:</strong> FOB Xiamen Port / CIF [Destination Port]</li>
-            <li><strong>Payment Terms:</strong> 30% T/T deposit, 70% balance before shipment</li>
+            <li><strong>Payment Terms:</strong> {quotation?.paymentTerms || buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment')}</li>
             <li><strong>Lead Time:</strong> 30-45 days after deposit received</li>
             <li><strong>Validity:</strong> This quotation is valid for 30 days from the date of issue</li>
             <li><strong>MOQ:</strong> As specified per product</li>

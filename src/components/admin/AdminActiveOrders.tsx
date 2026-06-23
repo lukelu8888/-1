@@ -6,6 +6,7 @@ import { useQuoteRequirements } from '../../contexts/QuoteRequirementContext';
 import { SalesContractDocument } from '../documents/templates/SalesContractDocument';
 import { adaptOrderToSalesContract } from '../../utils/documentDataAdapters';
 import { buildQuoteRequirementDocumentSnapshot } from './purchase-order/purchaseOrderUtils';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 import { PaymentProofDialog } from './PaymentProofDialog';
 import { UploadPaymentProofDialog } from './UploadPaymentProofDialog';
 import { Card } from '../ui/card';
@@ -91,7 +92,7 @@ export default function AdminActiveOrders() {
   
   // 合同条款编辑状态
   const [contractTerms, setContractTerms] = useState({
-    paymentTerms: '30% T/T deposit, 70% balance before shipment',
+    paymentTerms: buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment'),
     deliveryTerms: 'FOB Fuzhou, China (福州FOB)',
     shippingMethod: 'Sea Freight 海运',
     expectedDelivery: '',

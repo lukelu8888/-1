@@ -1,5 +1,6 @@
 import React from 'react';
 import { format } from 'date-fns';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 
 interface SalesContractTemplateProps {
   order: {
@@ -234,7 +235,7 @@ export const SalesContractTemplate = React.forwardRef<HTMLDivElement, SalesContr
           {/* 🔥 第一框：付款条件和付款金额 */}
           <div style={{ border: '1px solid #ddd', padding: '8px', fontSize: '8pt', backgroundColor: '#f9fafb', lineHeight: '1.5', marginBottom: '8px' }}>
             <p style={{ margin: '0 0 4px 0' }}>
-              <strong>Payment Terms 付款方式:</strong> {order.paymentTerms || '30% T/T deposit, 70% balance before shipment'}
+              <strong>Payment Terms 付款方式:</strong> {order.paymentTerms || buildPaymentTermsText('tt_deposit_balance_before_shipment', 'before_shipment')}
             </p>
             <p style={{ margin: '4px 0 8px 0', color: '#666', fontSize: '7.5pt' }}>
               预付30%电汇定金，发货前支付70%尾款。

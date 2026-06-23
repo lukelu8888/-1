@@ -8,16 +8,14 @@ import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner@2.0.3';
 import { TRADE_TERMS_PRESETS, isPresetTradeTerm, resolveInitialTradeTerms } from '../../utils/tradeTerms';
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
-
-// 🔥 预设选项配置
-const PAYMENT_TERMS_PRESETS = [
-  '30% T/T预付，70%见提单副本付款',
-  '50% T/T预付，50%发货前付清',
-  '100% T/T预付',
-  'L/C at sight（即期信用证）',
-  '30天远期信用证',
-  '自定义...'
-];
+import type { PaymentMode } from '../../contexts/SalesQuotationContext';
+import {
+  BALANCE_TRIGGER_OPTIONS,
+  PAYMENT_MODE_OPTIONS,
+  buildPaymentTermsText,
+  deriveBalanceTrigger,
+  type BalanceTrigger,
+} from '../../lib/paymentFlow';
 
 const QUALITY_REQUIREMENTS_PRESETS = [
   '需要第三方验货，AQL 2.5标准',
@@ -41,7 +39,7 @@ interface SubmitToProcurementDialogProps {
   open: boolean;
   onClose: () => void;
   requirement: any; // 采购需求单数据
-  onSubmit: (data: any) => void;
+  onSubmit: (data: any) => Promise<void> | void;
 }
 
 export function SubmitToProcurementDialog({
@@ -69,14 +67,19 @@ export function SubmitToProcurementDialog({
   const [remarks, setRemarks] = useState('');
   
   const [tradeTerms, setTradeTerms] = useState(resolveInitialTradeTerms());
-  const [paymentTerms, setPaymentTerms] = useState(PAYMENT_TERMS_PRESETS[0]); // 🔥 默认：第一条付款条款
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('tt_deposit_balance_before_shipment');
+  const [balanceTrigger, setBalanceTrigger] = useState<BalanceTrigger>(
+    deriveBalanceTrigger('tt_deposit_balance_before_shipment', null),
+  );
+  const [paymentTerms, setPaymentTerms] = useState(
+    buildPaymentTermsText('tt_deposit_balance_before_shipment', deriveBalanceTrigger('tt_deposit_balance_before_shipment', null)),
+  );
   const [deliveryDate, setDeliveryDate] = useState(getDefaultDeliveryDate()); // 🔥 默认：30天后
   const [targetCostRange, setTargetCostRange] = useState('');
   const [qualityRequirements, setQualityRequirements] = useState(QUALITY_REQUIREMENTS_PRESETS[0]); // 🔥 默认：第一条验货要求
   const [packagingRequirements, setPackagingRequirements] = useState(PACKAGING_REQUIREMENTS_PRESETS[0]); // 🔥 默认：第一条特殊包装
 
   // 🔥 控制是否使用自定义输入
-  const [isCustomPayment, setIsCustomPayment] = useState(false);
   const [isCustomTradeTerms, setIsCustomTradeTerms] = useState(false);
   const [isCustomQuality, setIsCustomQuality] = useState(false);
   const [isCustomPackaging, setIsCustomPackaging] = useState(false);
@@ -113,7 +116,14 @@ export function SubmitToProcurementDialog({
       console.log('🔄 [SubmitToProcurementDialog] 对话框打开，重置为默认值');
       setExpectedQuoteDate(getDefaultQuoteDate());
       setDeliveryDate(getDefaultDeliveryDate());
-      setPaymentTerms(PAYMENT_TERMS_PRESETS[0]);
+      const requirementPaymentMode = String((requirement as any)?.paymentMode || '').trim() as PaymentMode;
+      const initialPaymentMode = PAYMENT_MODE_OPTIONS.some((option) => option.value === requirementPaymentMode)
+        ? requirementPaymentMode
+        : 'tt_deposit_balance_before_shipment';
+      const initialBalanceTrigger = deriveBalanceTrigger(initialPaymentMode, (requirement as any)?.balanceTrigger || null);
+      setPaymentMode(initialPaymentMode);
+      setBalanceTrigger(initialBalanceTrigger);
+      setPaymentTerms(String((requirement as any)?.paymentTerms || '').trim() || buildPaymentTermsText(initialPaymentMode, initialBalanceTrigger));
       setQualityRequirements(QUALITY_REQUIREMENTS_PRESETS[0]);
       setPackagingRequirements(PACKAGING_REQUIREMENTS_PRESETS[0]);
       const initialTradeTerms = resolveInitialTradeTerms(
@@ -124,7 +134,6 @@ export function SubmitToProcurementDialog({
       setTradeTerms(initialTradeTerms);
       setTargetCostRange('');
       setRemarks('');
-      setIsCustomPayment(false);
       setIsCustomTradeTerms(!isPresetTradeTerm(initialTradeTerms));
       setIsCustomQuality(false);
       setIsCustomPackaging(false);
@@ -155,6 +164,8 @@ export function SubmitToProcurementDialog({
       const submissionData = {
         expectedQuoteDate,
         deliveryDate,
+        paymentMode,
+        balanceTrigger,
         paymentTerms,
         tradeTerms,
         targetCostRange,
@@ -164,12 +175,16 @@ export function SubmitToProcurementDialog({
         products: editableProducts
       };
 
-      onSubmit(submissionData);
+      await onSubmit(submissionData);
       
       // 重置表单
       setExpectedQuoteDate('');
       setDeliveryDate('');
-      setPaymentTerms('');
+      const initialPaymentMode = 'tt_deposit_balance_before_shipment' as PaymentMode;
+      const initialBalanceTrigger = deriveBalanceTrigger(initialPaymentMode, null);
+      setPaymentMode(initialPaymentMode);
+      setBalanceTrigger(initialBalanceTrigger);
+      setPaymentTerms(buildPaymentTermsText(initialPaymentMode, initialBalanceTrigger));
       setTradeTerms(resolveInitialTradeTerms());
       setTargetCostRange('');
       setQualityRequirements('');
@@ -405,45 +420,42 @@ export function SubmitToProcurementDialog({
 
                       <div className="space-y-2">
                         <Label className="text-xs uppercase tracking-wide text-gray-700">
-                          付款条款 *
+                          付款主规则 *
                         </Label>
-                        {!isCustomPayment ? (
-                          <select
-                            value={paymentTerms}
-                            onChange={(e) => {
-                              if (e.target.value === '自定义...') {
-                                setIsCustomPayment(true);
-                                setPaymentTerms('');
-                              } else {
-                                setPaymentTerms(e.target.value);
-                              }
-                            }}
-                            className="w-full text-xs border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:border-black"
-                          >
-                            {PAYMENT_TERMS_PRESETS.map((preset) => (
-                              <option key={preset} value={preset}>{preset}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <div className="flex flex-col gap-2">
-                            <Input
-                              placeholder="例如：30% T/T预付，70%见提单副本付款"
-                              value={paymentTerms}
-                              onChange={(e) => setPaymentTerms(e.target.value)}
-                              className="text-xs border-gray-300 focus:border-black"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsCustomPayment(false);
-                                setPaymentTerms('');
-                              }}
-                              className="px-2 py-1 text-xs border border-gray-300 hover:bg-gray-50 self-start"
-                            >
-                              返回
-                            </button>
-                          </div>
-                        )}
+                        <select
+                          value={paymentMode}
+                          onChange={(e) => {
+                            const nextMode = e.target.value as PaymentMode;
+                            const nextTrigger = deriveBalanceTrigger(nextMode, null);
+                            setPaymentMode(nextMode);
+                            setBalanceTrigger(nextTrigger);
+                            setPaymentTerms(buildPaymentTermsText(nextMode, nextTrigger));
+                          }}
+                          className="w-full text-xs border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:border-black"
+                        >
+                          {PAYMENT_MODE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs uppercase tracking-wide text-gray-700">
+                          触发节点 *
+                        </Label>
+                        <select
+                          value={balanceTrigger}
+                          onChange={(e) => {
+                            const nextTrigger = e.target.value as BalanceTrigger;
+                            setBalanceTrigger(nextTrigger);
+                            setPaymentTerms(buildPaymentTermsText(paymentMode, nextTrigger));
+                          }}
+                          className="w-full text-xs border border-gray-300 px-3 py-2 bg-white focus:outline-none focus:border-black"
+                        >
+                          {BALANCE_TRIGGER_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
                       </div>
 
                       <div className="space-y-2">
@@ -594,6 +606,18 @@ export function SubmitToProcurementDialog({
                           </div>
                         )}
                       </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase tracking-wide text-gray-700">
+                        付款条款展示文本 *
+                      </Label>
+                      <Textarea
+                        value={paymentTerms}
+                        onChange={(e) => setPaymentTerms(e.target.value)}
+                        className="text-xs border-gray-300 focus:border-black min-h-[76px]"
+                        placeholder="结构化付款规则会自动生成展示文本，也可人工微调。"
+                      />
                     </div>
 
                     {/* 第二行：给采购员的备注（单独一行，仅占左半边） */}

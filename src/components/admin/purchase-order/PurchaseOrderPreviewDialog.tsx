@@ -1,10 +1,13 @@
 import React from 'react';
-import { Download, Printer, RefreshCw } from 'lucide-react';
+import { Download, Printer, RefreshCw, ShoppingCart } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../../utils/pdfExport';
-import { PurchaseOrderDocument, PurchaseOrderData } from '../../documents/templates/PurchaseOrderDocument';
+import type { PurchaseOrderData } from '../../documents/templates/PurchaseOrderDocument';
+import { PurchaseOrderDocumentA4Pages } from '../../documents/templates/paginated/PurchaseOrderDocumentA4';
 import { Button } from '../../ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/dialog';
+import { ProcurementDocumentViewerShell } from './ProcurementDocumentViewerShell';
+import { getStoredAdminOrgProfile, getStoredAdminUserProfile } from '../../../contexts/AdminOrganizationContext';
+import { inferSupplierDocumentLanguage } from '../../../utils/documentDataAdapters';
 
 type PurchaseOrderPreviewDialogProps = {
   showPOPreview: boolean;
@@ -23,46 +26,60 @@ export const PurchaseOrderPreviewDialog: React.FC<PurchaseOrderPreviewDialogProp
   exportingPDF,
   setExportingPDF,
 }) => {
+  if (!showPOPreview || !currentPOData) return null;
+
+  const adminOrg = getStoredAdminOrgProfile();
+  const adminUser = getStoredAdminUserProfile();
+  const procurementLanguage = inferSupplierDocumentLanguage({
+    supplierName: currentPOData.supplier.companyName,
+    supplierAddress: currentPOData.supplier.address,
+  });
+  const useChineseBuyerProfile = procurementLanguage === 'zh';
+  const currentContactPerson = String(currentPOData.buyer.contactPerson || '').trim();
+  const shouldOverrideContactPerson = !currentContactPerson || ['管理员', '系统管理员', 'admin', 'administrator'].includes(currentContactPerson.toLowerCase());
+  const normalizedPOData: PurchaseOrderData = {
+    ...currentPOData,
+    buyer: {
+      ...currentPOData.buyer,
+      name: useChineseBuyerProfile
+        ? (adminOrg.nameCN || adminOrg.nameEN || currentPOData.buyer.name)
+        : (adminOrg.nameEN || adminOrg.nameCN || currentPOData.buyer.name),
+      nameEn: adminOrg.nameEN || adminOrg.nameCN || currentPOData.buyer.nameEn,
+      address: useChineseBuyerProfile
+        ? (adminOrg.addressCN || adminOrg.addressEN || currentPOData.buyer.address)
+        : (adminOrg.addressEN || adminOrg.addressCN || currentPOData.buyer.address),
+      addressEn: adminOrg.addressEN || adminOrg.addressCN || currentPOData.buyer.addressEn,
+      tel: currentPOData.buyer.tel || adminOrg.phone,
+      email: currentPOData.buyer.email || adminOrg.email || adminUser.email,
+      contactPerson: shouldOverrideContactPerson
+        ? (adminOrg.contactPerson || adminOrg.documentDefaults.defaultSignatory || adminUser.name || currentPOData.buyer.contactPerson)
+        : currentPOData.buyer.contactPerson,
+    },
+  };
+
+  const templateVersionLabel = normalizedPOData.templateSettings?.productTableColumns?.length
+    ? '统一采购合同模板'
+    : '默认采购合同模板';
+
   return (
-    <Dialog open={showPOPreview} onOpenChange={setShowPOPreview}>
-      <DialogContent className="max-w-[95vw] h-[95vh] p-0">
-        <DialogHeader className="px-6 py-4 border-b">
-          <DialogTitle style={{ fontSize: '15px' }}>📋 采购订单预览 - {currentPOData?.poNo}</DialogTitle>
-          <DialogDescription style={{ fontSize: '12px' }}>Purchase Order Preview - 引用文档中心统一模板</DialogDescription>
-        </DialogHeader>
-
-        <div className="flex-1 overflow-auto p-6 bg-gray-50">
-          {currentPOData && (
-            <div className="print-contract-content">
-              <PurchaseOrderDocument ref={poPDFRef} data={currentPOData} />
-            </div>
-          )}
-        </div>
-
-        <DialogFooter className="px-6 py-4 border-t bg-white">
-          <Button variant="outline" onClick={() => setShowPOPreview(false)} className="text-xs">
-            关闭预览
-          </Button>
+    <ProcurementDocumentViewerShell
+      open={showPOPreview}
+      onClose={() => setShowPOPreview(false)}
+      title="采购订单"
+      subtitle={normalizedPOData.poNo}
+      templateLabel={templateVersionLabel}
+      icon={<ShoppingCart className="h-6 w-6" />}
+      actions={(
+        <>
           <Button
             variant="outline"
+            size="sm"
             onClick={async () => {
-              if (!poPDFRef.current || !currentPOData) return;
-              const filename = generatePDFFilename('Purchase_Order', currentPOData.poNo);
-              await exportToPDFPrint(poPDFRef.current, filename);
-            }}
-            className="text-xs"
-            disabled={exportingPDF}
-          >
-            <Printer className="w-3.5 h-3.5 mr-1.5" />
-            打印/另存为PDF
-          </Button>
-          <Button
-            onClick={async () => {
-              if (!poPDFRef.current || !currentPOData) return;
+              if (!poPDFRef.current) return;
               setExportingPDF(true);
               try {
                 await new Promise((resolve) => setTimeout(resolve, 500));
-                const filename = generatePDFFilename('Purchase_Order', currentPOData.poNo);
+                const filename = generatePDFFilename('Purchase_Order', normalizedPOData.poNo);
                 await exportToPDF(poPDFRef.current, filename);
                 toast.success('采购订单PDF导出成功！');
               } catch (error) {
@@ -72,23 +89,41 @@ export const PurchaseOrderPreviewDialog: React.FC<PurchaseOrderPreviewDialogProp
                 setExportingPDF(false);
               }
             }}
-            className="bg-[#F96302] hover:bg-[#E05502] text-xs"
+            className="gap-2"
             disabled={exportingPDF}
           >
             {exportingPDF ? (
               <>
-                <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                <RefreshCw className="h-4 w-4 animate-spin" />
                 导出中...
               </>
             ) : (
               <>
-                <Download className="w-3.5 h-3.5 mr-1.5" />
-                导出PDF
+                <Download className="h-4 w-4" />
+                下载PDF
               </>
             )}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (!poPDFRef.current) return;
+              const filename = generatePDFFilename('Purchase_Order', normalizedPOData.poNo);
+              await exportToPDFPrint(poPDFRef.current, filename);
+            }}
+            className="gap-2"
+            disabled={exportingPDF}
+          >
+            <Printer className="h-4 w-4" />
+            打印
+          </Button>
+        </>
+      )}
+    >
+      <div ref={poPDFRef}>
+        <PurchaseOrderDocumentA4Pages data={normalizedPOData} />
+      </div>
+    </ProcurementDocumentViewerShell>
   );
 };

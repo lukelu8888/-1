@@ -1,9 +1,9 @@
 import React from 'react';
 import { Download, FileText, Printer } from 'lucide-react';
 import { Button } from '../../ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../ui/dialog';
 import { XJDocument, XJData } from '../../documents/templates/XJDocument';
 import type { ProjectExecutionBaseline } from './purchaseOrderUtils';
+import { ProcurementDocumentViewerShell } from './ProcurementDocumentViewerShell';
 
 type XJPreviewDialogProps = {
   showXJPreview: boolean;
@@ -22,56 +22,30 @@ export const XJPreviewDialog: React.FC<XJPreviewDialogProps> = ({
   xjDocRef,
   handleExportXJPDF,
 }) => {
+  const templateLabel = currentXJData?.projectInfo?.templateVersion || '统一采购询价模板';
+
   return (
-    <Dialog open={showXJPreview} onOpenChange={setShowXJPreview}>
-      <DialogContent className="max-w-[95vw] h-[95vh] p-0">
-        <DialogHeader className="px-6 py-4 border-b">
-          <DialogTitle className="text-base flex items-center gap-2">
-            <FileText className="w-4 h-4" />
-            📋 采购询价单预览 - {currentXJData?.xjNo}
-          </DialogTitle>
-          <DialogDescription style={{ fontSize: '12px' }}>
-            Procurement Inquiry Preview - 可直接发送给供应商的询价单文档
-          </DialogDescription>
-          {(projectExecutionBaseline?.projectCode || projectExecutionBaseline?.projectName || projectExecutionBaseline?.projectRevisionCode) && (
-            <div className="mt-3 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-700">
-              执行基线：
-              <span className="ml-1 font-medium">
-                {projectExecutionBaseline.projectCode || projectExecutionBaseline.projectName || '项目'}
-              </span>
-              <span className="mx-1">/</span>
-              <span className="font-medium">{projectExecutionBaseline.projectRevisionCode || 'Rev'}</span>
-              {projectExecutionBaseline.finalQuotationNumber && (
-                <>
-                  <span className="mx-1">/</span>
-                  <span className="font-medium">{projectExecutionBaseline.finalQuotationNumber}</span>
-                </>
-              )}
-            </div>
-          )}
-        </DialogHeader>
-
-        <div className="flex-1 overflow-auto bg-gray-100 p-6">
-          {currentXJData && <XJDocument ref={xjDocRef} data={currentXJData} />}
-        </div>
-
-        <div className="border-t bg-white px-6 py-4 flex items-center justify-between">
-          <div className="text-xs text-gray-500">💡 此询价单可发送给供应商进行报价</div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowXJPreview(false)} className="text-xs">
-              关闭
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => handleExportXJPDF(false)} className="text-xs flex items-center gap-1">
-              <Printer className="w-3 h-3" />
-              打印
-            </Button>
-            <Button size="sm" onClick={() => handleExportXJPDF(true)} className="bg-[#F96302] hover:bg-[#E05502] text-xs flex items-center gap-1">
-              <Download className="w-3 h-3" />
-              下载PDF
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <ProcurementDocumentViewerShell
+      open={showXJPreview}
+      onClose={() => setShowXJPreview(false)}
+      title="采购询价单"
+      subtitle={currentXJData?.xjNo}
+      templateLabel={templateLabel}
+      icon={<FileText className="h-6 w-6" />}
+      actions={(
+        <>
+          <Button variant="outline" size="sm" onClick={() => handleExportXJPDF(true)} className="gap-2 text-xs">
+            <Download className="h-4 w-4" />
+            下载PDF
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => handleExportXJPDF(false)} className="gap-2 text-xs">
+            <Printer className="h-4 w-4" />
+            打印
+          </Button>
+        </>
+      )}
+    >
+      {currentXJData ? <XJDocument ref={xjDocRef} data={currentXJData} /> : null}
+    </ProcurementDocumentViewerShell>
   );
 };

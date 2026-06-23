@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { WorkflowPipelineBanner, MAIN_WORKFLOW_STEPS } from '../shared/WorkflowPipelineBanner';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -16,7 +17,7 @@ import { useInquiry } from '../../contexts/InquiryContext';
 import { useSalesQuotations } from '../../contexts/SalesQuotationContext'; // 🔥 新增：销售报价Context
 import { nextQRNumber, nextQTNumber } from '../../utils/xjNumberGenerator'; // 🔥 新增：生成QT/QR编号
 import { buildIdentityPersistenceFields, getCurrentUser } from '../../utils/dataIsolation';
-import { salesQuotationService, quoteRequirementService, sharedRoleUiPreferenceService } from '../../lib/supabaseService';
+import { salesQuotationService, sharedRoleUiPreferenceService } from '../../lib/supabaseService';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
 import { getLocalAdminAuth } from '../../lib/internalAdminLocalAuth';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
@@ -31,6 +32,7 @@ import {
   findRelatedInquiryForProcurementDoc,
   hydrateProcurementRequirementWithInquiry,
 } from '../../utils/procurementRequestContext';
+
 import {
   type QuoteRequirementDocumentData,
 } from '../documents/templates/QuoteRequirementDocument';
@@ -54,6 +56,7 @@ import {
   matchesNormalizedQrNumber,
   normalizeLegacyQrNumber,
 } from '../../utils/quoteRequirementNumber';
+import { CompactDetailsPopover } from '../shared/CompactDetailsPopover';
 
 type TabType = 'all' | 'pending' | 'partial' | 'processing' | 'completed';
 type CostInquiryColumnKey =
@@ -294,8 +297,13 @@ export function CostInquiryQuotationManagement({
   useEffect(() => {
     if (!showViewModal || !selectedQR) return;
     const relatedInquiry = findRelatedInquiryForProcurementDoc(selectedQR, inquiries);
-    const requirementForView = hydrateProcurementRequirementWithInquiry(selectedQR, relatedInquiry);
-    const nextData = buildQuoteRequirementDocumentSnapshot(requirementForView, previewSanitizeRole);
+    const hydratedRequirement = hydrateProcurementRequirementWithInquiry(selectedQR, relatedInquiry);
+    const requirementForView = {
+      ...hydratedRequirement,
+      purchaserFeedback: selectedQR.purchaserFeedback || hydratedRequirement.purchaserFeedback,
+      purchaseDeptFeedback: selectedQR.purchaseDeptFeedback || hydratedRequirement.purchaseDeptFeedback,
+    };
+    const nextData = buildQuoteRequirementDocumentSnapshot(requirementForView, previewSanitizeRole, { forceRebuild: true });
     setPreviewDocumentData(nextData);
   }, [showViewModal, selectedQR, inquiries, previewSanitizeRole]);
 
@@ -541,6 +549,29 @@ export function CostInquiryQuotationManagement({
     );
   }, [quoteRequirements, currentUser, resolveQuotationOwner]);
 
+  const hasConfirmedQuotationPush = React.useCallback((qr: any) => {
+    if (!qr?.pushedToQuotation) return false;
+
+    const normalizedQrNumber = normalizeLegacyQrNumber(String(qr?.requirementNo || ''));
+    const linkedQuotationNumber = String(qr?.quotationNumber || '').trim();
+
+    return allSalesQuotations.some((quotation: any) => {
+      const quotationQrNumber = normalizeLegacyQrNumber(String(quotation?.qrNumber || ''));
+      const quotationNumberCandidates = [
+        quotation?.qtNumber,
+        quotation?.quotationNumber,
+        quotation?.id,
+      ]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+
+      return (
+        (normalizedQrNumber && quotationQrNumber === normalizedQrNumber) ||
+        (linkedQuotationNumber && quotationNumberCandidates.includes(linkedQuotationNumber))
+      );
+    });
+  }, [allSalesQuotations]);
+
   // 🔥 根据状态和搜索词筛选
   const filteredQRs = useMemo(() => {
     let filtered = myQRs;
@@ -680,14 +711,10 @@ export function CostInquiryQuotationManagement({
         };
       }),
       };
-      const saved = await quoteRequirementService.upsert({
+      await addQuoteRequirement({
         ...newQR,
         documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(newQR as any, resolvedCurrentUserRole),
       });
-      if (!saved) {
-        throw new Error('QR 写入 Supabase 失败');
-      }
-      await addQuoteRequirement(saved);
       toast.success(`✅ 成功创建 QR！单号：${qrNumber}`);
     setShowCreateModal(false);
     setSelectedINQ(null);
@@ -756,29 +783,9 @@ export function CostInquiryQuotationManagement({
         downstreamVisibility: selectedQR.downstreamVisibility || DEFAULT_DOWNSTREAM_VISIBILITY,
       };
 
-      const saved = await quoteRequirementService.upsert({
+      await updateQuoteRequirement(selectedQR.id, {
         ...payload,
         documentDataSnapshot: buildQuoteRequirementDocumentSnapshot(payload as any, resolvedCurrentUserRole),
-      });
-      if (!saved) {
-        throw new Error('QR 写入 Supabase 失败');
-      }
-      updateQuoteRequirement(selectedQR.id, {
-        status: 'submitted',
-        notes: payload.notes,
-        expectedQuoteDate: commercialTerms.expectedQuoteDate,
-        deliveryDate: commercialTerms.deliveryDate,
-        paymentTerms: commercialTerms.paymentTerms,
-        tradeTerms: commercialTerms.tradeTerms,
-        targetCostRange: commercialTerms.targetCostRange,
-        qualityRequirements: commercialTerms.qualityRequirements,
-        packagingRequirements: commercialTerms.packagingRequirements,
-        remarks: commercialTerms.remarks,
-        commercialTerms,
-        customerRequirements: selectedQR.customerRequirements || null,
-        downstreamVisibility: selectedQR.downstreamVisibility || DEFAULT_DOWNSTREAM_VISIBILITY,
-        items: updatedItems || selectedQR.items,
-        ...saved,
       });
       toast.success(`✅ 已提交给采购部门！单号：${selectedQR.requirementNo}`);
       setShowSubmitDialog(false);
@@ -791,7 +798,11 @@ export function CostInquiryQuotationManagement({
 
   // 🔥 查看采购需求单详情（客户询价单内容）
   const handleViewRequirement = (qr: any) => {
-    setSelectedQR(qr);
+    const latestQR = quoteRequirements.find((item: any) =>
+      String(item?.id || '') === String(qr?.id || '') ||
+      normalizeLegacyQrNumber(item?.requirementNo) === normalizeLegacyQrNumber(qr?.requirementNo)
+    );
+    setSelectedQR(latestQR || qr);
     setShowViewModal(true);
   };
 
@@ -1385,7 +1396,11 @@ export function CostInquiryQuotationManagement({
       key,
       startCostInquiryColumnResize,
       shrinkCostInquiryColumnToMinimum,
-      { lineHoverClassName: 'group-hover:bg-slate-400', hitAreaClassName: 'w-8 -right-4' },
+      {
+        hidden: showViewModal,
+        lineHoverClassName: '!h-7 !w-[1.5px] !bg-slate-400/85 !opacity-0 transition-opacity group-hover:!opacity-100 group-hover:!bg-slate-500',
+        hitAreaClassName: 'w-8 -right-4',
+      },
     );
 
   const renderCostInquiryHeaderCell = (
@@ -1414,7 +1429,13 @@ export function CostInquiryQuotationManagement({
   };
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    <div className="flex flex-1 min-h-0 flex-col gap-3">
+      {/* 🔥 业务链路进度 */}
+      <WorkflowPipelineBanner
+        steps={MAIN_WORKFLOW_STEPS}
+        currentKey="qr"
+        hint="当前：成本询报 → 下推销售报价"
+      />
       {/* 📋 成本询报表格 - 参考询价管理样式 */}
       <div className="border border-gray-200 rounded bg-white flex flex-1 min-h-0 flex-col overflow-visible min-h-[calc(100dvh-360px)]">
         <div className="border-b border-slate-200 bg-slate-50/70">
@@ -1580,10 +1601,13 @@ export function CostInquiryQuotationManagement({
                   ].filter(Boolean) as Array<{ value: string; className: string }>);
                   const relatedRefsExpanded = expandedRelatedIds.includes(String(qr.id));
                   // 🔥 修复：检查采购反馈数据（purchaserFeedback）而不是selectedSupplier
-                  const hasPurchaserFeedback = qr.purchaserFeedback && qr.purchaserFeedback.status === 'quoted';
-                  const canPushByStatus = ['submitted', 'partial', 'processing', 'completed'].includes(String(qr.status || ''));
-                  const showPushButton = canPushByStatus || hasPurchaserFeedback;
-                  const isPushedToQuotation = Boolean(qr.pushedToQuotation);
+                  const hasPurchaserFeedback = Boolean(
+                    qr.purchaserFeedback &&
+                    qr.purchaserFeedback.status === 'quoted' &&
+                    Array.isArray(qr.purchaserFeedback.products) &&
+                    qr.purchaserFeedback.products.length > 0,
+                  );
+                  const isPushedToQuotation = hasConfirmedQuotationPush(qr);
                   const isPushLoading =
                     pushingQrId === qr.id &&
                     pushStartedAt != null &&
@@ -1606,106 +1630,75 @@ export function CostInquiryQuotationManagement({
                           <span className="text-[12px] text-gray-500">{index + 1}</span>
                         </div>
                       </TableCell>
-                      <TableCell className="py-1.5 text-left" style={getCostInquiryColumnStyle('createdAt')}>
-                        <div className="space-y-0 text-slate-900">
-                          <div className="leading-4.5">
-                            <span className="mr-1 text-[12px] text-slate-500">创</span>
-                            <span className="text-[12px] font-medium text-slate-900">
-                              {formatCostInquiryDateOnly(qr.createdDate)}
-                            </span>
-                          </div>
-                          <div className="leading-4.5">
-                            <span className="mr-1 text-[12px] text-slate-500">截</span>
-                            <span className="text-[12px] font-medium text-slate-900">
-                              {formatCostInquiryDateOnly(qr.expectedQuoteDate || qr.commercialTerms?.expectedQuoteDate)}
-                            </span>
-                          </div>
-                          <div className="leading-4.5">
-                            <span className="mr-1 text-[12px] text-slate-500">交</span>
-                            <span className="text-[12px] font-medium text-slate-900">
-                              {formatCostInquiryDateOnly(qr.deliveryDate || qr.commercialTerms?.deliveryDate)}
-                            </span>
-                          </div>
+                      <TableCell className="py-1.5 text-left align-middle" style={getCostInquiryColumnStyle('createdAt')}>
+                        <div className="flex items-center gap-1.5 whitespace-nowrap text-slate-900">
+                          <span className="text-[12px] text-slate-500">创</span>
+                          <span className="text-[12px] font-medium text-slate-900">
+                            {formatCostInquiryDateOnly(qr.createdDate)}
+                          </span>
+                          <CompactDetailsPopover
+                            items={[
+                              { label: '截止', value: formatCostInquiryDateOnly(qr.expectedQuoteDate || qr.commercialTerms?.expectedQuoteDate) },
+                              { label: '交期', value: formatCostInquiryDateOnly(qr.deliveryDate || qr.commercialTerms?.deliveryDate) },
+                            ]}
+                          />
                         </div>
                       </TableCell>
-                      <TableCell className="py-1.5 overflow-hidden text-left" style={getCostInquiryColumnStyle('qrNo')}>
-                        <button
-                          className="text-[12px] font-semibold text-blue-600 hover:text-blue-800 cursor-pointer transition-colors"
-                          onClick={() => handleViewRequirement(qr)}
-                        >
-                          {formatDocumentNumber(normalizeLegacyQrNumber(qr.requirementNo), false)}
-                        </button>
-                        {relatedRefs.length > 0 ? (
+                      <TableCell className="py-1.5 overflow-hidden text-left align-middle" style={getCostInquiryColumnStyle('qrNo')}>
+                        <div className="flex min-w-0 items-center gap-1.5">
                           <button
-                            type="button"
-                            onClick={() => {
-                              setExpandedRelatedIds((current) => (
-                                current.includes(String(qr.id))
-                                  ? current.filter((id) => id !== String(qr.id))
-                                  : [...current, String(qr.id)]
-                              ));
-                            }}
-                            className="mt-0 block text-[12px] font-semibold leading-3.5 text-slate-500 hover:text-slate-700"
+                            className="truncate text-[12px] font-semibold text-blue-600 hover:text-blue-800 cursor-pointer transition-colors"
+                            onClick={() => handleViewRequirement(qr)}
                           >
-                            {relatedRefsExpanded ? '收起关联编号' : `展开关联编号 (${relatedRefs.length})`}
+                            {formatDocumentNumber(normalizeLegacyQrNumber(qr.requirementNo), false)}
                           </button>
-                        ) : null}
-                        {relatedRefsExpanded ? (
-                          <div className="mt-0 space-y-0">
-                            {relatedRefs.map((ref) => (
-                              <button
-                                key={`${qr.id}-${ref.value}`}
-                                type="button"
-                                onClick={() => {
-                                  const target = String(ref.value || '').trim();
-                                  if (target.startsWith('ING-')) {
-                                    onNavigateToInquiryManagementWithHighlight?.(target);
-                                    return;
-                                  }
-                                  if (target.startsWith('QT-')) {
-                                    onSwitchToQuotationManagement?.(target);
-                                  }
-                                }}
-                                className={`block text-left text-[12px] ${ref.className} ${String(ref.value || '').trim().match(/^(ING|QT)-/) ? 'cursor-pointer hover:underline' : 'cursor-default'}`}
-                              >
-                                {ref.value}
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
+                          <CompactDetailsPopover
+                            items={relatedRefs.map((ref) => ({
+                              label: '关联',
+                              value: ref.value,
+                              className: ref.className,
+                              onClick: () => {
+                                const target = String(ref.value || '').trim();
+                                if (target.startsWith('ING-')) {
+                                  onNavigateToInquiryManagementWithHighlight?.(target);
+                                  return;
+                                }
+                                if (target.startsWith('QT-')) {
+                                  onSwitchToQuotationManagement?.(target);
+                                }
+                              },
+                            }))}
+                          />
+                        </div>
                       </TableCell>
-                      <TableCell className="py-1.5 overflow-hidden text-left" style={getCostInquiryColumnStyle('product')}>
+                      <TableCell className="py-1.5 overflow-hidden text-left align-middle" style={getCostInquiryColumnStyle('product')}>
                         {(() => {
                           const items = Array.isArray(qr.items) ? qr.items : [];
                           const first = items[0];
                           return (
-                        <div className="space-y-0">
-                              <div className="break-words text-[12px] font-medium leading-3.5 text-slate-700">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                              <div className="truncate text-[12px] font-medium leading-3.5 text-slate-700">
                                 {first?.productName || getFormalBusinessModelNo(first) || 'N/A'}
                             </div>
-                              <div className="text-[12px] leading-3.5 text-slate-400">
-                                共 {Math.max(items.length, 1)} 个产品
-                        </div>
+                              <CompactDetailsPopover items={[{ label: '产品', value: `共 ${Math.max(items.length, 1)} 个产品` }]} />
                             </div>
                           );
                         })()}
                       </TableCell>
-                      <TableCell className="py-1.5 text-left" style={getCostInquiryColumnStyle('feedback')}>
+                      <TableCell className="py-1.5 text-left align-middle" style={getCostInquiryColumnStyle('feedback')}>
                         {/* 🔥 修复：显示采购反馈信息（purchaserFeedback）*/}
                         {hasPurchaserFeedback ? (
-                          <div className="flex flex-col items-start gap-0 text-left">
+                          <div className="flex items-center gap-1.5 text-left">
                             <span className="flex items-center justify-start gap-1 text-[12px] font-medium leading-3.5 text-green-600">
                               <CheckCircle className="w-3 h-3" />
                               已反馈
                             </span>
-                            <span className="text-[12px] leading-3.5 text-slate-500">
-                              {qr.purchaserFeedback.products?.length || 0} 个产品
-                            </span>
-                            {qr.purchaserFeedback.feedbackBy && (
-                              <span className="text-[12px] leading-3.5 text-blue-600">
-                                采购员: {qr.purchaserFeedback.feedbackBy}
-                              </span>
-                            )}
+                            <CompactDetailsPopover
+                              items={[
+                                { label: '产品', value: `${qr.purchaserFeedback.products?.length || 0} 个产品` },
+                                { label: '采购员', value: qr.purchaserFeedback.feedbackBy, className: 'text-blue-600' },
+                              ]}
+                            />
                           </div>
                         ) : (
                           <span className="flex items-center justify-start gap-1 text-[12px] leading-3.5 text-slate-400">
@@ -1742,31 +1735,37 @@ export function CostInquiryQuotationManagement({
                             </Button>
                           )}
 
-                          {/* 可下推状态：显示“下推报价管理”（完成态也允许下推） */}
-                          {showPushButton && (
-                            <Button
-                              size="sm"
-                              className={`h-5 px-2 text-[11px] ${
-                                isPushedToQuotation
-                                  ? 'bg-gray-100 text-gray-400 border border-gray-200 hover:bg-gray-100'
-                                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-                              }`}
-                              onClick={() => {
-                                if (!isPushedToQuotation) {
-                                  handlePushToQuotationManagement(qr);
+                          {/* 采购已反馈后才允许下推报价管理 */}
+                          {hasPurchaserFeedback ? (
+                            isPushedToQuotation ? (
+                              <span
+                                className="inline-flex items-center gap-1 h-5 px-2 text-[11px] rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium cursor-default"
+                                title="该 QR 已成功下推到报价管理(QT)，可在「报价管理」Tab查看"
+                              >
+                                ✓ 已下推 → 报价管理
+                              </span>
+                            ) : (
+                              <Button
+                                size="sm"
+                                className="h-5 px-2 text-[11px] bg-[#F96302] hover:bg-[#e05a02] text-white font-medium"
+                                onClick={() => handlePushToQuotationManagement(qr)}
+                                disabled={isPushLoading}
+                                title={
+                                  qr.pushedToQuotation
+                                    ? '检测到历史下推标记，允许重新下推修复'
+                                    : '按采购反馈下推销售报价(QT)，成功后自动跳转'
                                 }
-                              }}
-                              disabled={isPushLoading || isPushedToQuotation}
-                              title={
-                                isPushedToQuotation
-                                  ? '该 QR 已成功下推到报价管理'
-                                  : hasPurchaserFeedback
-                                    ? '按采购反馈下推到报价管理'
-                                    : '直接下推到报价管理'
-                              }
+                              >
+                                {isPushLoading ? '下推中...' : '下推 → 报价管理'}
+                              </Button>
+                            )
+                          ) : String(qr.status || '') === 'pending' ? null : (
+                            <span
+                              className="inline-flex h-5 items-center rounded border border-slate-200 bg-slate-50 px-2 text-[11px] font-medium text-slate-500"
+                              title="采购成本反馈完成后才可以下推报价管理"
                             >
-                              {isPushLoading ? '下推中...' : isPushedToQuotation ? '已下推报价管理' : '下推报价管理'}
-                            </Button>
+                              待采购反馈
+                            </span>
                           )}
                         </div>
                       </TableCell>

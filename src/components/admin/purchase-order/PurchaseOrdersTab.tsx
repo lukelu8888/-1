@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Edit, Eye, Plus, Send, Trash2 } from 'lucide-react';
 import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOrderContext';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { TabsContent } from '../../ui/tabs';
+import { WorkflowPipelineBanner, MAIN_WORKFLOW_STEPS } from '../../shared/WorkflowPipelineBanner';
 import { FinanceFilterBar } from '../../finance-v2/components/FinanceFilterBar';
 import {
+  ERP_LIST_PILL_STYLE,
+  ERP_LIST_TOOL_PILL_CLASS,
+  getErpListBatchDeletePillClass,
+  getErpListBatchDeletePillStyle,
   getErpListFilterPillClass,
   getErpListFilterPillStyle,
 } from '../../shared/erpListUiSpec';
@@ -24,6 +28,7 @@ type PurchaseOrdersTabProps = {
   filteredOrders: PurchaseOrderType[];
   handleViewPODocument: (po: PurchaseOrderType) => void;
   handleOpenEditPO: (po: PurchaseOrderType) => void;
+  handleViewComparisonForPO: (po: PurchaseOrderType) => void;
   handlePushPurchaseToSupplier: (po: PurchaseOrderType) => void;
   handleApplyBossApproval: (po: PurchaseOrderType) => void;
   handleValidateProcurementRequest: (po: PurchaseOrderType) => void;
@@ -44,6 +49,8 @@ type FilterKey =
   | 'cg_supplier';
 
 type PurchaseOrderColumnKey =
+  | 'selection'
+  | 'index'
   | 'date'
   | 'document'
   | 'supplier'
@@ -67,6 +74,8 @@ const CAPSULE_BUTTON_STYLE = { borderRadius: '9999px' } as const;
 
 const PURCHASE_ORDER_TABLE_UI_PREFERENCE_KEY = 'purchase_orders_table_column_widths_v1';
 const PURCHASE_ORDER_COLUMN_ORDER: PurchaseOrderColumnKey[] = [
+  'selection',
+  'index',
   'date',
   'document',
   'supplier',
@@ -78,6 +87,8 @@ const PURCHASE_ORDER_COLUMN_ORDER: PurchaseOrderColumnKey[] = [
 ];
 
 const PURCHASE_ORDER_COLUMN_MIN_WIDTHS: Record<PurchaseOrderColumnKey, number> = {
+  selection: 44,
+  index: 52,
   date: 1,
   document: 1,
   supplier: 1,
@@ -89,14 +100,16 @@ const PURCHASE_ORDER_COLUMN_MIN_WIDTHS: Record<PurchaseOrderColumnKey, number> =
 };
 
 const PURCHASE_ORDER_TABLE_DEFAULT_WIDTHS: Record<PurchaseOrderColumnKey, number> = {
+  selection: 44,
+  index: 56,
   date: 240,
   document: 320,
-  supplier: 360,
-  region: 96,
+  supplier: 330,
+  region: 84,
   summary: 170,
-  approval: 180,
-  execution: 280,
-  actions: 340,
+  approval: 160,
+  execution: 230,
+  actions: 420,
 };
 
 const mergeStoredPurchaseOrderColumnWidths = (
@@ -248,6 +261,7 @@ function getExecutionPresentation(po: PurchaseOrderType): {
   const workflow = derivePurchaseOrderWorkflowFields(po);
   const reqStatus = String(po.procurementRequestStatus || '').trim();
   const executionStatus = String(po.executionStatus || workflow.executionStatus || '').trim();
+  const prValidationStatus = String(po.prValidationStatus || '').trim();
 
   if (workflow.documentType === 'PR') {
     switch (workflow.executionStatus) {
@@ -260,6 +274,12 @@ function getExecutionPresentation(po: PurchaseOrderType): {
       default:
         return { label: '采购请求处理中', detail: 'PR阶段', tone: 'default' };
     }
+  }
+
+  if (workflow.approvalStatus === 'draft') {
+    return prValidationStatus === 'passed'
+      ? { label: '待提交审核', detail: 'CG审批前', tone: 'default' }
+      : { label: '待比价依据校验', detail: 'CG审批前', tone: 'warn' };
   }
 
   if (workflow.approvalStatus === 'approved' && reqStatus !== 'pushed_supplier') {
@@ -382,10 +402,10 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   filteredOrders,
   handleViewPODocument,
   handleOpenEditPO,
+  handleViewComparisonForPO,
   handlePushPurchaseToSupplier,
   handleApplyBossApproval,
   handleValidateProcurementRequest,
-  handleDeletePurchaseOrder,
   normalizeCGNumberForDisplay,
   resolveInquirySourceRef,
   resolveQuotationSourceRef,
@@ -480,6 +500,14 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   );
 
   const getPurchaseOrderColumnStyle = (key: PurchaseOrderColumnKey) => {
+    if (key === 'selection' || key === 'index') {
+      const width = purchaseOrderColumnWidths[key];
+      return {
+        width,
+        minWidth: width,
+        maxWidth: width,
+      } as const;
+    }
     const ratio = purchaseOrderColumnWidthTotal > 0
       ? purchaseOrderColumnWidths[key] / purchaseOrderColumnWidthTotal
       : 1 / PURCHASE_ORDER_COLUMN_ORDER.length;
@@ -519,12 +547,23 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
     ));
   };
 
-  const renderPurchaseOrderColumnResizeHandle = (key: PurchaseOrderColumnKey) =>
+  const renderPurchaseOrderColumnResizeHandle = (
+    key: PurchaseOrderColumnKey,
+    options?: {
+      showKnob?: boolean;
+      hitAreaClassName?: string;
+      lineHoverClassName?: string;
+      knobHoverClassName?: string;
+    },
+  ) =>
     renderColumnResizeHandle(
       key,
       startPurchaseOrderColumnResize,
       shrinkPurchaseOrderColumnToMinimum,
-      { lineHoverClassName: 'group-hover:bg-slate-400' },
+      {
+        lineHoverClassName: 'group-hover:bg-slate-400',
+        ...options,
+      },
     );
 
   const renderPurchaseOrderHeaderCell = (
@@ -555,6 +594,13 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
 
   return (
     <TabsContent value="orders" className="m-0 flex flex-1 min-h-0 flex-col">
+      <div className="px-3 pt-3 pb-1">
+        <WorkflowPipelineBanner
+          steps={MAIN_WORKFLOW_STEPS}
+          currentKey="cg"
+          hint="当前：采购订单 → 等待供应商确认生产"
+        />
+      </div>
       <div className="px-3 py-2">
         <FinanceFilterBar
           placeholder="搜索采购单号、供应商、需求编号..."
@@ -594,14 +640,20 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                   variant="outline"
                   onClick={handleBatchDeleteOrders}
                   disabled={selectedOrderIds.length === 0}
-                  style={CAPSULE_BUTTON_STYLE}
-                  className="h-8 !rounded-full border-red-200 px-3 text-[12px] font-semibold leading-[1.35] text-red-600 hover:bg-red-50"
+                  style={getErpListBatchDeletePillStyle(selectedOrderIds.length > 0)}
+                  className={getErpListBatchDeletePillClass(selectedOrderIds.length > 0)
+                    .replace('h-9', 'h-8')
+                    .replace('px-4', 'px-3')}
                 >
-                  <Trash2 className="mr-1 h-3.5 w-3.5" />
                   批量删除{selectedOrderIds.length > 0 ? ` (${selectedOrderIds.length})` : ''}
                 </Button>
-                <Button size="sm" style={CAPSULE_BUTTON_STYLE} className="h-8 !rounded-full bg-slate-900 px-3 text-[12px] font-semibold leading-[1.35] hover:bg-slate-800" onClick={handleCreateOrder}>
-                  <Plus className="mr-1 h-3.5 w-3.5" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  style={ERP_LIST_PILL_STYLE}
+                  className={ERP_LIST_TOOL_PILL_CLASS}
+                  onClick={handleCreateOrder}
+                >
                   新建采购单
                 </Button>
               </div>
@@ -616,22 +668,50 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
           <table className="w-full table-fixed text-[13px]">
             <thead className="bg-gray-50 border-b border-gray-200 text-slate-600">
               <tr>
-                <th className="w-10 px-2 py-3 text-center font-semibold">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 cursor-pointer rounded border border-slate-400"
-                    checked={selectedOrderIds.length === displayOrders.length && displayOrders.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedOrderIds(displayOrders.map((o) => o.id));
-                      } else {
-                        setSelectedOrderIds([]);
-                      }
-                    }}
-                  />
+                <th
+                  className="group relative overflow-hidden px-2 py-3 text-left font-semibold"
+                  style={getPurchaseOrderColumnStyle('selection')}
+                >
+                  <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer rounded border border-slate-400"
+                      checked={selectedOrderIds.length === displayOrders.length && displayOrders.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedOrderIds(displayOrders.map((o) => o.id));
+                        } else {
+                          setSelectedOrderIds([]);
+                        }
+                      }}
+                    />
+                  </div>
+                  {renderPurchaseOrderColumnResizeHandle('selection', {
+                    hitAreaClassName: 'w-8 -right-4',
+                  })}
                 </th>
-                <th className="w-12 px-2 py-3 text-center font-semibold">#</th>
-                {renderPurchaseOrderHeaderCell('date', '日期')}
+                <th
+                  className="group relative overflow-hidden px-2 py-3 font-semibold text-left"
+                  style={getPurchaseOrderColumnStyle('index')}
+                >
+                  <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                    <span className="block whitespace-nowrap text-[13px] font-semibold leading-4">#</span>
+                  </div>
+                  {renderPurchaseOrderColumnResizeHandle('index', {
+                    hitAreaClassName: 'w-8 -right-4',
+                  })}
+                </th>
+                <th
+                  className="group relative overflow-hidden px-3 py-3 font-semibold text-left"
+                  style={getPurchaseOrderColumnStyle('date')}
+                >
+                  <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                    <span className="block whitespace-nowrap text-[13px] font-semibold leading-4">日期</span>
+                  </div>
+                  {renderPurchaseOrderColumnResizeHandle('date', {
+                    hitAreaClassName: 'w-8 -right-4',
+                  })}
+                </th>
                 {renderPurchaseOrderHeaderCell('document', '单据')}
                 {renderPurchaseOrderHeaderCell('supplier', '供应商')}
                 {renderPurchaseOrderHeaderCell('region', '区域')}
@@ -672,24 +752,34 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                 const isPendingApproval = workflow.documentType === 'CG' && ['pending_l1', 'pending_l2'].includes(String(workflow.approvalStatus || ''));
                 const isApproved = workflow.documentType === 'CG' && workflow.approvalStatus === 'approved';
                 const isDraftCG = workflow.documentType === 'CG' && workflow.approvalStatus === 'draft';
+                const isRejectedCG = workflow.documentType === 'CG' && workflow.approvalStatus === 'rejected';
+                const hasValidationPassed = workflow.documentType === 'CG' && prValidationStatus === 'passed';
+                const canValidate = workflow.documentType === 'CG' && !pushedToSupplier && (isDraftCG || isRejectedCG) && !hasValidationPassed;
+                const canApplyApproval = workflow.documentType === 'CG' && !pushedToSupplier && hasValidationPassed && (isDraftCG || isRejectedCG);
 
                 return (
                   <tr key={po.id} className="border-b border-slate-200 align-top hover:bg-slate-50/70">
-                    <td className="px-2 py-3 text-center">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 cursor-pointer rounded border border-slate-400"
-                        checked={selectedOrderIds.includes(po.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedOrderIds([...selectedOrderIds, po.id]);
-                          } else {
-                            setSelectedOrderIds(selectedOrderIds.filter((id) => id !== po.id));
-                          }
-                        }}
-                      />
+                    <td className="px-2 py-3 text-left" style={getPurchaseOrderColumnStyle('selection')}>
+                      <div className="flex w-full items-center justify-start pr-4 text-left">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 cursor-pointer rounded border border-slate-400"
+                          checked={selectedOrderIds.includes(po.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedOrderIds([...selectedOrderIds, po.id]);
+                            } else {
+                              setSelectedOrderIds(selectedOrderIds.filter((id) => id !== po.id));
+                            }
+                          }}
+                        />
+                      </div>
                     </td>
-                    <td className="px-2 py-3 text-center text-slate-500">{idx + 1}</td>
+                    <td className="px-2 py-3 text-left text-slate-500" style={getPurchaseOrderColumnStyle('index')}>
+                      <div className="flex w-full items-center justify-start pr-4 text-left">
+                        {idx + 1}
+                      </div>
+                    </td>
                     <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('date')}>
                       <div className="space-y-1 text-slate-900">
                         <div className="whitespace-nowrap">
@@ -775,32 +865,43 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                         <div className="text-slate-400">待补充明细</div>
                       )}
                     </td>
-                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('approval')}>
-                      <Badge className={getFinanceToneBadgeClasses(approvalPresentation.tone)}>
-                        {approvalPresentation.label}
-                      </Badge>
-                      {prValidationStatus === 'passed' ? (
-                        <div className="mt-1 text-[12px] leading-[1.35] text-emerald-600">比价检查已通过</div>
-                      ) : null}
+                    <td className="px-3 py-3 align-top" style={getPurchaseOrderColumnStyle('approval')}>
+                      <div className="flex flex-col items-start gap-1.5">
+                        <Badge className={getFinanceToneBadgeClasses(approvalPresentation.tone)}>
+                          {approvalPresentation.label}
+                        </Badge>
+                        {prValidationStatus === 'passed' ? (
+                          <div className="text-[12px] leading-[1.35] text-emerald-600">比价依据校验已通过</div>
+                        ) : null}
+                      </div>
                     </td>
-                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('execution')}>
-                      <div className="flex flex-col gap-1.5">
+                    <td className="px-3 py-3 align-top" style={getPurchaseOrderColumnStyle('execution')}>
+                      <div className="flex flex-col items-start gap-1.5">
                         <Badge className={getFinanceToneBadgeClasses(executionPresentation.tone)}>
                           {executionPresentation.label}
                         </Badge>
                         <div className="text-[12px] leading-[1.35] text-slate-500">{executionPresentation.detail}</div>
                       </div>
                     </td>
-                    <td className="px-3 py-3" style={getPurchaseOrderColumnStyle('actions')}>
-                      <div className="flex flex-wrap justify-start gap-1.5">
+                    <td className="px-3 py-3 align-top" style={getPurchaseOrderColumnStyle('actions')}>
+                      <div className="flex flex-wrap items-center justify-start gap-1.5">
                         <Button variant="outline" size="sm" style={CAPSULE_BUTTON_STYLE} className="h-8 !rounded-full border-slate-300 px-3 text-[12px] font-semibold" onClick={() => handleViewPODocument(po)}>
-                          <Eye className="mr-1 h-3 w-3" />
                           查看
                         </Button>
                         <Button variant="outline" size="sm" style={CAPSULE_BUTTON_STYLE} className="h-8 !rounded-full border-slate-300 px-3 text-[12px] font-semibold" onClick={() => handleOpenEditPO(po)}>
-                          <Edit className="mr-1 h-3 w-3" />
                           编辑
                         </Button>
+                        {workflow.documentType === 'CG' ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewComparisonForPO(po)}
+                            style={CAPSULE_BUTTON_STYLE}
+                            className="h-8 !rounded-full border-emerald-200 px-3 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-50"
+                          >
+                            查看比价
+                          </Button>
+                        ) : null}
                         <Button
                           variant="outline"
                           size="sm"
@@ -809,7 +910,7 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                           style={CAPSULE_BUTTON_STYLE}
                           className={`h-8 !rounded-full px-3 text-[12px] font-semibold ${
                             pushedToSupplier
-                              ? 'border-slate-200 bg-slate-100 text-slate-500'
+                              ? 'border-slate-300 bg-slate-200 text-slate-600'
                               : canPushToSupplier
                                 ? 'border-blue-200 text-blue-700 hover:bg-blue-50'
                                 : 'border-slate-200 text-slate-400'
@@ -822,9 +923,21 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                                 : '需先完成审批后才可下推'
                           }
                         >
-                          <Send className="mr-1 h-3 w-3" />
-                          {pushedToSupplier ? '已下推' : '下推供应商'}
+                          {pushedToSupplier ? '已下推供应商' : '下推供应商'}
                         </Button>
+                        {canValidate ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              handleValidateProcurementRequest(po);
+                            }}
+                            style={CAPSULE_BUTTON_STYLE}
+                            className="h-8 !rounded-full border-sky-200 px-3 text-[12px] font-semibold text-sky-700 hover:bg-sky-50"
+                          >
+                            比价依据校验
+                          </Button>
+                        ) : null}
                         {!pushedToSupplier ? (
                           <Button
                             variant="outline"
@@ -832,30 +945,30 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                             onClick={() => {
                               handleApplyBossApproval(po);
                             }}
-                            disabled={isPendingApproval}
+                            disabled={!canApplyApproval && !isPendingApproval && !isApproved}
                             style={CAPSULE_BUTTON_STYLE}
                             className={`h-8 !rounded-full px-3 text-[12px] font-semibold ${
                               isPendingApproval
                                 ? 'border-amber-200 bg-amber-50 text-amber-600'
                                 : isApproved
                                     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                    : 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                                    : canApplyApproval
+                                      ? 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                                      : 'border-slate-200 text-slate-400'
                             }`}
+                            title={
+                              isPendingApproval
+                                ? '该采购单已进入审核流程'
+                                : isApproved
+                                  ? '该采购单已审核通过'
+                                  : canApplyApproval
+                                    ? '提交采购审核'
+                                    : '请先完成比价依据校验'
+                            }
                           >
-                            <CheckCircle2 className="mr-1 h-3 w-3" />
-                            {isPendingApproval ? '审核中' : isApproved ? '已审核' : isDraftCG ? '申请审核' : '申请审核'}
+                            {isPendingApproval ? '审核中' : isApproved ? '已审核' : '申请审核'}
                           </Button>
                         ) : null}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDeletePurchaseOrder(po)}
-                          style={CAPSULE_BUTTON_STYLE}
-                          className="h-8 !rounded-full border-red-200 px-3 text-[12px] font-semibold text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 className="mr-1 h-3 w-3" />
-                          删除
-                        </Button>
                       </div>
                     </td>
                   </tr>

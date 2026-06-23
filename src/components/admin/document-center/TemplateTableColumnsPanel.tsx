@@ -13,7 +13,7 @@ interface TemplateTableColumn {
 
 interface TemplateTableColumnsPanelProps {
   title: string;
-  description: string;
+  description?: string;
   columns: TemplateTableColumn[];
   onMove: (index: number, direction: 'up' | 'down') => void;
   onPatch: (index: number, patch: Partial<TemplateTableColumn>) => void;
@@ -30,11 +30,13 @@ export function TemplateTableColumnsPanel({
     <div className="rounded-lg border border-gray-200 p-3">
       <div className="mb-3">
         <p className="text-xs font-semibold text-gray-900">{title}</p>
-        <p className="mt-1 text-[11px] leading-5 text-gray-500">{description}</p>
+        {description ? (
+          <p className="mt-1 text-[11px] leading-5 text-gray-500">{description}</p>
+        ) : null}
       </div>
       <div className="space-y-2">
         {columns.map((column, index) => (
-          <div key={column.key} className="rounded border border-gray-100 bg-gray-50 p-2.5">
+          <div key={column.key} className="rounded border border-gray-100 bg-gray-50 p-2">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="text-[11px] font-semibold text-gray-700">{column.key}</div>
               <div className="flex items-center gap-1">
@@ -62,7 +64,7 @@ export function TemplateTableColumnsPanel({
                 </Button>
               </div>
             </div>
-            <div className="grid grid-cols-[1fr_92px] gap-2">
+            <div className="grid grid-cols-[1fr_88px] gap-2">
               <div>
                 <Label className="text-[11px] text-gray-500">列标题</Label>
                 <Input

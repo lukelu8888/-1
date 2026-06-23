@@ -15,13 +15,14 @@ import {
 } from 'lucide-react';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { productCategories, getLevel2Categories, getLevel3Categories } from '../../data/productCategories';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 
 interface ProductCreationWizardProps {
-  onComplete?: () => void;
+  onComplete?: (formData?: any, mode?: 'draft' | 'publish' | 'cancel') => void;
+  onCancel?: () => void;
 }
 
-export default function ProductCreationWizard({ onComplete }: ProductCreationWizardProps = {}) {
+export default function ProductCreationWizard({ onComplete, onCancel }: ProductCreationWizardProps = {}) {
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState<any>({
     // Step 1: 行业分类
@@ -172,7 +173,7 @@ export default function ProductCreationWizard({ onComplete }: ProductCreationWiz
     // 延迟后返回产品列表
     setTimeout(() => {
       if (onComplete) {
-        onComplete();
+        onComplete(formData, 'publish');
       }
     }, 1500);
   };
@@ -189,7 +190,7 @@ export default function ProductCreationWizard({ onComplete }: ProductCreationWiz
     // 延迟后返回产品列表
     setTimeout(() => {
       if (onComplete) {
-        onComplete();
+        onComplete(formData, 'draft');
       }
     }, 1500);
   };
@@ -239,8 +240,10 @@ export default function ProductCreationWizard({ onComplete }: ProductCreationWiz
               variant="outline" 
               size="sm" 
               onClick={() => {
-                if (onComplete) {
-                  onComplete();
+                if (onCancel) {
+                  onCancel();
+                } else if (onComplete) {
+                  onComplete(undefined, 'cancel');
                 }
               }}
               style={{ fontSize: '12px' }}

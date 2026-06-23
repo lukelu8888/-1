@@ -8,6 +8,7 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner@2.0.3';
+import { buildPaymentTermsText } from '../../lib/paymentFlow';
 import { 
   FileText,
   TrendingUp,
@@ -217,7 +218,7 @@ export default function QuoteManagementEnhanced({ userRole = 'Sales_Rep', user }
       name: '标准电气设备报价模板',
       category: '电气设备',
       defaultDiscount: 10,
-      paymentTerms: '30% 预付，70% 见提单复印件',
+      paymentTerms: buildPaymentTermsText('tt_deposit_balance_against_bl', 'after_shipment'),
       deliveryTerms: 'FOB 厦门港',
       validityDays: 15,
       notes: '含标准包装，不含运输保险',
@@ -250,7 +251,7 @@ export default function QuoteManagementEnhanced({ userRole = 'Sales_Rep', user }
       name: '快速成交模板',
       category: '全品类',
       defaultDiscount: 8,
-      paymentTerms: '100% 预付',
+      paymentTerms: buildPaymentTermsText('lc_100', 'lc_ready'),
       deliveryTerms: 'EXW 工厂交货',
       validityDays: 7,
       notes: '限时优惠，7天内成交额外2%折扣',

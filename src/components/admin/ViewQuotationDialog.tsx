@@ -6,6 +6,8 @@ import { Printer, Download, X, ArrowRight } from 'lucide-react';
 import { Quotation } from './QuotationManagement';
 import { QuotationDocument, QuotationData } from '../documents/templates/QuotationDocument'; // 🔥 使用文档中心的专业模板
 import { getFormalBusinessModelNo } from '../../utils/productModelDisplay';
+import { Badge } from '../ui/badge';
+import { BALANCE_TRIGGER_OPTIONS, buildPaymentTermsText, deriveBalanceTrigger, getPaymentModeLabel } from '../../lib/paymentFlow';
 
 interface ViewQuotationDialogProps {
   open: boolean;
@@ -88,7 +90,7 @@ export default function ViewQuotationDialog({
     
     tradeTerms: {
       incoterms: quotation.tradeTerms || quotation.deliveryTerms || 'FOB Xiamen',
-      paymentTerms: quotation.paymentTerms || '30% T/T deposit, 70% before shipment',
+      paymentTerms: quotation.paymentTerms || buildPaymentTermsText((quotation as any).paymentMode, deriveBalanceTrigger((quotation as any).paymentMode, (quotation as any).balanceTrigger)),
       deliveryTime: '25-30 days after deposit',
       packing: quotation.packing || 'Export standard carton with wooden pallet',
       portOfLoading: quotation.portOfLoading || 'Xiamen, China',
@@ -236,6 +238,19 @@ export default function ViewQuotationDialog({
 
           {/* 使用文档中心的专业报价单模板 */}
           <div className="mt-4">
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 print:hidden">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="text-xs">
+                  付款模式：{getPaymentModeLabel(quotation.paymentMode)}
+                </Badge>
+                {quotation.balanceTrigger && (
+                  <Badge variant="outline" className="text-xs">
+                    触发节点：{BALANCE_TRIGGER_OPTIONS.find((option) => option.value === quotation.balanceTrigger)?.label || quotation.balanceTrigger}
+                  </Badge>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-slate-600">{quotation.paymentTerms}</p>
+            </div>
             <QuotationDocument ref={printRef} data={quotationData} />
           </div>
 

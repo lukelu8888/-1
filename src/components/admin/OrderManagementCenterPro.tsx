@@ -1386,6 +1386,12 @@ export default function OrderManagementCenterPro({ currentUser: dashboardCurrent
                     setActiveTab('quotations');
                     setTimeout(() => setHighlightQtNumber(undefined), 3500);
                   }}
+                  onNavigateToProcurement={() => {
+                    // 复用顶层 AdminDashboard 的 navigate 事件跳转到采购订单管理模块
+                    window.dispatchEvent(new CustomEvent('navigate', {
+                      detail: { page: 'purchase-order-management' }
+                    }));
+                  }}
                 />
               </div>
             ) : null}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
@@ -21,6 +21,142 @@ import { PurchaseOrderDocument } from '../documents/templates/PurchaseOrderDocum
 import { PurchaseOrderData } from '../documents/templates/PurchaseOrderDocument'; // 🔥 采购订单数据类型
 import type { DocumentLayoutConfig } from '../documents/A4PageContainer';
 import { exportToPDF, exportToPDFPrint, generatePDFFilename } from '../../utils/pdfExport'; // 🔥 PDF导出工具
+import {
+  getSupplierMasterRequests,
+  SUPPLIER_MASTER_REQUESTS_UPDATED_EVENT,
+  updateSupplierMasterRequestStatus,
+  type SupplierMasterRequest,
+} from '../../lib/supplier-store';
+import {
+  getFinancePayeeApprovalStatusLabel,
+  getFinancePayeeCategoryLabel,
+  getFinancePayeePartySideLabel,
+} from '../finance-v2/data/financePayeeMasterData';
+import { loadFinanceV2PayeeMasters, saveFinanceV2PayeeMasters } from '../finance-v2/data/financeV2FinanceStorage';
+import { FinanceFilterBar } from '../finance-v2/components/FinanceFilterBar';
+import type { WorkbenchStatItem } from '../finance-v2/types/financeV2';
+import { scanSupplierDocument } from '../../lib/services/supplierDocumentRecognizerService';
+
+const SUPPLIER_MANAGEMENT_STORAGE_KEY = 'gsd_supplier_management_records_v1';
+
+function buildSupplierPendingRequestsSnapshot() {
+  const stored = getSupplierMasterRequests();
+  const financePending = loadFinanceV2PayeeMasters()
+    .filter((item) => item.partySide === 'supplier' && item.approvalStatus === 'pending_approval')
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      partySide: item.partySide,
+      entityType: item.entityType,
+      category: item.category,
+      expenseScope: item.expenseScope,
+      expenseSubject: item.expenseSubject,
+      department: item.department,
+      costCenter: item.costCenter,
+      routingNote: item.routingNote,
+      approvalStatus: 'pending_approval' as const,
+      submittedBy: '赵敏',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+
+  const merged = new Map<string, SupplierMasterRequest>();
+  [...stored, ...financePending].forEach((item) => {
+    if (item.partySide === 'supplier') merged.set(item.id, item);
+  });
+  return Array.from(merged.values());
+}
+
+function buildSupplierFromMasterRequest(request: SupplierMasterRequest, fallbackCode: string): Supplier {
+  return {
+    id: request.masterCode || fallbackCode,
+    name: request.name,
+    code: request.masterCode || fallbackCode,
+    nameEn: request.name,
+    level: 'C',
+    category: request.expenseSubject,
+    region: request.department || '待补充',
+    businessTypes: request.expenseScope === 'business' ? ['trading'] : ['agency'],
+    contact: '待补充',
+    phone: '待补充',
+    email: '',
+    address: '待补充',
+    businessLicense: '',
+    certifications: [],
+    cooperationYears: 0,
+    totalOrders: 0,
+    totalAmount: 0,
+    onTimeRate: 0,
+    qualityRate: 0,
+    status: 'active',
+    capacity: '',
+  };
+}
+
+function readStoredSupplierRows(): Supplier[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SUPPLIER_MANAGEMENT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Supplier[]) : null;
+  } catch (error) {
+    console.warn('[SupplierManagement] failed to parse stored rows:', error);
+    return null;
+  }
+}
+
+function writeStoredSupplierRows(records: Supplier[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(SUPPLIER_MANAGEMENT_STORAGE_KEY, JSON.stringify(records));
+}
+
+function hydrateAuthorizedSuppliers(base: Supplier[]): Supplier[] {
+  const merged = [...base];
+  const names = new Set(base.map((item) => item.name));
+  const approvedRequests = getSupplierMasterRequests().filter(
+    (item) => item.partySide === 'supplier' && item.approvalStatus === 'approved',
+  );
+  approvedRequests.forEach((item, index) => {
+    if (names.has(item.name)) return;
+    const fallbackCode = item.masterCode || `SUP-${String(base.length + index + 1).padStart(3, '0')}`;
+    merged.unshift(buildSupplierFromMasterRequest(item, fallbackCode));
+    names.add(item.name);
+  });
+
+  loadFinanceV2PayeeMasters()
+    .filter((item) => item.partySide === 'supplier' && item.approvalStatus === 'active')
+    .forEach((item, index) => {
+      if (names.has(item.name)) return;
+      const fallbackCode = item.masterCode || `SUP-${String(base.length + approvedRequests.length + index + 1).padStart(3, '0')}`;
+      merged.unshift({
+        id: item.masterCode || fallbackCode,
+        name: item.name,
+        code: item.masterCode || fallbackCode,
+        nameEn: item.name,
+        level: 'C',
+        category: item.expenseSubject,
+        region: item.department || '待补充',
+        businessTypes: item.expenseScope === 'business' ? ['trading'] : ['agency'],
+        contact: '待补充',
+        phone: '待补充',
+        email: '',
+        address: '待补充',
+        businessLicense: '',
+        certifications: [],
+        cooperationYears: 0,
+        totalOrders: 0,
+        totalAmount: 0,
+        onTimeRate: 0,
+        qualityRate: 0,
+        status: 'active',
+        capacity: '',
+      });
+      names.add(item.name);
+    });
+
+  return merged;
+}
 
 // 🔥 供应商接口 - 导出供其他模块使用
 export interface Supplier {
@@ -118,6 +254,11 @@ export default function SupplierManagement() {
   const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false);
   const [isAddPOOpen, setIsAddPOOpen] = useState(false);
   const [viewSupplier, setViewSupplier] = useState<Supplier | null>(null);
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
+  const [masterRequests, setMasterRequests] = useState<SupplierMasterRequest[]>(() => buildSupplierPendingRequestsSnapshot());
+  const pendingRequestCountRef = useRef(
+    buildSupplierPendingRequestsSnapshot().filter((item) => item.partySide === 'supplier' && item.approvalStatus === 'pending_approval').length,
+  );
   
   // 🔥 采购订单查看与导出状态
   const [viewPurchaseOrder, setViewPurchaseOrder] = useState<PurchaseOrder | null>(null);
@@ -153,6 +294,76 @@ export default function SupplierManagement() {
   ]);
   const [isAddingNewCategory, setIsAddingNewCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
+  const [isRecognizingSupplierDoc, setIsRecognizingSupplierDoc] = useState(false);
+  const [supplierOcrFileName, setSupplierOcrFileName] = useState('');
+  const supplierOcrInputRef = React.useRef<HTMLInputElement>(null);
+
+  const resetSupplierForm = () => {
+    setNewSupplier({
+      name: '',
+      nameEn: '',
+      code: '',
+      category: '',
+      contact: '',
+      phone: '',
+      email: '',
+      address: '',
+      businessLicense: '',
+      certifications: '',
+      capacity: ''
+    });
+    setSupplierOcrFileName('');
+    setIsRecognizingSupplierDoc(false);
+    setEditingSupplierId(null);
+  };
+
+  const handleSupplierDocumentSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setIsRecognizingSupplierDoc(true);
+
+    try {
+      const result = await scanSupplierDocument(file);
+      const nextValues = {
+        name: result.extracted.name || '',
+        nameEn: result.extracted.nameEn || '',
+        businessLicense: result.extracted.businessLicense || '',
+        address: result.extracted.address || '',
+        contact: result.extracted.contact || '',
+        phone: result.extracted.phone || '',
+        email: result.extracted.email || '',
+        certifications: result.extracted.certifications || '',
+      };
+
+      setNewSupplier((current) => ({
+        ...current,
+        name: current.name || nextValues.name,
+        nameEn: current.nameEn || nextValues.nameEn,
+        businessLicense: current.businessLicense || nextValues.businessLicense,
+        address: current.address || nextValues.address,
+        contact: current.contact || nextValues.contact,
+        phone: current.phone || nextValues.phone,
+        email: current.email || nextValues.email,
+        certifications: current.certifications || nextValues.certifications,
+      }));
+      setSupplierOcrFileName(result.fileName);
+
+      const filledCount = Object.values(nextValues).filter(Boolean).length;
+      toast.success('供应商资料 OCR 识别完成', {
+        description: `已从 ${result.fileName} 识别并回填 ${filledCount} 个字段。`,
+      });
+
+      result.extracted.warnings.forEach((warning) => {
+        toast.warning(warning, { duration: 5000 });
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '供应商资料 OCR 识别失败，请稍后重试');
+    } finally {
+      setIsRecognizingSupplierDoc(false);
+    }
+  };
 
   // 🔥🔥🔥 新增：筛选状态
   const [timeRange, setTimeRange] = useState('ytd'); // q1, q2, q3, q4, ytd, year
@@ -288,6 +499,44 @@ export default function SupplierManagement() {
       capacity: '10万件/月'
     }
   ]);
+
+  const pendingMasterRequests = useMemo(
+    () => masterRequests.filter((item) => item.partySide === 'supplier' && item.approvalStatus === 'pending_approval'),
+    [masterRequests],
+  );
+
+  useEffect(() => {
+    setMasterRequests(buildSupplierPendingRequestsSnapshot());
+    setSuppliers((current) => hydrateAuthorizedSuppliers(readStoredSupplierRows() || current));
+  }, []);
+
+  useEffect(() => {
+    const refreshMasterRequests = () => {
+      setMasterRequests(buildSupplierPendingRequestsSnapshot());
+      setSuppliers((current) => hydrateAuthorizedSuppliers(current));
+    };
+
+    window.addEventListener(SUPPLIER_MASTER_REQUESTS_UPDATED_EVENT, refreshMasterRequests);
+    window.addEventListener('storage', refreshMasterRequests);
+    return () => {
+      window.removeEventListener(SUPPLIER_MASTER_REQUESTS_UPDATED_EVENT, refreshMasterRequests);
+      window.removeEventListener('storage', refreshMasterRequests);
+    };
+  }, []);
+
+  useEffect(() => {
+    const nextCount = pendingMasterRequests.length;
+    if (nextCount > pendingRequestCountRef.current) {
+      toast.info(`收到 ${nextCount - pendingRequestCountRef.current} 条新的供应商主档待授权申请`, {
+        description: '请在供应商管理模块完成审核后生效。',
+      });
+    }
+    pendingRequestCountRef.current = nextCount;
+  }, [pendingMasterRequests]);
+
+  useEffect(() => {
+    writeStoredSupplierRows(suppliers);
+  }, [suppliers]);
 
   // 🔥🔥🔥 模拟采购订单数据（每个订单关联一种业务类型）
   const purchaseOrders: PurchaseOrder[] = [
@@ -712,8 +961,8 @@ export default function SupplierManagement() {
         return false;
       }
       
-      // 状态筛选
-      if (filterStatus !== 'all' && supplier.status !== filterStatus) {
+      // 等级筛选
+      if (filterStatus !== 'all' && supplier.level !== filterStatus) {
         return false;
       }
       
@@ -790,6 +1039,51 @@ export default function SupplierManagement() {
     avgOnTimeRate: suppliers.reduce((sum, s) => sum + s.onTimeRate, 0) / suppliers.length,
     avgQualityRate: suppliers.reduce((sum, s) => sum + s.qualityRate, 0) / suppliers.length
   };
+
+  const statItems = useMemo<WorkbenchStatItem[]>(() => [
+    {
+      id: 'supplier-total',
+      label: '供应商总数',
+      value: String(stats.totalSuppliers),
+      tone: 'default',
+    },
+    {
+      id: 'supplier-a-level',
+      label: 'A级供应商',
+      value: String(stats.aLevelSuppliers),
+      tone: 'ok',
+    },
+    {
+      id: 'supplier-po-count',
+      label: '采购订单',
+      value: String(stats.totalPurchaseOrders),
+      tone: 'default',
+    },
+    {
+      id: 'supplier-po-amount',
+      label: '采购金额',
+      value: `$${(stats.totalPurchaseAmount / 1000).toFixed(0)}K`,
+      tone: 'default',
+    },
+    {
+      id: 'supplier-pending-payment',
+      label: '待付款',
+      value: String(stats.pendingPayments),
+      tone: stats.pendingPayments > 0 ? 'warn' : 'ok',
+    },
+    {
+      id: 'supplier-ontime',
+      label: '准时交付率',
+      value: `${stats.avgOnTimeRate.toFixed(1)}%`,
+      tone: stats.avgOnTimeRate >= 95 ? 'ok' : stats.avgOnTimeRate >= 90 ? 'default' : 'warn',
+    },
+    {
+      id: 'supplier-quality',
+      label: '质量合格率',
+      value: `${stats.avgQualityRate.toFixed(1)}%`,
+      tone: stats.avgQualityRate >= 97 ? 'ok' : stats.avgQualityRate >= 94 ? 'default' : 'warn',
+    },
+  ], [stats]);
 
   // 获取供应商等级配置
   const getSupplierLevelConfig = (level: string) => {
@@ -921,242 +1215,211 @@ export default function SupplierManagement() {
       return;
     }
 
-    // 生成新供应商ID
-    const newId = `SUP-${String(suppliers.length + 1).padStart(3, '0')}`;
+    const existingSupplier = editingSupplierId ? suppliers.find((item) => item.id === editingSupplierId) : null;
+    const nextId = existingSupplier?.id || `SUP-${String(suppliers.length + 1).padStart(3, '0')}`;
 
-    // 创建新供应商对象
-    const supplierToAdd: Supplier = {
-      id: newId,
+    const supplierToSave: Supplier = {
+      id: nextId,
       name: newSupplier.name,
       code: newSupplier.code,
       nameEn: newSupplier.nameEn,
-      level: 'C', // 新供应商默认C级
+      level: existingSupplier?.level || 'C',
       category: newSupplier.category,
+      region: existingSupplier?.region || '福建',
+      businessTypes: existingSupplier?.businessTypes || ['trading'],
       contact: newSupplier.contact,
       phone: newSupplier.phone,
       email: newSupplier.email || '',
       address: newSupplier.address,
       businessLicense: newSupplier.businessLicense || '',
       certifications: newSupplier.certifications ? newSupplier.certifications.split(',').map(c => c.trim()) : [],
-      cooperationYears: 0, // 新供应商合作0年
-      totalOrders: 0,
-      totalAmount: 0,
-      onTimeRate: 0,
-      qualityRate: 0,
-      status: 'active',
+      cooperationYears: existingSupplier?.cooperationYears || 0,
+      totalOrders: existingSupplier?.totalOrders || 0,
+      totalAmount: existingSupplier?.totalAmount || 0,
+      onTimeRate: existingSupplier?.onTimeRate || 0,
+      qualityRate: existingSupplier?.qualityRate || 0,
+      status: existingSupplier?.status || 'active',
       capacity: newSupplier.capacity || ''
     };
 
-    // 添加到供应商列表（添加到最前面）
-    setSuppliers([supplierToAdd, ...suppliers]);
-    
-    // 显示成功提示
-    toast.success('供应商已成功保存！', {
-      description: `供应商 ${newSupplier.name} 已添加到系统`
+    setSuppliers((current) => {
+      if (!editingSupplierId) return [supplierToSave, ...current];
+      return current.map((item) => (item.id === editingSupplierId ? supplierToSave : item));
+    });
+    setViewSupplier((current) => (current?.id === supplierToSave.id ? supplierToSave : current));
+
+    toast.success(editingSupplierId ? '供应商信息已更新！' : '供应商已成功保存！', {
+      description: editingSupplierId ? `供应商 ${newSupplier.name} 的信息已更新` : `供应商 ${newSupplier.name} 已添加到系统`
     });
 
-    // 清空表单
-    setNewSupplier({
-      name: '',
-      nameEn: '',
-      code: '',
-      category: '',
-      contact: '',
-      phone: '',
-      email: '',
-      address: '',
-      businessLicense: '',
-      certifications: '',
-      capacity: ''
-    });
+    resetSupplierForm();
 
     // 关闭对话框
     setIsAddSupplierOpen(false);
   };
 
+  const openEditSupplierDialog = (supplier: Supplier) => {
+    setEditingSupplierId(supplier.id);
+    setNewSupplier({
+      name: supplier.name,
+      nameEn: supplier.nameEn,
+      code: supplier.code,
+      category: supplier.category,
+      contact: supplier.contact,
+      phone: supplier.phone,
+      email: supplier.email || '',
+      address: supplier.address,
+      businessLicense: supplier.businessLicense || '',
+      certifications: supplier.certifications.join(', '),
+      capacity: supplier.capacity || ''
+    });
+    setIsAddSupplierOpen(true);
+  };
+
+  const handleApproveMasterRequest = (request: SupplierMasterRequest) => {
+    const nextCode = `SUP-${String(suppliers.length + 1).padStart(3, '0')}`;
+    const approved = updateSupplierMasterRequestStatus(request.id, 'approved', {
+      masterCode: nextCode,
+      approvedAt: new Date().toISOString(),
+    });
+    if (!approved) {
+      toast.error('主档申请不存在或已被处理');
+      return;
+    }
+
+    const payeeMasters = loadFinanceV2PayeeMasters();
+    const nextPayeeMasters = payeeMasters.map((item) =>
+      item.id === request.id ? { ...item, approvalStatus: 'active' as const, masterCode: nextCode } : item,
+    );
+    saveFinanceV2PayeeMasters(nextPayeeMasters);
+    setMasterRequests(getSupplierMasterRequests());
+
+    if (!suppliers.some((item) => item.name === request.name)) {
+      const supplierToAdd = buildSupplierFromMasterRequest({ ...request, masterCode: nextCode }, nextCode);
+      setSuppliers((current) => [supplierToAdd, ...current]);
+    }
+
+    toast.success(`供应商主档已授权生效，系统编号 ${nextCode}`);
+  };
+
   return (
-    <div className="space-y-4">
-      {/* 🔥 标题栏 - 参考业务员模块设计 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-            <Building2 className="w-6 h-6 text-purple-600" />
-            采购与供应商管理
-          </h2>
-          <p className="text-sm text-gray-600 mt-1">
-            全流程供应链管理与采购数据分析
-          </p>
+    <div className="space-y-3 bg-slate-50">
+      <div className="overflow-hidden border border-slate-300 bg-white">
+        <div className="grid gap-4 border-b border-slate-300 p-4 xl:grid-cols-[minmax(0,1fr)_840px]">
+          <div className="min-w-0">
+            <div className="text-[15px] font-semibold leading-[1.4] text-slate-900">采购与供应商管理</div>
+            <div className="mt-1 text-[11px] leading-[1.45] text-slate-600">全流程供应链管理与采购数据分析</div>
+          </div>
+          <div className="grid gap-2 xl:grid-cols-4">
+            <Select value={timeRange} onValueChange={setTimeRange}>
+              <SelectTrigger className="h-10 border-slate-300 text-[13px] font-semibold text-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="q1" className="text-[13px]">Q1季度</SelectItem>
+                <SelectItem value="q2" className="text-[13px]">Q2季度</SelectItem>
+                <SelectItem value="q3" className="text-[13px]">Q3季度</SelectItem>
+                <SelectItem value="q4" className="text-[13px]">Q4季度</SelectItem>
+                <SelectItem value="ytd" className="text-[13px]">本年至今</SelectItem>
+                <SelectItem value="year" className="text-[13px]">全年</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={selectedRegion} onValueChange={setSelectedRegion}>
+              <SelectTrigger className="h-10 border-slate-300 text-[13px] font-semibold text-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-[13px]">全部区域</SelectItem>
+                <SelectItem value="广东" className="text-[13px]">广东</SelectItem>
+                <SelectItem value="浙江" className="text-[13px]">浙江</SelectItem>
+                <SelectItem value="福建" className="text-[13px]">福建</SelectItem>
+                <SelectItem value="江苏" className="text-[13px]">江苏</SelectItem>
+                <SelectItem value="上海" className="text-[13px]">上海</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={selectedBusinessType} onValueChange={setSelectedBusinessType}>
+              <SelectTrigger className="h-10 border-slate-300 text-[13px] font-semibold text-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-[13px]">全部业务</SelectItem>
+                <SelectItem value="trading" className="text-[13px]">直接采购</SelectItem>
+                <SelectItem value="inspection" className="text-[13px]">验货服务</SelectItem>
+                <SelectItem value="agency" className="text-[13px]">代理服务</SelectItem>
+                <SelectItem value="project" className="text-[13px]">一站式项目</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+              <SelectTrigger className="h-10 border-slate-300 text-[13px] font-semibold text-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-[13px]">全部类别</SelectItem>
+                <SelectItem value="电气设备" className="text-[13px]">电气设备</SelectItem>
+                <SelectItem value="卫浴产品" className="text-[13px]">卫浴产品</SelectItem>
+                <SelectItem value="门窗配件" className="text-[13px]">门窗配件</SelectItem>
+                <SelectItem value="劳保用品" className="text-[13px]">劳保用品</SelectItem>
+                <SelectItem value="五金工具" className="text-[13px]">五金工具</SelectItem>
+                <SelectItem value="建筑材料" className="text-[13px]">建筑材料</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex gap-2 xl:col-span-4">
+              <Button variant="outline" size="sm" className="h-10 border-slate-300 px-3.5 text-[13px] font-semibold text-slate-700">
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                导出报表
+              </Button>
+              <Button variant="outline" size="sm" className="h-10 border-slate-300 px-3.5 text-[13px] font-semibold text-slate-700">
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                刷新数据
+              </Button>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* 🔥 时间范围筛选器 */}
-          <Select value={timeRange} onValueChange={setTimeRange}>
-            <SelectTrigger className="h-8 w-[100px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="q1" className="text-xs">Q1季度</SelectItem>
-              <SelectItem value="q2" className="text-xs">Q2季度</SelectItem>
-              <SelectItem value="q3" className="text-xs">Q3季度</SelectItem>
-              <SelectItem value="q4" className="text-xs">Q4季度</SelectItem>
-              <SelectItem value="ytd" className="text-xs">本年至今</SelectItem>
-              <SelectItem value="year" className="text-xs">全年</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* 🔥 区域筛选器 */}
-          <Select value={selectedRegion} onValueChange={setSelectedRegion}>
-            <SelectTrigger className="h-8 w-[100px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">全部区域</SelectItem>
-              <SelectItem value="广东" className="text-xs">广东</SelectItem>
-              <SelectItem value="浙江" className="text-xs">浙江</SelectItem>
-              <SelectItem value="福建" className="text-xs">福建</SelectItem>
-              <SelectItem value="江苏" className="text-xs">江苏</SelectItem>
-              <SelectItem value="上海" className="text-xs">上海</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* 🔥 业务类型筛选器 */}
-          <Select value={selectedBusinessType} onValueChange={setSelectedBusinessType}>
-            <SelectTrigger className="h-8 w-[120px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">全部业务</SelectItem>
-              <SelectItem value="trading" className="text-xs">🛒 直接采购</SelectItem>
-              <SelectItem value="inspection" className="text-xs">🔍 验货服务</SelectItem>
-              <SelectItem value="agency" className="text-xs">🤝 代理服务</SelectItem>
-              <SelectItem value="project" className="text-xs">🌟 一站式项目</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* 🔥 产品类别筛选器 */}
-          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-            <SelectTrigger className="h-8 w-[100px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all" className="text-xs">全部类别</SelectItem>
-              <SelectItem value="电气设备" className="text-xs">电气设备</SelectItem>
-              <SelectItem value="卫浴产品" className="text-xs">卫浴产品</SelectItem>
-              <SelectItem value="门窗配件" className="text-xs">门窗配件</SelectItem>
-              <SelectItem value="劳保用品" className="text-xs">劳保用品</SelectItem>
-              <SelectItem value="五金工具" className="text-xs">五金工具</SelectItem>
-              <SelectItem value="建筑材料" className="text-xs">建筑材料</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button variant="outline" size="sm" className="h-8 text-xs">
-            <Download className="w-3.5 h-3.5 mr-1.5" />
-            导出报表
-          </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs">
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-            刷新数据
-          </Button>
+        <div className="grid gap-2 border-t border-slate-300 p-4 md:grid-cols-3 xl:grid-cols-7">
+          {statItems.map((s) => (
+            <div
+              key={s.id}
+              className={`border px-4 py-3 ${s.tone === 'ok' ? 'border-emerald-300 bg-emerald-50/70' : s.tone === 'warn' ? 'border-amber-300 bg-amber-50/70' : 'border-slate-300 bg-slate-50/70'}`}
+            >
+              <div className="text-[13px] font-semibold leading-[1.35] text-slate-700">{s.label}</div>
+              <div className="mt-2 text-[18px] font-semibold leading-[1.2] tabular-nums text-slate-900">{s.value}</div>
+              {s.sub ? <div className="mt-1 text-[11px] leading-[1.35] text-slate-500">{s.sub}</div> : null}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* 顶部统计卡片 */}
-      <div className="grid grid-cols-7 gap-2">
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">供应商总数</span>
-            <Building2 className="w-3 h-3 text-blue-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">{stats.totalSuppliers}</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">活跃 {stats.activeSuppliers} 家</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">A级供应商</span>
-            <Award className="w-3 h-3 text-emerald-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">{stats.aLevelSuppliers}</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">优质工厂</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">采购订单</span>
-            <ShoppingCart className="w-3 h-3 text-purple-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">{stats.totalPurchaseOrders}</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">生产中 {stats.producingOrders}</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">采购金额</span>
-            <DollarSign className="w-3 h-3 text-orange-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">${(stats.totalPurchaseAmount / 1000).toFixed(0)}K</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">本月采购</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">待付款</span>
-            <CreditCard className="w-3 h-3 text-rose-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">{stats.pendingPayments}</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">需处理</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">准时交付率</span>
-            <Clock className="w-3 h-3 text-blue-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">{stats.avgOnTimeRate.toFixed(1)}%</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">平均水平</p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded p-2.5">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-gray-500">质量合格率</span>
-            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-          </div>
-          <p className="text-lg font-bold text-gray-900">{stats.avgQualityRate.toFixed(1)}%</p>
-          <p className="text-[10px] text-gray-500 mt-0.5">平均水平</p>
-        </div>
-      </div>
-
-      {/* 主内容区 */}
-      <div className="bg-white border border-gray-200 rounded">
+      <div className="overflow-hidden border border-slate-300 bg-white">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-          <div className="border-b border-gray-200 px-3">
-            <TabsList className="bg-transparent h-auto p-0 gap-4">
+          <div className="border-b border-slate-300 bg-slate-100 px-3 py-2">
+            <TabsList className="h-auto gap-1 rounded-none bg-transparent p-0">
               <TabsTrigger 
                 value="suppliers" 
-                className="bg-transparent border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:bg-transparent data-[state=active]:text-blue-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
+                className="rounded-md border border-transparent px-3 py-2 text-[13px] font-semibold text-slate-700 data-[state=active]:border-slate-300 data-[state=active]:bg-white data-[state=active]:text-slate-900"
               >
-                <Building2 className="w-3 h-3 mr-1" />
-                供应商档案
+                <Building2 className="mr-1 h-3.5 w-3.5" />
+                供应商档案{pendingMasterRequests.length > 0 ? ` (${pendingMasterRequests.length})` : ''}
               </TabsTrigger>
 
               <TabsTrigger 
                 value="payments" 
-                className="bg-transparent border-b-2 border-transparent data-[state=active]:border-orange-600 data-[state=active]:bg-transparent data-[state=active]:text-orange-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
+                className="rounded-md border border-transparent px-3 py-2 text-[13px] font-semibold text-slate-700 data-[state=active]:border-slate-300 data-[state=active]:bg-white data-[state=active]:text-slate-900"
               >
-                <CreditCard className="w-3 h-3 mr-1" />
+                <CreditCard className="mr-1 h-3.5 w-3.5" />
                 供应商付款
               </TabsTrigger>
               <TabsTrigger 
                 value="performance" 
-                className="bg-transparent border-b-2 border-transparent data-[state=active]:border-emerald-600 data-[state=active]:bg-transparent data-[state=active]:text-emerald-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
+                className="rounded-md border border-transparent px-3 py-2 text-[13px] font-semibold text-slate-700 data-[state=active]:border-slate-300 data-[state=active]:bg-white data-[state=active]:text-slate-900"
               >
-                <BarChart3 className="w-3 h-3 mr-1" />
+                <BarChart3 className="mr-1 h-3.5 w-3.5" />
                 供应商绩效
               </TabsTrigger>
               <TabsTrigger 
                 value="analytics" 
-                className="bg-transparent border-b-2 border-transparent data-[state=active]:border-indigo-600 data-[state=active]:bg-transparent data-[state=active]:text-indigo-700 rounded-none px-0 pb-2 pt-2 text-[11px] font-medium"
+                className="rounded-md border border-transparent px-3 py-2 text-[13px] font-semibold text-slate-700 data-[state=active]:border-slate-300 data-[state=active]:bg-white data-[state=active]:text-slate-900"
               >
-                <Target className="w-3 h-3 mr-1" />
+                <Target className="mr-1 h-3.5 w-3.5" />
                 数据分析
               </TabsTrigger>
             </TabsList>
@@ -1164,72 +1427,104 @@ export default function SupplierManagement() {
 
           {/* 供应商档案标签页 */}
           <TabsContent value="suppliers" className="m-0">
-            <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
-                  <Input
-                    placeholder="搜索供应商名称、编号..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-7 h-7 text-[11px] border-gray-300"
-                  />
-                </div>
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="w-[100px] h-7 text-[11px] border-gray-300">
-                    <SelectValue placeholder="等级" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" style={{ fontSize: '11px' }}>全部</SelectItem>
-                    <SelectItem value="A" style={{ fontSize: '11px' }}>A级</SelectItem>
-                    <SelectItem value="B" style={{ fontSize: '11px' }}>B级</SelectItem>
-                    <SelectItem value="C" style={{ fontSize: '11px' }}>C级</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Dialog open={isAddSupplierOpen} onOpenChange={setIsAddSupplierOpen}>
+            <div className="border-b border-slate-300 bg-slate-50 p-3">
+              <FinanceFilterBar
+                placeholder="搜索供应商名称、编号、英文名或联系人…"
+                value={searchTerm}
+                onChange={setSearchTerm}
+                onReset={() => {
+                  setSearchTerm('');
+                  setFilterStatus('all');
+                }}
+                extra={
+                  <>
+                    <Select value={filterStatus} onValueChange={setFilterStatus}>
+                      <SelectTrigger className="h-10 min-w-[104px] border-slate-300 text-[13px] font-semibold text-slate-700">
+                        <SelectValue placeholder="等级" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all" className="text-[13px]">全部等级</SelectItem>
+                        <SelectItem value="A" className="text-[13px]">A级</SelectItem>
+                        <SelectItem value="B" className="text-[13px]">B级</SelectItem>
+                        <SelectItem value="C" className="text-[13px]">C级</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Dialog open={isAddSupplierOpen} onOpenChange={setIsAddSupplierOpen}>
                   <DialogTrigger asChild>
-                    <Button size="sm" className="h-7 text-[11px] bg-blue-600 hover:bg-blue-700 px-2.5">
-                      <Plus className="w-3 h-3 mr-1" />
+                    <Button size="sm" className="h-10 bg-slate-900 px-3.5 text-[13px] font-semibold hover:bg-slate-800" onClick={() => resetSupplierForm()}>
+                      <Plus className="mr-1.5 h-3.5 w-3.5" />
                       新增供应商
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                      <DialogTitle style={{ fontSize: '15px' }}>新增供应商</DialogTitle>
-                      <DialogDescription style={{ fontSize: '12px' }}>
-                        填写供应商基本信息和资质认证
+                  <DialogContent
+                    className="grid w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:!w-[60rem] sm:!max-w-[60rem] grid-rows-[auto_minmax(0,1fr)_auto] max-h-[calc(100dvh-2rem)] overflow-hidden border-slate-300 bg-white p-0"
+                  >
+                    <DialogHeader className="border-b border-slate-300 px-6 py-5">
+                      <DialogTitle className="text-[17px] font-semibold text-slate-900">{editingSupplierId ? '编辑供应商' : '新增供应商'}</DialogTitle>
+                      <DialogDescription className="text-[13px] leading-[1.5] text-slate-600">
+                        {editingSupplierId ? '修改供应商基本信息和资质认证' : '填写供应商基本信息和资质认证'}
                       </DialogDescription>
                     </DialogHeader>
-                    <div className="grid grid-cols-2 gap-3 py-3">
-                      <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>供应商名称（中文）*</Label>
+                    <div className="overflow-y-auto bg-slate-50 px-5 py-4">
+                    <input
+                      ref={supplierOcrInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp"
+                      className="hidden"
+                      onChange={handleSupplierDocumentSelect}
+                    />
+                    <div className="mb-4 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="text-[13px] font-semibold text-slate-900">OCR 资料识别</div>
+                          <div className="text-[12px] leading-[1.5] text-slate-600">上传营业执照或供应商资料截图，自动识别并回填名称、执照号、地址、联系人等字段。</div>
+                          <div className="mt-1 text-[11px] text-slate-500">
+                            当前支持 JPG、PNG、WebP 格式
+                            {supplierOcrFileName ? `，最近识别：${supplierOcrFileName}` : ''}
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-10 border-slate-300 bg-white px-4 text-[13px] font-semibold text-slate-700"
+                          onClick={() => supplierOcrInputRef.current?.click()}
+                          disabled={isRecognizingSupplierDoc}
+                        >
+                          {isRecognizingSupplierDoc ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                          {isRecognizingSupplierDoc ? '识别中...' : '上传资料识别'}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-x-4 gap-y-4 rounded-lg border border-slate-300 bg-white p-4 md:grid-cols-2">
+                      <div className="space-y-1.5 md:col-span-2">
+                        <Label className="text-[12px] font-semibold text-slate-700">供应商名称（中文）*</Label>
                         <Input 
                           placeholder="例：东莞市华盛电器有限公司" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.name}
                           onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>供应商名称（英文）*</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">供应商名称（英文）*</Label>
                         <Input 
                           placeholder="例：Dongguan Huasheng Electrical Co., Ltd." 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.nameEn}
                           onChange={(e) => setNewSupplier({ ...newSupplier, nameEn: e.target.value })}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>供应商编号*</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">供应商编号*</Label>
                         <Input 
                           placeholder="例：DG-HS-001" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.code}
                           onChange={(e) => setNewSupplier({ ...newSupplier, code: e.target.value })}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>产品类别*</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">产品类别*</Label>
                         <Select value={newSupplier.category} onValueChange={(value) => {
                           if (value === '__add_new__') {
                             setIsAddingNewCategory(true);
@@ -1237,32 +1532,32 @@ export default function SupplierManagement() {
                             setNewSupplier({ ...newSupplier, category: value });
                           }
                         }}>
-                          <SelectTrigger className="h-8 text-[11px]">
+                          <SelectTrigger className="h-10 border-slate-300 bg-white text-[13px] text-slate-900">
                             <SelectValue placeholder="选择类别" />
                           </SelectTrigger>
                           <SelectContent>
                             {productCategories.map((category) => (
-                              <SelectItem key={category} value={category} style={{ fontSize: '11px' }}>
+                              <SelectItem key={category} value={category} className="text-[13px]">
                                 {category}
                               </SelectItem>
                             ))}
-                            <SelectItem value="__add_new__" style={{ fontSize: '11px', color: '#2563eb', fontWeight: 500 }}>
+                            <SelectItem value="__add_new__" className="text-[13px] font-semibold text-blue-600">
                               + 新增类别
                             </SelectItem>
                           </SelectContent>
                         </Select>
                         {isAddingNewCategory && (
-                          <div className="flex gap-1.5 mt-1.5">
+                          <div className="mt-2 flex gap-2">
                             <Input
                               placeholder="输入新类别名称"
                               value={newCategory}
                               onChange={(e) => setNewCategory(e.target.value)}
-                              className="h-7 text-[11px] flex-1"
+                              className="h-9 flex-1 border-slate-300 bg-white text-[13px]"
                               autoFocus
                             />
                             <Button
                               size="sm"
-                              className="h-7 px-2 text-[10px]"
+                              className="h-9 px-3 text-[12px] font-semibold"
                               onClick={() => {
                                 if (newCategory.trim()) {
                                   setProductCategories([...productCategories, newCategory.trim()]);
@@ -1277,7 +1572,7 @@ export default function SupplierManagement() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="h-7 px-2 text-[10px]"
+                              className="h-9 border-slate-300 px-3 text-[12px] font-semibold"
                               onClick={() => {
                                 setNewCategory('');
                                 setIsAddingNewCategory(false);
@@ -1289,149 +1584,203 @@ export default function SupplierManagement() {
                         )}
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>联系人*</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">联系人*</Label>
                         <Input 
                           placeholder="例：张伟" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.contact}
                           onChange={(e) => setNewSupplier({ ...newSupplier, contact: e.target.value })}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>联系电话*</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">联系电话*</Label>
                         <Input 
                           placeholder="例：+86 769 8888 1234" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.phone}
                           onChange={(e) => setNewSupplier({ ...newSupplier, phone: e.target.value })}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>邮箱</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">邮箱</Label>
                         <Input 
                           placeholder="例：zhang@huasheng.com" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.email}
                           onChange={(e) => setNewSupplier({ ...newSupplier, email: e.target.value })}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>营业执照号</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">营业执照号</Label>
                         <Input 
                           placeholder="例：91441900MA4W1234XY" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.businessLicense}
                           onChange={(e) => setNewSupplier({ ...newSupplier, businessLicense: e.target.value })}
                         />
                       </div>
-                      <div className="col-span-2 space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>地址*</Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-[12px] font-semibold text-slate-700">地址*</Label>
                         <Input 
                           placeholder="例：广东省东莞市长安镇工业园区" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.address}
                           onChange={(e) => setNewSupplier({ ...newSupplier, address: e.target.value })}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>月产能</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">月产能</Label>
                         <Input 
                           placeholder="例：50万件/月" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.capacity}
                           onChange={(e) => setNewSupplier({ ...newSupplier, capacity: e.target.value })}
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label style={{ fontSize: '11px' }}>认证资质</Label>
+                        <Label className="text-[12px] font-semibold text-slate-700">认证资质</Label>
                         <Input 
                           placeholder="例：ISO9001, CE, RoHS" 
-                          className="h-8 text-[11px]"
+                          className="h-10 border-slate-300 bg-white text-[13px] text-slate-900 placeholder:text-slate-400"
                           value={newSupplier.certifications}
                           onChange={(e) => setNewSupplier({ ...newSupplier, certifications: e.target.value })}
                         />
                       </div>
                     </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" className="h-8 text-[11px]" onClick={() => setIsAddSupplierOpen(false)}>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 border-t border-slate-300 bg-white px-6 py-4">
+                      <Button variant="outline" size="sm" className="h-10 border-slate-300 px-5 text-[13px] font-semibold" onClick={() => { setIsAddSupplierOpen(false); resetSupplierForm(); }}>
                         取消
                       </Button>
-                      <Button size="sm" className="h-8 text-[11px] bg-blue-600 hover:bg-blue-700" onClick={handleSaveSupplier}>
+                      <Button size="sm" className="h-10 bg-slate-900 px-5 text-[13px] font-semibold hover:bg-slate-800" onClick={handleSaveSupplier}>
                         保存
                       </Button>
                     </div>
                   </DialogContent>
-                </Dialog>
-              </div>
+                    </Dialog>
+                  </>
+                }
+              />
             </div>
 
-            <div className="overflow-x-auto">
+            {pendingMasterRequests.length > 0 ? (
+              <div className="border-b border-amber-300 bg-amber-50 px-3 py-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div>
+                    <div className="text-[13px] font-semibold leading-[1.35] text-amber-900">待授权主档申请</div>
+                    <div className="text-[11px] leading-[1.45] text-amber-700">财务端新增的供应商主档需在这里授权后生效；审核通过时系统会生成供应商编号。</div>
+                  </div>
+                  <Badge className="border-amber-300 bg-white text-[11px] font-semibold text-amber-700">{pendingMasterRequests.length} 条待处理</Badge>
+                </div>
+                <div className="overflow-x-auto border border-amber-200 bg-white">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-amber-50 hover:bg-amber-50">
+                        <TableHead className="h-9 py-2 text-[12px] font-semibold text-amber-900">名称</TableHead>
+                        <TableHead className="h-9 py-2 text-[12px] font-semibold text-amber-900">生效编号</TableHead>
+                        <TableHead className="h-9 py-2 text-[12px] font-semibold text-amber-900">名单侧别</TableHead>
+                        <TableHead className="h-9 py-2 text-[12px] font-semibold text-amber-900">收款方属性</TableHead>
+                        <TableHead className="h-9 py-2 text-[12px] font-semibold text-amber-900">费用归属</TableHead>
+                        <TableHead className="h-9 py-2 text-[12px] font-semibold text-amber-900">默认科目</TableHead>
+                        <TableHead className="h-9 py-2 text-[12px] font-semibold text-amber-900">状态</TableHead>
+                        <TableHead className="h-9 py-2 text-right text-[12px] font-semibold text-amber-900">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pendingMasterRequests.map((request) => (
+                        <TableRow key={request.id}>
+                          <TableCell className="py-2 text-[12px] font-semibold text-slate-900">{request.name}</TableCell>
+                          <TableCell className="py-2 font-mono text-[12px] text-slate-500">审核通过后生成</TableCell>
+                          <TableCell className="py-2 text-[12px] text-slate-700">{getFinancePayeePartySideLabel(request.partySide)}</TableCell>
+                          <TableCell className="py-2 text-[12px] text-slate-700">{getFinancePayeeCategoryLabel(request.category as any)}</TableCell>
+                          <TableCell className="py-2 text-[12px] text-slate-700">{request.expenseScope === 'management' ? '管理费用' : '业务费用'}</TableCell>
+                          <TableCell className="py-2 text-[12px] text-slate-700">{request.expenseSubject}</TableCell>
+                          <TableCell className="py-2 text-[12px] text-slate-700">{getFinancePayeeApprovalStatusLabel(request.approvalStatus as any)}</TableCell>
+                          <TableCell className="py-2 text-right">
+                            <Button
+                              size="sm"
+                              className="h-8 bg-amber-600 px-3 text-[12px] font-semibold hover:bg-amber-700"
+                              onClick={() => handleApproveMasterRequest(request)}
+                            >
+                              授权生效
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="overflow-hidden border-t border-slate-300">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-gray-50 hover:bg-gray-50">
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">供应商编号</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">供应商名称</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">等级</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">产品类别</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">联系方式</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">合作时长</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">订单数</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">准时率</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">质量率</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium text-right">操作</TableHead>
+                  <TableRow className="bg-slate-100 hover:bg-slate-100">
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">供应商编号</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">供应商名称</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">等级</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">产品类别</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">联系方式</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">合作时长</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">订单数</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">准时率</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">质量率</TableHead>
+                    <TableHead className="h-10 py-2 text-right text-[12px] font-semibold text-slate-700">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredSuppliers.map((supplier) => (
-                    <TableRow key={supplier.id} className="hover:bg-gray-50">
-                      <TableCell className="py-1.5">
+                    <TableRow key={supplier.id} className="hover:bg-slate-50">
+                      <TableCell className="py-2.5">
                         <button
                           onClick={() => setViewSupplier(supplier)}
-                          className="text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline transition-all cursor-pointer"
+                          className="font-mono text-[13px] font-semibold tabular-nums text-blue-600 transition-all hover:text-blue-800 hover:underline"
                         >
                           {supplier.code}
                         </button>
                       </TableCell>
-                      <TableCell className="py-1.5">
+                      <TableCell className="py-2.5">
                         <button
                           onClick={() => setViewSupplier(supplier)}
                           className="text-left"
                         >
-                          <p className="text-[11px] font-medium text-gray-900 hover:text-purple-600 transition-all cursor-pointer">
+                          <p className="text-[13px] font-semibold text-slate-900 transition-all hover:text-blue-700">
                             {supplier.name}
                           </p>
-                          <p className="text-[10px] text-gray-500">{supplier.nameEn}</p>
+                          <p className="text-[11px] text-slate-500">{supplier.nameEn}</p>
                         </button>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <Badge className={`h-4 px-1.5 text-[10px] border ${getSupplierLevelConfig(supplier.level).color}`}>
+                      <TableCell className="py-2.5">
+                        <Badge className={`h-6 px-2 text-[11px] font-semibold border ${getSupplierLevelConfig(supplier.level).color}`}>
                           {getSupplierLevelConfig(supplier.level).label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-700">{supplier.category}</p>
-                        <p className="text-[10px] text-gray-500">{supplier.capacity}</p>
+                      <TableCell className="py-2.5">
+                        <p className="text-[12px] font-medium text-slate-700">{supplier.category}</p>
+                        <p className="text-[11px] text-slate-500">{supplier.capacity}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
+                      <TableCell className="py-2.5">
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-1">
-                            <Users className="w-2.5 h-2.5 text-gray-400" />
-                            <p className="text-[10px] text-gray-700">{supplier.contact}</p>
+                            <Users className="h-3 w-3 text-slate-400" />
+                            <p className="text-[11px] text-slate-700">{supplier.contact}</p>
                           </div>
                           <div className="flex items-center gap-1">
-                            <Phone className="w-2.5 h-2.5 text-gray-400" />
-                            <p className="text-[10px] text-gray-500">{supplier.phone}</p>
+                            <Phone className="h-3 w-3 text-slate-400" />
+                            <p className="text-[11px] text-slate-500">{supplier.phone}</p>
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-700">{supplier.cooperationYears}年</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] tabular-nums text-slate-700">{supplier.cooperationYears}年</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] font-medium text-gray-900">{supplier.totalOrders}</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] font-semibold tabular-nums text-slate-900">{supplier.totalOrders}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <Badge className={`h-4 px-1.5 text-[10px] border ${
+                      <TableCell className="py-2.5">
+                        <Badge className={`h-6 px-2 font-mono text-[11px] font-semibold tabular-nums border ${
                           supplier.onTimeRate >= 95 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                           supplier.onTimeRate >= 90 ? 'bg-blue-50 text-blue-700 border-blue-200' :
                           'bg-amber-50 text-amber-700 border-amber-200'
@@ -1439,8 +1788,8 @@ export default function SupplierManagement() {
                           {supplier.onTimeRate}%
                         </Badge>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <Badge className={`h-4 px-1.5 text-[10px] border ${
+                      <TableCell className="py-2.5">
+                        <Badge className={`h-6 px-2 font-mono text-[11px] font-semibold tabular-nums border ${
                           supplier.qualityRate >= 98 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                           supplier.qualityRate >= 95 ? 'bg-blue-50 text-blue-700 border-blue-200' :
                           'bg-amber-50 text-amber-700 border-amber-200'
@@ -1448,27 +1797,25 @@ export default function SupplierManagement() {
                           {supplier.qualityRate}%
                         </Badge>
                       </TableCell>
-                      <TableCell className="py-1.5 text-right">
+                      <TableCell className="py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            className="h-6 w-6 p-0 hover:bg-blue-50 hover:text-blue-600 transition-all" 
+                            className="h-8 w-8 p-0 text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-all" 
                             onClick={() => setViewSupplier(supplier)}
                             title="查看供应商详情"
                           >
-                            <Eye className="w-3 h-3" />
+                            <Eye className="h-4 w-4" />
                           </Button>
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            className="h-6 w-6 p-0 hover:bg-purple-50 hover:text-purple-600 transition-all"
+                            className="h-8 w-8 p-0 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-all"
                             title="编辑供应商信息"
-                            onClick={() => {
-                              toast.info('编辑功能开发中...');
-                            }}
+                            onClick={() => openEditSupplierDialog(supplier)}
                           >
-                            <Edit className="w-3 h-3" />
+                            <Edit className="h-4 w-4" />
                           </Button>
                         </div>
                       </TableCell>
@@ -1477,65 +1824,67 @@ export default function SupplierManagement() {
                 </TableBody>
               </Table>
             </div>
+            </div>
           </TabsContent>
 
           {/* 供应商付款标签页 */}
           <TabsContent value="payments" className="m-0">
-            <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
+            <div className="border-b border-slate-300 bg-slate-50 p-3">
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
+                  <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                   <Input
                     placeholder="搜索付款编号、供应商..."
-                    className="pl-7 h-7 text-[11px] border-gray-300"
+                    className="h-10 border-slate-300 pl-9 text-[13px] font-semibold text-slate-700 placeholder:text-[12px]"
                   />
                 </div>
                 <Select>
-                  <SelectTrigger className="w-[100px] h-7 text-[11px] border-gray-300">
+                  <SelectTrigger className="h-10 w-[120px] border-slate-300 text-[13px] font-semibold text-slate-700">
                     <SelectValue placeholder="状态" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all" style={{ fontSize: '11px' }}>全部</SelectItem>
-                    <SelectItem value="pending" style={{ fontSize: '11px' }}>待付</SelectItem>
-                    <SelectItem value="paid" style={{ fontSize: '11px' }}>已付</SelectItem>
+                    <SelectItem value="all" className="text-[13px]">全部</SelectItem>
+                    <SelectItem value="pending" className="text-[13px]">待付</SelectItem>
+                    <SelectItem value="paid" className="text-[13px]">已付</SelectItem>
                   </SelectContent>
                 </Select>
-                <Button size="sm" className="h-7 text-[11px] bg-orange-600 hover:bg-orange-700 px-2.5">
-                  <Plus className="w-3 h-3 mr-1" />
+                <Button size="sm" className="h-10 bg-slate-900 px-3.5 text-[13px] font-semibold hover:bg-slate-800">
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
                   登记付款
                 </Button>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-hidden border-t border-slate-300">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-gray-50 hover:bg-gray-50">
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">付款编号</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">供应商</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">采购单号</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">付款类型</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">付款金额</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">支付方式</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">到期日期</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">状态</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium text-right">操作</TableHead>
+                  <TableRow className="bg-slate-100 hover:bg-slate-100">
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">付款编号</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">供应商</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">采购单号</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">付款类型</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">付款金额</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">支付方式</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">到期日期</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">状态</TableHead>
+                    <TableHead className="h-10 py-2 text-right text-[12px] font-semibold text-slate-700">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {supplierPayments.map((payment) => (
-                    <TableRow key={payment.id} className="hover:bg-gray-50">
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] font-medium text-orange-600">{payment.paymentNumber}</p>
+                    <TableRow key={payment.id} className="hover:bg-slate-50">
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] font-semibold tabular-nums text-orange-600">{payment.paymentNumber}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-900">{payment.supplierName}</p>
+                      <TableCell className="py-2.5">
+                        <p className="text-[13px] font-semibold text-slate-900">{payment.supplierName}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-purple-600">{payment.poNumber}</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] font-semibold tabular-nums text-violet-600">{payment.poNumber}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <Badge className={`h-4 px-1.5 text-[10px] border ${
+                      <TableCell className="py-2.5">
+                        <Badge className={`h-6 px-2 text-[11px] font-semibold border ${
                           payment.type === 'deposit' ? 'bg-blue-50 text-blue-700 border-blue-200' :
                           payment.type === 'balance' ? 'bg-purple-50 text-purple-700 border-purple-200' :
                           'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -1543,22 +1892,22 @@ export default function SupplierManagement() {
                           {payment.type === 'deposit' ? '定金' : payment.type === 'balance' ? '尾款' : '全款'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[12px] font-bold text-gray-900">
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[14px] font-semibold tabular-nums text-slate-900">
                           {getCurrencySymbol(payment.currency)}{payment.amount.toLocaleString()}
                         </p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-700">{payment.paymentMethod}</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] font-semibold tabular-nums text-slate-700">{payment.paymentMethod}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-700">{payment.dueDate}</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] tabular-nums text-slate-700">{payment.dueDate}</p>
                         {payment.paidDate && (
-                          <p className="text-[10px] text-emerald-600">付: {payment.paidDate}</p>
+                          <p className="font-mono text-[11px] tabular-nums text-emerald-600">付: {payment.paidDate}</p>
                         )}
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <Badge className={`h-4 px-1.5 text-[10px] border ${
+                      <TableCell className="py-2.5">
+                        <Badge className={`h-6 px-2 text-[11px] font-semibold border ${
                           payment.status === 'paid' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                           payment.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-200' :
                           'bg-rose-50 text-rose-700 border-rose-200'
@@ -1566,8 +1915,8 @@ export default function SupplierManagement() {
                           {payment.status === 'paid' ? '已付' : payment.status === 'pending' ? '待付' : '逾期'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="py-1.5 text-right">
-                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]">
+                      <TableCell className="py-2.5 text-right">
+                        <Button variant="ghost" size="sm" className="h-8 px-3 text-[12px] font-semibold text-slate-700">
                           详情
                         </Button>
                       </TableCell>
@@ -1576,93 +1925,95 @@ export default function SupplierManagement() {
                 </TableBody>
               </Table>
             </div>
+            </div>
           </TabsContent>
 
           {/* 供应商绩效标签页 */}
           <TabsContent value="performance" className="m-0">
-            <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
+            <div className="border-b border-slate-300 bg-slate-50 p-3">
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
+                  <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                   <Input
                     placeholder="搜索供应商..."
-                    className="pl-7 h-7 text-[11px] border-gray-300"
+                    className="h-10 border-slate-300 pl-9 text-[13px] font-semibold text-slate-700 placeholder:text-[12px]"
                   />
                 </div>
                 <Select>
-                  <SelectTrigger className="w-[120px] h-7 text-[11px] border-gray-300">
+                  <SelectTrigger className="h-10 w-[120px] border-slate-300 text-[13px] font-semibold text-slate-700">
                     <SelectValue placeholder="排序" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="rating" style={{ fontSize: '11px' }}>评分排序</SelectItem>
-                    <SelectItem value="ontime" style={{ fontSize: '11px' }}>准时率排序</SelectItem>
-                    <SelectItem value="quality" style={{ fontSize: '11px' }}>质量率排序</SelectItem>
+                    <SelectItem value="rating" className="text-[13px]">评分排序</SelectItem>
+                    <SelectItem value="ontime" className="text-[13px]">准时率排序</SelectItem>
+                    <SelectItem value="quality" className="text-[13px]">质量率排序</SelectItem>
                   </SelectContent>
                 </Select>
-                <Button size="sm" className="h-7 text-[11px] bg-emerald-600 hover:bg-emerald-700 px-2.5">
-                  <Download className="w-3 h-3 mr-1" />
+                <Button size="sm" className="h-10 bg-emerald-600 px-3.5 text-[13px] font-semibold hover:bg-emerald-700">
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
                   导出报告
                 </Button>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-hidden border-t border-slate-300">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-gray-50 hover:bg-gray-50">
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">供应商名称</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">总订单数</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">完成订单</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">准时订单</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">合格订单</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">准时率</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">质量率</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">平均交期</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium">综合评分</TableHead>
-                    <TableHead className="h-7 py-1.5 text-[11px] text-gray-600 font-medium text-right">操作</TableHead>
+                  <TableRow className="bg-slate-100 hover:bg-slate-100">
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">供应商名称</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">总订单数</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">完成订单</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">准时订单</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">合格订单</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">准时率</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">质量率</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">平均交期</TableHead>
+                    <TableHead className="h-10 py-2 text-[12px] font-semibold text-slate-700">综合评分</TableHead>
+                    <TableHead className="h-10 py-2 text-right text-[12px] font-semibold text-slate-700">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {supplierPerformance.map((perf) => (
-                    <TableRow key={perf.supplierName} className="hover:bg-gray-50">
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] font-medium text-gray-900">{perf.supplierName}</p>
+                    <TableRow key={perf.supplierName} className="hover:bg-slate-50">
+                      <TableCell className="py-2.5">
+                        <p className="text-[13px] font-semibold text-slate-900">{perf.supplierName}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-900">{perf.totalOrders}</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] font-semibold tabular-nums text-slate-900">{perf.totalOrders}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-emerald-600 font-medium">{perf.completedOrders}</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] font-semibold tabular-nums text-emerald-600">{perf.completedOrders}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-blue-600 font-medium">{perf.onTimeOrders}</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] font-semibold tabular-nums text-blue-600">{perf.onTimeOrders}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-purple-600 font-medium">{perf.qualifiedOrders}</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] font-semibold tabular-nums text-purple-600">{perf.qualifiedOrders}</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
+                      <TableCell className="py-2.5">
                         <div className="space-y-0.5">
                           <Progress value={perf.onTimeRate} className="h-1 w-16" />
-                          <p className="text-[10px] text-gray-600">{perf.onTimeRate}%</p>
+                          <p className="font-mono text-[12px] tabular-nums text-slate-600">{perf.onTimeRate}%</p>
                         </div>
                       </TableCell>
-                      <TableCell className="py-1.5">
+                      <TableCell className="py-2.5">
                         <div className="space-y-0.5">
                           <Progress value={perf.qualityRate} className="h-1 w-16" />
-                          <p className="text-[10px] text-gray-600">{perf.qualityRate}%</p>
+                          <p className="font-mono text-[12px] tabular-nums text-slate-600">{perf.qualityRate}%</p>
                         </div>
                       </TableCell>
-                      <TableCell className="py-1.5">
-                        <p className="text-[11px] text-gray-700">{perf.avgDeliveryDays}天</p>
+                      <TableCell className="py-2.5">
+                        <p className="font-mono text-[13px] tabular-nums text-slate-700">{perf.avgDeliveryDays}天</p>
                       </TableCell>
-                      <TableCell className="py-1.5">
+                      <TableCell className="py-2.5">
                         <div className="flex items-center gap-1">
                           {renderStars(perf.rating)}
-                          <span className="text-[10px] text-gray-600 ml-1">{perf.rating.toFixed(1)}</span>
+                          <span className="ml-1 font-mono text-[12px] font-semibold tabular-nums text-slate-600">{perf.rating.toFixed(1)}</span>
                         </div>
                       </TableCell>
-                      <TableCell className="py-1.5 text-right">
-                        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px]">
+                      <TableCell className="py-2.5 text-right">
+                        <Button variant="ghost" size="sm" className="h-8 px-3 text-[12px] font-semibold text-slate-700">
                           详细
                         </Button>
                       </TableCell>
@@ -1671,18 +2022,19 @@ export default function SupplierManagement() {
                 </TableBody>
               </Table>
             </div>
+            </div>
           </TabsContent>
 
           {/* 🔥🔥🔥 数据分析标签页 - 二维交叉数据表 */}
           <TabsContent value="analytics" className="m-0 p-4">
             <div className="space-y-4">
               {/* 说明卡片 */}
-              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+              <div className="border border-slate-300 bg-slate-50 p-4">
                 <div className="flex items-start gap-2">
-                  <Target className="w-4 h-4 text-indigo-600 mt-0.5" />
+                  <Target className="mt-0.5 h-4 w-4 text-slate-700" />
                   <div>
-                    <h3 className="text-xs font-semibold text-indigo-900 mb-1">区域 × 业务类型 交叉数据分析</h3>
-                    <p className="text-[10px] text-indigo-700">
+                    <h3 className="mb-1 text-[13px] font-semibold text-slate-900">区域 × 业务类型交叉数据分析</h3>
+                    <p className="text-[11px] leading-[1.45] text-slate-600">
                       展示不同区域在不同业务类型下的供应商数量、订单数、采购金额、准时率和质量率等关键指标
                     </p>
                   </div>
@@ -1690,136 +2042,136 @@ export default function SupplierManagement() {
               </div>
 
               {/* 二维交叉数据表 */}
-              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <div className="overflow-hidden border border-slate-300 bg-white">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-[10px]">
+                  <table className="w-full text-[12px]">
                     <thead>
-                      <tr className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
-                        <th className="px-3 py-2 text-left font-semibold border-r border-indigo-400" rowSpan={2}>区域</th>
-                        <th className="px-3 py-2 text-center font-semibold border-r border-indigo-400" colSpan={5}>🛒 直接采购</th>
-                        <th className="px-3 py-2 text-center font-semibold border-r border-indigo-400" colSpan={5}>🔍 验货服务</th>
-                        <th className="px-3 py-2 text-center font-semibold border-r border-indigo-400" colSpan={5}>🤝 代理服务</th>
-                        <th className="px-3 py-2 text-center font-semibold" colSpan={5}>🌟 一站式项目</th>
+                      <tr className="bg-slate-800 text-white">
+                        <th className="border-r border-slate-600 px-3 py-3 text-left text-[12px] font-semibold" rowSpan={2}>区域</th>
+                        <th className="border-r border-slate-600 px-3 py-3 text-center text-[12px] font-semibold" colSpan={5}>直接采购</th>
+                        <th className="border-r border-slate-600 px-3 py-3 text-center text-[12px] font-semibold" colSpan={5}>验货服务</th>
+                        <th className="border-r border-slate-600 px-3 py-3 text-center text-[12px] font-semibold" colSpan={5}>代理服务</th>
+                        <th className="px-3 py-3 text-center text-[12px] font-semibold" colSpan={5}>一站式项目</th>
                       </tr>
-                      <tr className="bg-indigo-500 text-white">
+                      <tr className="bg-slate-700 text-white">
                         {/* 直接采购 */}
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">供应商</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">订单数</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">金额(¥)</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">准时率</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-400">质量率</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">供应商</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">订单数</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">金额(¥)</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">准时率</th>
+                        <th className="border-r border-slate-600 px-2 py-2 text-center text-[11px] font-semibold">质量率</th>
                         {/* 验货服务 */}
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">供应商</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">订单数</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">金额(¥)</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">准时率</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-400">质量率</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">供应商</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">订单数</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">金额(¥)</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">准时率</th>
+                        <th className="border-r border-slate-600 px-2 py-2 text-center text-[11px] font-semibold">质量率</th>
                         {/* 代理服务 */}
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">供应商</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">订单数</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">金额(¥)</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">准时率</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-400">质量率</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">供应商</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">订单数</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">金额(¥)</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">准时率</th>
+                        <th className="border-r border-slate-600 px-2 py-2 text-center text-[11px] font-semibold">质量率</th>
                         {/* 一站式项目 */}
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">供应商</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">订单数</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">金额(¥)</th>
-                        <th className="px-2 py-1.5 text-center font-medium border-r border-indigo-300">准时率</th>
-                        <th className="px-2 py-1.5 text-center font-medium">质量率</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">供应商</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">订单数</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">金额(¥)</th>
+                        <th className="border-r border-slate-500 px-2 py-2 text-center text-[11px] font-semibold">准时率</th>
+                        <th className="px-2 py-2 text-center text-[11px] font-semibold">质量率</th>
                       </tr>
                     </thead>
                     <tbody>
                       {['广东', '浙江', '福建', '江苏', '上海'].map((region, idx) => (
-                        <tr key={region} className={idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-                          <td className="px-3 py-2 font-semibold text-gray-900 border-r border-gray-300">{region}</td>
+                        <tr key={region} className={idx % 2 === 0 ? 'bg-slate-50' : 'bg-white'}>
+                          <td className="border-r border-slate-300 px-3 py-3 text-[12px] font-semibold text-slate-900">{region}</td>
                           
                           {/* 直接采购 */}
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.trading?.supplierCount || 0}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.trading?.orderCount || 0}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200 font-medium text-emerald-700">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono font-semibold tabular-nums text-emerald-700">
                             {crossTable[region]?.trading?.totalAmount 
                               ? `¥${(crossTable[region].trading.totalAmount / 10000).toFixed(1)}万`
                               : '-'}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.trading?.avgOnTimeRate 
                               ? `${crossTable[region].trading.avgOnTimeRate.toFixed(1)}%`
                               : '-'}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-300">
+                          <td className="border-r border-slate-300 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.trading?.avgQualityRate 
                               ? `${crossTable[region].trading.avgQualityRate.toFixed(1)}%`
                               : '-'}
                           </td>
 
                           {/* 验货服务 */}
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.inspection?.supplierCount || 0}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.inspection?.orderCount || 0}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200 font-medium text-emerald-700">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono font-semibold tabular-nums text-emerald-700">
                             {crossTable[region]?.inspection?.totalAmount 
                               ? `¥${(crossTable[region].inspection.totalAmount / 10000).toFixed(1)}万`
                               : '-'}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.inspection?.avgOnTimeRate 
                               ? `${crossTable[region].inspection.avgOnTimeRate.toFixed(1)}%`
                               : '-'}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-300">
+                          <td className="border-r border-slate-300 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.inspection?.avgQualityRate 
                               ? `${crossTable[region].inspection.avgQualityRate.toFixed(1)}%`
                               : '-'}
                           </td>
 
                           {/* 代理服务 */}
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.agency?.supplierCount || 0}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.agency?.orderCount || 0}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200 font-medium text-emerald-700">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono font-semibold tabular-nums text-emerald-700">
                             {crossTable[region]?.agency?.totalAmount 
                               ? `¥${(crossTable[region].agency.totalAmount / 10000).toFixed(1)}万`
                               : '-'}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.agency?.avgOnTimeRate 
                               ? `${crossTable[region].agency.avgOnTimeRate.toFixed(1)}%`
                               : '-'}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-300">
+                          <td className="border-r border-slate-300 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.agency?.avgQualityRate 
                               ? `${crossTable[region].agency.avgQualityRate.toFixed(1)}%`
                               : '-'}
                           </td>
 
                           {/* 一站式项目 */}
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.project?.supplierCount || 0}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.project?.orderCount || 0}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200 font-medium text-emerald-700">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono font-semibold tabular-nums text-emerald-700">
                             {crossTable[region]?.project?.totalAmount 
                               ? `¥${(crossTable[region].project.totalAmount / 10000).toFixed(1)}万`
                               : '-'}
                           </td>
-                          <td className="px-2 py-2 text-center border-r border-gray-200">
+                          <td className="border-r border-slate-200 px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.project?.avgOnTimeRate 
                               ? `${crossTable[region].project.avgOnTimeRate.toFixed(1)}%`
                               : '-'}
                           </td>
-                          <td className="px-2 py-2 text-center">
+                          <td className="px-2 py-3 text-center font-mono tabular-nums">
                             {crossTable[region]?.project?.avgQualityRate 
                               ? `${crossTable[region].project.avgQualityRate.toFixed(1)}%`
                               : '-'}
@@ -1832,44 +2184,44 @@ export default function SupplierManagement() {
               </div>
 
               {/* 🔥 业务类型总额验证卡片 */}
-              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border-2 border-emerald-300 rounded-lg p-4">
-                <h4 className="text-sm font-bold text-emerald-900 mb-3 flex items-center gap-2">
+              <div className="border border-emerald-300 bg-emerald-50/70 p-4">
+                <h4 className="mb-3 flex items-center gap-2 text-[14px] font-semibold text-emerald-900">
                   <CheckCircle2 className="w-4 h-4" />
                   业务类型总额验证
                 </h4>
                 <div className="grid grid-cols-5 gap-3">
-                  <div className="bg-white rounded p-2.5 border border-emerald-200">
-                    <p className="text-[10px] text-gray-600 mb-0.5">🛒 直接采购</p>
-                    <p className="text-sm font-bold text-blue-700">
+                  <div className="border border-emerald-200 bg-white p-3">
+                    <p className="mb-1 text-[11px] text-slate-600">直接采购</p>
+                    <p className="font-mono text-[15px] font-semibold tabular-nums text-blue-700">
                       ${(filteredPurchaseOrders.filter(po => po.businessType === 'trading').reduce((sum, po) => sum + po.totalAmount, 0) * timeMultiplier / 1000).toFixed(1)}K
                     </p>
                   </div>
-                  <div className="bg-white rounded p-2.5 border border-emerald-200">
-                    <p className="text-[10px] text-gray-600 mb-0.5">🔍 验货服务</p>
-                    <p className="text-sm font-bold text-purple-700">
+                  <div className="border border-emerald-200 bg-white p-3">
+                    <p className="mb-1 text-[11px] text-slate-600">验货服务</p>
+                    <p className="font-mono text-[15px] font-semibold tabular-nums text-purple-700">
                       ${(filteredPurchaseOrders.filter(po => po.businessType === 'inspection').reduce((sum, po) => sum + po.totalAmount, 0) * timeMultiplier / 1000).toFixed(1)}K
                     </p>
                   </div>
-                  <div className="bg-white rounded p-2.5 border border-emerald-200">
-                    <p className="text-[10px] text-gray-600 mb-0.5">🤝 代理服务</p>
-                    <p className="text-sm font-bold text-orange-700">
+                  <div className="border border-emerald-200 bg-white p-3">
+                    <p className="mb-1 text-[11px] text-slate-600">代理服务</p>
+                    <p className="font-mono text-[15px] font-semibold tabular-nums text-orange-700">
                       ${(filteredPurchaseOrders.filter(po => po.businessType === 'agency').reduce((sum, po) => sum + po.totalAmount, 0) * timeMultiplier / 1000).toFixed(1)}K
                     </p>
                   </div>
-                  <div className="bg-white rounded p-2.5 border border-emerald-200">
-                    <p className="text-[10px] text-gray-600 mb-0.5">🌟 一站式项目</p>
-                    <p className="text-sm font-bold text-rose-700">
+                  <div className="border border-emerald-200 bg-white p-3">
+                    <p className="mb-1 text-[11px] text-slate-600">一站式项目</p>
+                    <p className="font-mono text-[15px] font-semibold tabular-nums text-rose-700">
                       ${(filteredPurchaseOrders.filter(po => po.businessType === 'project').reduce((sum, po) => sum + po.totalAmount, 0) * timeMultiplier / 1000).toFixed(1)}K
                     </p>
                   </div>
-                  <div className="bg-gradient-to-br from-emerald-100 to-teal-100 rounded p-2.5 border-2 border-emerald-400">
-                    <p className="text-[10px] text-emerald-800 font-semibold mb-0.5">✅ 总采购额</p>
-                    <p className="text-sm font-bold text-emerald-900">
+                  <div className="border-2 border-emerald-400 bg-emerald-100/80 p-3">
+                    <p className="mb-1 text-[11px] font-semibold text-emerald-800">总采购额</p>
+                    <p className="font-mono text-[15px] font-semibold tabular-nums text-emerald-900">
                       ${(stats.totalPurchaseAmount / 1000).toFixed(1)}K
                     </p>
                   </div>
                 </div>
-                <p className="text-[10px] text-emerald-700 mt-2 flex items-center gap-1">
+                <p className="mt-2 flex items-center gap-1 text-[11px] text-emerald-700">
                   <CheckCircle2 className="w-3 h-3" />
                   <strong>验证通过：</strong>各业务类型金额总和 = 总采购额（无重复计数）
                 </p>
@@ -1877,9 +2229,9 @@ export default function SupplierManagement() {
 
               {/* 数据说明 */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <h4 className="text-xs font-semibold text-blue-900 mb-2">📊 数据说明</h4>
-                  <ul className="space-y-1 text-[10px] text-blue-800">
+                <div className="border border-blue-200 bg-blue-50/70 p-4">
+                  <h4 className="mb-2 text-[13px] font-semibold text-blue-900">数据说明</h4>
+                  <ul className="space-y-1 text-[11px] leading-[1.45] text-blue-800">
                     <li>• <strong>供应商：</strong>该区域该业务类型的供应商数量</li>
                     <li>• <strong>订单数：</strong>累计采购订单数量（受时间筛选影响）</li>
                     <li>• <strong>金额：</strong>累计采购金额（人民币）</li>
@@ -1887,9 +2239,9 @@ export default function SupplierManagement() {
                     <li>• <strong>质量率：</strong>平均质量合格率</li>
                   </ul>
                 </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <h4 className="text-xs font-semibold text-amber-900 mb-2">💡 使用建议</h4>
-                  <ul className="space-y-1 text-[10px] text-amber-800">
+                <div className="border border-amber-200 bg-amber-50/70 p-4">
+                  <h4 className="mb-2 text-[13px] font-semibold text-amber-900">使用建议</h4>
+                  <ul className="space-y-1 text-[11px] leading-[1.45] text-amber-800">
                     <li>• 使用顶部筛选器可以按时间、区域、业务类型查看数据</li>
                     <li>• 关注准时率和质量率低于90%的单元格，需要改进</li>
                     <li>• 通过交叉对比发现优质供应商和潜在风险</li>
@@ -1904,17 +2256,17 @@ export default function SupplierManagement() {
 
       {/* 供应商详情对话框 */}
       <Dialog open={!!viewSupplier} onOpenChange={() => setViewSupplier(null)}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent safeViewport className="max-w-3xl overflow-hidden border-slate-300 p-0">
           {viewSupplier && (
             <>
-              <DialogHeader>
-                <DialogTitle style={{ fontSize: '16px' }}>供应商详情</DialogTitle>
-                <DialogDescription style={{ fontSize: '12px' }}>
+              <DialogHeader className="border-b border-slate-300 px-5 py-4">
+                <DialogTitle className="text-[15px] font-semibold text-slate-900">供应商详情</DialogTitle>
+                <DialogDescription className="text-[12px] text-slate-600">
                   {viewSupplier.name} ({viewSupplier.code})
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-4 py-3">
+              <div className="max-h-[calc(100dvh-11rem)] space-y-4 overflow-y-auto bg-slate-50 px-5 py-4">
                 {/* 基本信息 */}
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <div className="flex items-center gap-2 mb-3">
@@ -2063,12 +2415,19 @@ export default function SupplierManagement() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t">
-                <Button variant="outline" size="sm" className="h-8 text-[11px]" onClick={() => setViewSupplier(null)}>
+              <div className="flex justify-end gap-2 border-t border-slate-300 bg-white px-5 py-3">
+                <Button variant="outline" size="sm" className="h-9 border-slate-300 px-4 text-[13px] font-semibold" onClick={() => setViewSupplier(null)}>
                   关闭
                 </Button>
-                <Button size="sm" className="h-8 text-[11px] bg-blue-600 hover:bg-blue-700">
-                  <Edit className="w-3 h-3 mr-1" />
+                <Button
+                  size="sm"
+                  className="h-9 bg-slate-900 px-4 text-[13px] font-semibold hover:bg-slate-800"
+                  onClick={() => {
+                    setViewSupplier(null);
+                    openEditSupplierDialog(viewSupplier);
+                  }}
+                >
+                  <Edit className="mr-1.5 h-3.5 w-3.5" />
                   编辑供应商
                 </Button>
               </div>

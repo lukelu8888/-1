@@ -9,6 +9,7 @@ interface TemplateVersionActionsCardProps {
   noteField: React.ReactNode;
   onRestoreLatest: () => void;
   restoreDisabled?: boolean;
+  validationPanel?: React.ReactNode;
 }
 
 export function TemplateVersionActionsCard({
@@ -18,6 +19,7 @@ export function TemplateVersionActionsCard({
   noteField,
   onRestoreLatest,
   restoreDisabled = false,
+  validationPanel,
 }: TemplateVersionActionsCardProps) {
   return (
     <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
@@ -29,6 +31,7 @@ export function TemplateVersionActionsCard({
       {currentLoadedText ? (
         <p className="mt-1 text-[11px] font-medium text-violet-800">{currentLoadedText}</p>
       ) : null}
+      {validationPanel}
       {noteField}
       <Button
         size="sm"

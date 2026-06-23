@@ -48,7 +48,7 @@ export default function AdminOverview({ onNavigateToAPIDemo }: AdminOverviewProp
       id: 'PRD-002', 
       name: 'Cabinet Hinges Deluxe', 
       category: '铰链系列',
-      mainImage: 'https://images.unsplash.com/photo-1581858726788-75bc0f1a4e8c?w=400',
+      mainImage: 'https://images.unsplash.com/photo-1565538810643-b5bdb714032a?w=400',
       images: 4,
       videos: 0,
       status: 'draft',

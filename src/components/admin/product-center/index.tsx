@@ -22,12 +22,14 @@ export default function ProductCenterApp() {
 
   return (
     <ProductCenterProvider>
-      <ProductCenterShell
-        activeModule={activeModule}
-        setActiveModule={setActiveModule}
-        detailProductId={detailProductId}
-        setDetailProductId={setDetailProductId}
-      />
+      <div className="h-[calc(100dvh-64px)] min-h-[620px] overflow-hidden">
+        <ProductCenterShell
+          activeModule={activeModule}
+          setActiveModule={setActiveModule}
+          detailProductId={detailProductId}
+          setDetailProductId={setDetailProductId}
+        />
+      </div>
     </ProductCenterProvider>
   );
 }

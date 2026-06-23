@@ -113,11 +113,11 @@ export default function AdminInquiryManagement({ onCreateQuotation, onSwitchToCo
         throw new Error('QR 写入 Supabase 失败');
       }
       await addQuoteRequirement(saved);
-      toast.success(`✅ 成功下推到成本询报！QR单号：${qrNumber}`);
+      toast.success(`成功下推到成本询报！QR单号：${qrNumber}`);
       if (onSwitchToCostInquiry) setTimeout(() => onSwitchToCostInquiry(), 500);
     } catch (error: any) {
       console.error('❌ [下推成本询报] 失败:', error);
-      toast.error(`❌ 下推失败: ${error.message || '未知错误'}`);
+      toast.error(`下推失败: ${error.message || '未知错误'}`);
     }
   };
 

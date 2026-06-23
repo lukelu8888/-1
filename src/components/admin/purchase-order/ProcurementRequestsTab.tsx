@@ -1,14 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { Eye, Trash2 } from 'lucide-react';
 import { PurchaseOrder as PurchaseOrderType } from '../../../contexts/PurchaseOrderContext';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { TabsContent } from '../../ui/tabs';
+import { WorkflowPipelineBanner, MAIN_WORKFLOW_STEPS } from '../../shared/WorkflowPipelineBanner';
 import { FinanceFilterBar } from '../../finance-v2/components/FinanceFilterBar';
 import {
+  getErpListBatchDeletePillClass,
+  getErpListBatchDeletePillStyle,
   getErpListFilterPillClass,
   getErpListFilterPillStyle,
 } from '../../shared/erpListUiSpec';
+import { useResizableTableColumns } from '../../shared/useResizableTableColumns';
 import { extractProjectExecutionBaseline } from './purchaseOrderUtils';
 import { sortDocumentFlowRefs } from '../../../utils/documentFlowRefOrder';
 
@@ -30,9 +33,20 @@ type ProcurementRequestsTabProps = {
   openSupplierAllocationDialog: (po: PurchaseOrderType) => void;
   hasDownstreamPOForProcurementRequest: (po: PurchaseOrderType) => boolean;
   handleDeleteProcurementRequest: (po: PurchaseOrderType) => void;
+  /** 分配完成后跳转到采购订单Tab */
+  onSwitchToOrdersTab?: () => void;
 };
 
 type RequestFilterKey = 'all' | 'pending_assignment' | 'partially_allocated' | 'fully_allocated';
+
+type ProcurementRequestColumnKey =
+  | 'selection'
+  | 'index'
+  | 'date'
+  | 'number'
+  | 'summary'
+  | 'status'
+  | 'actions';
 
 const FILTER_LABELS: Record<RequestFilterKey, string> = {
   all: '全部',
@@ -43,6 +57,37 @@ const FILTER_LABELS: Record<RequestFilterKey, string> = {
 
 const FILTER_ORDER: RequestFilterKey[] = ['all', 'pending_assignment', 'partially_allocated', 'fully_allocated'];
 const CAPSULE_BUTTON_STYLE = { borderRadius: '9999px' } as const;
+const PROCUREMENT_REQUEST_COLUMN_ORDER: ProcurementRequestColumnKey[] = [
+  'selection',
+  'index',
+  'date',
+  'number',
+  'summary',
+  'status',
+  'actions',
+];
+
+const PROCUREMENT_REQUEST_COLUMN_DEFAULT_WIDTHS: Record<ProcurementRequestColumnKey, number> = {
+  selection: 52,
+  index: 56,
+  date: 180,
+  number: 240,
+  summary: 170,
+  status: 190,
+  actions: 220,
+};
+
+const PROCUREMENT_REQUEST_COLUMN_MIN_WIDTHS: Record<ProcurementRequestColumnKey, number> = {
+  selection: 52,
+  index: 56,
+  date: 150,
+  number: 200,
+  summary: 140,
+  status: 160,
+  actions: 180,
+};
+
+const PROCUREMENT_REQUEST_TABLE_UI_PREFERENCE_KEY = 'procurement_requests_table_column_widths_v1';
 
 const normalizeProcurementRequestRuntimeStatus = (rawStatus: string): RequestFilterKey => {
   const status = String(rawStatus || '').trim();
@@ -83,6 +128,9 @@ function buildProcurementSourceRefs(
   pushRef(resolveSourceContractNo(po), 'text-blue-600');
   pushRef(resolveInquirySourceRef(po), 'text-purple-500');
   pushRef(getRequirementNoFromPO(po), 'text-slate-500');
+  pushRef(po.xjNumber || (po as any).xj_number || '', 'text-emerald-600');
+  pushRef(po.quotationNumber || (po as any).quotation_number || po.selectedBjId || (po as any).selected_bj_id || '', 'text-amber-600');
+  pushRef(po.parentRequestPoNumber || (po as any).parent_request_po_number || '', 'text-cyan-600');
 
   return sortDocumentFlowRefs(refs);
 }
@@ -92,6 +140,7 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
   setProcurementRequestSearchTerm,
   selectedProcurementRequestIds,
   setSelectedProcurementRequestIds,
+  onSwitchToOrdersTab,
   handleBatchDeleteProcurementRequests,
   filteredProcurementRequests,
   purchaseOrders,
@@ -104,10 +153,20 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
   handleViewPODocument,
   openSupplierAllocationDialog,
   hasDownstreamPOForProcurementRequest,
-  handleDeleteProcurementRequest,
 }) => {
   const [statusFilter, setStatusFilter] = useState<RequestFilterKey>('all');
   const [expandedSourceIds, setExpandedSourceIds] = useState<string[]>([]);
+  const {
+    getColumnStyle,
+    renderResizeHandle,
+    renderHeaderCell,
+  } = useResizableTableColumns<ProcurementRequestColumnKey>({
+    storageKey: PROCUREMENT_REQUEST_TABLE_UI_PREFERENCE_KEY,
+    order: PROCUREMENT_REQUEST_COLUMN_ORDER,
+    defaults: PROCUREMENT_REQUEST_COLUMN_DEFAULT_WIDTHS,
+    minWidths: PROCUREMENT_REQUEST_COLUMN_MIN_WIDTHS,
+    fixedColumns: ['selection', 'index'],
+  });
 
   const counts = useMemo(() => {
     return filteredProcurementRequests.reduce<Record<RequestFilterKey, number>>((acc, po) => {
@@ -138,6 +197,13 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
 
   return (
     <TabsContent value="procurement-requests" className="m-0 flex flex-1 min-h-0 flex-col">
+      <div className="px-3 pt-3 pb-1">
+        <WorkflowPipelineBanner
+          steps={MAIN_WORKFLOW_STEPS}
+          currentKey="pr"
+          hint="当前：采购请求 → 分配供应商后生成采购订单(CG)"
+        />
+      </div>
       <div className="px-3 py-2">
         <FinanceFilterBar
           placeholder="搜索采购请求号、来源询价、需求编号..."
@@ -177,8 +243,10 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
                   variant="outline"
                   onClick={handleBatchDeleteProcurementRequests}
                   disabled={selectedProcurementRequestIds.length === 0}
-                  style={CAPSULE_BUTTON_STYLE}
-                  className="h-8 !rounded-full border-red-200 px-3 text-[12px] font-semibold leading-[1.35] text-red-600 hover:bg-red-50"
+                  style={getErpListBatchDeletePillStyle(selectedProcurementRequestIds.length > 0)}
+                  className={getErpListBatchDeletePillClass(selectedProcurementRequestIds.length > 0)
+                    .replace('h-9', 'h-8')
+                    .replace('px-4', 'px-3')}
                 >
                   批量删除{selectedProcurementRequestIds.length > 0 ? ` (${selectedProcurementRequestIds.length})` : ''}
                 </Button>
@@ -196,29 +264,43 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
             </div>
           ) : null}
           <div className="overflow-x-auto overflow-y-visible bg-white flex-1 rounded-[inherit]">
-            <table className="w-full min-w-[1160px] text-[13px]">
+            <table className="w-full table-fixed text-[13px]">
               <thead className="bg-gray-50 border-b border-gray-200 text-slate-600">
                 <tr>
-                  <th className="w-10 px-2 py-3 text-center font-semibold">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 cursor-pointer rounded border border-slate-400"
-                      checked={selectedProcurementRequestIds.length === displayProcurementRequests.length && displayProcurementRequests.length > 0}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedProcurementRequestIds(displayProcurementRequests.map((o) => o.id));
-                        } else {
-                          setSelectedProcurementRequestIds([]);
-                        }
-                      }}
-                    />
+                  <th
+                    className="group relative overflow-hidden px-2 py-3 text-left font-semibold"
+                    style={getColumnStyle('selection')}
+                  >
+                    <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 cursor-pointer rounded border border-slate-400"
+                        checked={selectedProcurementRequestIds.length === displayProcurementRequests.length && displayProcurementRequests.length > 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedProcurementRequestIds(displayProcurementRequests.map((o) => o.id));
+                          } else {
+                            setSelectedProcurementRequestIds([]);
+                          }
+                        }}
+                      />
+                    </div>
+                    {renderResizeHandle('selection', { hitAreaClassName: 'w-8 -right-4' })}
                   </th>
-                  <th className="w-12 px-2 py-3 text-center font-semibold">#</th>
-                  <th className="px-3 py-3 text-left font-semibold">日期</th>
-                  <th className="px-3 py-3 text-left font-semibold">编号</th>
-                  <th className="px-3 py-3 text-left font-semibold">产品摘要</th>
-                  <th className="px-3 py-3 text-left font-semibold">分配状态</th>
-                  <th className="px-3 py-3 text-center font-semibold">操作</th>
+                  <th
+                    className="group relative overflow-hidden px-2 py-3 text-left font-semibold"
+                    style={getColumnStyle('index')}
+                  >
+                    <div className="flex min-h-5 w-full items-center justify-start pr-4 text-left">
+                      <span className="block whitespace-nowrap text-[13px] font-semibold leading-4">#</span>
+                    </div>
+                    {renderResizeHandle('index', { hitAreaClassName: 'w-8 -right-4' })}
+                  </th>
+                  {renderHeaderCell('date', '日期', 'text-left', { hitAreaClassName: 'w-8 -right-4' })}
+                  {renderHeaderCell('number', '编号', 'text-left')}
+                  {renderHeaderCell('summary', '产品摘要', 'text-left')}
+                  {renderHeaderCell('status', '分配状态', 'text-left')}
+                  {renderHeaderCell('actions', '操作', 'text-left')}
                 </tr>
               </thead>
               <tbody>
@@ -232,7 +314,7 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
 
                   return (
                     <tr key={po.id} className="border-b border-slate-200 align-top hover:bg-slate-50/70">
-                      <td className="px-2 py-3 text-center">
+                      <td className="px-2 py-3 text-left" style={getColumnStyle('selection')}>
                         <input
                           type="checkbox"
                           className="h-4 w-4 cursor-pointer rounded border border-slate-400"
@@ -246,8 +328,8 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
                           }}
                         />
                     </td>
-                    <td className="px-2 py-3 text-center text-slate-500">{idx + 1}</td>
-                    <td className="px-3 py-3">
+                    <td className="px-2 py-3 text-left text-slate-500" style={getColumnStyle('index')}>{idx + 1}</td>
+                    <td className="px-3 py-3" style={getColumnStyle('date')}>
                       <div className="space-y-1 text-slate-900">
                         <div>
                           <span className="mr-1 text-[12px] text-slate-500">申请日期</span>
@@ -270,7 +352,7 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-3" style={getColumnStyle('number')}>
                       <div className="relative inline-block">
                           <button onClick={() => handleViewPODocument(po)} className="font-semibold text-slate-900 hover:text-slate-700 hover:underline">
                             {normalizeCGNumberForDisplay(po.poNumber || '')}
@@ -309,13 +391,13 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
                         ) : null}
                       </div>
                     </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3" style={getColumnStyle('summary')}>
                         <div className="font-medium text-slate-900">{po.items?.length || 0} 个产品</div>
                         <div className="mt-1 text-[12px] leading-[1.35] text-slate-500">
                           共 {(po.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0).toLocaleString()} 件
                         </div>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3" style={getColumnStyle('status')}>
                         <div className="flex flex-col gap-1.5">
                           <Badge className={getRequestToneClasses(runtimeStatus)}>
                             {getProcurementRequestStatusText(rawRuntimeStatus)}
@@ -325,38 +407,42 @@ export const ProcurementRequestsTab: React.FC<ProcurementRequestsTabProps> = ({
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap justify-center gap-1.5">
+                      <td className="px-3 py-3" style={getColumnStyle('actions')}>
+                        <div className="flex flex-wrap justify-start gap-1.5">
                           <Button variant="outline" size="sm" onClick={() => handleViewPODocument(po)} style={CAPSULE_BUTTON_STYLE} className="h-8 !rounded-full border-slate-300 px-3 text-[12px] font-semibold">
-                            <Eye className="mr-1 h-3 w-3" />
                             查看
                           </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => openSupplierAllocationDialog(po)}
-                            disabled={runtimeStatus === 'fully_allocated'}
-                            style={CAPSULE_BUTTON_STYLE}
-                            className={`h-8 !rounded-full px-3 text-[12px] font-semibold ${
-                              runtimeStatus === 'fully_allocated'
-                                ? 'bg-slate-200 text-slate-500 hover:bg-slate-200'
-                                : 'bg-slate-900 text-white hover:bg-slate-800'
-                            }`}
-                            title="按产品行分配供应商并生成采购合同草稿"
-                          >
-                            {runtimeStatus === 'fully_allocated' ? '已分配完成' : runtimeStatus === 'partially_allocated' ? '继续分配' : '分配供应商'}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleDeleteProcurementRequest(po)}
-                            disabled={lockedByDownstream}
-                            style={CAPSULE_BUTTON_STYLE}
-                            className="h-8 !rounded-full border-red-200 px-3 text-[12px] font-semibold text-red-600 hover:bg-red-50 disabled:border-slate-200 disabled:text-slate-400"
-                            title={lockedByDownstream ? '已存在下游CG，不可删除上游采购请求' : '删除采购请求'}
-                          >
-                            <Trash2 className="mr-1 h-3 w-3" />
-                            删除
-                          </Button>
+                          {runtimeStatus === 'fully_allocated' ? (
+                            <>
+                              <span
+                                className="inline-flex items-center h-8 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-[12px] font-semibold text-emerald-700"
+                                title="所有产品已分配供应商，采购订单(CG)已生成，可在「采购订单」Tab查看"
+                              >
+                                ✓ 已分配 → 生成CG
+                              </span>
+                              {onSwitchToOrdersTab && (
+                                <Button
+                                  size="sm"
+                                  onClick={onSwitchToOrdersTab}
+                                  style={CAPSULE_BUTTON_STYLE}
+                                  className="h-8 !rounded-full bg-[#F96302] px-3 text-[12px] font-semibold text-white hover:bg-[#e05a02]"
+                                  title="跳转到采购订单(CG)Tab查看已生成的采购订单"
+                                >
+                                  去采购订单 →
+                                </Button>
+                              )}
+                            </>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => openSupplierAllocationDialog(po)}
+                              style={CAPSULE_BUTTON_STYLE}
+                              className="h-8 !rounded-full bg-slate-900 px-3 text-[12px] font-semibold text-white hover:bg-slate-800"
+                              title="按产品行分配供应商，分配完成后自动生成采购订单(CG)"
+                            >
+                              {runtimeStatus === 'partially_allocated' ? '继续分配 → 生成CG' : '分配供应商 → 生成CG'}
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
