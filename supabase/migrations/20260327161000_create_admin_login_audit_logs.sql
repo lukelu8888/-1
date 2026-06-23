@@ -1,4 +1,4 @@
--- Migration 069: Admin login audit trail
+-- Migration 20260327161000: Admin login audit trail
 -- Record every admin-portal login attempt so operations can answer
 -- "who logged in and when" without relying on browser cache.
 

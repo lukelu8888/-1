@@ -23,26 +23,56 @@
 
 -- ─── 1. Search ────────────────────────────────────────────────────────────
 
--- Generated tsvector covers the textual fields that operators search by.
--- We use the 'simple' configuration to avoid stemming surprises across
--- mixed-language data (en + zh cohabit in the same column).
+-- Search vector covers the textual fields that operators search by.
+-- Keep it as a regular column maintained by a trigger instead of a generated
+-- column: array_to_string(text[]) is not immutable on Postgres, so Supabase
+-- rejects it inside a stored generation expression.
 alter table public.pc_products
-  add column if not exists search_vector tsvector
-    generated always as (
-      to_tsvector(
-        'simple',
-        coalesce(sku, '')             || ' ' ||
-        coalesce(spu, '')             || ' ' ||
-        coalesce(name, '')            || ' ' ||
-        coalesce(name_en, '')         || ' ' ||
-        coalesce(name_zh, '')         || ' ' ||
-        coalesce(brand, '')           || ' ' ||
-        coalesce(short_description,'')|| ' ' ||
-        coalesce(long_description, '')|| ' ' ||
-        coalesce(array_to_string(keywords, ' '), '') || ' ' ||
-        coalesce(array_to_string(tags, ' '), '')
-      )
-    ) stored;
+  add column if not exists search_vector tsvector;
+
+create or replace function public.pc_products_refresh_search_vector()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.search_vector :=
+    to_tsvector(
+      'simple',
+      coalesce(new.sku, '')             || ' ' ||
+      coalesce(new.spu, '')             || ' ' ||
+      coalesce(new.name, '')            || ' ' ||
+      coalesce(new.name_en, '')         || ' ' ||
+      coalesce(new.name_zh, '')         || ' ' ||
+      coalesce(new.brand, '')           || ' ' ||
+      coalesce(new.short_description,'')|| ' ' ||
+      coalesce(new.long_description, '')|| ' ' ||
+      coalesce(array_to_string(new.keywords, ' '), '') || ' ' ||
+      coalesce(array_to_string(new.tags, ' '), '')
+    );
+  return new;
+end $$;
+
+drop trigger if exists trg_pc_products_search_vector on public.pc_products;
+create trigger trg_pc_products_search_vector
+  before insert or update of sku, spu, name, name_en, name_zh, brand, short_description, long_description, keywords, tags
+  on public.pc_products
+  for each row execute function public.pc_products_refresh_search_vector();
+
+update public.pc_products
+   set search_vector = to_tsvector(
+     'simple',
+     coalesce(sku, '')             || ' ' ||
+     coalesce(spu, '')             || ' ' ||
+     coalesce(name, '')            || ' ' ||
+     coalesce(name_en, '')         || ' ' ||
+     coalesce(name_zh, '')         || ' ' ||
+     coalesce(brand, '')           || ' ' ||
+     coalesce(short_description,'')|| ' ' ||
+     coalesce(long_description, '')|| ' ' ||
+     coalesce(array_to_string(keywords, ' '), '') || ' ' ||
+     coalesce(array_to_string(tags, ' '), '')
+   )
+ where search_vector is null;
 
 create index if not exists idx_pc_products_search
   on public.pc_products using gin (search_vector);
