@@ -139,11 +139,19 @@ const buildMasterRef = (product: Record<string, any>): MasterProductRef | null =
     normalizeText(product?.internalModelNo) ||
     normalizeText(product?.supplierModelNo) ||
     normalizeText(product?.modelNo);
+  const factoryModelNo =
+    normalizeText(masterRef?.factoryModelNo) ||
+    normalizeText(product?.factoryModelNo) ||
+    normalizeText(product?.factorySku) ||
+    normalizeText(product?.factory_model_no) ||
+    normalizeText(product?.factory_sku) ||
+    internalModelNo;
 
   if (!internalModelNo) return null;
   return {
     masterProductId: normalizeText(masterRef?.masterProductId) || null,
     internalModelNo,
+    factoryModelNo,
     isResolved:
       Boolean(masterRef?.isResolved) ||
       Boolean(masterRef?.masterProductId) ||
@@ -189,6 +197,7 @@ const snapshotMatchesDraft = (
     snapshot.displayModelNo === draft.displayModelNo &&
     snapshot.customerModelNo === draft.customerModelNo &&
     snapshot.supplierModelNo === draft.supplierModelNo &&
+    snapshot.factoryModelNo === draft.factoryModelNo &&
     snapshot.description === draft.description &&
     snapshot.specSummary === draft.specSummary &&
     snapshot.imageUrl === draft.imageUrl &&
@@ -285,6 +294,15 @@ export const tradeProductSnapshotService = {
       normalizeText(product?.supplierModelNo) ||
       normalizeText(product?.modelNo) ||
       normalizeText(product?.internalModelNo);
+    const factoryModelNo =
+      normalizeText(existingDraft?.factoryModelNo) ||
+      normalizeText(existingSnapshot?.factoryModelNo) ||
+      normalizeText(masterRef?.factoryModelNo) ||
+      normalizeText(product?.factoryModelNo) ||
+      normalizeText(product?.factorySku) ||
+      normalizeText(product?.factory_model_no) ||
+      normalizeText(product?.factory_sku) ||
+      supplierModelNo;
     const oemDataSnapshot =
       product?.oem || existingDraft?.oemDataSnapshot || existingSnapshot?.oemDataSnapshot || null;
     const attachmentSummarySnapshot =
@@ -343,6 +361,7 @@ export const tradeProductSnapshotService = {
         }),
       customerModelNo,
       supplierModelNo,
+      factoryModelNo,
       description,
       specSummary,
       imageUrl:
@@ -450,6 +469,7 @@ export const tradeProductSnapshotService = {
       ...normalizedProduct,
       modelNo: normalizedProduct?.modelNo || inquirySnapshot.supplierModelNo || inquirySnapshot.displayModelNo,
       internalModelNo: normalizedProduct?.internalModelNo || inquirySnapshot.masterRef?.internalModelNo || '',
+      factoryModelNo: normalizedProduct?.factoryModelNo || inquirySnapshot.factoryModelNo || inquirySnapshot.masterRef?.factoryModelNo || '',
       inquirySnapshot,
       inquirySnapshotDraft: draft,
       masterRef: inquirySnapshot.masterRef,

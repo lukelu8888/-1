@@ -36,6 +36,7 @@ export type SnapshotSourceLayer =
 export type MasterProductRef = {
   masterProductId: string | null;
   internalModelNo: string;
+  factoryModelNo?: string;
   isResolved: boolean;
 };
 
@@ -98,6 +99,7 @@ export type ProductSnapshotBase = SnapshotEnvelope & {
   displayModelNo: string;
   customerModelNo: string;
   supplierModelNo: string;
+  factoryModelNo?: string;
   description: string;
   specSummary: string;
   imageUrl: string;

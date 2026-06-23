@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase, supabaseAnonKey } from '../lib/supabase'
 import type { Session, User } from '@supabase/supabase-js'
 import { normalizeManagedAdminIdentity } from '../lib/internalAdminIdentity'
+import { isCurrentLocalDevHost } from '../lib/localDevHost'
 
 export interface SupabaseProfile {
   id: string
@@ -38,8 +39,7 @@ function promiseWithTimeout<T>(promise: Promise<T>, timeoutMs: number, message: 
 }
 
 function shouldUseProxyAuth() {
-  if (typeof window === 'undefined') return false
-  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  return isCurrentLocalDevHost()
 }
 
 function isRetriableNetworkError(error: any) {
@@ -79,12 +79,42 @@ async function directPasswordSignIn(email: string, password: string) {
       throw new Error('Login response missing session token')
     }
 
-    const { data, error } = await supabase.auth.setSession({
-      access_token,
-      refresh_token,
-    })
-    if (error) throw error
-    return data
+    const fallbackData = {
+      session: {
+        access_token,
+        refresh_token,
+        token_type: payload?.token_type ?? 'bearer',
+        expires_in: payload?.expires_in ?? 3600,
+        expires_at: payload?.expires_at ?? Math.floor(Date.now() / 1000) + 3600,
+        user: (payload?.user ?? null) as User | null,
+      } as Session,
+      user: (payload?.user ?? null) as User | null,
+    }
+
+    try {
+      const { data, error } = await promiseWithTimeout(
+        supabase.auth.setSession({
+          access_token,
+          refresh_token,
+        }),
+        1500,
+        'Supabase auth session write timed out',
+      )
+      if (error) throw error
+      return data
+    } catch (sessionError: any) {
+      if (sessionError?.message === 'Supabase auth session write timed out') {
+        console.warn('[useSupabaseAuth] setSession stalled after proxy auth, continuing with fallback session payload.')
+        void supabase.auth.setSession({
+          access_token,
+          refresh_token,
+        }).catch((backgroundError) => {
+          console.warn('[useSupabaseAuth] background setSession failed after timeout:', backgroundError)
+        })
+        return fallbackData
+      }
+      throw sessionError
+    }
   } catch (error: any) {
     if (error?.name === 'AbortError') {
       throw new Error('Login request timed out. Please try again.')
@@ -132,6 +162,14 @@ async function fetchProfileViaProxy(userId: string): Promise<SupabaseProfile | n
 }
 
 export async function signInWithEmail(email: string, password: string) {
+  if (shouldUseProxyAuth()) {
+    try {
+      return await directPasswordSignIn(email, password)
+    } catch (proxyError: any) {
+      console.warn('[useSupabaseAuth] proxy auth failed, falling back to Supabase SDK:', proxyError?.message || proxyError)
+    }
+  }
+
   try {
     const { data, error } = await promiseWithTimeout(
       supabase.auth.signInWithPassword({ email, password }),
@@ -149,6 +187,41 @@ export async function signInWithEmail(email: string, password: string) {
   }
 }
 
+export async function sendPhoneOtp(phone: string) {
+  const normalizedPhone = String(phone || '').trim()
+  if (!normalizedPhone) {
+    throw new Error('手机号不能为空')
+  }
+
+  const { data, error } = await supabase.auth.signInWithOtp({
+    phone: normalizedPhone,
+    options: {
+      shouldCreateUser: false,
+    },
+  })
+  if (error) throw error
+  return data
+}
+
+export async function verifyPhoneOtp(phone: string, token: string) {
+  const normalizedPhone = String(phone || '').trim()
+  const normalizedToken = String(token || '').trim()
+  if (!normalizedPhone) {
+    throw new Error('手机号不能为空')
+  }
+  if (!normalizedToken) {
+    throw new Error('验证码不能为空')
+  }
+
+  const { data, error } = await supabase.auth.verifyOtp({
+    phone: normalizedPhone,
+    token: normalizedToken,
+    type: 'sms',
+  })
+  if (error) throw error
+  return data
+}
+
 // ── 登出 ──────────────────────────────────────────────────────
 export async function signOut() {
   const { error } = await supabase.auth.signOut()
@@ -164,6 +237,21 @@ export async function signOut() {
 
 // ── 获取用户 Profile ───────────────────────────────────────────
 export async function fetchProfile(userId: string): Promise<SupabaseProfile | null> {
+  if (shouldUseProxyAuth()) {
+    try {
+      return await fetchProfileViaProxy(userId)
+    } catch (proxyError) {
+      const message = String((proxyError as any)?.message || proxyError || '').toLowerCase()
+      const isAbortLike =
+        (proxyError as any)?.name === 'AbortError' ||
+        message.includes('signal is aborted') ||
+        message.includes('request aborted')
+      if (!isAbortLike) {
+        console.warn('[useSupabaseAuth] profile proxy fetch failed, falling back to Supabase SDK:', proxyError)
+      }
+    }
+  }
+
   try {
     const { data, error } = await promiseWithTimeout(
       supabase

@@ -20,6 +20,16 @@ export const getSupplierPartNo = (product: any) =>
   product?.supplier_model_no ||
   '';
 
+export const getFactoryModelNo = (product: any) =>
+  product?.factoryModelNo ||
+  product?.factorySku ||
+  product?.factory_model_no ||
+  product?.factory_sku ||
+  product?.internalFactoryNo ||
+  product?.internal_factory_no ||
+  product?.masterRef?.factoryModelNo ||
+  '';
+
 export const hasCustomerPartNo = (product: any) => Boolean(getCustomerPartNo(product));
 
 export const hasSupplierPartNo = (product: any) => Boolean(getSupplierPartNo(product));
@@ -69,6 +79,9 @@ export const getFormalBusinessModelNo = (product: any) => getInternalFacingModel
 
 export const getSupplierFacingModelNo = (product: any) => getInternalFacingModelNo(product);
 
+export const getFactoryFacingModelNo = (product: any) =>
+  getFactoryModelNo(product) || getInternalFacingModelNo(product);
+
 export const shouldShowCustomerRefLine = (product: any) => {
   const customerPartNo = getCustomerPartNo(product);
   if (!customerPartNo) return false;
@@ -92,6 +105,7 @@ export const getModelDisplayBundle = (product: any) => ({
   internalModelNo: getInternalFacingModelNo(product),
   customerPartNo: getCustomerPartNo(product),
   supplierPartNo: getSupplierPartNo(product),
+  factoryModelNo: getFactoryFacingModelNo(product),
   customerFacingModelNo: getCustomerFacingModelNo(product),
   formalBusinessModelNo: getFormalBusinessModelNo(product),
   supplierFacingModelNo: getSupplierFacingModelNo(product),

@@ -1,4 +1,5 @@
-import { supabase } from '../supabase'
+import { supabase, supabaseAnonKey, supabaseUrl } from '../supabase'
+import { isCurrentLocalDevHost } from '../localDevHost'
 import {
   DEFAULT_TEMPLATE_BINDING_FLOW_CODE,
   templateBindingResolutionCache,
@@ -34,7 +35,9 @@ type DependencyBag = {
 }
 
 const documentTemplateVersionCache = new Map<string, any>()
+
 const missingColumnCache = new Map<string, Set<string>>()
+const TEMPLATE_BINDING_CACHE_TTL_MS = 5 * 1000
 
 export function applyKnownMissingColumns(table: string, payload: Record<string, any>, removedColumns: string[]) {
   const cachedColumns = missingColumnCache.get(table)
@@ -57,6 +60,221 @@ export function rememberMissingColumn(table: string, column: string) {
 
 export function hasKnownMissingColumn(table: string, column: string) {
   return missingColumnCache.get(table)?.has(column) ?? false
+}
+
+function shouldUseSupabaseProxy() {
+  return isCurrentLocalDevHost()
+}
+
+function shouldRetryDirectSupabaseRequest(error: unknown) {
+  const message = String((error as any)?.message || error || '').toLowerCase()
+  return (
+    (error as any)?.name === 'TypeError' ||
+    message.includes('failed to fetch') ||
+    message.includes('networkerror') ||
+    message.includes('load failed') ||
+    message.includes('connection refused') ||
+    message.includes('err_connection_refused')
+  )
+}
+
+function isAbortLikeError(error: unknown) {
+  const message = String((error as any)?.message || error || '').toLowerCase()
+  return (
+    (error as any)?.name === 'AbortError' ||
+    message.includes('signal is aborted') ||
+    message.includes('request aborted')
+  )
+}
+
+function shouldRetryDirectSupabaseResponse(response: Response) {
+  return response.status >= 500
+}
+
+function readSupabaseAccessTokenFromStorage(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem('cosun_supabase_auth')
+    const parsed = raw ? JSON.parse(raw) : null
+    return String(
+      parsed?.access_token ||
+      parsed?.currentSession?.access_token ||
+      parsed?.session?.access_token ||
+      parsed?.data?.session?.access_token ||
+      '',
+    ).trim() || null
+  } catch {
+    return null
+  }
+}
+
+function readSupabaseRefreshTokenFromStorage(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem('cosun_supabase_auth')
+    const parsed = raw ? JSON.parse(raw) : null
+    return String(
+      parsed?.refresh_token ||
+      parsed?.currentSession?.refresh_token ||
+      parsed?.session?.refresh_token ||
+      parsed?.data?.session?.refresh_token ||
+      '',
+    ).trim() || null
+  } catch {
+    return null
+  }
+}
+
+async function resolveValidSupabaseAccessToken(options: { forceRefresh?: boolean } = {}): Promise<string | null> {
+  const cachedAccessToken = readSupabaseAccessTokenFromStorage()
+  const refreshToken = readSupabaseRefreshTokenFromStorage()
+  const shouldUseProxy = shouldUseSupabaseProxy()
+  const forceRefresh = options.forceRefresh === true
+  let sessionAccessToken: string | null = null
+
+  if (shouldUseProxy) {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      sessionAccessToken = String(session?.access_token || '').trim() || null
+      if (sessionAccessToken && !forceRefresh) {
+        return sessionAccessToken
+      }
+      const {
+        data: refreshed,
+        error: refreshError,
+      } = await supabase.auth.refreshSession()
+      if (!refreshError) {
+        const refreshedAccessToken = String(refreshed?.session?.access_token || '').trim()
+        if (refreshedAccessToken) {
+          return refreshedAccessToken
+        }
+      }
+      if (sessionAccessToken && !forceRefresh) {
+        return sessionAccessToken
+      }
+    } catch (error) {
+      if (!isAbortLikeError(error)) {
+        console.warn('[Supabase] failed to read current session token for REST fallback, using cached token if available.', error)
+      }
+    }
+  }
+
+  if (!refreshToken) {
+    return forceRefresh ? sessionAccessToken : (sessionAccessToken || cachedAccessToken)
+  }
+
+  const proxyAuthBase = '/__supabase_auth__'
+  const directAuthBase = `${supabaseUrl}/auth/v1`
+  const authBase = shouldUseProxy ? proxyAuthBase : directAuthBase
+
+  try {
+    const requestInit: RequestInit = {
+      method: 'POST',
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }
+    let response: Response
+    try {
+      response = await fetch(`${authBase}/token?grant_type=refresh_token`, requestInit)
+      if (shouldUseProxy && shouldRetryDirectSupabaseResponse(response)) {
+        console.warn('[Supabase] auth proxy refresh returned 5xx, retrying direct refresh request.', response.status)
+        response = await fetch(`${directAuthBase}/token?grant_type=refresh_token`, requestInit)
+      }
+    } catch (error) {
+      if (!(shouldUseProxy && shouldRetryDirectSupabaseRequest(error))) {
+        throw error
+      }
+      console.warn('[Supabase] auth proxy refresh failed, retrying direct refresh request.', error)
+      response = await fetch(`${directAuthBase}/token?grant_type=refresh_token`, requestInit)
+    }
+
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      const message = formatUnknownError(payload, `Auth refresh failed with status ${response.status}`)
+      throw new Error(message)
+    }
+
+    const nextAccessToken = String(payload?.access_token || '').trim()
+    const nextRefreshToken = String(payload?.refresh_token || '').trim()
+    if (!nextAccessToken || !nextRefreshToken) {
+      return forceRefresh ? null : cachedAccessToken
+    }
+
+    try {
+      await supabase.auth.setSession({
+        access_token: nextAccessToken,
+        refresh_token: nextRefreshToken,
+      })
+    } catch {
+      // Ignore setSession failures here; the returned token can still be used for REST fallback.
+    }
+
+    return nextAccessToken
+  } catch (error) {
+    console.warn('[Supabase] refresh token for REST fallback failed.', error)
+    return forceRefresh ? sessionAccessToken : (sessionAccessToken || cachedAccessToken)
+  }
+}
+
+async function ensureSupabaseClientSessionReady(options: { forceRefresh?: boolean } = {}): Promise<boolean> {
+  if (typeof window === 'undefined') return true
+  const refreshToken = readSupabaseRefreshTokenFromStorage()
+  const accessToken = await resolveValidSupabaseAccessToken(options)
+  if (!accessToken || !refreshToken) return false
+  try {
+    await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    })
+    return true
+  } catch (error) {
+    console.warn('[Supabase] failed to restore client session before inquiry create.', error)
+    return false
+  }
+}
+
+export function formatUnknownError(error: unknown, fallback = 'Unknown error'): string {
+  if (error instanceof Error) {
+    return error.message || fallback
+  }
+  if (typeof error === 'string') {
+    return error.trim() || fallback
+  }
+  if (error && typeof error === 'object') {
+    const candidate = error as Record<string, any>
+    const message = String(
+      candidate.message ||
+      candidate.error_description ||
+      candidate.error ||
+      candidate.details ||
+      candidate.hint ||
+      '',
+    ).trim()
+    if (message) return message
+    try {
+      return JSON.stringify(candidate)
+    } catch {
+      return fallback
+    }
+  }
+  return fallback
+}
+
+function toRuntimeError(error: unknown, fallback: string): Error {
+  if (error instanceof Error) {
+    const message = formatUnknownError(error, fallback)
+    if (message === error.message) {
+      return error
+    }
+    return new Error(message)
+  }
+  return new Error(formatUnknownError(error, fallback))
 }
 
 function isPlainObject(value: unknown): value is Record<string, any> {
@@ -147,10 +365,57 @@ function isMissingRpcFunctionError(error: any, functionName: string): boolean {
 }
 
 function isInquiryNumberConflictError(error: any): boolean {
-  const message = String(error?.message || '')
+  const message = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.error,
+    error?.error_description,
+    (() => {
+      try {
+        return error && typeof error === 'object' ? JSON.stringify(error) : String(error || '')
+      } catch {
+        return String(error || '')
+      }
+    })(),
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase()
   return (
-    error?.code === '23505' &&
-    message.includes('inquiries_inquiry_number_tenant_key')
+    (error?.code === '23505' && message.includes('inquiries_inquiry_number_tenant_key')) ||
+    (error?.code === '409' && message.includes('inquiries_inquiry_number_tenant_key')) ||
+    (error?.status === 409 && message.includes('inquiries_inquiry_number_tenant_key')) ||
+    (message.includes('409') && message.includes('inquiries_inquiry_number_tenant_key')) ||
+    (message.includes('duplicate key') && message.includes('inquiries_inquiry_number_tenant_key'))
+  )
+}
+
+function isInquiryPrimaryKeyConflictError(error: any): boolean {
+  const message = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.error,
+    error?.error_description,
+    (() => {
+      try {
+        return error && typeof error === 'object' ? JSON.stringify(error) : String(error || '')
+      } catch {
+        return String(error || '')
+      }
+    })(),
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase()
+
+  return (
+    (error?.code === '23505' && message.includes('inquiries_pkey')) ||
+    (error?.code === '409' && message.includes('inquiries_pkey')) ||
+    (error?.status === 409 && message.includes('inquiries_pkey')) ||
+    (message.includes('409') && message.includes('inquiries_pkey')) ||
+    (message.includes('duplicate key') && message.includes('inquiries_pkey'))
   )
 }
 
@@ -184,7 +449,163 @@ async function getExistingInquiryRowById(id: string): Promise<any | null> {
   }
 }
 
-function buildInquiryNumberPrefix(regionCode: string, dateValue?: unknown): string {
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function waitForExistingInquiryRowById(
+  id: string,
+  attempts = 3,
+  delayMs = 250,
+): Promise<any | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const existing = await getExistingInquiryRowById(id)
+    if (existing) {
+      return existing
+    }
+    if (attempt < attempts - 1) {
+      await delay(delayMs)
+    }
+  }
+  return null
+}
+
+async function insertInquiryRowViaRest(
+  payload: Record<string, any>,
+  context: string,
+): Promise<any | null> {
+  if (typeof window === 'undefined') return null
+  const normalizedId = String(payload?.id || '').trim()
+  if (!normalizedId) {
+    throw new Error(`${context} REST upsert failed: missing inquiry id`)
+  }
+
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), 20000)
+
+  try {
+    const useProxy = shouldUseSupabaseProxy()
+    const proxyRestBase = '/__supabase_rest__'
+    const directRestBase = `${supabaseUrl}/rest/v1`
+    const restBase = useProxy ? proxyRestBase : directRestBase
+    const requestOnce = async (forceRefresh = false) => {
+      const accessToken = await resolveValidSupabaseAccessToken({ forceRefresh })
+      const requestInit: RequestInit = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${accessToken || supabaseAnonKey}`,
+          Prefer: 'resolution=merge-duplicates, return=representation',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      }
+      let response: Response
+      try {
+        response = await fetch(`${restBase}/inquiries?on_conflict=id`, requestInit)
+        if (useProxy && shouldRetryDirectSupabaseResponse(response)) {
+          console.warn(`[Supabase] ${context}: REST proxy insert returned 5xx, retrying direct request.`, response.status)
+          response = await fetch(`${directRestBase}/inquiries?on_conflict=id`, requestInit)
+        }
+      } catch (error) {
+        if (!(useProxy && shouldRetryDirectSupabaseRequest(error))) {
+          throw error
+        }
+        console.warn(`[Supabase] ${context}: REST proxy insert failed, retrying direct request.`, error)
+        response = await fetch(`${directRestBase}/inquiries?on_conflict=id`, requestInit)
+      }
+      const rawText = await response.text()
+      const parsed = rawText ? JSON.parse(rawText) : null
+      return { response, rawText, parsed }
+    }
+
+    let { response, rawText, parsed } = await requestOnce(false)
+    const parsedMessage = formatUnknownError(parsed || rawText || response.statusText || response.status)
+
+    if (response.status === 401 && parsedMessage.toLowerCase().includes('jwt expired')) {
+      ;({ response, rawText, parsed } = await requestOnce(true))
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `${context} REST upsert failed: ${formatUnknownError(parsed || rawText || response.statusText || response.status)}`,
+      )
+    }
+
+    if (Array.isArray(parsed)) {
+      return parsed[0] || null
+    }
+
+    return parsed || null
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+async function loadInquiryNumberRowsViaRest(prefix: string): Promise<Array<{ inquiry_number?: string | null }>> {
+  if (typeof window === 'undefined') return []
+
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), 12000)
+
+  try {
+    const useProxy = shouldUseSupabaseProxy()
+    const proxyRestBase = '/__supabase_rest__'
+    const directRestBase = `${supabaseUrl}/rest/v1`
+    const restBase = useProxy ? proxyRestBase : directRestBase
+    const query = new URLSearchParams({
+      select: 'inquiry_number',
+      inquiry_number: `like.${prefix}%`,
+      order: 'inquiry_number.desc',
+      limit: '200',
+    })
+    const requestOnce = async (forceRefresh = false) => {
+      const accessToken = await resolveValidSupabaseAccessToken({ forceRefresh })
+      const requestInit: RequestInit = {
+        method: 'GET',
+        headers: {
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${accessToken || supabaseAnonKey}`,
+        },
+        signal: controller.signal,
+      }
+      let response: Response
+      try {
+        response = await fetch(`${restBase}/inquiries?${query.toString()}`, requestInit)
+        if (useProxy && shouldRetryDirectSupabaseResponse(response)) {
+          console.warn('[Supabase] inquiry number REST proxy scan returned 5xx, retrying direct request.', response.status)
+          response = await fetch(`${directRestBase}/inquiries?${query.toString()}`, requestInit)
+        }
+      } catch (error) {
+        if (!(useProxy && shouldRetryDirectSupabaseRequest(error))) {
+          throw error
+        }
+        console.warn('[Supabase] inquiry number REST proxy scan failed, retrying direct request.', error)
+        response = await fetch(`${directRestBase}/inquiries?${query.toString()}`, requestInit)
+      }
+      const rawText = await response.text()
+      const parsed = rawText ? JSON.parse(rawText) : []
+      return { response, rawText, parsed }
+    }
+
+    let { response, rawText, parsed } = await requestOnce(false)
+    const parsedMessage = formatUnknownError(parsed || rawText || response.statusText || response.status)
+    if (response.status === 401 && parsedMessage.toLowerCase().includes('jwt expired')) {
+      ;({ response, rawText, parsed } = await requestOnce(true))
+    }
+
+    if (!response.ok) {
+      throw new Error(`Inquiry number REST scan failed: ${formatUnknownError(parsed || rawText || response.statusText || response.status)}`)
+    }
+
+    return Array.isArray(parsed) ? parsed : []
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+export function buildInquiryNumberPrefix(regionCode: string, dateValue?: unknown): string {
   const rawDate = String(dateValue || '').trim()
   const parsedDate = rawDate ? new Date(rawDate) : new Date()
   const safeDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate
@@ -194,21 +615,135 @@ function buildInquiryNumberPrefix(regionCode: string, dateValue?: unknown): stri
   return `ING-${String(regionCode || 'NA').toUpperCase()}-${yy}${mm}${dd}-`
 }
 
-function isTransientInquiryAllocationError(error: any): boolean {
-  const message = String(error?.message || error || '').toLowerCase()
+function buildInquiryNumberRegionPattern(regionCode: string): string {
+  return `ING-${String(regionCode || 'NA').toUpperCase()}-`
+}
+
+export function isTransientSupabaseRequestError(error: any): boolean {
+  const message = [
+    error?.name,
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.error,
+    error?.error_description,
+    error?.cause?.message,
+    (() => {
+      try {
+        return error && typeof error === 'object' ? JSON.stringify(error) : String(error || '')
+      } catch {
+        return String(error || '')
+      }
+    })(),
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase()
   return (
     error?.name === 'AbortError' ||
+    error?.name === 'TypeError' ||
     message.includes('signal is aborted') ||
     message.includes('request aborted') ||
-    message.includes('timed out')
+    message.includes('timed out') ||
+    message.includes('failed to fetch') ||
+    message.includes('networkerror') ||
+    message.includes('load failed') ||
+    message.includes('connection refused') ||
+    message.includes('err_connection_refused')
   )
 }
 
-function buildLocalFallbackInquiryNumber(prefix: string): string {
-  const now = Date.now()
-  const suffix = Number(String(now).slice(-4))
-  const safeSuffix = Number.isFinite(suffix) && suffix > 0 ? suffix : Math.floor(Math.random() * 9000) + 1000
-  return `${prefix}${String(safeSuffix).padStart(4, '0')}`
+function isSupabaseAuthTokenError(error: any): boolean {
+  const message = [
+    error?.name,
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.error,
+    error?.error_description,
+    error?.cause?.message,
+    (() => {
+      try {
+        return error && typeof error === 'object' ? JSON.stringify(error) : String(error || '')
+      } catch {
+        return String(error || '')
+      }
+    })(),
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase()
+
+  return (
+    message.includes('jwt expired') ||
+    message.includes('invalid jwt') ||
+    message.includes('token has expired') ||
+    message.includes('401') ||
+    message.includes('unauthorized')
+  )
+}
+
+function isSupabasePermissionDeniedError(error: any): boolean {
+  const message = [
+    error?.name,
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.error,
+    error?.error_description,
+    error?.cause?.message,
+    (() => {
+      try {
+        return error && typeof error === 'object' ? JSON.stringify(error) : String(error || '')
+      } catch {
+        return String(error || '')
+      }
+    })(),
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase()
+
+  return (
+    message.includes('permission denied for table inquiries') ||
+    message.includes('new row violates row-level security policy') ||
+    message.includes('row-level security') ||
+    message.includes('42501')
+  )
+}
+
+export function buildLocalFallbackInquiryNumber(prefix: string, regionCode: string): string {
+  const normalizedRegionCode = String(regionCode || 'NA').trim().toUpperCase() || 'NA'
+  const storageKey = `ing_local_fallback_counter_v4:${prefix}`
+  const legacyStorageKeyV3 = `ing_local_fallback_counter_v3:${normalizedRegionCode}`
+  const legacyStorageKeyV2 = `ing_local_fallback_counter_v2:${prefix}`
+  const legacyStorageKeyV1 = `ing_local_fallback_counter:${prefix}`
+  let nextSuffix = 1
+
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = Number.parseInt(String(window.localStorage.getItem(storageKey) || '0'), 10)
+      const legacyStoredV2 = Number.parseInt(String(window.localStorage.getItem(legacyStorageKeyV2) || '0'), 10)
+      const legacyStoredV1 = Number.parseInt(String(window.localStorage.getItem(legacyStorageKeyV1) || '0'), 10)
+      const seededCounter =
+        Number.isFinite(stored) && stored > 0 && stored < 9000
+          ? stored
+          : (
+              Number.isFinite(legacyStoredV2) && legacyStoredV2 > 0 && legacyStoredV2 < 9000
+                ? legacyStoredV2
+                : (Number.isFinite(legacyStoredV1) && legacyStoredV1 > 0 && legacyStoredV1 < 9000 ? legacyStoredV1 : 0)
+            )
+      nextSuffix = seededCounter > 0 ? seededCounter + 1 : 1
+      window.localStorage.setItem(storageKey, String(nextSuffix))
+      window.localStorage.removeItem(legacyStorageKeyV3)
+      window.localStorage.removeItem(legacyStorageKeyV2)
+      window.localStorage.removeItem(legacyStorageKeyV1)
+    } catch {
+      nextSuffix = 1
+    }
+  }
+
+  return `${prefix}${String(nextSuffix).padStart(4, '0')}`
 }
 
 export async function allocateNextClientInquiryNumber(
@@ -219,6 +754,7 @@ export async function allocateNextClientInquiryNumber(
 ): Promise<string> {
   const normalizedRegionCode = String(regionCode || 'NA').toUpperCase()
   const prefix = buildInquiryNumberPrefix(normalizedRegionCode, dateValue)
+  const shouldPreferLocalFallback = shouldUseSupabaseProxy()
 
   try {
     const { data, error } = await withSupabaseTimeout(
@@ -237,8 +773,16 @@ export async function allocateNextClientInquiryNumber(
     if (error && !isMissingRpcFunctionError(error, 'next_inquiry_number')) {
       console.warn('[Supabase] next_inquiry_number RPC unavailable, falling back to prefix scan.', error)
     }
+    if (error && shouldPreferLocalFallback) {
+      console.warn('[Supabase] using local inquiry number fallback in localhost/proxy mode after RPC miss.', error)
+      return buildLocalFallbackInquiryNumber(prefix, normalizedRegionCode)
+    }
   } catch (error) {
     console.warn('[Supabase] inquiry number RPC allocation failed, falling back to prefix scan.', error)
+    if (shouldPreferLocalFallback) {
+      console.warn('[Supabase] using local inquiry number fallback in localhost/proxy mode after RPC abort.', error)
+      return buildLocalFallbackInquiryNumber(prefix, normalizedRegionCode)
+    }
   }
 
   let data: any = null
@@ -250,34 +794,41 @@ export async function allocateNextClientInquiryNumber(
         .select('inquiry_number')
         .like('inquiry_number', `${prefix}%`)
         .order('inquiry_number', { ascending: false })
-        .limit(20),
+        .limit(200),
       8000,
       'Inquiry number allocation request timed out',
     )
     data = result.data
     error = result.error
   } catch (scanError) {
-    if (isTransientInquiryAllocationError(scanError)) {
+    if (isTransientSupabaseRequestError(scanError)) {
       console.warn('[Supabase] inquiry number prefix scan timed out, using local fallback number.', scanError)
-      return buildLocalFallbackInquiryNumber(prefix)
+      return buildLocalFallbackInquiryNumber(prefix, normalizedRegionCode)
     }
     throw scanError
   }
 
   if (error) {
-    if (isTransientInquiryAllocationError(error)) {
-      console.warn('[Supabase] inquiry number prefix scan interrupted, using local fallback number.', error)
-      return buildLocalFallbackInquiryNumber(prefix)
+    if (isTransientSupabaseRequestError(error)) {
+      console.warn('[Supabase] inquiry number prefix scan interrupted, trying REST scan before local fallback.', error)
+      try {
+        data = await loadInquiryNumberRowsViaRest(prefix)
+        error = null
+      } catch (restScanError) {
+        console.warn('[Supabase] inquiry number REST scan interrupted, using local fallback number.', restScanError)
+        return buildLocalFallbackInquiryNumber(prefix, normalizedRegionCode)
+      }
+    } else {
+      deps?.throwSupabaseError('allocateNextClientInquiryNumber inquiries', error)
+      throw error
     }
-    deps?.throwSupabaseError('allocateNextClientInquiryNumber inquiries', error)
-    throw error
   }
 
   let maxSuffix = 0
   for (const row of data || []) {
     const inquiryNumber = String((row as any)?.inquiry_number || '')
     if (!inquiryNumber.startsWith(prefix)) continue
-    const suffix = Number.parseInt(inquiryNumber.slice(prefix.length), 10)
+    const suffix = Number.parseInt(inquiryNumber.split('-').pop() || '', 10)
     if (Number.isFinite(suffix) && suffix > maxSuffix) {
       maxSuffix = suffix
     }
@@ -299,14 +850,32 @@ export async function insertInquiryWithServerAssignedNumber(
 
   const removedColumns: string[] = []
   applyKnownMissingColumns('inquiries', workingPayload, removedColumns)
+  let lastTransientError: Error | null = null
+  let localSequenceFloor = 0
+  const shouldPreferRestInsert = shouldUseSupabaseProxy()
+  const allowRestFallbackAfterSdkAbort = !shouldPreferRestInsert
+  const buildNextInquiryNumberFromFloor = (nextFloor: number) => {
+    const prefix = buildInquiryNumberPrefix(String(workingPayload.region_code || 'NA'), workingPayload.date)
+    return `${prefix}${String(Math.max(nextFloor, 1)).padStart(4, '0')}`
+  }
+  const extractInquirySuffix = (value: unknown) => {
+    const suffix = Number.parseInt(String(value || '').split('-').pop() || '', 10)
+    return Number.isFinite(suffix) ? suffix : 0
+  }
 
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const allocatedInquiryNumber = await allocateNextClientInquiryNumber(
+  const maxAttempts = shouldPreferRestInsert ? 3 : 8
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let allocatedInquiryNumber = await allocateNextClientInquiryNumber(
       String(workingPayload.region_code || 'NA'),
       workingPayload.date,
       null,
       deps,
     )
+    const allocatedSuffix = extractInquirySuffix(allocatedInquiryNumber)
+    if (localSequenceFloor > 0 && allocatedSuffix < localSequenceFloor) {
+      allocatedInquiryNumber = buildNextInquiryNumberFromFloor(localSequenceFloor)
+    }
     workingPayload.inquiry_number = allocatedInquiryNumber
     if ((workingPayload.document_data_snapshot || null) && typeof workingPayload.document_data_snapshot === 'object') {
       workingPayload.document_data_snapshot = {
@@ -315,9 +884,56 @@ export async function insertInquiryWithServerAssignedNumber(
       }
     }
 
+    if (shouldPreferRestInsert) {
+      try {
+        const restInserted = await insertInquiryRowViaRest(workingPayload, `${context} (proxy-first)`)
+        if (restInserted) {
+          if (removedColumns.length > 0) {
+            console.warn(`[Supabase] ${context}: schema drift fallback removed columns: ${removedColumns.join(', ')}`)
+          }
+          return restInserted
+        }
+      } catch (restError) {
+        if (isInquiryPrimaryKeyConflictError(restError)) {
+          const existing = await waitForExistingInquiryRowById(String(workingPayload.id || ''))
+          if (existing) {
+            console.warn(`[Supabase] ${context}: proxy-first REST insert hit primary key conflict, returning existing inquiry row.`, restError)
+            return existing
+          }
+        }
+        if (isInquiryNumberConflictError(restError)) {
+          localSequenceFloor = Math.max(localSequenceFloor, extractInquirySuffix(workingPayload.inquiry_number) + 1)
+          lastTransientError = toRuntimeError(
+            restError,
+            `${context} retrying after inquiry number conflict`,
+          )
+          console.warn(`[Supabase] ${context}: proxy-first REST insert hit inquiry number conflict, bumping sequence floor.`, restError)
+          continue
+        }
+        if (isTransientSupabaseRequestError(restError)) {
+          lastTransientError = toRuntimeError(restError, `${context} REST insert fallback failed`)
+          console.warn(`[Supabase] ${context}: proxy-first REST insert interrupted, falling back to SDK insert.`, restError)
+        }
+        else if (isSupabaseAuthTokenError(restError)) {
+          console.warn(`[Supabase] ${context}: proxy-first REST insert auth failed (JWT expired). Session needs re-login.`, restError)
+          throw restError
+        }
+        else if (isSupabasePermissionDeniedError(restError)) {
+          lastTransientError = toRuntimeError(restError, `${context} REST permission denied, falling back to SDK insert`)
+          console.warn(`[Supabase] ${context}: proxy-first REST insert permission denied, falling back to SDK insert.`, restError)
+        }
+        else {
+          throw restError
+        }
+      }
+    }
+
     let data: any = null
     let error: any = null
     try {
+      if (shouldPreferRestInsert) {
+        await ensureSupabaseClientSessionReady({ forceRefresh: attempt > 0 })
+      }
       const result = await withSupabaseTimeout(
         supabase
           .from('inquiries')
@@ -330,8 +946,45 @@ export async function insertInquiryWithServerAssignedNumber(
       data = result.data
       error = result.error
     } catch (requestError) {
-      if (isTransientInquiryAllocationError(requestError)) {
-        console.warn(`[Supabase] ${context}: insert interrupted, retrying.`, requestError)
+      if (isTransientSupabaseRequestError(requestError)) {
+        lastTransientError = toRuntimeError(requestError, `${context} interrupted`)
+        console.warn(
+          `[Supabase] ${context}: insert interrupted, ${
+            allowRestFallbackAfterSdkAbort ? 'trying REST fallback before retry.' : 'retrying SDK insert without REST fallback in localhost/proxy mode.'
+          }`,
+          requestError,
+        )
+        const existing = await getExistingInquiryRowById(String(workingPayload.id || ''))
+        if (existing) {
+          return existing
+        }
+        if (allowRestFallbackAfterSdkAbort) {
+          try {
+            const restInserted = await insertInquiryRowViaRest(workingPayload, context)
+            if (restInserted) {
+              return restInserted
+            }
+          } catch (restError) {
+            if (isInquiryPrimaryKeyConflictError(restError)) {
+              const existing = await waitForExistingInquiryRowById(String(workingPayload.id || ''))
+              if (existing) {
+                console.warn(`[Supabase] ${context}: REST insert hit primary key conflict, returning existing inquiry row.`, restError)
+                return existing
+              }
+            }
+            if (isInquiryNumberConflictError(restError)) {
+              localSequenceFloor = Math.max(localSequenceFloor, extractInquirySuffix(workingPayload.inquiry_number) + 1)
+              lastTransientError = toRuntimeError(
+                restError,
+                `${context} retrying after inquiry number conflict`,
+              )
+              console.warn(`[Supabase] ${context}: REST insert hit inquiry number conflict, bumping sequence floor.`, restError)
+              continue
+            }
+            lastTransientError = toRuntimeError(restError, `${context} REST insert fallback failed`)
+            console.warn(`[Supabase] ${context}: REST insert fallback failed, retrying.`, restError)
+          }
+        }
         continue
       }
       throw requestError
@@ -344,6 +997,48 @@ export async function insertInquiryWithServerAssignedNumber(
       return data
     }
 
+    if (isTransientSupabaseRequestError(error)) {
+      lastTransientError = toRuntimeError(error, `${context} interrupted`)
+      console.warn(
+        `[Supabase] ${context}: insert returned transient abort, ${
+          allowRestFallbackAfterSdkAbort ? 'trying REST fallback before retry.' : 'retrying SDK insert without REST fallback in localhost/proxy mode.'
+        }`,
+        error,
+      )
+      const existing = await getExistingInquiryRowById(String(workingPayload.id || ''))
+      if (existing) {
+        return existing
+      }
+      if (allowRestFallbackAfterSdkAbort) {
+        try {
+          const restInserted = await insertInquiryRowViaRest(workingPayload, context)
+          if (restInserted) {
+            return restInserted
+          }
+        } catch (restError) {
+          if (isInquiryPrimaryKeyConflictError(restError)) {
+            const existing = await waitForExistingInquiryRowById(String(workingPayload.id || ''))
+            if (existing) {
+              console.warn(`[Supabase] ${context}: REST insert hit primary key conflict after transient abort, returning existing inquiry row.`, restError)
+              return existing
+            }
+          }
+          if (isInquiryNumberConflictError(restError)) {
+            localSequenceFloor = Math.max(localSequenceFloor, extractInquirySuffix(workingPayload.inquiry_number) + 1)
+            lastTransientError = toRuntimeError(
+              restError,
+              `${context} retrying after inquiry number conflict`,
+            )
+            console.warn(`[Supabase] ${context}: REST insert hit inquiry number conflict after transient abort, bumping sequence floor.`, restError)
+            continue
+          }
+          lastTransientError = toRuntimeError(restError, `${context} REST insert fallback failed`)
+          console.warn(`[Supabase] ${context}: REST insert fallback failed after transient abort.`, restError)
+        }
+      }
+      continue
+    }
+
     const missingColumn = deps.extractMissingColumn(error)
     if (missingColumn && Object.prototype.hasOwnProperty.call(workingPayload, missingColumn)) {
       delete workingPayload[missingColumn]
@@ -353,21 +1048,82 @@ export async function insertInquiryWithServerAssignedNumber(
     }
 
     if (error.code === '23505' && String(error.message || '').includes('inquiries_pkey')) {
-      const existing = await getExistingInquiryRowById(String(workingPayload.id || ''))
+      const existing = await waitForExistingInquiryRowById(String(workingPayload.id || ''))
       if (existing) {
         return existing
       }
       continue
     }
 
-    if (error.code === '23505' && String(error.message || '').includes('inquiries_inquiry_number_tenant_key')) {
+    if (isInquiryNumberConflictError(error)) {
+      localSequenceFloor = Math.max(localSequenceFloor, extractInquirySuffix(workingPayload.inquiry_number) + 1)
+      if (attempt >= 1) {
+        lastTransientError = new Error(`${context} deferred after repeated inquiry number conflicts`)
+        break
+      }
       continue
     }
 
     deps.throwSupabaseError(context, error)
   }
 
+  if (lastTransientError) {
+    throw lastTransientError
+  }
+
   throw new Error(`${context} failed: exceeded retry budget`)
+}
+
+export async function updateInquiryRowViaRest(
+  id: string,
+  payload: Record<string, any>,
+  context: string,
+): Promise<any | null> {
+  if (typeof window === 'undefined') return null
+
+  const normalizedId = String(id || '').trim()
+  if (!normalizedId) {
+    throw new Error(`${context} failed: missing inquiry id`)
+  }
+
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), 20000)
+
+  try {
+    const accessToken = await resolveValidSupabaseAccessToken()
+    const restBase = shouldUseSupabaseProxy() ? '/__supabase_rest__' : `${supabaseUrl}/rest/v1`
+    const response = await fetch(
+      `${restBase}/inquiries?id=eq.${encodeURIComponent(normalizedId)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${accessToken || supabaseAnonKey}`,
+          Prefer: 'return=representation',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      },
+    )
+
+    const rawText = await response.text()
+    const parsed = rawText ? JSON.parse(rawText) : null
+
+    if (!response.ok) {
+      throw new Error(
+        `${context} REST update failed: ${formatUnknownError(parsed || rawText || response.statusText || response.status)}`,
+      )
+    }
+
+    if (Array.isArray(parsed)) {
+      return parsed[0] || null
+    }
+
+    return parsed || null
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
 }
 
 export async function resolveBusinessDocumentTemplateBinding(
@@ -412,7 +1168,8 @@ export async function resolveBusinessDocumentTemplateBinding(
   }
 
   const cachedBinding = templateBindingResolutionCache.get(cacheKey)
-  if (cachedBinding) {
+  const cachedBindingFetchedAt = Number((cachedBinding as any)?.__fetchedAt || 0)
+  if (cachedBinding && (Date.now() - cachedBindingFetchedAt) < TEMPLATE_BINDING_CACHE_TTL_MS) {
     return {
       ...cachedBinding,
       document_data_snapshot: existingDocumentSnapshot || options.businessData,
@@ -565,6 +1322,7 @@ export async function resolveBusinessDocumentTemplateBinding(
   }
   templateBindingResolutionCache.set(cacheKey, {
     ...resolved,
+    __fetchedAt: Date.now(),
     document_data_snapshot: resolvedDocumentData,
     documentDataSnapshot: resolvedDocumentData,
   })

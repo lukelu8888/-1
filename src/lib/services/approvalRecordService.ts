@@ -49,12 +49,123 @@ export function fromApprovalRow(r: any) {
   }
 }
 
+const APPROVAL_RECORD_SUMMARY_COLUMNS = [
+  'id',
+  'type',
+  'related_document_id',
+  'related_document_type',
+  'submitted_by',
+  'submitted_by_name',
+  'submitted_by_role',
+  'submitted_at',
+  'region',
+  'current_approver',
+  'current_approver_role',
+  'next_approver',
+  'next_approver_role',
+  'requires_director_approval',
+  'status',
+  'urgency',
+  'amount',
+  'currency',
+  'customer_name',
+  'customer_email',
+  'product_summary',
+  'approval_history',
+  'deadline',
+  'created_at',
+  'updated_at',
+].join(',')
+
+const APPROVAL_SUMMARY_CACHE_TTL_MS = 30_000
+const APPROVAL_SUMMARY_CACHE_ALL_KEY = '__all__'
+
+type ApprovalSummaryCacheEntry = {
+  data: any[]
+  updatedAt: number
+  promise?: Promise<any[]>
+}
+
+const approvalSummaryCache = new Map<string, ApprovalSummaryCacheEntry>()
+
+const getFreshApprovalSummaryCache = (key: string) => {
+  const cached = approvalSummaryCache.get(key)
+  if (!cached?.data?.length) return null
+  if (Date.now() - cached.updatedAt > APPROVAL_SUMMARY_CACHE_TTL_MS) return null
+  return cached.data
+}
+
+const setApprovalSummaryCache = (key: string, data: any[]) => {
+  approvalSummaryCache.set(key, {
+    data,
+    updatedAt: Date.now(),
+  })
+  return data
+}
+
+const loadApprovalSummaryCache = async (key: string, loader: () => Promise<any[]>) => {
+  const cached = approvalSummaryCache.get(key)
+  if (cached?.promise) return cached.promise
+
+  const promise = loader()
+    .then((data) => setApprovalSummaryCache(key, data || []))
+    .finally(() => {
+      const latest = approvalSummaryCache.get(key)
+      if (latest?.promise) {
+        approvalSummaryCache.set(key, {
+          data: latest.data || [],
+          updatedAt: latest.updatedAt || Date.now(),
+        })
+      }
+    })
+
+  approvalSummaryCache.set(key, {
+    data: cached?.data || [],
+    updatedAt: cached?.updatedAt || 0,
+    promise,
+  })
+
+  return promise
+}
+
 export function createApprovalRecordService(deps: ApprovalRecordDeps) {
   return {
     async getAll() {
       const { data, error } = await supabase.from('approval_records').select('*').order('created_at', { ascending: false })
       if (error) deps.throwSupabaseError('getAll approval_records', error)
       return (data || []).map(fromApprovalRow)
+    },
+
+    async getAllSummaries() {
+      const { data, error } = await supabase
+        .from('approval_records')
+        .select(APPROVAL_RECORD_SUMMARY_COLUMNS)
+        .order('created_at', { ascending: false })
+      if (error) deps.throwSupabaseError('getAllSummaries approval_records', error)
+      return (data || []).map(fromApprovalRow)
+    },
+
+    readAllSummariesCache() {
+      return getFreshApprovalSummaryCache(APPROVAL_SUMMARY_CACHE_ALL_KEY)
+    },
+
+    async getAllSummariesCached(options?: { force?: boolean }) {
+      if (!options?.force) {
+        const cached = getFreshApprovalSummaryCache(APPROVAL_SUMMARY_CACHE_ALL_KEY)
+        if (cached) return cached
+      }
+      return loadApprovalSummaryCache(APPROVAL_SUMMARY_CACHE_ALL_KEY, async () => {
+        const { data, error } = await supabase
+          .from('approval_records')
+          .select(APPROVAL_RECORD_SUMMARY_COLUMNS)
+          .order('created_at', { ascending: false })
+        if (error) deps.throwSupabaseError('getAllSummaries approval_records', error)
+        return (data || []).map(fromApprovalRow)
+      })
+    },
+
+    async prefetchAllSummaries() {
+      return this.getAllSummariesCached()
     },
 
     async getForApprover(email: string) {
@@ -78,6 +189,110 @@ export function createApprovalRecordService(deps: ApprovalRecordDeps) {
         .order('created_at', { ascending: false })
       if (legacyError) deps.throwSupabaseError('getForApprover approval_records legacy', legacyError)
       return (legacyData || []).map(fromApprovalRow)
+    },
+
+    async getForApproverSummaries(email: string) {
+      const aliases = getPersonnelEmailAliases(email)
+      const canonicalEmail = canonicalizePersonnelEmail(email)
+      const emailFilter = aliases.map((alias) => `current_approver.eq.${alias},submitted_by.eq.${alias},actor_email.eq.${alias}`).join(',')
+      const { data, error } = await supabase
+        .from('approval_records')
+        .select(APPROVAL_RECORD_SUMMARY_COLUMNS)
+        .or(emailFilter || `current_approver.eq.${canonicalEmail},submitted_by.eq.${canonicalEmail},actor_email.eq.${canonicalEmail}`)
+        .order('created_at', { ascending: false })
+
+      if (!error) return (data || []).map(fromApprovalRow)
+
+      console.warn('[approvalRecordService] getForApproverSummaries new columns unavailable, using legacy fallback:', error.message)
+      const legacyFilter = aliases.map((alias) => `approver.eq.${alias},requested_by.eq.${alias}`).join(',')
+      const { data: legacyData, error: legacyError } = await supabase
+        .from('approval_records')
+        .select(APPROVAL_RECORD_SUMMARY_COLUMNS)
+        .or(legacyFilter || `approver.eq.${canonicalEmail},requested_by.eq.${canonicalEmail}`)
+        .order('created_at', { ascending: false })
+      if (legacyError) deps.throwSupabaseError('getForApproverSummaries approval_records legacy', legacyError)
+      return (legacyData || []).map(fromApprovalRow)
+    },
+
+    readForApproverSummariesCache(email: string) {
+      return getFreshApprovalSummaryCache(canonicalizePersonnelEmail(email))
+    },
+
+    async getForApproverSummariesCached(email: string, options?: { force?: boolean }) {
+      const cacheKey = canonicalizePersonnelEmail(email)
+      if (!options?.force) {
+        const cached = getFreshApprovalSummaryCache(cacheKey)
+        if (cached) return cached
+      }
+
+      return loadApprovalSummaryCache(cacheKey, async () => {
+        const aliases = getPersonnelEmailAliases(email)
+        const canonicalEmail = canonicalizePersonnelEmail(email)
+        const emailFilter = aliases.map((alias) => `current_approver.eq.${alias},submitted_by.eq.${alias},actor_email.eq.${alias}`).join(',')
+        const { data, error } = await supabase
+          .from('approval_records')
+          .select(APPROVAL_RECORD_SUMMARY_COLUMNS)
+          .or(emailFilter || `current_approver.eq.${canonicalEmail},submitted_by.eq.${canonicalEmail},actor_email.eq.${canonicalEmail}`)
+          .order('created_at', { ascending: false })
+
+        if (!error) return (data || []).map(fromApprovalRow)
+
+        console.warn('[approvalRecordService] getForApproverSummaries new columns unavailable, using legacy fallback:', error.message)
+        const legacyFilter = aliases.map((alias) => `approver.eq.${alias},requested_by.eq.${alias}`).join(',')
+        const { data: legacyData, error: legacyError } = await supabase
+          .from('approval_records')
+          .select(APPROVAL_RECORD_SUMMARY_COLUMNS)
+          .or(legacyFilter || `approver.eq.${canonicalEmail},requested_by.eq.${canonicalEmail}`)
+          .order('created_at', { ascending: false })
+        if (legacyError) deps.throwSupabaseError('getForApproverSummaries approval_records legacy', legacyError)
+        return (legacyData || []).map(fromApprovalRow)
+      })
+    },
+
+    async prefetchForApproverSummaries(email: string) {
+      return this.getForApproverSummariesCached(email)
+    },
+
+    async getById(id: string) {
+      const { data, error } = await supabase
+        .from('approval_records')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle()
+      if (error) deps.throwSupabaseError('getById approval_records', error)
+      return fromApprovalRow(data)
+    },
+
+    async findLatestByDocumentAndStatuses(options: {
+      type: string
+      relatedDocumentId: string
+      statuses: string[]
+    }) {
+      const normalizedType = String(options.type || '').trim()
+      const normalizedDocumentId = String(options.relatedDocumentId || '').trim()
+      const normalizedStatuses = Array.from(
+        new Set(
+          (options.statuses || [])
+            .map((status) => String(status || '').trim())
+            .filter(Boolean),
+        ),
+      )
+
+      if (!normalizedType || !normalizedDocumentId || normalizedStatuses.length === 0) {
+        return null
+      }
+
+      const { data, error } = await supabase
+        .from('approval_records')
+        .select(APPROVAL_RECORD_SUMMARY_COLUMNS)
+        .eq('type', normalizedType)
+        .eq('related_document_id', normalizedDocumentId)
+        .in('status', normalizedStatuses)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (error) deps.throwSupabaseError('findLatestByDocumentAndStatuses approval_records', error)
+      return fromApprovalRow((data || [])[0] || null)
     },
 
     async upsert(record: any) {

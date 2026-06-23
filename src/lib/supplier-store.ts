@@ -21,8 +21,30 @@ export interface Supplier {
   createdAt?: string;      // 创建时间
 }
 
+export interface SupplierMasterRequest {
+  id: string;
+  name: string;
+  partySide: 'supplier' | 'third_party';
+  entityType: 'company' | 'person';
+  category: string;
+  expenseScope: 'business' | 'management';
+  expenseSubject: string;
+  masterCode?: string;
+  department?: string;
+  costCenter?: string;
+  routingNote?: string;
+  approvalStatus: 'pending_approval' | 'approved' | 'rejected';
+  submittedBy: string;
+  approvedAt?: string;
+  financeNotifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // LocalStorage Key
 const SUPPLIER_STORE_KEY = 'gsd_supplier_store';
+const SUPPLIER_MASTER_REQUESTS_KEY = 'gsd_supplier_master_requests';
+export const SUPPLIER_MASTER_REQUESTS_UPDATED_EVENT = 'supplier-master-requests-updated';
 
 /**
  * 初始化供应商库（测试数据）
@@ -243,6 +265,75 @@ export function addSupplier(supplier: Omit<Supplier, 'id' | 'createdAt'>): Suppl
   
   console.log('✅ 新增供应商:', newSupplier.name);
   return newSupplier;
+}
+
+export function getSupplierMasterRequests(): SupplierMasterRequest[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(SUPPLIER_MASTER_REQUESTS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as SupplierMasterRequest[];
+  } catch (error) {
+    console.error('❌ 供应商主档申请解析失败:', error);
+    return [];
+  }
+}
+
+function saveSupplierMasterRequests(requests: SupplierMasterRequest[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(SUPPLIER_MASTER_REQUESTS_KEY, JSON.stringify(requests));
+  window.dispatchEvent(
+    new CustomEvent(SUPPLIER_MASTER_REQUESTS_UPDATED_EVENT, {
+      detail: { count: requests.length, updatedAt: new Date().toISOString() },
+    }),
+  );
+}
+
+export function upsertSupplierMasterRequest(
+  request: Omit<SupplierMasterRequest, 'createdAt' | 'updatedAt'> & { createdAt?: string; updatedAt?: string },
+): SupplierMasterRequest {
+  const requests = getSupplierMasterRequests();
+  const now = new Date().toISOString();
+  const existingIndex = requests.findIndex((item) => item.id === request.id);
+  const nextRecord: SupplierMasterRequest = {
+    ...request,
+    createdAt: request.createdAt || requests[existingIndex]?.createdAt || now,
+    updatedAt: now,
+  };
+
+  if (existingIndex === -1) {
+    requests.unshift(nextRecord);
+  } else {
+    requests[existingIndex] = nextRecord;
+  }
+
+  saveSupplierMasterRequests(requests);
+  return nextRecord;
+}
+
+export function updateSupplierMasterRequestStatus(
+  id: string,
+  approvalStatus: SupplierMasterRequest['approvalStatus'],
+  extras?: Partial<SupplierMasterRequest>,
+): SupplierMasterRequest | null {
+  const requests = getSupplierMasterRequests();
+  const index = requests.findIndex((item) => item.id === id);
+  if (index === -1) return null;
+
+  requests[index] = {
+    ...requests[index],
+    ...extras,
+    approvalStatus,
+    updatedAt: new Date().toISOString(),
+  };
+  saveSupplierMasterRequests(requests);
+  return requests[index];
+}
+
+export function markSupplierMasterRequestFinanceNotified(id: string): SupplierMasterRequest | null {
+  return updateSupplierMasterRequestStatus(id, 'approved', {
+    financeNotifiedAt: new Date().toISOString(),
+  });
 }
 
 /**

@@ -1,10 +1,4 @@
 import { supabase } from '../supabase'
-import {
-  DEFAULT_CUSTOMER_ENTERPRISE_ROLE,
-  DEFAULT_CUSTOMER_ENTERPRISE_STATUS,
-  normalizeCustomerEnterpriseRole,
-  normalizeCustomerEnterpriseStatus,
-} from '../customerEnterpriseRoles'
 
 function buildSupabaseError(context: string, error: any) {
   return new Error(`${context} failed: ${String(error?.message || error || 'Unknown Supabase error').trim()}`)
@@ -95,8 +89,8 @@ function mapCustomerEnterpriseMemberRow(row: CustomerEnterpriseMemberSupabaseRec
     title: row.title || '',
     businessEmail: row.business_email || '',
     loginEmail: row.login_email || '',
-    role: normalizeCustomerEnterpriseRole(row.role),
-    status: normalizeCustomerEnterpriseStatus(row.status),
+    role: row.role || 'Purchaser',
+    status: row.status || 'invited',
     canLogin: row.can_login !== false,
     lastLogin: row.last_login_at || '',
     permissions: Array.isArray(row.permissions) ? row.permissions : [],
@@ -111,7 +105,7 @@ function mapCustomerEnterpriseInvitationRow(row: CustomerEnterpriseInvitationSup
     memberId: row.member_id || '',
     loginEmail: row.login_email || '',
     businessEmail: row.business_email || '',
-    role: normalizeCustomerEnterpriseRole(row.role),
+    role: row.role || 'Purchaser',
     status: row.status || 'pending',
     inviteToken: row.invite_token || '',
     invitedByEmail: row.invited_by_email || '',
@@ -163,28 +157,21 @@ export const customerEnterpriseMemberService = {
       throw new Error('replace customer enterprise members failed: enterprise auth user id is required')
     }
 
-    const dedupedMembers = new Map<string, Record<string, any>>()
-    members.forEach((member, index) => {
-      const normalizedLoginEmail = String(member.loginEmail || '').trim().toLowerCase()
-      const normalizedId = String(member.id || '').trim() || crypto.randomUUID()
-      const dedupeKey = normalizedLoginEmail || normalizedId || `member-${index}`
-      dedupedMembers.set(dedupeKey, {
-        id: normalizedId,
-        enterprise_auth_user_id: normalizedEnterpriseAuthUserId,
-        linked_auth_user_id: member.linkedAuthUserId || null,
-        name: String(member.name || '').trim(),
-        title: String(member.title || '').trim(),
-        business_email: String(member.businessEmail || '').trim().toLowerCase(),
-        login_email: normalizedLoginEmail,
-        role: normalizeCustomerEnterpriseRole(member.role || DEFAULT_CUSTOMER_ENTERPRISE_ROLE),
-        status: normalizeCustomerEnterpriseStatus(member.status || DEFAULT_CUSTOMER_ENTERPRISE_STATUS),
-        can_login: member.canLogin !== false,
-        last_login_at: String(member.lastLogin || '').trim(),
-        permissions: Array.isArray(member.permissions) ? member.permissions : [],
-        updated_at: new Date().toISOString(),
-      })
-    })
-    const normalizedMembers = Array.from(dedupedMembers.values())
+    const normalizedMembers = members.map((member) => ({
+      id: String(member.id || '').trim() || crypto.randomUUID(),
+      enterprise_auth_user_id: normalizedEnterpriseAuthUserId,
+      linked_auth_user_id: member.linkedAuthUserId || null,
+      name: String(member.name || '').trim(),
+      title: String(member.title || '').trim(),
+      business_email: String(member.businessEmail || '').trim().toLowerCase(),
+      login_email: String(member.loginEmail || '').trim().toLowerCase(),
+      role: String(member.role || 'Purchaser').trim() || 'Purchaser',
+      status: String(member.status || 'invited').trim() || 'invited',
+      can_login: member.canLogin !== false,
+      last_login_at: String(member.lastLogin || '').trim(),
+      permissions: Array.isArray(member.permissions) ? member.permissions : [],
+      updated_at: new Date().toISOString(),
+    }))
 
     const { error: deleteError } = await withSupabaseTimeout(
       supabase
@@ -201,15 +188,15 @@ export const customerEnterpriseMemberService = {
       return []
     }
 
-    const { error: insertError } = await withSupabaseTimeout(
+    const { error: upsertError } = await withSupabaseTimeout(
       supabase
         .from('customer_enterprise_members')
-        .insert(normalizedMembers),
+        .upsert(normalizedMembers, { onConflict: 'enterprise_auth_user_id,login_email' }),
       12000,
       'save customer enterprise members timed out',
     )
 
-    if (insertError) throw buildSupabaseError('save customer enterprise members', insertError)
+    if (upsertError) throw buildSupabaseError('save customer enterprise members', upsertError)
     return normalizedMembers.map((row) => mapCustomerEnterpriseMemberRow(row))
   },
 
@@ -226,12 +213,12 @@ export const customerEnterpriseMemberService = {
 
     if (normalizedAuthUserId && normalizedLoginEmail) {
       query = query.or(
-        `linked_auth_user_id.eq.${normalizedAuthUserId},login_email.eq.${normalizedLoginEmail},business_email.eq.${normalizedLoginEmail}`,
+        `linked_auth_user_id.eq.${normalizedAuthUserId},login_email.eq.${normalizedLoginEmail}`,
       )
     } else if (normalizedAuthUserId) {
       query = query.eq('linked_auth_user_id', normalizedAuthUserId)
     } else {
-      query = query.or(`login_email.eq.${normalizedLoginEmail},business_email.eq.${normalizedLoginEmail}`)
+      query = query.eq('login_email', normalizedLoginEmail)
     }
 
     const { data, error } = await withSupabaseTimeout(
@@ -305,7 +292,7 @@ export const customerEnterpriseInvitationService = {
       member_id: input.memberId,
       login_email: String(input.loginEmail || '').trim().toLowerCase(),
       business_email: String(input.businessEmail || '').trim().toLowerCase(),
-      role: normalizeCustomerEnterpriseRole(input.role || DEFAULT_CUSTOMER_ENTERPRISE_ROLE),
+      role: input.role || 'Purchaser',
       status: 'pending',
       invite_token: inviteToken,
       invited_by_email: String(input.invitedByEmail || '').trim().toLowerCase(),
@@ -344,49 +331,6 @@ export const customerEnterpriseInvitationService = {
 
     if (error) throw buildSupabaseError('create customer invitation', error)
     return mapCustomerEnterpriseInvitationRow(data as CustomerEnterpriseInvitationSupabaseRecord | null)
-  },
-
-  async updateStatusByMemberId(
-    memberId: string,
-    status: 'pending' | 'accepted' | 'cancelled' | 'expired',
-    patch?: {
-      acceptedAt?: string | null
-      linkedAuthUserId?: string | null
-    },
-  ) {
-    const now = new Date().toISOString()
-    const payload: Record<string, any> = {
-      status,
-      updated_at: now,
-    }
-
-    if (status === 'accepted') {
-      payload.accepted_at = patch?.acceptedAt || now
-      payload.linked_auth_user_id = patch?.linkedAuthUserId || null
-    }
-
-    if (status === 'expired' || status === 'cancelled') {
-      payload.expires_at = now
-    }
-
-    const { data, error } = await withSupabaseTimeout(
-      supabase
-        .from('customer_enterprise_invitations')
-        .update(payload)
-        .eq('member_id', memberId)
-        .in('status', ['pending', 'accepted'])
-        .select('*'),
-      12000,
-      'update customer invitation status timed out',
-    )
-
-    if (error) throw buildSupabaseError('update customer invitation status', error)
-
-    const latest = Array.isArray(data) && data.length > 0
-      ? data.sort((a, b) => String((b as any)?.updated_at || '').localeCompare(String((a as any)?.updated_at || '')))[0]
-      : null
-
-    return mapCustomerEnterpriseInvitationRow(latest as CustomerEnterpriseInvitationSupabaseRecord | null)
   },
 
   async acceptInvitation(inviteToken: string, linkedAuthUserId: string) {

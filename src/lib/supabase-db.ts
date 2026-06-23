@@ -5,6 +5,7 @@
  */
 
 import { supabase } from './supabase';
+import { getPersistableSalesContractStatus, normalizeCustomerContractStatus } from './customerPortalContractStatus';
 
 // ─── 通用工具 ─────────────────────────────────────────────────
 
@@ -92,9 +93,24 @@ export const salesContractsDb = {
   },
 
   async updateStatus(contractNumber: string, status: string, extra: Record<string, any> = {}): Promise<boolean> {
+    const logicalStatus = normalizeCustomerContractStatus(status);
+    const persistedStatus = getPersistableSalesContractStatus(logicalStatus);
+    const existingRenderMeta = extra.documentRenderMeta || extra.document_render_meta || {};
     const { error } = await supabase
       .from('sales_contracts')
-      .update({ status, updated_at: new Date().toISOString(), ...extra })
+      .update({
+        ...extra,
+        status: persistedStatus,
+        document_render_meta: {
+          ...existingRenderMeta,
+          erpWorkflow: {
+            ...(existingRenderMeta?.erpWorkflow || {}),
+            logicalStatus,
+            persistedStatus,
+          },
+        },
+        updated_at: new Date().toISOString(),
+      })
       .eq('contract_number', contractNumber);
     if (error) { console.warn('[Supabase] update contract status:', error.message); return false; }
     return true;
@@ -430,6 +446,9 @@ export const notificationsDb = {
 // ─── 数据映射：前端对象 → 数据库行 ────────────────────────────
 
 function toContractRow(c: any): any {
+  const logicalStatus = normalizeCustomerContractStatus(c);
+  const persistedStatus = getPersistableSalesContractStatus(logicalStatus);
+  const existingRenderMeta = c.documentRenderMeta || c.document_render_meta || {};
   return {
     id: c.id,
     contract_number: c.contractNumber || c.contract_number,
@@ -465,6 +484,13 @@ function toContractRow(c: any): any {
     trade_terms: c.tradeTerms || c.trade_terms || null,
     payment_terms: c.paymentTerms || c.payment_terms || null,
     payment_mode: c.paymentMode || c.payment_mode || null,
+    balance_trigger: c.balanceTrigger || c.balance_trigger || null,
+    sc_type: c.scType || c.sc_type || null,
+    exceptional_clause_flag: c.exceptionalClauseFlag ?? c.exceptional_clause_flag ?? false,
+    exceptional_clause_notes: c.exceptionalClauseNotes || c.exceptional_clause_notes || null,
+    special_account_period_flag: c.specialAccountPeriodFlag ?? c.special_account_period_flag ?? false,
+    strategic_customer_flag: c.strategicCustomerFlag ?? c.strategic_customer_flag ?? false,
+    sc_last_approval_at: c.scLastApprovalAt || c.sc_last_approval_at || null,
     deposit_percentage: c.depositPercentage ?? c.deposit_percentage ?? 30,
     deposit_amount: c.depositAmount || c.deposit_amount || 0,
     balance_percentage: c.balancePercentage ?? c.balance_percentage ?? 70,
@@ -473,7 +499,7 @@ function toContractRow(c: any): any {
     port_of_loading: c.portOfLoading || c.port_of_loading || null,
     port_of_destination: c.portOfDestination || c.port_of_destination || null,
     packing: c.packing || null,
-    status: c.status || 'draft',
+    status: persistedStatus,
     approval_flow: c.approvalFlow || c.approval_flow || null,
     approval_history: c.approvalHistory || c.approval_history || [],
     approval_notes: c.approvalNotes || c.approval_notes || null,
@@ -494,6 +520,14 @@ function toContractRow(c: any): any {
     approved_at: c.approvedAt || c.approved_at || null,
     sent_to_customer_at: c.sentToCustomerAt || c.sent_to_customer_at || null,
     customer_confirmed_at: c.customerConfirmedAt || c.customer_confirmed_at || null,
+    document_render_meta: {
+      ...existingRenderMeta,
+      erpWorkflow: {
+        ...(existingRenderMeta?.erpWorkflow || {}),
+        logicalStatus,
+        persistedStatus,
+      },
+    },
   };
 }
 
@@ -600,6 +634,14 @@ function toQuotationRow(q: any): any {
     price_type: q.priceType || q.price_type || null,
     profit_margin: q.profitMargin ?? q.profit_margin ?? null,
     payment_terms: q.paymentTerms || q.payment_terms || null,
+    payment_mode: q.paymentMode || q.payment_mode || null,
+    balance_trigger: q.balanceTrigger || q.balance_trigger || null,
+    qt_type: q.qtType || q.qt_type || null,
+    special_price_flag: q.specialPriceFlag ?? q.special_price_flag ?? false,
+    special_price_reason: q.specialPriceReason || q.special_price_reason || null,
+    special_payment_terms_flag: q.specialPaymentTermsFlag ?? q.special_payment_terms_flag ?? false,
+    strategic_customer_flag: q.strategicCustomerFlag ?? q.strategic_customer_flag ?? false,
+    qt_last_approval_at: q.qtLastApprovalAt || q.qt_last_approval_at || null,
     delivery_time: q.deliveryTime || q.delivery_time || null,
     validity_period: q.validityPeriod || q.validity_period || null,
     status: q.status || 'draft',
@@ -619,11 +661,23 @@ function toQuotationRow(q: any): any {
 
 export function fromContractRow(row: any): any {
   if (!row) return null;
+  const projectExecutionBaseline = row.document_render_meta?.projectExecutionBaseline || null;
+  const inferredStatus = normalizeCustomerContractStatus(row);
   return {
     id: row.id,
     contractNumber: row.contract_number,
     quotationNumber: row.quotation_number,
     inquiryNumber: row.inquiry_number,
+    projectId: projectExecutionBaseline?.projectId || null,
+    projectCode: projectExecutionBaseline?.projectCode || null,
+    projectName: projectExecutionBaseline?.projectName || null,
+    projectRevisionId: projectExecutionBaseline?.projectRevisionId || null,
+    projectRevisionCode: projectExecutionBaseline?.projectRevisionCode || null,
+    projectRevisionStatus: projectExecutionBaseline?.projectRevisionStatus || null,
+    finalRevisionId: projectExecutionBaseline?.finalRevisionId || null,
+    finalQuotationId: projectExecutionBaseline?.finalQuotationId || null,
+    finalQuotationNumber: projectExecutionBaseline?.finalQuotationNumber || null,
+    quotationRole: projectExecutionBaseline?.quotationRole || null,
     customerName: row.customer_name,
     customerEmail: row.customer_email,
     customerCompany: row.customer_company,
@@ -654,15 +708,25 @@ export function fromContractRow(row: any): any {
     tradeTerms: row.trade_terms,
     paymentTerms: row.payment_terms,
     paymentMode: row.payment_mode || null,
+    balanceTrigger: row.balance_trigger || null,
+    scType: row.sc_type || null,
+    exceptionalClauseFlag: Boolean(row.exceptional_clause_flag),
+    exceptionalClauseNotes: row.exceptional_clause_notes || null,
+    specialAccountPeriodFlag: Boolean(row.special_account_period_flag),
+    strategicCustomerFlag: Boolean(row.strategic_customer_flag),
+    scLastApprovalAt: row.sc_last_approval_at || null,
     depositPercentage: row.deposit_percentage,
     depositAmount: row.deposit_amount,
     balancePercentage: row.balance_percentage,
     balanceAmount: row.balance_amount,
+    additionalCost: row.additional_cost ?? 0,
+    fxRates: row.fx_rates ?? {},
+    profitSnapshot: row.profit_snapshot ?? null,
     deliveryTime: row.delivery_time,
     portOfLoading: row.port_of_loading,
     portOfDestination: row.port_of_destination,
     packing: row.packing,
-    status: row.status,
+    status: inferredStatus,
     approvalFlow: row.approval_flow,
     approvalHistory: row.approval_history || [],
     approvalNotes: row.approval_notes,
@@ -674,6 +738,7 @@ export function fromContractRow(row: any): any {
     purchaseOrderNumbers: row.purchase_order_numbers,
     sellerSignature: row.seller_signature,
     buyerSignature: row.buyer_signature,
+    customerFeedback: row.customer_feedback || null,
     remarks: row.remarks,
     attachments: row.attachments || [],
     createdBy: row.created_by,
@@ -683,6 +748,11 @@ export function fromContractRow(row: any): any {
     approvedAt: row.approved_at,
     sentToCustomerAt: row.sent_to_customer_at,
     customerConfirmedAt: row.customer_confirmed_at,
+    templateId: row.template_id || null,
+    templateVersionId: row.template_version_id || null,
+    templateSnapshot: row.template_snapshot || {},
+    documentDataSnapshot: row.document_data_snapshot || {},
+    documentRenderMeta: row.document_render_meta || {},
   };
 }
 
@@ -759,3 +829,182 @@ export function fromARRow(row: any): any {
     updatedAt: row.updated_at,
   };
 }
+
+// ─── 借抬头出口服务 ────────────────────────────────────────────
+
+function rowToExportServiceOrder(row: any): any {
+  return {
+    id: row.id,
+    source: row.source,
+    type: row.type,
+    customer: row.customer_name,
+    customerEmail: row.customer_email ?? undefined,
+    region: row.region,
+    managerName: row.manager_name ?? undefined,
+    salesName: row.sales_name ?? undefined,
+    trackerName: row.tracker_name ?? undefined,
+    financeName: row.finance_name ?? undefined,
+    internalStage: row.internal_stage,
+    currentActionRole: row.current_action_role,
+    isBlocked: row.is_blocked ?? false,
+    isUrgent: row.is_urgent ?? false,
+    emailSubject: row.email_subject ?? undefined,
+    piNumber: row.pi_number ?? undefined,
+    piAmount: row.pi_amount ?? undefined,
+    piCurrency: row.pi_currency ?? 'USD',
+    piRejectionReason: row.pi_rejection_reason ?? undefined,
+    piCustomerFeedback: row.pi_customer_feedback ?? undefined,
+    piCustomerDecision: row.pi_customer_decision ?? undefined,
+    freightQuotes: row.freight_quotes ?? [],
+    confirmedForwarder: row.confirmed_forwarder ?? undefined,
+    confirmedFreight: row.confirmed_freight ?? undefined,
+    soaAmount: row.soa_amount ?? undefined,
+    soaCurrency: row.soa_currency ?? 'USD',
+    blNumber: row.bl_number ?? undefined,
+    blForwardedAt: row.bl_forwarded_at ?? undefined,
+    documents: row.documents ?? [],
+    events: row.events ?? [],
+    internalNotes: row.internal_notes ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function exportServiceOrderToRow(patch: any): any {
+  const row: any = { updated_at: new Date().toISOString() };
+  if (patch.source !== undefined)              row.source = patch.source;
+  if (patch.type !== undefined)                row.type = patch.type;
+  if (patch.customer !== undefined)            row.customer_name = patch.customer;
+  if (patch.customerEmail !== undefined)       row.customer_email = patch.customerEmail;
+  if (patch.region !== undefined)              row.region = patch.region;
+  if (patch.managerName !== undefined)         row.manager_name = patch.managerName;
+  if (patch.salesName !== undefined)           row.sales_name = patch.salesName;
+  if (patch.trackerName !== undefined)         row.tracker_name = patch.trackerName;
+  if (patch.financeName !== undefined)         row.finance_name = patch.financeName;
+  if (patch.internalStage !== undefined)       row.internal_stage = patch.internalStage;
+  if (patch.currentActionRole !== undefined)   row.current_action_role = patch.currentActionRole;
+  if (patch.isBlocked !== undefined)           row.is_blocked = patch.isBlocked;
+  if (patch.isUrgent !== undefined)            row.is_urgent = patch.isUrgent;
+  if (patch.emailSubject !== undefined)        row.email_subject = patch.emailSubject;
+  if (patch.piNumber !== undefined)            row.pi_number = patch.piNumber;
+  if (patch.piAmount !== undefined)            row.pi_amount = patch.piAmount;
+  if (patch.piCurrency !== undefined)          row.pi_currency = patch.piCurrency;
+  if (patch.piRejectionReason !== undefined)   row.pi_rejection_reason = patch.piRejectionReason;
+  if (patch.piCustomerFeedback !== undefined)  row.pi_customer_feedback = patch.piCustomerFeedback;
+  if (patch.piCustomerDecision !== undefined)  row.pi_customer_decision = patch.piCustomerDecision;
+  if (patch.freightQuotes !== undefined)       row.freight_quotes = patch.freightQuotes;
+  if (patch.confirmedForwarder !== undefined)  row.confirmed_forwarder = patch.confirmedForwarder;
+  if (patch.confirmedFreight !== undefined)    row.confirmed_freight = patch.confirmedFreight;
+  if (patch.soaAmount !== undefined)           row.soa_amount = patch.soaAmount;
+  if (patch.soaCurrency !== undefined)         row.soa_currency = patch.soaCurrency;
+  if (patch.blNumber !== undefined)            row.bl_number = patch.blNumber;
+  if (patch.blForwardedAt !== undefined)       row.bl_forwarded_at = patch.blForwardedAt;
+  if (patch.documents !== undefined)           row.documents = patch.documents;
+  if (patch.events !== undefined)              row.events = patch.events;
+  if (patch.internalNotes !== undefined)       row.internal_notes = patch.internalNotes;
+  return row;
+}
+
+export const exportServiceOrdersDb = {
+  async getAll(): Promise<any[]> {
+    return safeQuery(
+      async () => {
+        const { data, error } = await supabase
+          .from('export_service_orders')
+          .select('*')
+          .order('created_at', { ascending: false });
+        return { data: (data ?? []).map(rowToExportServiceOrder), error };
+      },
+      []
+    );
+  },
+
+  async getByCustomerEmail(email: string): Promise<any[]> {
+    return safeQuery(
+      async () => {
+        const { data, error } = await supabase
+          .from('export_service_orders')
+          .select('*')
+          .eq('customer_email', email)
+          .order('created_at', { ascending: false });
+        return { data: (data ?? []).map(rowToExportServiceOrder), error };
+      },
+      []
+    );
+  },
+
+  async getById(id: string): Promise<any | null> {
+    return safeQuery(
+      async () => {
+        const { data, error } = await supabase
+          .from('export_service_orders')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        return { data: data ? rowToExportServiceOrder(data) : null, error };
+      },
+      null
+    );
+  },
+
+  async create(order: any): Promise<any | null> {
+    const row = exportServiceOrderToRow(order);
+    row.created_at = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('export_service_orders')
+      .insert(row)
+      .select()
+      .maybeSingle();
+    if (error) { console.warn('[Supabase] create export service order:', error.message); return null; }
+    return data ? rowToExportServiceOrder(data) : null;
+  },
+
+  async update(id: string, patch: any): Promise<boolean> {
+    const row = exportServiceOrderToRow(patch);
+    const { error } = await supabase
+      .from('export_service_orders')
+      .update(row)
+      .eq('id', id);
+    if (error) { console.warn('[Supabase] update export service order:', error.message); return false; }
+    return true;
+  },
+
+  async delete(id: string): Promise<boolean> {
+    const { error } = await supabase.from('export_service_orders').delete().eq('id', id);
+    if (error) { console.warn('[Supabase] delete export service order:', error.message); return false; }
+    return true;
+  },
+
+  subscribeChanges(callback: (payload: any) => void) {
+    return supabase
+      .channel('export_service_orders_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'export_service_orders' }, callback)
+      .subscribe();
+  },
+
+  async isExportServiceEnabled(customerEmail: string): Promise<boolean> {
+    return safeQuery(
+      async () => {
+        const { data, error } = await supabase
+          .from('customer_service_features')
+          .select('enabled')
+          .eq('customer_email', customerEmail)
+          .eq('feature', 'export_service')
+          .maybeSingle();
+        return { data: data?.enabled ?? false, error };
+      },
+      false
+    );
+  },
+
+  async setExportServiceEnabled(customerEmail: string, enabled: boolean): Promise<boolean> {
+    const { error } = await supabase
+      .from('customer_service_features')
+      .upsert(
+        { customer_email: customerEmail, feature: 'export_service', enabled, updated_at: new Date().toISOString() },
+        { onConflict: 'customer_email,feature' }
+      );
+    if (error) { console.warn('[Supabase] set export service enabled:', error.message); return false; }
+    return true;
+  },
+};

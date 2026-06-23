@@ -11,14 +11,22 @@
 import type { SalesContractData } from '@/components/documents/templates/SalesContractDocument';
 import type { QuotationData } from '@/components/documents/templates/QuotationDocument';
 import type { SupplierQuotationData } from '@/components/documents/templates/SupplierQuotationDocument';
-import type { CustomerInquiryData } from '@/components/documents/templates/CustomerInquiryDocument';
+import {
+  type CustomerInquiryData,
+  syncCustomerInquiryRequirementFields,
+} from '@/components/documents/templates/CustomerInquiryDocument';
+import type { CommercialInvoiceData } from '@/components/documents/templates/CommercialInvoiceDocument';
+import type { PackingListData } from '@/components/documents/templates/PackingListDocument';
 import { getStoredAdminOrgProfile } from '@/contexts/AdminOrganizationContext';
+import { resolveUsdSellerBankInfo } from '@/utils/documentBankInfo';
 import { aggregateInquiryOemFromProducts, type InquiryOemData } from '@/types/oem';
 import {
   getCustomerFacingModelNo,
+  getFactoryFacingModelNo,
   getFormalBusinessModelNo,
   getSupplierFacingModelNo,
 } from '@/utils/productModelDisplay';
+import { resolveDisplayNumber } from '@/lib/erp-core/number-display';
 
 const toSafeNumber = (value: unknown): number => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -36,6 +44,220 @@ const normalizePlaceholderText = (value?: string | null) => {
   }
   return text;
 };
+
+const containsChineseText = (value?: string | null) => /[\u3400-\u9fff]/.test(String(value || ''));
+
+const pickMeaningfulText = (...values: unknown[]) => {
+  for (const value of values) {
+    const text = normalizePlaceholderText(String(value || ''));
+    if (text) return text;
+  }
+  return '';
+};
+
+const SPEC_PRIORITY_GROUPS: Array<{ label: string; keys: string[] }> = [
+  { label: 'Color', keys: ['color', 'colour', 'finish'] },
+  { label: 'Size', keys: ['size', 'sizes', 'dimension', 'dimensions', 'dimension(mm)', 'size(mm)'] },
+  { label: 'Spec', keys: ['spec', 'specification', 'type', 'rating', 'voltage', 'power', 'wattage', 'current', 'capacity'] },
+  { label: 'Material', keys: ['material'] },
+  { label: 'Certification', keys: ['certification', 'certifications', 'certificate', 'certificates', 'compliance', 'standard', 'standards'] },
+];
+
+const normalizeSpecKey = (key: string) =>
+  String(key || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+
+const collectStructuredSpecEntries = (product: any): Array<[string, string]> => {
+  const sources = [product?.specifications, product?.specs, product?.attributes, product?.variantAttributes];
+  for (const source of sources) {
+    if (source && typeof source === 'object' && !Array.isArray(source)) {
+      const entries = Object.entries(source)
+        .map(([key, value]) => [String(key), normalizePlaceholderText(String(value || ''))] as [string, string])
+        .filter(([, value]) => Boolean(value));
+      if (entries.length > 0) return entries;
+    }
+  }
+  return [];
+};
+
+const buildInquirySpecSummary = (product: any, normalizedProduct: ReturnType<typeof resolveFlowProductDisplay>) => {
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  const structuredEntries = collectStructuredSpecEntries(product);
+
+  const pushPart = (value: string, label?: string) => {
+    const clean = normalizePlaceholderText(value);
+    if (!clean) return;
+    const composed = label ? `${label}: ${clean}` : clean;
+    const key = composed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    parts.push(composed);
+  };
+
+  for (const group of SPEC_PRIORITY_GROUPS) {
+    const matchedEntry = structuredEntries.find(([rawKey]) => {
+      const key = normalizeSpecKey(rawKey);
+      return group.keys.some((candidate) => key === candidate || key.includes(candidate));
+    });
+    if (matchedEntry) {
+      pushPart(matchedEntry[1], group.label);
+      continue;
+    }
+
+    if (group.label === 'Color') {
+      pushPart(product?.color, group.label);
+    } else if (group.label === 'Size') {
+      pushPart(product?.size || product?.dimensions || product?.dimension, group.label);
+    } else if (group.label === 'Material') {
+      pushPart(product?.material, group.label);
+    } else if (group.label === 'Certification') {
+      if (Array.isArray(product?.certifications)) {
+        pushPart(product.certifications.filter(Boolean).join(', '), group.label);
+      } else {
+        pushPart(product?.certifications || product?.certification, group.label);
+      }
+    }
+  }
+
+  const genericSpecSource = pickMeaningfulText(
+    product?.specification,
+    product?.specifications,
+    product?.specs,
+    product?.description,
+    product?.productPackageSnapshot?.specSummary,
+    product?.productPackageSnapshot?.description,
+    product?.inquirySnapshot?.specSummary,
+    product?.inquirySnapshot?.description,
+    product?.inquirySnapshotDraft?.specSummary,
+    product?.inquirySnapshotDraft?.description,
+    normalizedProduct.specification,
+  );
+
+  if (parts.length === 0) {
+    return genericSpecSource || '-';
+  }
+
+  if (genericSpecSource) {
+    const genericSegments = genericSpecSource
+      .split(/\s*[|,;/]\s*/)
+      .map((segment) => normalizePlaceholderText(segment))
+      .filter(Boolean);
+
+    for (const segment of genericSegments) {
+      if (parts.length >= 5) break;
+      const lower = segment.toLowerCase();
+      const alreadyCovered = parts.some((part) => lower.includes(part.toLowerCase()) || part.toLowerCase().includes(lower));
+      if (!alreadyCovered) pushPart(segment);
+    }
+  }
+
+  return parts.slice(0, 5).join(' | ');
+};
+
+const CHINA_REGION_HINTS = [
+  '中国', 'china', 'cn', 'guangdong', 'zhejiang', 'fujian', 'jiangsu', 'shanghai', 'shandong',
+  '广东', '浙江', '福建', '江苏', '上海', '山东', '东莞', '佛山', '温州', '济南', '宁波', '杭州', '深圳', '苏州',
+] as const;
+
+export const inferSupplierDocumentLanguage = (source: any): 'zh' | 'en' => {
+  const explicitCountryCode = String(
+    source?.supplierCountryCode ||
+    source?.supplier?.countryCode ||
+    source?.supplierProfile?.countryCode ||
+    source?.supplier_country_code ||
+    '',
+  ).trim().toUpperCase();
+  if (explicitCountryCode) {
+    return explicitCountryCode === 'CN' ? 'zh' : 'en';
+  }
+
+  const explicitLocale = String(
+    source?.supplierLocale ||
+    source?.supplier?.locale ||
+    source?.supplierProfile?.locale ||
+    '',
+  ).trim().toLowerCase();
+  if (explicitLocale) {
+    return explicitLocale.startsWith('zh') ? 'zh' : 'en';
+  }
+
+  if (
+    source?.isDomesticSupplier === true ||
+    source?.supplier?.isDomesticSupplier === true ||
+    source?.supplierProfile?.isDomesticSupplier === true
+  ) {
+    return 'zh';
+  }
+
+  const regionHint = String(
+    source?.supplierRegion ||
+    source?.supplier?.region ||
+    source?.supplierProfile?.region ||
+    source?.supplierAddress ||
+    source?.supplier?.address ||
+    source?.supplierName ||
+    source?.supplier?.companyName ||
+    source?.supplier?.name ||
+    '',
+  ).trim().toLowerCase();
+
+  if (regionHint && CHINA_REGION_HINTS.some((hint) => regionHint.includes(hint))) {
+    return 'zh';
+  }
+
+  return 'en';
+};
+
+type SalesContractBuyerInput = {
+  customerCompany?: string | null;
+  customerName?: string | null;
+  customerAddress?: string | null;
+  customerCountry?: string | null;
+  contactPerson?: string | null;
+  contactPhone?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+};
+
+export function resolveSalesContractBuyerData(
+  source: SalesContractBuyerInput,
+  fallbackRegion?: 'NA' | 'SA' | 'EU',
+): SalesContractData['buyer'] {
+  const companyName =
+    normalizePlaceholderText(source.customerCompany)
+    || normalizePlaceholderText(source.customerName)
+    || 'To be confirmed';
+  const address =
+    normalizePlaceholderText(source.customerAddress)
+    || 'To be confirmed';
+  const country =
+    normalizePlaceholderText(source.customerCountry)
+    || detectCountryFromRegion(fallbackRegion || 'NA');
+  const contactPerson =
+    normalizePlaceholderText(source.contactPerson)
+    || normalizePlaceholderText(source.customerName)
+    || 'N/A';
+  const tel =
+    normalizePlaceholderText(source.contactPhone)
+    || normalizePlaceholderText(source.customerPhone)
+    || 'N/A';
+  const email =
+    normalizePlaceholderText(source.customerEmail)
+    || 'N/A';
+
+  return {
+    companyName,
+    address,
+    country,
+    contactPerson,
+    tel,
+    email,
+  };
+}
 
 const parseQuotedProductSummary = (rawName?: string | null, rawSpecification?: string | null) => {
   const nameText = normalizePlaceholderText(rawName);
@@ -101,10 +323,155 @@ const parseQuotedProductSummary = (rawName?: string | null, rawSpecification?: s
   };
 };
 
+export const normalizeFlowProductCore = (product: any, index = 0) => {
+  const parsedSummary = parseQuotedProductSummary(
+    product?.productName ||
+      product?.name ||
+      product?.description ||
+      product?.itemName ||
+      product?.title ||
+      '',
+    product?.specification || product?.specs || product?.spec || '',
+  );
+
+  const quantity = toSafeNumber(product?.quantity ?? product?.qty ?? product?.pcs ?? product?.count);
+  const rawProductName = pickMeaningfulText(
+    product?.rawProductName,
+    product?.productName,
+    product?.name,
+    product?.description,
+    product?.itemName,
+    product?.title,
+    parsedSummary.productName,
+  );
+  const rawSpecification = pickMeaningfulText(
+    product?.rawSpecification,
+    product?.specification,
+    product?.specs,
+    product?.spec,
+    parsedSummary.specification,
+  );
+
+  const productNameZh = pickMeaningfulText(
+    product?.productNameZh,
+    product?.productNameCN,
+    product?.productNameCn,
+    product?.nameZh,
+    product?.nameCN,
+    product?.nameCn,
+    product?.descriptionZh,
+    product?.descriptionCN,
+    containsChineseText(rawProductName) ? rawProductName : '',
+  );
+  const productNameEn = pickMeaningfulText(
+    product?.productNameEn,
+    product?.productNameEN,
+    product?.nameEn,
+    product?.descriptionEn,
+    !containsChineseText(rawProductName) ? rawProductName : '',
+  );
+  const specificationZh = pickMeaningfulText(
+    product?.specificationZh,
+    product?.specificationCN,
+    product?.specificationCn,
+    containsChineseText(rawSpecification) ? rawSpecification : '',
+  );
+  const specificationEn = pickMeaningfulText(
+    product?.specificationEn,
+    product?.specificationEN,
+    !containsChineseText(rawSpecification) ? rawSpecification : '',
+  );
+
+  return {
+    id: product?.id || product?.productId || `product-${index + 1}`,
+    rawProductName,
+    rawSpecification,
+    productName:
+      normalizePlaceholderText(
+        product?.productName ||
+          product?.name ||
+          product?.description ||
+          product?.itemName ||
+          product?.title,
+      ) ||
+      parsedSummary.productName ||
+      `Product ${index + 1}`,
+    productNameZh,
+    productNameEn,
+    modelNo:
+      normalizePlaceholderText(
+        getFormalBusinessModelNo(product) ||
+          product?.modelNo ||
+          product?.model ||
+          product?.model_no ||
+          product?.sku ||
+          product?.customerModelNo ||
+          product?.supplierModelNo,
+      ) ||
+      parsedSummary.modelNo ||
+      '',
+    factoryModelNo:
+      normalizePlaceholderText(
+        getFactoryFacingModelNo(product) ||
+          product?.factoryModelNo ||
+          product?.factorySku ||
+          product?.factory_model_no ||
+          product?.factory_sku,
+      ) || '',
+    imageUrl:
+      normalizePlaceholderText(
+        product?.imageUrl ||
+          product?.image ||
+          product?.image_url ||
+          product?.photoUrl ||
+          product?.productImage ||
+          product?.product_image,
+      ) || '',
+    specification:
+      normalizePlaceholderText(product?.specification || product?.specs || product?.spec) ||
+      parsedSummary.specification ||
+      '',
+    specificationZh,
+    specificationEn,
+    quantity,
+    unit: normalizePlaceholderText(product?.unit || product?.uom) || 'PCS',
+    hsCode: normalizePlaceholderText(product?.hsCode || product?.hs_code) || '',
+    remarks: normalizePlaceholderText(product?.remarks || product?.notes) || '',
+  };
+};
+
+export const resolveFlowProductDisplay = (
+  product: any,
+  preferredLanguage: 'zh' | 'en' = 'en',
+) => {
+  const normalized = normalizeFlowProductCore(product);
+  const productName = preferredLanguage === 'zh'
+    ? normalized.productNameZh || normalized.productNameEn || normalized.productName
+    : normalized.productNameEn
+      || (!containsChineseText(normalized.productName) ? normalized.productName : '')
+      || `Product ${String(normalized.id || '').trim() || ''}`.trim()
+      || 'Product';
+  const specification = preferredLanguage === 'zh'
+    ? normalized.specificationZh || normalized.specificationEn || normalized.specification
+    : normalized.specificationEn
+      || (!containsChineseText(normalized.specification) ? normalized.specification : '');
+
+  return {
+    ...normalized,
+    productName,
+    specification,
+  };
+};
+
 const UUID_LIKE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const buildAdminCompanyProfile = () => {
   const adminOrg = getStoredAdminOrgProfile();
+  const normalizedUsdBank = resolveUsdSellerBankInfo(
+    adminOrg,
+    undefined,
+    String(adminOrg.nameEN || adminOrg.nameCN || '').trim(),
+  );
 
   return {
     name: String(adminOrg.nameCN || '').trim(),
@@ -115,24 +482,16 @@ const buildAdminCompanyProfile = () => {
     email: String(adminOrg.email || '').trim(),
     website: String(adminOrg.website || '').trim(),
     contactPerson: String(adminOrg.contactPerson || '').trim(),
-    bankUSD: {
-      bankName: String(adminOrg.bankUSD.bankNameEN || adminOrg.bankUSD.bankNameCN || '').trim(),
-      accountName: String(adminOrg.bankUSD.accountNameEN || adminOrg.bankUSD.accountNameCN || adminOrg.nameEN || adminOrg.nameCN || '').trim(),
-      accountNumber: String(adminOrg.bankUSD.accountNumber || '').trim(),
-      swiftCode: String(adminOrg.bankUSD.swiftCode || '').trim(),
-      bankAddress: String(adminOrg.bankUSD.bankAddress || '').trim(),
-      currency: String(adminOrg.bankUSD.currency || 'USD').trim(),
-    },
+    bankUSD: normalizedUsdBank,
   };
 };
 
 const resolveDisplayInquiryNumber = (inquiry: Record<string, any>): string => {
+  const isPendingSync = String(inquiry.syncStatus || '').trim().toLowerCase() === 'pending';
   const candidates = [
     inquiry.inquiryNumber,
     inquiry.inquiry_number,
     inquiry.inquiryNo,
-    inquiry.documentDataSnapshot?.inquiryNo,
-    inquiry.document_data_snapshot?.inquiryNo,
     inquiry.id,
   ];
 
@@ -142,7 +501,79 @@ const resolveDisplayInquiryNumber = (inquiry: Record<string, any>): string => {
     return value;
   }
 
-  return 'ING-DRAFT';
+  if (!isPendingSync) {
+    const snapshotCandidates = [
+      inquiry.documentDataSnapshot?.inquiryNumber,
+      inquiry.documentDataSnapshot?.inquiryNo,
+      inquiry.document_data_snapshot?.inquiryNumber,
+      inquiry.document_data_snapshot?.inquiryNo,
+    ];
+
+    for (const candidate of snapshotCandidates) {
+      const value = String(candidate || '').trim();
+      if (!value || value === 'ING-DRAFT' || UUID_LIKE_PATTERN.test(value)) continue;
+      return value;
+    }
+  }
+
+  const mappedInternalNo = String(inquiry.inquiryNumber || inquiry.inquiry_number || inquiry.id || '').trim();
+  if (mappedInternalNo) {
+    const normalizedCompanyId = String(inquiry.companyId || inquiry.company_id || '').trim() || undefined;
+    const primaryDisplay = resolveDisplayNumber({
+      domain: 'ing',
+      internalNo: mappedInternalNo,
+      companyId: normalizedCompanyId,
+    });
+    const display = String(primaryDisplay.externalNo || '').trim()
+      ? primaryDisplay
+      : resolveDisplayNumber({
+          domain: 'ing',
+          internalNo: mappedInternalNo,
+        });
+    if (String(display.externalNo || '').trim()) {
+      return String(display.externalNo).trim();
+    }
+  }
+
+  return 'ING';
+};
+
+export const resolveCustomerInquiryDisplayNo = (
+  inquiry: Record<string, any> | null | undefined,
+  companyId?: string,
+): string => {
+  if (!inquiry) return '';
+
+  const isPendingLocalInquiry =
+    String(inquiry?.syncStatus || '').trim() === 'pending' &&
+    UUID_LIKE_PATTERN.test(String(inquiry?.id || '').trim());
+  if (isPendingLocalInquiry) {
+    return '';
+  }
+
+  const displayNo = resolveDisplayInquiryNumber({
+    ...inquiry,
+    companyId: companyId || inquiry.companyId,
+    company_id: companyId || inquiry.company_id,
+  });
+  if (displayNo && displayNo !== 'ING') {
+    return displayNo;
+  }
+
+  const fallbackCandidates = [
+    inquiry.inquiryNumber,
+    inquiry.inquiry_number,
+    inquiry.documentDataSnapshot?.inquiryNo,
+    inquiry.document_data_snapshot?.inquiryNo,
+  ];
+
+  for (const candidate of fallbackCandidates) {
+    const value = String(candidate || '').trim();
+    if (!value || value === 'ING-DRAFT' || UUID_LIKE_PATTERN.test(value)) continue;
+    return value;
+  }
+
+  return '';
 };
 
 const parseInquiryRequirementsFromMessage = (message?: string | null) => {
@@ -380,7 +811,11 @@ export function adaptInquiryToFactoryFacingOemDocument(inquiry: {
 }
 
 export function adaptInquiryToDocumentData(inquiry: {
+  id?: string;
   inquiryNumber?: string;
+  inquiry_number?: string;
+  companyId?: string;
+  company_id?: string;
   date?: string;
   region?: 'NA' | 'SA' | 'EU';
   buyerInfo?: {
@@ -411,10 +846,22 @@ export function adaptInquiryToDocumentData(inquiry: {
     totalNetWeight?: string;
   };
   requirements?: {
+    incoterm?: string;
+    locationLabel?: string;
+    locationValue?: string;
+    finalDestinationPlan?: string;
     deliveryTime?: string;
     portOfDestination?: string;
     paymentTerms?: string;
     tradeTerms?: string;
+    paymentMode?: string;
+    balanceTrigger?: string;
+    documentReleasePreference?: string;
+    lcType?: string;
+    creditDays?: string;
+    businessScenario?: string;
+    businessScenarioNotes?: string;
+    insuranceRequirement?: string;
     packingRequirements?: string;
     certifications?: string[] | string;
     otherRequirements?: string;
@@ -440,6 +887,27 @@ export function adaptInquiryToDocumentData(inquiry: {
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean);
+  const resolvedRequirements = syncCustomerInquiryRequirementFields({
+    incoterm: inquiry.requirements?.incoterm,
+    locationLabel: inquiry.requirements?.locationLabel,
+    locationValue: inquiry.requirements?.locationValue,
+    finalDestinationPlan: inquiry.requirements?.finalDestinationPlan,
+    tradeTerms: inquiry.requirements?.tradeTerms || (!hasStructuredRequirements ? legacyRequirements.tradeTerms : ''),
+    deliveryTime: inquiry.requirements?.deliveryTime || (!hasStructuredRequirements ? legacyRequirements.deliveryTime : ''),
+    portOfDestination: inquiry.requirements?.portOfDestination || (!hasStructuredRequirements ? legacyRequirements.portOfDestination : ''),
+    paymentTerms: inquiry.requirements?.paymentTerms || (!hasStructuredRequirements ? legacyRequirements.paymentTerms : ''),
+    paymentMode: inquiry.requirements?.paymentMode,
+    balanceTrigger: inquiry.requirements?.balanceTrigger,
+    documentReleasePreference: inquiry.requirements?.documentReleasePreference,
+    lcType: inquiry.requirements?.lcType,
+    creditDays: inquiry.requirements?.creditDays,
+    businessScenario: inquiry.requirements?.businessScenario,
+    businessScenarioNotes: inquiry.requirements?.businessScenarioNotes,
+    insuranceRequirement: inquiry.requirements?.insuranceRequirement,
+    packingRequirements: inquiry.requirements?.packingRequirements || (!hasStructuredRequirements ? legacyRequirements.packingRequirements : ''),
+    certifications: certificationList.join(', '),
+    otherRequirements: inquiry.requirements?.otherRequirements || (!hasStructuredRequirements ? legacyRequirements.otherRequirements || inquiry.message || '' : ''),
+  });
   const companyName = inquiry.buyerInfo?.companyName && inquiry.buyerInfo.companyName !== 'N/A'
     ? inquiry.buyerInfo.companyName
     : (emailName ? `${emailName} inquiry` : 'Customer Inquiry');
@@ -449,8 +917,10 @@ export function adaptInquiryToDocumentData(inquiry: {
 
   const resolvedOem = resolveProductLevelInquiryOem(inquiry);
 
+  const resolvedInquiryNo = resolveDisplayInquiryNumber(inquiry as Record<string, any>);
+
   return {
-    inquiryNo: resolveDisplayInquiryNumber(inquiry as Record<string, any>),
+    inquiryNo: resolvedInquiryNo === 'ING' ? '' : resolvedInquiryNo,
     inquiryDate: date,
     region,
     customer: {
@@ -462,29 +932,54 @@ export function adaptInquiryToDocumentData(inquiry: {
       country: region === 'NA' ? 'United States' : region === 'SA' ? 'South America' : 'Europe & Africa',
     },
     products: products.map((product, index) => {
-      const quantity = toSafeNumber(product.quantity);
+      const normalizedProduct = resolveFlowProductDisplay(product, 'en');
       const targetPrice = toSafeNumber(product.targetPrice ?? product.unitPrice);
+      const resolvedModelNo = pickMeaningfulText(
+        product?.inquirySnapshot?.displayModelNo,
+        product?.inquirySnapshotDraft?.displayModelNo,
+        product?.productPackageSnapshot?.supplierModelNo,
+        product?.productPackageSnapshot?.customerModelNo,
+        getCustomerFacingModelNo(product),
+        normalizedProduct.modelNo,
+      );
       return {
         no: index + 1,
-        modelNo: getCustomerFacingModelNo(product),
-        imageUrl: product.imageUrl || product.image || '',
-        productName: product.productName || 'Unnamed Product',
-        specification: [product.specification, product.color, product.material].filter(Boolean).join(' / '),
-        quantity,
-        unit: product.unit || 'pcs',
+        modelNo: resolvedModelNo || '-',
+        imageUrl: normalizedProduct.imageUrl,
+        productName: pickMeaningfulText(
+          product?.inquirySnapshot?.productName,
+          product?.inquirySnapshotDraft?.productName,
+          product?.productPackageSnapshot?.productName,
+          normalizedProduct.productName,
+        ) || 'Unnamed Product',
+        specification: buildInquirySpecSummary(product, normalizedProduct),
+        quantity: normalizedProduct.quantity,
+        unit: normalizedProduct.unit || 'pcs',
         targetPrice: targetPrice || undefined,
         currency: product.currency || 'USD',
         description: '',
       };
     }),
     requirements: {
-      deliveryTime: inquiry.requirements?.deliveryTime || (!hasStructuredRequirements ? legacyRequirements.deliveryTime : ''),
-      portOfDestination: inquiry.requirements?.portOfDestination || (!hasStructuredRequirements ? legacyRequirements.portOfDestination : ''),
-      paymentTerms: inquiry.requirements?.paymentTerms || (!hasStructuredRequirements ? legacyRequirements.paymentTerms : ''),
-      tradeTerms: inquiry.requirements?.tradeTerms || (!hasStructuredRequirements ? legacyRequirements.tradeTerms : ''),
-      packingRequirements: inquiry.requirements?.packingRequirements || (!hasStructuredRequirements ? legacyRequirements.packingRequirements : ''),
+      incoterm: resolvedRequirements.incoterm,
+      locationLabel: resolvedRequirements.locationLabel,
+      locationValue: resolvedRequirements.locationValue,
+      finalDestinationPlan: resolvedRequirements.finalDestinationPlan,
+      deliveryTime: resolvedRequirements.deliveryTime,
+      portOfDestination: resolvedRequirements.portOfDestination,
+      paymentTerms: resolvedRequirements.paymentTerms,
+      tradeTerms: resolvedRequirements.tradeTerms,
+      paymentMode: resolvedRequirements.paymentMode,
+      balanceTrigger: resolvedRequirements.balanceTrigger,
+      documentReleasePreference: resolvedRequirements.documentReleasePreference,
+      lcType: resolvedRequirements.lcType,
+      creditDays: resolvedRequirements.creditDays,
+      businessScenario: resolvedRequirements.businessScenario,
+      businessScenarioNotes: resolvedRequirements.businessScenarioNotes,
+      insuranceRequirement: resolvedRequirements.insuranceRequirement,
+      packingRequirements: resolvedRequirements.packingRequirements,
       certifications: certificationList.length > 0 ? certificationList : (!hasStructuredRequirements ? legacyRequirements.certifications : []),
-      otherRequirements: inquiry.requirements?.otherRequirements || (!hasStructuredRequirements ? legacyRequirements.otherRequirements || inquiry.message || '' : ''),
+      otherRequirements: resolvedRequirements.otherRequirements,
     },
     oem: resolvedOem || undefined,
     remarks: inquiry.message || '',
@@ -573,34 +1068,37 @@ export function adaptOrderToSalesContract(orderData: {
     },
     
     // 买方信息
-    buyer: {
-      companyName: orderData.customer,
-      address: orderData.customerAddress || 'To be confirmed',
-      country: orderData.customerCountry || detectCountryFromRegion(region),
-      contactPerson: orderData.customerContact || 'N/A',
-      tel: orderData.customerPhone || 'N/A',
-      email: orderData.customerEmail || 'N/A'
-    },
+    buyer: resolveSalesContractBuyerData({
+      customerCompany: orderData.customer,
+      customerName: orderData.customerContact,
+      customerAddress: orderData.customerAddress,
+      customerCountry: orderData.customerCountry,
+      contactPerson: orderData.customerContact,
+      contactPhone: orderData.customerPhone,
+      customerEmail: orderData.customerEmail,
+    }, region),
     
     // 产品列表
     products: orderData.products.map((product, index) => {
-      const quantity = toSafeNumber(product.quantity);
+      const normalizedProduct = resolveFlowProductDisplay(product, 'en');
+      const quantity = toSafeNumber(normalizedProduct.quantity);
       const unitPrice = toSafeNumber(product.unitPrice);
       const amount = toSafeNumber(product.totalPrice) || quantity * unitPrice;
       return {
-      no: index + 1,
-      modelNo: getFormalBusinessModelNo(product),
-      imageUrl: product.imageUrl,
-      description: product.name,
-      specification: product.specs || 'Standard',
-      hsCode: product.hsCode,
-      quantity,
-      unit: product.unit || 'pcs',
-      unitPrice,
-      currency: orderData.currency,
-      amount,
-      deliveryTime: orderData.expectedDelivery
-    }}),
+        no: index + 1,
+        modelNo: normalizedProduct.modelNo || getFormalBusinessModelNo(product) || '-',
+        imageUrl: normalizedProduct.imageUrl || '',
+        description: normalizedProduct.productName || product.name || '-',
+        specification: normalizedProduct.specification || product.specs || 'Standard',
+        hsCode: product.hsCode,
+        quantity,
+        unit: normalizedProduct.unit || product.unit || 'pcs',
+        unitPrice,
+        currency: orderData.currency,
+        amount,
+        deliveryTime: orderData.expectedDelivery,
+      };
+    }),
     
     // 合同条款
     terms: {
@@ -623,7 +1121,7 @@ export function adaptOrderToSalesContract(orderData: {
     liabilityTerms: {
       sellerDefault: 'If the Seller fails to deliver the goods within the agreed time without valid reason, the Seller shall pay liquidated damages equal to 0.5% of the total contract value for each week of delay, up to a maximum of 5% of the total contract value.',
       buyerDefault: 'If the Buyer fails to make payment within the agreed time, the Buyer shall pay liquidated damages equal to 0.5% of the outstanding amount for each week of delay. If payment is delayed for more than 30 days, the Seller has the right to terminate the contract and claim compensation.',
-      forceMajeure: 'Neither party shall be liable for failure or delay in performing its obligations due to force majeure events such as natural disasters, war, government actions, or other unforeseeable circumstances beyond reasonable control. The affected party must notify the other party within 7 days and provide relevant證明 documents.'
+      forceMajeure: 'Neither party shall be liable for failure or delay in performing its obligations due to force majeure events such as natural disasters, war, government actions, or other unforeseeable circumstances beyond reasonable control. The affected party must notify the other party within 7 days and provide supporting documents.'
     },
     
     // 争议解决
@@ -634,7 +1132,7 @@ export function adaptOrderToSalesContract(orderData: {
     
     // 签名信息
     signature: {
-      sellerSignatory: '张三 (Legal Representative)',
+      sellerSignatory: 'Authorized Signatory (Legal Representative)',
       buyerSignatory: orderData.customerContact || 'To be signed',
       signDate: orderData.date
     }
@@ -669,6 +1167,7 @@ export function adaptSalesQuotationToDocumentData(quotation: {
     moq?: number;
     leadTime?: string;
   }>;
+  currency?: string;
   tradeTerms?: {
     incoterms?: string;
     paymentTerms?: string;
@@ -692,7 +1191,22 @@ export function adaptSalesQuotationToDocumentData(quotation: {
     || new Date().toISOString().split('T')[0];
   const validUntil = quotation.validUntil
     || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const currency = quotation.items?.[0]?.currency || 'USD';
+  const extractProductSpecCurrency = (item: any) => {
+    const text = [
+      item?.specification,
+      item?.specs,
+      item?.description,
+      item?.rawSpecification,
+    ].map((value) => String(value || '')).join(' ');
+    const matched = text.match(/Currency[:：]\s*([A-Z]{3})/i);
+    return matched?.[1]?.toUpperCase() || '';
+  };
+  const explicitCurrency = String(quotation.currency || '').trim().toUpperCase();
+  const firstItemCurrency = String(quotation.items?.[0]?.currency || '').trim().toUpperCase();
+  const productSpecCurrency = (quotation.items || []).map(extractProductSpecCurrency).find(Boolean) || '';
+  const currency = explicitCurrency === 'CNY' && productSpecCurrency === 'USD'
+    ? 'USD'
+    : explicitCurrency || firstItemCurrency || productSpecCurrency || 'USD';
 
   return {
     quotationNo: quotation.qtNumber || 'QT-DRAFT',
@@ -718,25 +1232,20 @@ export function adaptSalesQuotationToDocumentData(quotation: {
       phone: quotation.customerPhone || '',
     },
     products: (quotation.items || []).map((item, index) => {
-      const quantity = toSafeNumber(item.quantity);
+      const normalizedCore = resolveFlowProductDisplay(item, 'en');
       const unitPrice = toSafeNumber(item.salesPrice ?? item.unitPrice);
-      const normalized = parseQuotedProductSummary(item.productName, item.specification);
-      const normalizedModelNo = normalizePlaceholderText(item.modelNo) || normalized.modelNo;
       return {
         no: index + 1,
-        modelNo: getFormalBusinessModelNo({
-          ...item,
-          modelNo: normalizedModelNo || '',
-        }),
-        imageUrl: item.imageUrl || '',
-        productName: normalized.productName,
-        specification: normalized.specification,
-        hsCode: item.hsCode || '',
-        quantity,
-        unit: item.unit || 'PCS',
+        modelNo: normalizedCore.modelNo || '-',
+        imageUrl: normalizedCore.imageUrl,
+        productName: normalizedCore.productName,
+        specification: normalizedCore.specification,
+        hsCode: normalizedCore.hsCode || '',
+        quantity: normalizedCore.quantity,
+        unit: normalizedCore.unit || 'PCS',
         unitPrice,
-        currency: item.currency || currency,
-        amount: toSafeNumber(item.amount) || quantity * unitPrice,
+        currency,
+        amount: toSafeNumber(item.amount) || normalizedCore.quantity * unitPrice,
         moq: item.moq || 0,
         leadTime: item.leadTime || '',
       };
@@ -823,23 +1332,20 @@ export function adaptLegacyQuotationToDocumentData(quotation: {
       phone: quotation.customerPhone || '',
     },
     products: (quotation.products || []).map((item, index) => {
-      const quantity = toSafeNumber(item.quantity);
+      const normalizedCore = resolveFlowProductDisplay(item, 'en');
       const unitPrice = toSafeNumber(item.unitPrice);
       return {
         no: index + 1,
-        modelNo: getFormalBusinessModelNo({
-          ...item,
-          modelNo: item.sku || item.modelNo || '',
-        }),
-        imageUrl: item.image || '',
-        productName: item.productName || item.name || '',
-        specification: item.specification || item.specs || '',
+        modelNo: normalizedCore.modelNo || '-',
+        imageUrl: normalizedCore.imageUrl,
+        productName: normalizedCore.productName,
+        specification: normalizedCore.specification,
         hsCode: '',
-        quantity,
-        unit: item.unit || 'PCS',
+        quantity: normalizedCore.quantity,
+        unit: normalizedCore.unit || 'PCS',
         unitPrice,
         currency,
-        amount: toSafeNumber(item.totalPrice) || quantity * unitPrice,
+        amount: toSafeNumber(item.totalPrice) || normalizedCore.quantity * unitPrice,
         moq: 0,
         leadTime: '',
       };
@@ -928,19 +1434,22 @@ export function adaptSupplierQuotationToDocumentData(quotation: {
       email: adminCompany.email,
       contactPerson: adminCompany.contactPerson,
     },
-    products: (quotation.items || []).map((item, index) => ({
-      no: index + 1,
-      modelNo: getSupplierFacingModelNo(item),
-      imageUrl: item.imageUrl || '',
-      itemCode: '',
-      description: item.productName || item.description || '',
-      specification: item.specification || '',
-      quantity: toSafeNumber(item.quantity),
-      unit: item.unit || 'PCS',
-      unitPrice: toSafeNumber(item.unitPrice),
-      currency: item.currency || 'CNY',
-      remarks: item.remarks || '',
-    })),
+    products: (quotation.items || []).map((item, index) => {
+      const normalized = resolveFlowProductDisplay(item, inferSupplierDocumentLanguage(quotation));
+      return {
+        no: index + 1,
+        modelNo: getSupplierFacingModelNo(item) || normalized.modelNo || '-',
+        imageUrl: normalized.imageUrl || '',
+        itemCode: '',
+        description: normalized.productName || item.productName || item.description || '',
+        specification: normalized.specification || item.specification || '',
+        quantity: toSafeNumber(normalized.quantity),
+        unit: normalized.unit || item.unit || 'PCS',
+        unitPrice: toSafeNumber(item.unitPrice),
+        currency: item.currency || 'CNY',
+        remarks: normalized.remarks || item.remarks || '',
+      };
+    }),
     terms: {
       paymentTerms: quotation.paymentTerms || 'T/T 30天',
       deliveryTerms: quotation.deliveryTerms || 'FOB 厦门',
@@ -1005,6 +1514,7 @@ export function adaptSalesContractToDocumentData(contract: {
   const adminCompany = buildAdminCompanyProfile();
   const region = contract.region === 'EA' ? 'EU' : (contract.region || 'NA');
   const totalAmount = toSafeNumber(contract.totalAmount);
+  const contractCurrency = String(contract.currency || 'USD').trim().toUpperCase() || 'USD';
   return {
     contractNo: contract.contractNumber || 'SC-DRAFT',
     contractDate: contract.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0],
@@ -1025,35 +1535,39 @@ export function adaptSalesContractToDocumentData(contract: {
         accountNumber: adminCompany.bankUSD.accountNumber,
         swiftCode: adminCompany.bankUSD.swiftCode,
         bankAddress: adminCompany.bankUSD.bankAddress,
-        currency: contract.currency || adminCompany.bankUSD.currency,
+        currency: contractCurrency || adminCompany.bankUSD.currency,
         paymentNote: adminCompany.bankUSD.paymentNote,
       },
     },
-    buyer: {
-      companyName: contract.customerCompany || '',
-      address: contract.customerAddress || 'Customer Address',
-      country: contract.customerCountry || 'Unknown',
-      contactPerson: contract.customerName || '',
-      tel: contract.contactPhone || 'N/A',
-      email: contract.customerEmail || '',
-    },
-    products: (contract.products || []).map((item, index) => ({
-      no: index + 1,
-      modelNo: getFormalBusinessModelNo(item),
-      imageUrl: item.imageUrl || '',
-      description: item.productName || '',
-      specification: item.specification || '',
-      hsCode: item.hsCode || '',
-      quantity: toSafeNumber(item.quantity),
-      unit: item.unit || 'PCS',
-      unitPrice: toSafeNumber(item.unitPrice),
-      currency: item.currency || contract.currency || 'USD',
-      amount: toSafeNumber(item.amount) || (toSafeNumber(item.quantity) * toSafeNumber(item.unitPrice)),
-      deliveryTime: item.deliveryTime || '',
-    })),
+    buyer: resolveSalesContractBuyerData({
+      customerCompany: contract.customerCompany,
+      customerName: contract.customerName,
+      customerAddress: contract.customerAddress,
+      customerCountry: contract.customerCountry,
+      contactPerson: contract.contactPerson ?? contract.customerName,
+      contactPhone: contract.contactPhone,
+      customerEmail: contract.customerEmail,
+    }, region),
+    products: (contract.products || []).map((item, index) => {
+      const normalizedCore = resolveFlowProductDisplay(item, 'en');
+      return {
+        no: index + 1,
+        modelNo: normalizedCore.modelNo || '-',
+        imageUrl: normalizedCore.imageUrl,
+        description: normalizedCore.productName || '',
+        specification: normalizedCore.specification || '',
+        hsCode: normalizedCore.hsCode || '',
+        quantity: normalizedCore.quantity,
+        unit: normalizedCore.unit || 'PCS',
+        unitPrice: toSafeNumber(item.unitPrice),
+        currency: contractCurrency,
+        amount: toSafeNumber(item.amount) || (normalizedCore.quantity * toSafeNumber(item.unitPrice)),
+        deliveryTime: item.deliveryTime || '',
+      };
+    }),
     terms: {
       totalAmount,
-      currency: contract.currency || 'USD',
+      currency: contractCurrency,
       tradeTerms: contract.tradeTerms || 'FOB Xiamen',
       paymentTerms: contract.paymentTerms || '30% T/T deposit, 70% before shipment',
       depositAmount: toSafeNumber(contract.depositAmount),
@@ -1072,6 +1586,197 @@ export function adaptSalesContractToDocumentData(contract: {
     },
     remarks: contract.remarks || '',
   };
+}
+
+const buildFlowGoodsDescription = (product: any) => {
+  const normalized = resolveFlowProductDisplay(product, 'en');
+  return [
+    normalized.modelNo ? `Model ${normalized.modelNo}` : '',
+    normalized.productName,
+    normalized.specification,
+  ]
+    .filter(Boolean)
+    .join(' / ');
+};
+
+const resolvePackageMetrics = (product: any, quantity: number) => {
+  const qtyPerCarton = Math.max(
+    1,
+    toSafeNumber(
+      product?.qtyPerCarton ??
+      product?.pcsPerCarton ??
+      product?.unitsPerCarton ??
+      product?.packingQty,
+    ) || 1,
+  );
+  const totalCartons = Math.max(1, Math.ceil(quantity / qtyPerCarton));
+  const netWeightPerCarton = toSafeNumber(
+    product?.cartonNetWeight ??
+    product?.netWeightPerCarton ??
+    product?.netWeight ??
+    product?.net_weight,
+  ) || 12;
+  const grossWeightPerCarton = toSafeNumber(
+    product?.cartonGrossWeight ??
+    product?.grossWeightPerCarton ??
+    product?.grossWeight ??
+    product?.gross_weight,
+  ) || Math.max(netWeightPerCarton + 2, 14);
+  const cbmPerCarton = toSafeNumber(
+    product?.cbmPerCarton ??
+    product?.measurementPerCarton ??
+    product?.cbm ??
+    product?.measurement,
+  ) || 0.08;
+
+  return {
+    qtyPerCarton,
+    totalCartons,
+    netWeightPerCarton,
+    grossWeightPerCarton,
+    cbmPerCarton,
+    totalNW: totalCartons * netWeightPerCarton,
+    totalGW: totalCartons * grossWeightPerCarton,
+    totalCBM: totalCartons * cbmPerCarton,
+  };
+};
+
+export function adaptSalesContractToCommercialInvoice(
+  contract: any,
+  shipmentLike?: any,
+): CommercialInvoiceData {
+  const adminCompany = buildAdminCompanyProfile();
+  const goods = (contract?.products || []).map((item: any, index: number) => {
+    const normalized = resolveFlowProductDisplay(item, 'en');
+    const quantity = normalized.quantity;
+    const unitPrice = toSafeNumber(item?.unitPrice);
+    const amount = toSafeNumber(item?.amount) || quantity * unitPrice;
+    const metrics = resolvePackageMetrics(item, quantity);
+    return {
+      no: index + 1,
+      description: buildFlowGoodsDescription(item) || normalized.productName || `Product ${index + 1}`,
+      hsCode: normalized.hsCode || '',
+      quantity,
+      unit: (normalized.unit || 'PCS').toUpperCase(),
+      unitPrice,
+      currency: item?.currency || contract?.currency || 'USD',
+      amount,
+      grossWeight: Number((metrics.totalGW / Math.max(quantity, 1)).toFixed(3)),
+      netWeight: Number((metrics.totalNW / Math.max(quantity, 1)).toFixed(3)),
+      measurement: Number((metrics.totalCBM / Math.max(quantity, 1)).toFixed(4)),
+    };
+  });
+
+  const totalCartons = goods.reduce((sum, item, index) => {
+    const metrics = resolvePackageMetrics(contract?.products?.[index], item.quantity);
+    return sum + metrics.totalCartons;
+  }, 0);
+  const totalGrossWeight = goods.reduce((sum, item) => sum + (item.grossWeight || 0) * item.quantity, 0);
+  const totalNetWeight = goods.reduce((sum, item) => sum + (item.netWeight || 0) * item.quantity, 0);
+  const totalMeasurement = goods.reduce((sum, item) => sum + (item.measurement || 0) * item.quantity, 0);
+
+  return {
+    invoiceNo: String(shipmentLike?.invoiceNo || `CI-${contract?.contractNumber || contract?.id || 'DRAFT'}`),
+    invoiceDate: String(shipmentLike?.invoiceDate || contract?.createdAt || new Date().toISOString()).slice(0, 10),
+    contractNo: contract?.contractNumber || contract?.id || '',
+    exporter: {
+      name: adminCompany.name,
+      nameEn: adminCompany.nameEn,
+      address: adminCompany.address,
+      addressEn: adminCompany.addressEn,
+      tel: adminCompany.tel,
+    },
+    importer: {
+      name: contract?.customerCompany || contract?.customerName || '',
+      address: contract?.customerAddress || '',
+      country: contract?.customerCountry || '',
+      tel: contract?.contactPhone || '',
+    },
+    shippingMarks: {
+      mainMark: `${contract?.customerCompany || 'COSUN'}-${String(contract?.contractNumber || '').slice(-4) || '0001'}`.slice(0, 40),
+      sideMark: `C/NO. 1-${Math.max(totalCartons, 1)}`,
+      cautionMark: 'MADE IN CHINA',
+    },
+    goods,
+    shipping: {
+      tradeTerms: contract?.tradeTerms || 'FOB Xiamen',
+      paymentTerms: contract?.paymentTerms || '30% T/T deposit, 70% before shipment',
+      portOfLoading: contract?.portOfLoading || 'Xiamen, China',
+      portOfDischarge: shipmentLike?.portOfDischarge || contract?.portOfDestination || '',
+      finalDestination: shipmentLike?.finalDestination || contract?.portOfDestination || '',
+      vesselName: shipmentLike?.vesselName,
+      voyageNo: shipmentLike?.voyageNo,
+      blNo: shipmentLike?.blNo,
+    },
+    packing: {
+      totalCartons: Math.max(totalCartons, 1),
+      totalGrossWeight: Number(totalGrossWeight.toFixed(2)),
+      totalNetWeight: Number(totalNetWeight.toFixed(2)),
+      totalMeasurement: Number(totalMeasurement.toFixed(3)),
+    },
+  };
+}
+
+export function adaptSalesContractToPackingList(
+  contract: any,
+  shipmentLike?: any,
+): PackingListData {
+  const adminCompany = buildAdminCompanyProfile();
+  const packages = (contract?.products || []).map((item: any, index: number) => {
+    const normalized = resolveFlowProductDisplay(item, 'en');
+    const quantity = normalized.quantity;
+    const metrics = resolvePackageMetrics(item, quantity);
+    const cartonStart = packagesCartonStart(index, contract?.products || []);
+    const cartonEnd = cartonStart + metrics.totalCartons - 1;
+
+    return {
+      cartonNo: metrics.totalCartons <= 1 ? `${cartonStart}` : `${cartonStart}-${cartonEnd}`,
+      description: buildFlowGoodsDescription(item) || normalized.productName || `Product ${index + 1}`,
+      qtyPerCarton: metrics.qtyPerCarton,
+      totalCartons: metrics.totalCartons,
+      totalQty: quantity,
+      unit: (normalized.unit || 'PCS').toUpperCase(),
+      netWeight: Number(metrics.netWeightPerCarton.toFixed(2)),
+      grossWeight: Number(metrics.grossWeightPerCarton.toFixed(2)),
+      measurement: Number(metrics.cbmPerCarton.toFixed(3)),
+      totalNW: Number(metrics.totalNW.toFixed(2)),
+      totalGW: Number(metrics.totalGW.toFixed(2)),
+      totalCBM: Number(metrics.totalCBM.toFixed(3)),
+    };
+  });
+
+  return {
+    plNo: String(shipmentLike?.plNo || `PL-${contract?.contractNumber || contract?.id || 'DRAFT'}`),
+    invoiceNo: String(shipmentLike?.invoiceNo || `CI-${contract?.contractNumber || contract?.id || 'DRAFT'}`),
+    date: String(shipmentLike?.date || contract?.createdAt || new Date().toISOString()).slice(0, 10),
+    exporter: {
+      name: adminCompany.nameEn || adminCompany.name,
+      address: adminCompany.addressEn || adminCompany.address,
+    },
+    importer: {
+      name: contract?.customerCompany || contract?.customerName || '',
+      address: contract?.customerAddress || '',
+    },
+    shippingMarks: `${contract?.customerCompany || 'COSUN'}\n${contract?.portOfDestination || ''}\nMADE IN CHINA`,
+    packages,
+    shipping: {
+      portOfLoading: contract?.portOfLoading || 'Xiamen, China',
+      portOfDischarge: shipmentLike?.portOfDischarge || contract?.portOfDestination || '',
+      vesselName: shipmentLike?.vesselName,
+      blNo: shipmentLike?.blNo,
+    },
+  };
+}
+
+function packagesCartonStart(index: number, products: any[]) {
+  let start = 1;
+  for (let i = 0; i < index; i += 1) {
+    const previous = products[i];
+    const previousQuantity = normalizeFlowProductCore(previous).quantity;
+    const previousMetrics = resolvePackageMetrics(previous, previousQuantity);
+    start += previousMetrics.totalCartons;
+  }
+  return start;
 }
 
 /**
@@ -1162,6 +1867,5 @@ export function adaptQuotationToProformaInvoice(quotationData: any): any {
  * 🔥 发货数据 → 商业发票数据适配器（如需要可添加）
  */
 export function adaptShipmentToCommercialInvoice(shipmentData: any): any {
-  // TODO: 实现发货数据到商业发票的转换
-  return shipmentData;
+  return adaptSalesContractToCommercialInvoice(shipmentData?.contract || shipmentData, shipmentData);
 }

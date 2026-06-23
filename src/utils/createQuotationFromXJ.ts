@@ -5,13 +5,18 @@ import { nextBJNumber } from './xjNumberGenerator';
 import { productMasterService, productModelMappingService, supplierQuotationService, toUUID } from '../lib/supabaseService';
 import { adaptSupplierQuotationToDocumentData } from './documentDataAdapters';
 import { getFormalBusinessModelNo } from './productModelDisplay';
+import { getStoredAdminOrgProfile } from '../contexts/AdminOrganizationContext';
 
 export interface SupplierQuotationItem {
   id: string;
   productName: string;
+  productNameEn?: string;
+  productNameZh?: string;
   modelNo: string;
   supplierModelNo?: string;
   specification?: string;
+  specificationEn?: string;
+  specificationZh?: string;
   quantity: number;
   unit: string;
   unitPrice?: number;
@@ -236,10 +241,14 @@ export async function createQuotationFromXJ(
   if (xj.products && Array.isArray(xj.products) && xj.products.length > 0) {
     items = xj.products.map((product: any, _index: number) => ({
       id: product.id && /^[0-9a-f-]{36}$/.test(product.id) ? product.id : toUUID(undefined),
-      productName: product.productName || '产品名称',
+      productName: product.productName || product.productNameZh || product.productNameEn || '产品名称',
+      productNameEn: product.productNameEn || '',
+      productNameZh: product.productNameZh || '',
       modelNo: getFormalBusinessModelNo(product),
       supplierModelNo: product.supplierModelNo || options.supplierModelNo || '',
       specification: product.specification || '',
+      specificationEn: product.specificationEn || '',
+      specificationZh: product.specificationZh || '',
       quantity: product.quantity || 0,
       unit: product.unit || 'pcs',
       unitPrice: options.unitPrice || 0,
@@ -256,10 +265,14 @@ export async function createQuotationFromXJ(
   } else {
     items = [{
       id: toUUID(undefined),
-      productName: xj.productName || '产品名称',
+      productName: xj.productName || xj.productNameZh || xj.productNameEn || '产品名称',
+      productNameEn: xj.productNameEn || '',
+      productNameZh: xj.productNameZh || '',
       modelNo: getFormalBusinessModelNo(xj),
       supplierModelNo: xj.supplierModelNo || options.supplierModelNo || '',
       specification: xj.specification || '',
+      specificationEn: xj.specificationEn || '',
+      specificationZh: xj.specificationZh || '',
       quantity: xj.quantity || 0,
       unit: xj.unit || 'pcs',
       unitPrice: options.unitPrice || 0,
@@ -276,6 +289,36 @@ export async function createQuotationFromXJ(
   }
 
   const totalAmount = items.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const adminOrg = getStoredAdminOrgProfile();
+  const issuerFallbackName = String(adminOrg?.nameCN || adminOrg?.nameEN || 'COSUN采购').trim();
+  const inferredCustomerCompany = String(
+    xj?.documentData?.buyer?.name ||
+    xj?.documentData?.buyer?.companyName ||
+    xj?.documentDataSnapshot?.buyer?.name ||
+    xj?.documentDataSnapshot?.buyer?.companyName ||
+    xj?.document_data_snapshot?.buyer?.name ||
+    xj?.document_data_snapshot?.buyer?.companyName ||
+    xj?.documentData?.buyerInfo?.companyName ||
+    (xj as any)?.buyerCompany ||
+    issuerFallbackName ||
+    xj?.documentDataSnapshot?.customer?.companyName ||
+    xj?.document_data_snapshot?.customer?.companyName ||
+    (xj as any)?.customerCompany ||
+    xj?.customerName ||
+    ''
+  ).trim();
+  const inferredCustomerContact = String(
+    xj?.documentData?.buyer?.contactPerson ||
+    xj?.documentDataSnapshot?.buyer?.contactPerson ||
+    xj?.document_data_snapshot?.buyer?.contactPerson ||
+    xj?.documentData?.buyerInfo?.contactPerson ||
+    (xj as any)?.buyerContact ||
+    issuerFallbackName ||
+    xj?.documentDataSnapshot?.customer?.contactPerson ||
+    xj?.document_data_snapshot?.customer?.contactPerson ||
+    (xj as any)?.customerContact ||
+    ''
+  ).trim();
 
   const sourceTemplateSnapshot = xj?.templateSnapshot || xj?.template_snapshot || null;
   const sourceTemplateId = xj?.templateId || xj?.template_id || null;
@@ -304,10 +347,10 @@ export async function createQuotationFromXJ(
     finalQuotationId: projectExecutionBaseline?.finalQuotationId || null,
     finalQuotationNumber: projectExecutionBaseline?.finalQuotationNumber || null,
     quotationRole: projectExecutionBaseline?.projectRevisionId ? 'supplier_response' : null,
-    customerName: 'COSUN采购',
-    customerCompany: '福建高盛达富建材有限公司',
-    customerContact: xj.buyerContact,
-    customerEmail: xj.buyerEmail,
+    customerName: inferredCustomerCompany || inferredCustomerContact || issuerFallbackName,
+    customerCompany: inferredCustomerCompany || issuerFallbackName,
+    customerContact: inferredCustomerContact || xj.buyerContact,
+    customerEmail: xj?.documentData?.buyer?.email || xj?.documentDataSnapshot?.buyer?.email || xj?.document_data_snapshot?.buyer?.email || xj.buyerEmail,
     supplierCode,
     supplierName,
     supplierCompany,

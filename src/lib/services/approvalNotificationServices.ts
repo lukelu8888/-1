@@ -4,7 +4,7 @@ type DependencyBag = {
   handleError: (error: any, context: string) => any
 }
 
-function fromNotificationRow(r: any) {
+export function fromNotificationRow(r: any) {
   if (!r) return null
   return {
     id: r.id,

@@ -7,6 +7,7 @@
 
 export interface ProductSpec {
   id: string;
+  categoryId?: string;
   name: string;
   model: string;
   image: string;

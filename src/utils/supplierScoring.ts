@@ -10,11 +10,137 @@
 
 import { buildSourcePricingBasis, normalizePriceType, normalizeCurrencyByPriceType, type PricingTaxSettings, type SourcePricingBasis } from '../types/pricingBasis';
 
+export const SMART_COMPARISON_SCORING_POLICY = {
+  baseWeights: {
+    priceScore: 40,
+    leadTimeScore: 20,
+    paymentScore: 15,
+    moqScore: 10,
+    supplierCreditScore: 10,
+    qualityScore: 5,
+  },
+  weightDescriptions: {
+    priceScore: '价格越低得分越高',
+    leadTimeScore: '交期越短得分越高',
+    paymentScore: '账期越长得分越高',
+    moqScore: 'MOQ越低得分越高',
+    supplierCreditScore: '优先使用历史评级，否则退回默认值',
+    qualityScore: '优先使用历史质量表现，否则退回默认值',
+  },
+  performanceAdjustmentBands: [
+    { minScore: 90, adjustment: 8 },
+    { minScore: 80, adjustment: 6 },
+    { minScore: 70, adjustment: 4 },
+    { minScore: 60, adjustment: 2 },
+    { minScore: 50, adjustment: 0 },
+    { minScore: 40, adjustment: -2 },
+    { minScore: 30, adjustment: -4 },
+    { minScore: 0, adjustment: -6 },
+  ],
+  historicalPriceDeviationThresholds: {
+    watchPct: 8,
+    alertPct: 15,
+  },
+} as const;
+
+function assertSmartComparisonPolicy() {
+  const totalWeight = Object.values(SMART_COMPARISON_SCORING_POLICY.baseWeights)
+    .reduce((sum, weight) => sum + weight, 0);
+
+  if (totalWeight !== 100) {
+    throw new Error(`SMART_COMPARISON_SCORING_POLICY.baseWeights 必须合计 100，当前为 ${totalWeight}`);
+  }
+
+  const { watchPct, alertPct } = SMART_COMPARISON_SCORING_POLICY.historicalPriceDeviationThresholds;
+  if (watchPct <= 0 || alertPct <= watchPct) {
+    throw new Error('SMART_COMPARISON_SCORING_POLICY.historicalPriceDeviationThresholds 配置无效');
+  }
+
+  const bands = SMART_COMPARISON_SCORING_POLICY.performanceAdjustmentBands;
+  for (let index = 1; index < bands.length; index += 1) {
+    if (bands[index - 1].minScore <= bands[index].minScore) {
+      throw new Error('SMART_COMPARISON_SCORING_POLICY.performanceAdjustmentBands 必须按 minScore 降序排列');
+    }
+  }
+}
+
+assertSmartComparisonPolicy();
+
+export const SMART_COMPARISON_SCORE_WEIGHTS = [
+  {
+    key: 'priceScore',
+    label: '价格',
+    weight: SMART_COMPARISON_SCORING_POLICY.baseWeights.priceScore,
+    description: SMART_COMPARISON_SCORING_POLICY.weightDescriptions.priceScore,
+  },
+  {
+    key: 'leadTimeScore',
+    label: '交期',
+    weight: SMART_COMPARISON_SCORING_POLICY.baseWeights.leadTimeScore,
+    description: SMART_COMPARISON_SCORING_POLICY.weightDescriptions.leadTimeScore,
+  },
+  {
+    key: 'paymentScore',
+    label: '账期',
+    weight: SMART_COMPARISON_SCORING_POLICY.baseWeights.paymentScore,
+    description: SMART_COMPARISON_SCORING_POLICY.weightDescriptions.paymentScore,
+  },
+  {
+    key: 'moqScore',
+    label: 'MOQ',
+    weight: SMART_COMPARISON_SCORING_POLICY.baseWeights.moqScore,
+    description: SMART_COMPARISON_SCORING_POLICY.weightDescriptions.moqScore,
+  },
+  {
+    key: 'supplierCreditScore',
+    label: '供应商信用',
+    weight: SMART_COMPARISON_SCORING_POLICY.baseWeights.supplierCreditScore,
+    description: SMART_COMPARISON_SCORING_POLICY.weightDescriptions.supplierCreditScore,
+  },
+  {
+    key: 'qualityScore',
+    label: '品质',
+    weight: SMART_COMPARISON_SCORING_POLICY.baseWeights.qualityScore,
+    description: SMART_COMPARISON_SCORING_POLICY.weightDescriptions.qualityScore,
+  },
+] as const;
+
+export type ScoreEvidenceSource = 'quoted' | 'history' | 'default';
+export type HistoricalPriceDeviationLevel = 'normal' | 'watch' | 'alert';
+
+interface SupplierScoreAssessment {
+  score: number;
+  source: Exclude<ScoreEvidenceSource, 'quoted'>;
+}
+
+export interface HistoricalBenchmarkReference {
+  sampleCount: number;
+  sameSupplierSampleCount: number;
+  marketMinUnitPrice?: number | null;
+  marketAvgUnitPrice?: number | null;
+  sameSupplierAvgUnitPrice?: number | null;
+  latestKnownUnitPrice?: number | null;
+  latestKnownQuoteDate?: string | null;
+}
+
+export interface SupplierPerformanceReference {
+  historicalPurchaseOrderCount: number;
+  qcPassCount: number;
+  qcFailCount: number;
+  supplierSelfInspectionPassCount: number;
+  supplierSelfInspectionFailCount: number;
+  averageOverallRating?: number | null;
+  averageDeliveryRating?: number | null;
+  qualityIssueCount: number;
+  deliveryIssueCount: number;
+}
+
 // 🔥 供应商报价对比项
 export interface SupplierQuotationForComparison {
   bjNumber: string;
   xjNumber?: string;
   supplierId: string;
+  supplierCode?: string;
   supplierName: string;
   supplierCompany?: string;
   
@@ -38,6 +164,18 @@ export interface SupplierQuotationForComparison {
   quoteMode?: string;
   taxSettings?: PricingTaxSettings;
   pricingBasis?: SourcePricingBasis;
+  leadTimeSource?: ScoreEvidenceSource;
+  moqSource?: ScoreEvidenceSource;
+  paymentTermsSource?: ScoreEvidenceSource;
+  supplierCreditSource?: ScoreEvidenceSource;
+  qualitySource?: ScoreEvidenceSource;
+  historicalBenchmark?: HistoricalBenchmarkReference | null;
+  historicalPriceDeltaPct?: number | null;
+  historicalPriceDeviationLevel?: HistoricalPriceDeviationLevel | null;
+  supplierPerformance?: SupplierPerformanceReference | null;
+  supplierPerformanceScore?: number | null;
+  supplierPerformanceAdjustment?: number;
+  baseTotalScore?: number;
   
   // 🔥 评分维度
   priceScore: number;        // 价格得分 (0-100)
@@ -155,17 +293,23 @@ export function calculatePaymentTermsScore(paymentTerms: string): number {
   return 50;
 }
 
+function getStoredSupplierProfile(supplierId: string, supplierName: string) {
+  const suppliers = JSON.parse(localStorage.getItem('suppliers') || '[]');
+  return suppliers.find((s: any) =>
+    s.id === supplierId || s.code === supplierId || s.name === supplierName
+  );
+}
+
 /**
  * 🔥 获取供应商信用评分
  * TODO: 从历史合作数据中获取真实评分
  */
 export function getSupplierCreditScore(supplierId: string, supplierName: string): number {
-  // 🔥 模拟：从localStorage读取供应商历史评分
-  const suppliers = JSON.parse(localStorage.getItem('suppliers') || '[]');
-  const supplier = suppliers.find((s: any) => 
-    s.id === supplierId || s.code === supplierId || s.name === supplierName
-  );
-  
+  return getSupplierCreditAssessment(supplierId, supplierName).score;
+}
+
+export function getSupplierCreditAssessment(supplierId: string, supplierName: string): SupplierScoreAssessment {
+  const supplier = getStoredSupplierProfile(supplierId, supplierName);
   if (supplier && supplier.creditRating) {
     // A级 = 95, B级 = 85, C级 = 70, D级 = 50
     const ratingMap: { [key: string]: number } = {
@@ -177,11 +321,17 @@ export function getSupplierCreditScore(supplierId: string, supplierName: string)
       'B+': 90,
       'C+': 75
     };
-    return ratingMap[supplier.creditRating] || 75;
+    return {
+      score: ratingMap[supplier.creditRating] || 75,
+      source: 'history',
+    };
   }
   
   // 默认中等信用
-  return 75;
+  return {
+    score: 75,
+    source: 'default',
+  };
 }
 
 /**
@@ -189,20 +339,25 @@ export function getSupplierCreditScore(supplierId: string, supplierName: string)
  * TODO: 从历史质检数据中获取真实评分
  */
 export function getSupplierQualityScore(supplierId: string, supplierName: string): number {
-  // 🔥 模拟：从localStorage读取供应商质量评分
-  const suppliers = JSON.parse(localStorage.getItem('suppliers') || '[]');
-  const supplier = suppliers.find((s: any) => 
-    s.id === supplierId || s.code === supplierId || s.name === supplierName
-  );
-  
+  return getSupplierQualityAssessment(supplierId, supplierName).score;
+}
+
+export function getSupplierQualityAssessment(supplierId: string, supplierName: string): SupplierScoreAssessment {
+  const supplier = getStoredSupplierProfile(supplierId, supplierName);
   if (supplier && supplier.qualityRating) {
     // 5星 = 100, 4星 = 85, 3星 = 70, 2星 = 50, 1星 = 30
     const stars = parseInt(supplier.qualityRating) || 3;
-    return 30 + (stars - 1) * 17.5;
+    return {
+      score: 30 + (stars - 1) * 17.5,
+      source: 'history',
+    };
   }
   
   // 默认中等品质
-  return 70;
+  return {
+    score: 70,
+    source: 'default',
+  };
 }
 
 /**
@@ -220,6 +375,14 @@ export function calculateSupplierScore(
   qualityScore: number;
   totalScore: number;
 } {
+  const {
+    priceScore: priceWeight,
+    leadTimeScore: leadTimeWeight,
+    paymentScore: paymentWeight,
+    moqScore: moqWeight,
+    supplierCreditScore: supplierCreditWeight,
+    qualityScore: qualityWeight,
+  } = SMART_COMPARISON_SCORING_POLICY.baseWeights;
   
   // 1️⃣ 价格得分 (40%) - 价格越低得分越高
   const prices = allQuotationsForSameProduct.map(q => q.unitPrice);
@@ -246,25 +409,25 @@ export function calculateSupplierScore(
     100 - ((quotation.moq - minMOQ) / (maxMOQ - minMOQ)) * 100;
   
   // 5️⃣ 供应商信用得分 (10%) - 从历史数据获取
-  const supplierCreditScore = getSupplierCreditScore(
+  const supplierCreditAssessment = getSupplierCreditAssessment(
     quotation.supplierId || quotation.supplierCode,
     quotation.supplierName || quotation.supplierCompany
   );
   
   // 6️⃣ 品质得分 (5%)
-  const qualityScore = getSupplierQualityScore(
+  const qualityAssessment = getSupplierQualityAssessment(
     quotation.supplierId || quotation.supplierCode,
     quotation.supplierName || quotation.supplierCompany
   );
   
   // 🔥 综合得分（加权平均）
   const totalScore = Math.round(
-    priceScore * 0.40 +
-    leadTimeScore * 0.20 +
-    paymentScore * 0.15 +
-    moqScore * 0.10 +
-    supplierCreditScore * 0.10 +
-    qualityScore * 0.05
+    priceScore * (priceWeight / 100) +
+    leadTimeScore * (leadTimeWeight / 100) +
+    paymentScore * (paymentWeight / 100) +
+    moqScore * (moqWeight / 100) +
+    supplierCreditAssessment.score * (supplierCreditWeight / 100) +
+    qualityAssessment.score * (qualityWeight / 100)
   );
   
   return {
@@ -272,10 +435,91 @@ export function calculateSupplierScore(
     leadTimeScore: Math.round(leadTimeScore),
     paymentScore: Math.round(paymentScore),
     moqScore: Math.round(moqScore),
-    supplierCreditScore: Math.round(supplierCreditScore),
-    qualityScore: Math.round(qualityScore),
+    supplierCreditScore: Math.round(supplierCreditAssessment.score),
+    qualityScore: Math.round(qualityAssessment.score),
     totalScore
   };
+}
+
+function clampScore(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+export function calculateSupplierPerformanceScore(
+  performance?: SupplierPerformanceReference | null,
+): number | null {
+  if (!performance || performance.historicalPurchaseOrderCount <= 0) {
+    return null;
+  }
+
+  const qcTotal = performance.qcPassCount + performance.qcFailCount;
+  const qcPassRateScore = qcTotal > 0
+    ? (performance.qcPassCount / qcTotal) * 100
+    : null;
+
+  const supplierInspectionTotal =
+    performance.supplierSelfInspectionPassCount + performance.supplierSelfInspectionFailCount;
+  const supplierInspectionScore = supplierInspectionTotal > 0
+    ? (performance.supplierSelfInspectionPassCount / supplierInspectionTotal) * 100
+    : null;
+
+  const overallRatingScore = performance.averageOverallRating != null
+    ? Math.max(0, Math.min(100, (performance.averageOverallRating / 5) * 100))
+    : null;
+  const deliveryRatingScore = performance.averageDeliveryRating != null
+    ? Math.max(0, Math.min(100, (performance.averageDeliveryRating / 5) * 100))
+    : null;
+
+  const issuePenalty = Math.min(
+    30,
+    ((performance.qualityIssueCount * 1.5) + (performance.deliveryIssueCount * 1.5))
+      / Math.max(1, performance.historicalPurchaseOrderCount) * 20,
+  );
+  const orderExperienceBonus = Math.min(10, performance.historicalPurchaseOrderCount * 1.5);
+
+  const componentValues = [
+    qcPassRateScore,
+    supplierInspectionScore,
+    overallRatingScore,
+    deliveryRatingScore,
+  ].filter((value): value is number => value != null);
+
+  const componentAverage = componentValues.length > 0
+    ? componentValues.reduce((sum, value) => sum + value, 0) / componentValues.length
+    : 60;
+
+  return clampScore(componentAverage + orderExperienceBonus - issuePenalty);
+}
+
+export function calculatePerformanceScoreAdjustment(performanceScore?: number | null): number {
+  if (performanceScore == null) return 0;
+  const matchedBand = SMART_COMPARISON_SCORING_POLICY.performanceAdjustmentBands
+    .find((band) => performanceScore >= band.minScore);
+  return matchedBand?.adjustment ?? 0;
+}
+
+export function calculateHistoricalPriceDeltaPct(
+  unitPrice: number,
+  benchmark?: HistoricalBenchmarkReference | null,
+): number | null {
+  const referencePrice = benchmark?.marketAvgUnitPrice;
+  if (referencePrice == null || referencePrice <= 0) {
+    return null;
+  }
+  return ((unitPrice - referencePrice) / referencePrice) * 100;
+}
+
+export function assessHistoricalPriceDeviationLevel(
+  deltaPct?: number | null,
+): HistoricalPriceDeviationLevel | null {
+  if (deltaPct == null || !Number.isFinite(deltaPct)) {
+    return null;
+  }
+  const thresholds = SMART_COMPARISON_SCORING_POLICY.historicalPriceDeviationThresholds;
+  const absoluteDelta = Math.abs(deltaPct);
+  if (absoluteDelta >= thresholds.alertPct) return 'alert';
+  if (absoluteDelta >= thresholds.watchPct) return 'watch';
+  return 'normal';
 }
 
 /**
@@ -323,6 +567,14 @@ export function generateRecommendReason(
   
   if (quotation.qualityScore >= 85) {
     reasons.push('品质可靠');
+  }
+
+  if (quotation.supplierPerformanceScore != null) {
+    if (quotation.supplierPerformanceScore >= 80) {
+      reasons.push('历史履约稳定');
+    } else if (quotation.supplierPerformanceScore < 45) {
+      reasons.push('需关注后段履约');
+    }
   }
   
   if (quotation.riskLevel === 'low') {
@@ -408,6 +660,18 @@ export function generateWarnings(
   if (quotation.priceScore > 98) {
     warnings.push('💡 价格明显低于市场，建议核实供应商资质和产品质量');
   }
+
+  if (quotation.historicalPriceDeviationLevel === 'alert' && quotation.historicalPriceDeltaPct != null) {
+    if (quotation.historicalPriceDeltaPct < 0) {
+      warnings.push(`💡 较历史均价低 ${Math.abs(quotation.historicalPriceDeltaPct).toFixed(1)}%，建议确认是否存在异常低价`);
+    } else {
+      warnings.push(`⚠️ 较历史均价高 ${quotation.historicalPriceDeltaPct.toFixed(1)}%，建议补充涨价依据`);
+    }
+  }
+
+  if (quotation.supplierPerformanceScore != null && quotation.supplierPerformanceScore < 45) {
+    warnings.push('⚠️ 历史履约表现偏弱，建议结合试单、分批交付或加强验货');
+  }
   
   if (quotation.riskLevel === 'high') {
     warnings.push('🔴 综合风险评级：高风险，建议先小单测试');
@@ -445,12 +709,59 @@ export function performSmartComparison(
     const quotations: SupplierQuotationForComparison[] = [];
     
     for (const bj of allBJs) {
+      const snapshotItems = Array.isArray(bj?.documentDataSnapshot?.products)
+        ? bj.documentDataSnapshot.products
+        : Array.isArray(bj?.document_data_snapshot?.products)
+          ? bj.document_data_snapshot.products
+          : [];
+      const rowItems = Array.isArray(bj?.items) ? bj.items : [];
+      const candidateItems = (snapshotItems.length > 0 ? snapshotItems : rowItems).map((item: any, index: number) => {
+        const fallbackRow = rowItems[index] || null;
+        return {
+          ...fallbackRow,
+          ...item,
+          productId: item?.productId || item?.id || fallbackRow?.productId || fallbackRow?.id,
+          productName:
+            item?.productName ||
+            item?.name ||
+            item?.description ||
+            fallbackRow?.productName ||
+            fallbackRow?.name ||
+            fallbackRow?.description,
+          specification: item?.specification || fallbackRow?.specification || product.specification,
+          quantity: item?.quantity ?? fallbackRow?.quantity ?? product.quantity,
+          unit: item?.unit || fallbackRow?.unit || product.unit,
+          unitPrice: item?.unitPrice ?? item?.price ?? fallbackRow?.unitPrice ?? fallbackRow?.price,
+          amount:
+            item?.amount ??
+            item?.totalPrice ??
+            item?.lineAmount ??
+            fallbackRow?.amount ??
+            fallbackRow?.totalPrice ??
+            fallbackRow?.lineAmount,
+          currency:
+            item?.currency ||
+            item?.quoteCurrency ||
+            fallbackRow?.currency ||
+            fallbackRow?.quoteCurrency ||
+            bj?.currency ||
+            'CNY',
+          leadTime: item?.leadTime ?? fallbackRow?.leadTime,
+          moq: item?.moq ?? fallbackRow?.moq,
+          taxSettings: item?.taxSettings || fallbackRow?.taxSettings,
+          priceType: item?.priceType || fallbackRow?.priceType,
+          quoteMode: item?.quoteMode || fallbackRow?.quoteMode || bj?.quoteMode,
+          pricingBasis: item?.pricingBasis || fallbackRow?.pricingBasis,
+          costBreakdown: item?.costBreakdown || fallbackRow?.costBreakdown,
+        };
+      });
+
       // 在该BJ的items中查找匹配该产品的报价项
-      const bjItem = bj.items.find((item: any) => {
+      const bjItem = candidateItems.find((item: any) => {
         // 🔥 关键修复：匹配逻辑优先用productId，其次用productName
         return item.productId === product.id || 
                item.productName === product.productName;
-      });
+      }) || candidateItems[0];
       
       if (!bjItem) {
         // 该供应商没有报这个产品的价
@@ -479,6 +790,7 @@ export function performSmartComparison(
         bjNumber: bj.quotationNo,
         xjNumber: bj.sourceXJ,
         supplierId: bj.supplierCode || bj.supplierId,
+        supplierCode: bj.supplierCode || bj.supplierId || '',
         supplierName: bj.supplierName || bj.supplierCompany,
         supplierCompany: bj.supplierCompany,
         
@@ -500,6 +812,11 @@ export function performSmartComparison(
         quoteMode: pricingBasis.quoteMode || bjItem.quoteMode || bj.quoteMode,
         taxSettings,
         pricingBasis,
+        leadTimeSource: bjItem.leadTime != null ? 'quoted' : 'default',
+        moqSource: bjItem.moq != null ? 'quoted' : 'default',
+        paymentTermsSource: bj.paymentTerms ? 'quoted' : 'default',
+        supplierCreditSource: 'default' as ScoreEvidenceSource,
+        qualitySource: 'default' as ScoreEvidenceSource,
         
         // 初始化评分字段
         priceScore: 0,
@@ -528,6 +845,14 @@ export function performSmartComparison(
     // 🔥 计算每个报价的得分
     for (const quotation of quotations) {
       const scores = calculateSupplierScore(quotation, quotations);
+      const supplierCreditAssessment = getSupplierCreditAssessment(
+        quotation.supplierId || quotation.supplierCode,
+        quotation.supplierName || quotation.supplierCompany
+      );
+      const qualityAssessment = getSupplierQualityAssessment(
+        quotation.supplierId || quotation.supplierCode,
+        quotation.supplierName || quotation.supplierCompany
+      );
       
       quotation.priceScore = scores.priceScore;
       quotation.leadTimeScore = scores.leadTimeScore;
@@ -536,6 +861,8 @@ export function performSmartComparison(
       quotation.supplierCreditScore = scores.supplierCreditScore;
       quotation.qualityScore = scores.qualityScore;
       quotation.totalScore = scores.totalScore;
+      quotation.supplierCreditSource = supplierCreditAssessment.source;
+      quotation.qualitySource = qualityAssessment.source;
       
       // 评估风险
       quotation.riskLevel = assessRiskLevel(quotation);

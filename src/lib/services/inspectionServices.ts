@@ -74,6 +74,14 @@ function toSupplierInspectionRow(report: any) {
 }
 
 export const supplierInspectionReportService = {
+  async listAll() {
+    const { data, error } = await supabase
+      .from('supplier_inspection_reports')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (error) throwSupabaseError('listAll supplier_inspection_reports', error)
+    return (data || []).map(fromSupplierInspectionRow)
+  },
   async getByPurchaseOrderId(purchaseOrderId: string) {
     const { data, error } = await supabase
       .from('supplier_inspection_reports')
@@ -174,6 +182,14 @@ function buildExecutionUpdateFromQcInspection(row: any) {
 }
 
 export const qcInspectionOrderService = {
+  async listAll() {
+    const { data, error } = await supabase
+      .from('qc_inspection_orders')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (error) throwSupabaseError('listAll qc_inspection_orders', error)
+    return (data || []).map(fromQcInspectionOrderRow)
+  },
   async getByPurchaseOrderId(purchaseOrderId: string) {
     const { data, error } = await supabase
       .from('qc_inspection_orders')

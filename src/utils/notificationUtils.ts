@@ -50,3 +50,20 @@ export function sendNotificationToUser(
     })
   );
 }
+
+export function sendNotificationToUsers(
+  recipientEmails: string[],
+  notification: SendNotificationPayload
+) {
+  const uniqueRecipients = Array.from(
+    new Set(
+      recipientEmails
+        .map((email) => String(email || '').trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+
+  uniqueRecipients.forEach((email) => {
+    sendNotificationToUser(email, notification);
+  });
+}

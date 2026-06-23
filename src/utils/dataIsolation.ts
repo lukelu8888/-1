@@ -28,14 +28,126 @@ function parseStoredJson(key: string) {
   }
 }
 
+export function resolveCurrentStorageIdentity() {
+  if (typeof window === 'undefined') {
+    return { email: 'anonymous', role: 'guest' };
+  }
+
+  try {
+    const currentUser = getCurrentUser() as any;
+    const authUser = parseStoredJson('cosun_auth_user');
+    const backendUser = parseStoredJson('cosun_backend_user');
+    const switchedUser = parseStoredJson('cosun_switched_user');
+    const currentRbacUser = parseStoredJson('cosun_current_user');
+
+    const email = String(
+      currentUser?.email ||
+      switchedUser?.email ||
+      currentRbacUser?.email ||
+      authUser?.email ||
+      backendUser?.email ||
+      'anonymous',
+    )
+      .trim()
+      .toLowerCase();
+
+    const role = String(
+      currentUser?.userRole ||
+      currentUser?.role ||
+      switchedUser?.userRole ||
+      switchedUser?.role ||
+      currentRbacUser?.userRole ||
+      currentRbacUser?.role ||
+      backendUser?.rbac_role ||
+      backendUser?.role ||
+      backendUser?.portal_role ||
+      authUser?.userRole ||
+      authUser?.role ||
+      authUser?.type ||
+      'guest',
+    )
+      .trim()
+      .toLowerCase();
+
+    return {
+      email: email || 'anonymous',
+      role: role || 'guest',
+    };
+  } catch {
+    return { email: 'anonymous', role: 'guest' };
+  }
+}
+
+export function getScopedStorageKey(baseKey: string) {
+  const { email } = resolveCurrentStorageIdentity();
+  return `${baseKey}:${email}`;
+}
+
+export function getLegacyScopedStorageKeys(baseKey: string, extraKeys: string[] = []) {
+  if (typeof window === 'undefined') return extraKeys;
+
+  const { email, role } = resolveCurrentStorageIdentity();
+  const keys = new Set<string>([
+    getScopedStorageKey(baseKey),
+    `${baseKey}:${email}:${role}`,
+    `${baseKey}:${email}:customer`,
+    `${baseKey}:${email}:admin`,
+    `${baseKey}:${email}:staff`,
+    `${baseKey}:${email}:supplier`,
+    baseKey,
+    ...extraKeys,
+  ]);
+
+  try {
+    const prefix = `${baseKey}:${email}:`;
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(prefix)) {
+        keys.add(key);
+      }
+    }
+  } catch {
+    // ignore storage scan failures
+  }
+
+  return Array.from(keys);
+}
+
+export function readScopedStoragePayload(baseKey: string, extraKeys: string[] = []) {
+  if (typeof window === 'undefined') return null;
+
+  for (const key of getLegacyScopedStorageKeys(baseKey, extraKeys)) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) return raw;
+    } catch {
+      // ignore malformed entries and keep scanning
+    }
+  }
+
+  return null;
+}
+
+export function clearLegacyScopedStorageKeys(baseKey: string, extraKeys: string[] = []) {
+  if (typeof window === 'undefined') return;
+
+  const stableKey = getScopedStorageKey(baseKey);
+  for (const key of getLegacyScopedStorageKeys(baseKey, extraKeys)) {
+    if (key === stableKey) continue;
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+}
+
 function getPreferredRbacUser() {
   const switchedUser = parseStoredJson('cosun_switched_user');
   const currentUser = parseStoredJson('cosun_current_user');
 
   if (switchedUser?.email) {
-    if (!currentUser?.email || String(switchedUser.email).trim().toLowerCase() === String(currentUser.email).trim().toLowerCase()) {
-      return switchedUser;
-    }
+    return switchedUser;
   }
 
   return currentUser;

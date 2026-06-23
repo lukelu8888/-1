@@ -3,6 +3,7 @@ import { sanitizePersistedInquiryProducts } from './services/productMappingServi
 export {
   adminOrganizationService,
   externalPortalDirectoryService,
+  sharedRoleUiPreferenceService,
   staffDirectoryService,
   uiPreferenceService,
 } from './services/profileDirectoryServices'
@@ -41,6 +42,23 @@ import {
   isTemplateCenterSupabaseUnreachable,
   retryTemplateCenterSupabase,
 } from './services/templateCenterService'
+import {
+  buildSupabaseError,
+  extractCheckConstraintColumn,
+  extractMissingColumn,
+  fromRegionCode,
+  handleError,
+  isMissingColumnError,
+  matchesCustomerEmailFallback,
+  normalizeProfitRateForStorage,
+  normalizeProfitRatePercent,
+  shouldDowngradeProfitRate,
+  throwSupabaseError,
+  toIsoDate,
+  toRegionCode,
+  toUUID,
+  toUUIDOrNull,
+} from './services/supabaseCoreHelpers'
 import { createApprovalRecordService } from './services/approvalRecordService'
 import { createInquiryService } from './services/inquiryService'
 import {
@@ -69,9 +87,11 @@ import {
   enrichInquiryRowsWithTemplateData,
   hasKnownMissingColumn,
   insertInquiryWithServerAssignedNumber,
+  isTransientSupabaseRequestError,
   isUuidLike,
   rememberMissingColumn,
   resolveBusinessDocumentTemplateBinding,
+  updateInquiryRowViaRest,
   updateWithSchemaFallback,
   upsertWithSchemaFallback,
   upsertWithoutSelectWithSchemaFallback,
@@ -89,23 +109,6 @@ export type {
 export {
   REGION_CODE_TO_NAME,
   REGION_NAME_TO_CODE,
-  buildSupabaseError,
-  extractCheckConstraintColumn,
-  extractMissingColumn,
-  fromRegionCode,
-  handleError,
-  isMissingColumnError,
-  matchesCustomerEmailFallback,
-  normalizeProfitRateForStorage,
-  normalizeProfitRatePercent,
-  shouldDowngradeProfitRate,
-  throwSupabaseError,
-  toIsoDate,
-  toRegionCode,
-  toUUID,
-  toUUIDOrNull,
-} from './services/supabaseCoreHelpers'
-import {
   buildSupabaseError,
   extractCheckConstraintColumn,
   extractMissingColumn,
@@ -185,7 +188,17 @@ export async function nextInternalModelNo(regionCode: string = 'NA'): Promise<st
 export const inquiryService = createInquiryService({
   throwSupabaseError,
   withSupabaseTimeout,
-  resolveBusinessDocumentTemplateBinding,
+  resolveBusinessDocumentTemplateBinding: (input, options) =>
+    resolveBusinessDocumentTemplateBinding(input, options, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
   applyKnownMissingColumns,
   rememberMissingColumn,
   hasKnownMissingColumn,
@@ -193,7 +206,19 @@ export const inquiryService = createInquiryService({
   extractMissingColumn,
   enrichInquiryRowsWithTemplateData,
   enrichInquiryRowWithTemplateData,
-  insertInquiryWithServerAssignedNumber,
+  insertInquiryWithServerAssignedNumber: (payload, context) =>
+    insertInquiryWithServerAssignedNumber(payload, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
+  isTransientSupabaseRequestError,
+  updateInquiryRowViaRest,
   toRegionCode,
   toUUIDOrNull,
   sanitizePersistedInquiryProducts,
@@ -204,7 +229,17 @@ export const salesQuotationService = createSalesQuotationService({
   throwSupabaseError,
   buildSupabaseError,
   resolveBusinessDocumentTemplateBinding,
-  upsertWithSchemaFallback,
+  upsertWithSchemaFallback: (table, row, onConflict, context) =>
+    upsertWithSchemaFallback(table, row, onConflict, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
   normalizeProfitRateForStorage,
   normalizeProfitRatePercent,
   toUUID,
@@ -234,7 +269,17 @@ export const quotationRequestService = createQuotationRequestService({
 export const purchaseOrderService = createPurchaseOrderService({
   throwSupabaseError,
   resolveBusinessDocumentTemplateBinding,
-  upsertWithSchemaFallback,
+  upsertWithSchemaFallback: (table, row, onConflict, context) =>
+    upsertWithSchemaFallback(table, row, onConflict, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
   toUUID,
   toUUIDOrNull,
   toIsoDate,
@@ -245,7 +290,17 @@ export const purchaseOrderService = createPurchaseOrderService({
 export const quoteRequirementService = createQuoteRequirementService({
   throwSupabaseError,
   resolveBusinessDocumentTemplateBinding,
-  upsertWithSchemaFallback,
+  upsertWithSchemaFallback: (table, row, onConflict, context) =>
+    upsertWithSchemaFallback(table, row, onConflict, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
   toUUID,
   toUUIDOrNull,
   toIsoDate,
@@ -259,7 +314,28 @@ export const contractService = createContractService({
   resolveBusinessDocumentTemplateBinding,
   rememberMissingColumn,
   matchesCustomerEmailFallback,
-  upsertWithSchemaFallback,
+  upsertWithSchemaFallback: (table, row, onConflict, context) =>
+    upsertWithSchemaFallback(table, row, onConflict, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
+  updateWithSchemaFallback: (table, row, applyFilters, context) =>
+    updateWithSchemaFallback(table, row, applyFilters, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
   toUUIDOrNull,
 })
 
@@ -269,7 +345,28 @@ export const orderService = createOrderService({
   resolveBusinessDocumentTemplateBinding,
   rememberMissingColumn,
   matchesCustomerEmailFallback,
-  upsertWithSchemaFallback,
+  upsertWithSchemaFallback: (table, row, onConflict, context) =>
+    upsertWithSchemaFallback(table, row, onConflict, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
+  updateWithSchemaFallback: (table, row, applyFilters, context) =>
+    updateWithSchemaFallback(table, row, applyFilters, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
   toUUIDOrNull,
 })
 
@@ -279,7 +376,28 @@ export const arService = createArService({
   resolveBusinessDocumentTemplateBinding,
   rememberMissingColumn,
   matchesCustomerEmailFallback,
-  upsertWithSchemaFallback,
+  upsertWithSchemaFallback: (table, row, onConflict, context) =>
+    upsertWithSchemaFallback(table, row, onConflict, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
+  updateWithSchemaFallback: (table, row, applyFilters, context) =>
+    updateWithSchemaFallback(table, row, applyFilters, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
   toUUIDOrNull,
 })
 
@@ -302,8 +420,28 @@ export const templateCenterService = createTemplateCenterService({
   buildSupabaseError,
   throwSupabaseError,
   withSupabaseTimeout,
-  updateWithSchemaFallback,
-  upsertWithoutSelectWithSchemaFallback,
+  updateWithSchemaFallback: (table, row, applyFilter, context) =>
+    updateWithSchemaFallback(table, row, applyFilter, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
+  upsertWithoutSelectWithSchemaFallback: (table, row, onConflict, context) =>
+    upsertWithoutSelectWithSchemaFallback(table, row, onConflict, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
 })
 
 export const approvalRecordService = createApprovalRecordService({
@@ -311,7 +449,17 @@ export const approvalRecordService = createApprovalRecordService({
   toUUID,
   toUUIDOrNull,
   toRegionCode,
-  upsertWithSchemaFallback,
+  upsertWithSchemaFallback: (table, row, onConflict, context) =>
+    upsertWithSchemaFallback(table, row, onConflict, context, {
+      buildSupabaseError,
+      throwSupabaseError,
+      extractMissingColumn,
+      extractCheckConstraintColumn,
+      shouldDowngradeProfitRate,
+      toUUIDOrNull,
+      toRegionCode,
+      sanitizePersistedInquiryProducts,
+    }),
   extractMissingColumn,
 })
 

@@ -6,6 +6,8 @@ import { useState, useEffect } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { User, hasPermission, Permission } from '../lib/rbac-config';
 import { normalizeManagedAdminIdentity } from '../lib/internalAdminIdentity';
+import { canUseRoleSwitcherForUser, shouldAuditImpersonation } from '../config/adminPortalPolicy';
+import { roleSwitcherAuditService } from '../lib/services/roleSwitcherAuditService';
 
 const RBAC_USER_KEY = 'cosun_current_user';
 const SWITCHED_RBAC_USER_KEY = 'cosun_switched_user';
@@ -22,11 +24,20 @@ function buildRbacUser(stored: any): User | null {
 }
 
 function readPersistedRbacUser(authEmail?: string | null): User | null {
+  if (!canUseRoleSwitcherForUser(authEmail)) {
+    try {
+      localStorage.removeItem(SWITCHED_RBAC_USER_KEY);
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
   try {
     const switchedRaw = localStorage.getItem(SWITCHED_RBAC_USER_KEY);
     if (switchedRaw) {
       const switched = buildRbacUser(JSON.parse(switchedRaw));
-      if (switched && (!authEmail || switched.email === authEmail)) {
+      if (switched) {
         return switched;
       }
     }
@@ -65,8 +76,15 @@ export function useAuth() {
     }
 
     if (authUser.type === 'admin') {
+      if (!canUseRoleSwitcherForUser(authUser.email)) {
+        try {
+          localStorage.removeItem(SWITCHED_RBAC_USER_KEY);
+        } catch {
+          // ignore
+        }
+      }
       const persisted = readPersistedRbacUser(authUser.email);
-      if (persisted?.email === authUser.email) {
+      if (persisted) {
         setCurrentUser(persisted);
         return;
       }
@@ -96,9 +114,27 @@ export function useAuth() {
 
   // Admin 内部角色切换（不触发 Supabase 重新登录）
   const switchUser = (user: User) => {
+    if (!canUseRoleSwitcherForUser(authUser?.email)) return;
+
+    const previousUser = currentUser;
     setCurrentUser(user);
     localStorage.setItem(RBAC_USER_KEY, JSON.stringify(user));
     localStorage.setItem(SWITCHED_RBAC_USER_KEY, JSON.stringify(user));
+    if (shouldAuditImpersonation()) {
+      roleSwitcherAuditService.record({
+        authenticatedUser: authUser?.type === 'admin'
+          ? normalizeManagedAdminIdentity({
+              id: authUser.id ?? authUser.email,
+              name: authUser.name ?? authUser.email.split('@')[0],
+              email: authUser.email,
+              role: (authUser.role as any) ?? 'Admin',
+              region: (authUser.region as any) ?? 'all',
+            })
+          : null,
+        previousUser,
+        nextUser: user,
+      });
+    }
     window.dispatchEvent(new CustomEvent('userChanged', { detail: user }));
   };
 

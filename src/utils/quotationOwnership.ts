@@ -67,7 +67,10 @@ export const resolveInquirySalesOwner = (
   const ownerEmail = pickBusinessOwnerEmail(
     [
       inquiry?.salesRepEmail,
+      inquiry?.ownerEmail,
+      inquiry?.owner_email,
       inquiry?.assignedTo,
+      inquiry?.assigned_to,
     ],
     inquiry?.region,
     currentUser?.email || '',
@@ -79,6 +82,8 @@ export const resolveInquirySalesOwner = (
       ownerEmail,
       [
         inquiry?.salesRepName,
+        inquiry?.ownerName,
+        inquiry?.owner_name,
         ownerEmail === normalizePersonnelEmail(currentUser?.email, inquiry?.region) ? currentUser?.name : '',
       ],
       inquiry?.region,
@@ -110,9 +115,16 @@ export const resolveQuoteRequirementOwner = (
   const fallbackEmail = normalizePersonnelEmail(currentUser?.email, region) || currentUser?.email || '';
   const ownerEmail = pickBusinessOwnerEmail(
     [
+      qr?.ownerEmail,
+      qr?.owner_email,
       qr?.requestedBy,
+      qr?.requested_by,
       qr?.salesPerson,
       qr?.salesPersonEmail,
+      qr?.assignedTo,
+      qr?.assigned_to,
+      relatedInquiry?.ownerEmail,
+      relatedInquiry?.owner_email,
       relatedInquiry?.salesRepEmail,
       relatedInquiry?.assignedTo,
       qr?.createdBy,
@@ -126,8 +138,13 @@ export const resolveQuoteRequirementOwner = (
     name: resolveOwnerName(
       ownerEmail,
       [
+        qr?.ownerName,
+        qr?.owner_name,
         qr?.requestedByName,
+        qr?.requested_by_name,
         qr?.salesPersonName,
+        relatedInquiry?.ownerName,
+        relatedInquiry?.owner_name,
         relatedInquiry?.salesRepName,
         ownerEmail === fallbackEmail ? currentUser?.name : '',
       ],

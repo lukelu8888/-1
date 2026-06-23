@@ -37,6 +37,46 @@ function toIsoDate(v: any): string | null {
   return d.toISOString().slice(0, 10)
 }
 
+function toPaymentNumberSegment(value: any): string {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+}
+
+function inferPaymentType(p: any): string {
+  const explicit = p.paymentType || p.payment_type
+  if (explicit) return explicit
+  const text = `${p.notes || ''} ${p.reference || ''} ${p.bankReference || p.bank_reference || ''}`.toLowerCase()
+  if (text.includes('余款') || text.includes('balance') || text.includes('final')) return 'balance'
+  return 'deposit'
+}
+
+function buildPaymentNumber(p: any, paymentType: string): string {
+  const explicit = p.paymentNumber || p.payment_number
+  if (explicit) return explicit
+
+  const source =
+    p.receivableNumber ||
+    p.receivable_number ||
+    p.orderNumber ||
+    p.order_number ||
+    p.contractNumber ||
+    p.contract_number ||
+    p.receivableId ||
+    p.receivable_id ||
+    p.id
+  const date = toIsoDate(p.paidDate || p.paid_date || p.paymentDate || p.payment_date) || new Date().toISOString().slice(0, 10)
+  const sourceSegment = toPaymentNumberSegment(source) || 'UNLINKED'
+  const typeSegment = toPaymentNumberSegment(paymentType) || 'PAYMENT'
+  const dateSegment = date.replace(/-/g, '')
+  const referenceSegment = toPaymentNumberSegment(p.bankReference || p.bank_reference || p.reference)
+
+  return ['PAY', sourceSegment, typeSegment, dateSegment, referenceSegment].filter(Boolean).join('-')
+}
+
 function toInquiryOemModuleRow(inquiryId: string, oem: any, options: { productId?: string | null; productName?: string | null } = {}) {
   return {
     inquiry_id: inquiryId,
@@ -475,22 +515,29 @@ export const inquiryOemFactoryDispatchService = {
 }
 
 function toPaymentRow(p: any) {
+  const paymentType = inferPaymentType(p)
+  const bankInfo = {
+    ...(p.bankInfo || p.bank_info || {}),
+    ...(p.receivableId || p.receivable_id ? { receivableId: p.receivableId || p.receivable_id } : {}),
+    ...(p.receivableNumber || p.receivable_number ? { receivableNumber: p.receivableNumber || p.receivable_number } : {}),
+    ...(p.bankReference || p.bank_reference || p.reference ? { bankReference: p.bankReference || p.bank_reference || p.reference } : {}),
+  }
   return {
     id: toUUID(p.id),
-    payment_number: p.paymentNumber || p.payment_number || '',
+    payment_number: buildPaymentNumber(p, paymentType),
     order_number: p.orderNumber || p.order_number || null,
     contract_number: p.contractNumber || p.contract_number || null,
     customer_name: p.customerName || p.customer_name || '',
     customer_email: p.customerEmail || p.customer_email || '',
     amount: p.amount || 0,
     currency: p.currency || 'USD',
-    payment_type: p.paymentType || p.payment_type || 'deposit',
+    payment_type: paymentType,
     payment_method: p.paymentMethod || p.payment_method || null,
     status: p.status || 'pending',
     due_date: toIsoDate(p.dueDate || p.due_date),
-    paid_date: toIsoDate(p.paidDate || p.paid_date),
-    bank_info: p.bankInfo || p.bank_info || null,
-    attachment_url: p.attachmentUrl || p.attachment_url || null,
+    paid_date: toIsoDate(p.paidDate || p.paid_date || p.paymentDate || p.payment_date),
+    bank_info: Object.keys(bankInfo).length > 0 ? bankInfo : null,
+    attachment_url: p.attachmentUrl || p.attachment_url || p.proofUrl || p.proof_url || null,
     notes: p.notes || null,
     created_by: p.createdBy || p.created_by || null,
   }
@@ -534,7 +581,7 @@ export const paymentService = {
   },
   async upsert(p: any) {
     const row = toPaymentRow(p)
-    const { data, error } = await supabase.from('payments').upsert(row, { onConflict: 'id' }).select().single()
+    const { data, error } = await supabase.from('payments').upsert(row, { onConflict: 'payment_number' }).select().single()
     if (error) return handleError(error, 'upsert payment')
     return fromPaymentRow(data)
   },

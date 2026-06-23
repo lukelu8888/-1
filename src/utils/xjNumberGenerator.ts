@@ -27,7 +27,7 @@ export async function nextQRNumber(region = 'NA'): Promise<string> {
     return data as string;
   } catch (e) {
     console.error('[xjNumberGenerator] nextQRNumber RPC failed:', e);
-    return localFallback('QR');
+    return localFallback('QR', region);
   }
 }
 
@@ -192,12 +192,13 @@ export function generateDocumentNumber(type: DocumentType, region: RegionType): 
 
 /**
  * Parse document number to extract type, region, date and sequence
- * @param documentNumber Document number string (e.g., "ING-NA-251120-0001")
+ * Supports sequence widths of 4 or more digits.
+ * @param documentNumber Document number string (e.g., "ING-NA-251120-0001" or "ING-NA-251120-10000")
  * @returns Parsed data or null if invalid
  */
 export function parseDocumentNumber(documentNumber: string): { type: string; region: string; date: string; sequence: number } | null {
-  // Try new format first: {TYPE}-{REGION}-YYMMDD-XXXX
-  const newFormatMatch = documentNumber.match(/^([A-Z]{2,3})-([A-Z]{2})-(\d{6})-(\d{4})$/);
+  // Try new format first: {TYPE}-{REGION}-YYMMDD-{SEQUENCE}
+  const newFormatMatch = documentNumber.match(/^([A-Z]{2,3})-([A-Z]{2})-(\d{6})-(\d{4,})$/);
   if (newFormatMatch) {
     return {
       type: newFormatMatch[1],

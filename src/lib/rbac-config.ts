@@ -448,18 +448,18 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   // 🔧 Admin（系统管理员）- 技术支持与系统维护
   // ========================================
   // 🔥 角色定位：IT技术人员，负责系统配置和维护
-  // ✅ 有权限：系统设置、用户管理、数据备份、权限配置
-  // ❌ 无权限：业务数据、财务数据、审批流程（这些属于CEO）
+  // ✅ 有权限：系统设置、用户管理、数据备份、权限配置、财务模块入口（运维/演示）
+  // ❌ 无权限：一线业务与客户销售流程（订单/合同等交由业务角色）；无业务审批权限
   Admin: [
     'access:dashboard',           // ✅ 访问工作台
     'access:settings',            // ✅ 系统设置（核心职责）
     'access:user_management',     // ✅ 用户管理（核心职责）
     'access:backup_center',       // ✅ 数据备份（核心职责）
     'access:data_management',     // ✅ 数据管理（核心职责）
+    'access:finance_management',  // ✅ 财务模块（实施/运维联调与客户演示需要）
     // ❌ 移除access:quote_management - 业务模块，不应访问
     // ❌ 移除access:contract_management - 业务模块，不应访问
     // ❌ 移除业务模块访问权限 - 系统管理员不应参与业务决策
-    // ❌ 移除财务模块访问权限 - 财务数据属于CEO/CFO/Finance职责
     // ❌ 移除审批权限 - 审批属于业务决策，不是技术职责
   ],
 
@@ -567,7 +567,7 @@ const ACCESS_PERMISSION_MODULE_MAP: Partial<Record<Permission, PermissionModuleI
   'access:service_provider': ['service-provider-management'],
   'access:order_management': ['order-management-center'],
   'access:purchase_orders': ['purchase-order-management'],
-  'access:shipping': ['shipping-document-management', 'documentation-workbench-ultimate'],
+  'access:shipping': ['shipping-document-management', 'documentation-center', 'documentation-workbench-ultimate'],
   'access:data_management': [
     'people-admin-center',
     'admin-ops-center',
@@ -578,6 +578,7 @@ const ACCESS_PERMISSION_MODULE_MAP: Partial<Record<Permission, PermissionModuleI
     'status-flow-simulator',
     'role-permission',
     'menu-permission-matrix',
+    'document-numbering-center',
     'permission-center',
     'enterprise-backup-center',
     'supabase-diagnostic',
@@ -586,7 +587,7 @@ const ACCESS_PERMISSION_MODULE_MAP: Partial<Record<Permission, PermissionModuleI
   'access:product_management': ['product-management'],
   'access:product_push': ['product-push'],
   'access:social_media': ['social-media-marketing'],
-  'access:finance_management': ['finance-management'],
+  'access:finance_management': ['finance-management', 'management-finance-center', 'expense-management-center'],
   'access:backup_center': ['enterprise-backup-center'],
 };
 

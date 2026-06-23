@@ -1,5 +1,5 @@
 import type { InquirySnapshotDraft, ProductMappingRef } from '../product-domain/types';
-import { getInternalModelNo } from '../../utils/productModelDisplay';
+import { getFactoryFacingModelNo, getInternalModelNo } from '../../utils/productModelDisplay';
 import {
   buildAttachmentSummarySnapshot,
   buildFileManifestSnapshot,
@@ -45,11 +45,13 @@ const toMappingRef = (product: any): ProductMappingRef | null => {
 export const websiteCatalogAdapter = {
   toInquirySnapshotDraft(product: any, context: WebsiteCatalogSelectionContext = {}): InquirySnapshotDraft {
     const internalModelNo = normalizeText(getInternalModelNo(product));
+    const factoryModelNo = normalizeText(getFactoryFacingModelNo(product) || internalModelNo);
     const specSummary = toSpecSummary(product);
     return {
       masterRef: {
         masterProductId: normalizeText(product?.masterProductId || product?.supplierProductId) || null,
         internalModelNo,
+        factoryModelNo,
         isResolved: Boolean(product?.masterProductId || product?.supplierProductId || internalModelNo),
       },
       mappingRef: toMappingRef(product),
@@ -66,6 +68,7 @@ export const websiteCatalogAdapter = {
       }),
       customerModelNo: '',
       supplierModelNo: normalizeText(product?.sku || product?.modelNo || ''),
+      factoryModelNo,
       description: specSummary,
       specSummary,
       imageUrl: normalizeText(product?.image || product?.imageUrl),

@@ -106,13 +106,17 @@ export const sanitizePurchaserFeedbackForSales = (
   if (!feedback) return null;
   if (userRole !== SALES_ROLE) return feedback;
 
+  const { decisionSnapshot: _decisionSnapshot, ...restFeedback } = feedback as QuoteRequirementFeedback & {
+    decisionSnapshot?: unknown;
+  };
+
   const sanitizedProducts: QuoteRequirementFeedbackProduct[] = (feedback.products || []).map((product) => ({
     ...product,
     remarks: desensitizePurchaserFeedbackText(product.remarks || '', feedback, userRole),
   }));
 
   return {
-    ...feedback,
+    ...restFeedback,
     linkedBJ: feedback.linkedBJ ? '已隐藏' : feedback.linkedBJ,
     linkedSupplier: feedback.linkedSupplier ? '已隐藏' : feedback.linkedSupplier,
     purchaserRemarks: desensitizePurchaserFeedbackText(feedback.purchaserRemarks || '', feedback, userRole),

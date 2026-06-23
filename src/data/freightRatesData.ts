@@ -633,12 +633,15 @@ export function searchPorts(query: string) {
     return getAllPorts();
   }
   
-  const searchTerm = query.toLowerCase();
+  const searchTerm = query.toLowerCase().trim();
+  const normalizedSearchTerm = searchTerm.replace(/[,\s]+/g, ' ').trim();
   const allPorts = getAllPorts();
   
   return allPorts.filter(port => 
     port.name.toLowerCase().includes(searchTerm) ||
     port.country.toLowerCase().includes(searchTerm) ||
-    port.code.toLowerCase().includes(searchTerm)
+    port.code.toLowerCase().includes(searchTerm) ||
+    `${port.name}, ${port.country}`.toLowerCase().includes(searchTerm) ||
+    `${port.name} ${port.country}`.toLowerCase().includes(normalizedSearchTerm)
   );
 }

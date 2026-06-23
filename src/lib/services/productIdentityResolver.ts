@@ -5,6 +5,7 @@ import {
 } from '../supabaseService';
 import {
   getCustomerPartNo,
+  getFactoryFacingModelNo,
   getInternalModelNo,
   getSupplierPartNo,
 } from '../../utils/productModelDisplay';
@@ -24,6 +25,7 @@ export type IdentityResolutionInput = {
   description?: unknown;
   imageUrl?: unknown;
   internalModelNo?: unknown;
+  factoryModelNo?: unknown;
   customerModelNo?: unknown;
   supplierModelNo?: unknown;
   mappingPartyType?: MappingPartyType | null;
@@ -50,6 +52,7 @@ const buildMasterProductRef = (productMaster: any, fallbackInternalModelNo?: str
   return {
     masterProductId: toNullableText(productMaster?.id),
     internalModelNo,
+    factoryModelNo: normalizeText(productMaster?.factoryModelNo || productMaster?.factorySku || fallbackInternalModelNo),
     isResolved: Boolean(productMaster?.id && internalModelNo),
   };
 };
@@ -99,9 +102,12 @@ export const productIdentityResolver = {
       resolutionStatus = 'generated_master';
     }
 
+    const factoryModelNo = normalizeText(input.factoryModelNo) || normalizeText(getFactoryFacingModelNo(input)) || internalModelNo;
+
     if (internalModelNo && input.createMasterIfMissing !== false) {
       productMaster = await productMasterService.upsert({
         internalModelNo,
+        factoryModelNo,
         regionCode,
         productName,
         description,

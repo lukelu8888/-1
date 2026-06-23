@@ -4,6 +4,43 @@ import type { SalesQuotation } from '../../contexts/SalesQuotationContext'
 import type { SalesContract } from '../../contexts/SalesContractContext'
 import type { PurchaseOrder } from '../../contexts/PurchaseOrderContext'
 import { normalizePersonnelEmail } from '../notification-rules'
+import {
+  buildTaskCenterCompatFields,
+  buildTaskCenterRiskCountMap,
+  buildTaskCenterSectionCountMap,
+  composeTaskCenterDataBundle,
+  finalizeCollaborationSections,
+  finalizeTaskCenterRiskItems,
+  finalizeTaskSections,
+} from './taskCenterContracts'
+import type { RoleCollaborationSection, TaskCenterCompatFields, TaskCenterDataBundle, TaskCenterRiskItem, TaskCenterRiskOverview, TaskCenterSection } from './taskCenterContracts'
+
+// ── computeSalesTodoSummary input/output types (used by SalesManagerTodoCenter & orderManagementCountService) ──
+export interface ComputeSalesTodoSummaryInput {
+  salesEmail: string
+  salesName?: string
+  salesRegion?: string
+  inquiries: Inquiry[]
+  quotationRequests: QuotationRequest[]
+  quotations: SalesQuotation[]
+  contracts: SalesContract[]
+  purchaseOrders: PurchaseOrder[]
+  quoteRequirements?: any[]
+  exportServiceOrders?: any[]
+}
+
+export interface ComputeSalesTodoSummaryResult {
+  aggregated: AggregateTodosResult
+  totalOpen: number
+  moduleCounts: {
+    inquiries: number
+    costInquiry: number
+    quotations: number
+    orders: number
+    collections: number
+    exportService: number
+  }
+}
 
 export type TodoPriority = 'overdue' | 'high' | 'medium' | 'normal'
 
@@ -19,6 +56,15 @@ export type TodoType =
   | 'inspection_method'
   | 'third_party_inspection'
   | 'payment_followup'
+  | 'balance_tt_chase'
+  | 'lc_open_chase'
+  | 'lc_terms_confirm'
+  | 'bl_copy_send'
+  | 'dp_redemption_chase'
+  | 'da_acceptance_chase'
+  | 'da_maturity_chase'
+  | 'oa_period_warning'
+  | 'oa_overdue_chase'
   | 'freight_confirmation'
   | 'arrival_confirmation'
   | 'clearance_docs'
@@ -101,6 +147,24 @@ export interface AggregateTodosResult {
   todos: SalesTodoItem[]
   bucketCounts: Record<TodoBucket, number>
   customerGroups: CustomerGroup[]
+  summary: SalesTodoDashboardSummary
+  taskCenter: TaskCenterDataBundle<SalesTodoItem>
+  taskSections: TaskCenterCompatFields<SalesTodoItem>['taskSections']
+  riskItems: TaskCenterRiskItem[]
+  riskOverview: TaskCenterRiskOverview
+  collaborationSections: RoleCollaborationSection[]
+}
+
+export interface SalesTodoDashboardSummary {
+  totalOpen: number
+  mustTodayCount: number
+  overdueCount: number
+  completedTodayCount: number
+  highRiskGroups: CustomerGroup[]
+  upcomingTodos: SalesTodoItem[]
+  mustTodayDone: number
+  mustTodayTotal: number
+  progressPct: number
 }
 
 export interface CustomerReplyItem {
@@ -189,10 +253,57 @@ function calcBucket(type: TodoType, priority: TodoPriority): TodoBucket {
   if (['qt_send', 'qt_customer_feedback', 'qt_negotiating', 'sc_sign', 'inspection_method', 'third_party_inspection'].includes(type)) {
     return 'quote_contract'
   }
-  if (['sc_deposit', 'payment_followup', 'freight_confirmation'].includes(type)) return 'payment'
+  if ([
+    'sc_deposit',
+    'payment_followup',
+    'balance_tt_chase',
+    'lc_open_chase',
+    'lc_terms_confirm',
+    'bl_copy_send',
+    'dp_redemption_chase',
+    'da_acceptance_chase',
+    'da_maturity_chase',
+    'oa_period_warning',
+    'oa_overdue_chase',
+    'freight_confirmation',
+  ].includes(type)) return 'payment'
   if (['arrival_confirmation', 'clearance_docs', 'receipt_confirmation'].includes(type)) return 'delivery'
   if (type === 'feedback_followup') return 'feedback'
   return 'must_today'
+}
+
+function collaborationRolesForTodoType(type: TodoType): string[] {
+  switch (type) {
+    case 'qr_waiting_cost':
+      return ['Procurement']
+    case 'sc_sign':
+      return ['Customer']
+    case 'sc_deposit':
+    case 'balance_tt_chase':
+    case 'dp_redemption_chase':
+    case 'da_acceptance_chase':
+    case 'da_maturity_chase':
+    case 'oa_period_warning':
+    case 'oa_overdue_chase':
+      return ['Finance']
+    case 'inspection_method':
+    case 'third_party_inspection':
+      return ['QC']
+    case 'lc_open_chase':
+      return ['Finance', 'Customer']
+    case 'lc_terms_confirm':
+      return ['Documentation_Officer', 'Finance']
+    case 'freight_confirmation':
+    case 'arrival_confirmation':
+    case 'receipt_confirmation':
+      return ['Order_Coordinator']
+    case 'clearance_docs':
+      return ['Documentation_Officer']
+    case 'feedback_followup':
+      return ['Marketing_Ops']
+    default:
+      return []
+  }
 }
 
 function pickLatestFollowUp(todoId: string, all: FollowUpRecord[]) {
@@ -206,6 +317,107 @@ function stageFromPo(po: PurchaseOrder): string {
   if (po.shipmentReadinessStatus === 'arrival_notice_sent' || po.shipmentReadinessStatus === 'arrived_at_port') return '已到港，待客户确认'
   if (po.finishedGoodsConfirmedAt) return '完货后客户协同'
   return '履约协同'
+}
+
+function buildPaymentTodoConfig(
+  po: PurchaseOrder,
+  contract: Partial<SalesContract> | null,
+): { type: TodoType; blockReason: string; nextAction: string; ageAt?: string; dueAt?: string } | null {
+  const mode = String(po.collectionControlMode || '').trim()
+  const gateStatus = String(po.customerBalanceGateStatus || 'pending').trim().toLowerCase()
+  const bankStatus = String(po.bankSubmissionStatus || 'not_required').trim().toLowerCase()
+  const documentStatus = String(po.documentReleaseStatus || 'pending').trim().toLowerCase()
+  const paymentMode = String(contract?.paymentMode || '').trim()
+
+  if (!mode || ['released', 'completed', 'collected', 'finance_confirmed'].includes(gateStatus)) {
+    return null
+  }
+
+  if (mode === 'prepaid_before_booking' || mode === 'post_tt_before_obl_release') {
+    if (paymentMode === 'tt_deposit_balance_against_bl' && !po.customerPaymentReceivedAt && !po.customerPaymentConfirmedAt) {
+      return {
+        type: 'bl_copy_send',
+        blockReason: '见提单付款场景下，待向客户发送提单副本并催收尾款',
+        nextAction: '发送提单副本并催客户付款',
+        ageAt: po.updatedDate || po.createdDate,
+      }
+    }
+
+    return {
+      type: 'balance_tt_chase',
+      blockReason: mode === 'prepaid_before_booking'
+        ? '订舱前尾款尚未完成确认'
+        : '放单前尾款尚未完成确认',
+      nextAction: mode === 'prepaid_before_booking' ? '催客户完成订舱前尾款' : '催客户完成放单前尾款',
+      ageAt: po.customerBalanceConfirmedAt || po.customerPaymentReceivedAt || po.updatedDate || po.createdDate,
+    }
+  }
+
+  if (mode === 'lc_bank_negotiation') {
+    if (['pending_lc_issuance', 'awaiting_customer', 'blocked'].includes(gateStatus)) {
+      return {
+        type: 'lc_open_chase',
+        blockReason: '信用证尚未落实，无法进入交单议付环节',
+        nextAction: '催客户开立并确认 L/C',
+        ageAt: po.updatedDate || po.createdDate,
+      }
+    }
+
+    if (['pending_submission', 'submitted_to_bank'].includes(bankStatus)) {
+      return {
+        type: 'lc_terms_confirm',
+        blockReason: bankStatus === 'submitted_to_bank'
+          ? '已向银行交单，待跟进议付与单证条件'
+          : 'L/C 已到位，待确认交单要求与议付条件',
+        nextAction: bankStatus === 'submitted_to_bank' ? '跟进银行议付与单证状态' : '确认 L/C 条款与交单要求',
+        ageAt: po.bankSubmittedAt || po.updatedDate || po.createdDate,
+      }
+    }
+
+    return {
+      type: 'lc_terms_confirm',
+      blockReason: 'L/C 相关条件尚未完成闭环',
+      nextAction: '跟进 L/C 条款、交单与议付结果',
+      ageAt: po.bankSubmittedAt || po.updatedDate || po.createdDate,
+    }
+  }
+
+  if (mode === 'dp_collection' || mode === 'dp_or_other_collection' || mode === 'da_acceptance') {
+    if (paymentMode === 'oa') {
+      const overdue = gateStatus.includes('overdue') || documentStatus === 'blocked'
+      return {
+        type: overdue ? 'oa_overdue_chase' : 'oa_period_warning',
+        blockReason: overdue ? '账期已逾期，待客户完成回款' : '账期临近或待客户完成账期内付款',
+        nextAction: overdue ? '催客户处理逾期账款' : '提醒客户在账期内完成付款',
+        ageAt: po.customerPaymentReceivedAt || po.updatedDate || po.createdDate,
+      }
+    }
+
+    if (mode === 'da_acceptance' || paymentMode === 'da') {
+      const maturityStates = ['accepted', 'matured', 'due', 'awaiting_maturity']
+      const isMaturityStage = maturityStates.some((state) => bankStatus.includes(state)) || documentStatus === 'released'
+      return {
+        type: isMaturityStage ? 'da_maturity_chase' : 'da_acceptance_chase',
+        blockReason: isMaturityStage ? '承兑已进入到期付款阶段，待客户履约付款' : '承兑交单场景下，待客户完成承兑确认',
+        nextAction: isMaturityStage ? '催客户按承兑到期付款' : '催客户完成承兑确认',
+        ageAt: po.bankSubmittedAt || po.updatedDate || po.createdDate,
+      }
+    }
+
+    return {
+      type: 'dp_redemption_chase',
+      blockReason: '托收/赎单条件尚未完成，待客户在银行完成赎单',
+      nextAction: '催客户完成银行赎单或托收确认',
+      ageAt: po.bankSubmittedAt || po.updatedDate || po.createdDate,
+    }
+  }
+
+  return {
+    type: 'payment_followup',
+    blockReason: '客户付款控制节点尚未完成',
+    nextAction: '催客户完成付款/交单前条件',
+    ageAt: po.customerBalanceConfirmedAt || po.updatedDate || po.createdDate,
+  }
 }
 
 function findContractForPurchaseOrder(
@@ -387,6 +599,18 @@ export function aggregateSalesTodosFromContexts(input: AggregateTodosInput): Agg
         ...base,
       }, completedMap, followUps, { dueAt: qt.validUntil, ageAt: qt.customerResponse?.respondedAt || qt.sentAt || qt.createdAt }))
     }
+
+    if (qt.approvalStatus === 'approved' && qt.customerStatus === 'accepted' && !qt.pushedToContract) {
+      items.push(buildBaseTodo({
+        id: `qt-${qt.id}-prepare-sc`,
+        type: 'qt_prepare_sc',
+        stage: '客户已确认 QT',
+        blockReason: '客户已接受报价，尚未生成销售合同',
+        nextAction: '下推生成 SC，并提交合同审批',
+        lastContactAt: qt.customerResponse?.respondedAt || qt.sentAt,
+        ...base,
+      }, completedMap, followUps, { dueAt: qt.validUntil, ageAt: qt.customerResponse?.respondedAt || qt.sentAt || qt.createdAt }))
+    }
   }
 
   for (const sc of contracts) {
@@ -447,7 +671,7 @@ export function aggregateSalesTodosFromContexts(input: AggregateTodosInput): Agg
       docType: 'CG' as const,
       createdAt: toIso(po.updatedDate || po.createdDate || po.orderDate),
       referenceId: po.id,
-      navigateTo: 'shipment-management',
+      navigateTo: 'shipping-document-management',
     }
 
     if (po.finishedGoodsConfirmedAt && !po.customerInspectionMode) {
@@ -489,18 +713,16 @@ export function aggregateSalesTodosFromContexts(input: AggregateTodosInput): Agg
       }, completedMap, followUps, { ageAt: po.updatedDate || po.createdDate }))
     }
 
-    if (
-      po.collectionControlMode &&
-      ['pending', 'awaiting_customer', 'blocked'].includes(String(po.customerBalanceGateStatus || 'pending'))
-    ) {
+    const paymentTodoConfig = buildPaymentTodoConfig(po, contract)
+    if (paymentTodoConfig) {
       items.push(buildBaseTodo({
-        id: `po-${po.id}-payment`,
-        type: 'payment_followup',
+        id: `po-${po.id}-payment-${paymentTodoConfig.type}`,
+        type: paymentTodoConfig.type,
         stage: stageFromPo(po),
-        blockReason: '客户付款控制节点尚未完成',
-        nextAction: '催客户完成付款/交单前条件',
+        blockReason: paymentTodoConfig.blockReason,
+        nextAction: paymentTodoConfig.nextAction,
         ...base,
-      }, completedMap, followUps, { ageAt: po.customerBalanceConfirmedAt || po.updatedDate || po.createdDate }))
+      }, completedMap, followUps, { ageAt: paymentTodoConfig.ageAt, dueAt: paymentTodoConfig.dueAt }))
     }
 
     if (po.freightConfirmationRequired && !po.freightConfirmedByCustomerAt) {
@@ -596,7 +818,112 @@ export function aggregateSalesTodosFromContexts(input: AggregateTodosInput): Agg
 
   customerGroups.sort((a, b) => priorityOrder.indexOf(a.highestPriority) - priorityOrder.indexOf(b.highestPriority))
 
-  return { todos: items, bucketCounts, customerGroups }
+  const openTodos = items.filter((item) => !item.isCompleted)
+  const taskSections: TaskCenterSection<SalesTodoItem>[] = finalizeTaskSections([
+    {
+      key: 'must-today',
+      label: '今日必须跟进',
+      accent: 'red',
+      count: openTodos.filter((item) => item.bucket === 'must_today').length,
+      items: openTodos.filter((item) => item.bucket === 'must_today').slice(0, 5),
+    },
+    {
+      key: 'payment',
+      label: '付款与放单',
+      accent: 'orange',
+      count: openTodos.filter((item) => item.bucket === 'payment').length,
+      items: openTodos.filter((item) => item.bucket === 'payment').slice(0, 5),
+    },
+    {
+      key: 'delivery-feedback',
+      label: '交付与反馈',
+      accent: 'blue',
+      count: openTodos.filter((item) => item.bucket === 'delivery' || item.bucket === 'feedback').length,
+      items: openTodos.filter((item) => item.bucket === 'delivery' || item.bucket === 'feedback').slice(0, 5),
+    },
+  ], {
+    order: ['must-today', 'payment', 'delivery-feedback'],
+    defaultAccent: 'blue',
+  })
+
+  const riskItems: TaskCenterRiskItem[] = finalizeTaskCenterRiskItems([
+    { key: 'overdue', label: '超期事项', count: openTodos.filter((item) => item.priority === 'overdue').length, tone: 'critical' },
+    { key: 'high-priority', label: '高优先级', count: openTodos.filter((item) => item.priority === 'high').length, tone: 'warning' },
+    { key: 'payment-risk', label: '付款/放单风险', count: openTodos.filter((item) => item.bucket === 'payment').length, tone: 'info' },
+    { key: 'delivery-risk', label: '交付/反馈待跟进', count: openTodos.filter((item) => item.bucket === 'delivery' || item.bucket === 'feedback').length, tone: 'default' },
+  ], {
+    order: ['overdue', 'high-priority', 'payment-risk', 'delivery-risk'],
+  })
+
+  const collaborationAccumulator = new Map<string, RoleCollaborationSection>()
+  openTodos.forEach((item) => {
+    collaborationRolesForTodoType(item.type).forEach((role) => {
+      const key = role.toLowerCase()
+      const existing = collaborationAccumulator.get(key)
+      if (existing) {
+        existing.count += 1
+      } else {
+        collaborationAccumulator.set(key, {
+          key,
+          label: `${role}协同`,
+          roles: [role],
+          count: 1,
+        })
+      }
+    })
+  })
+  const collaborationSections = finalizeCollaborationSections(Array.from(collaborationAccumulator.values()), {
+    order: ['finance', 'procurement', 'docs', 'coordinator', 'qc', 'marketing_ops', 'customer'],
+  })
+
+  const taskCenter = composeTaskCenterDataBundle({
+    taskSections,
+    riskItems,
+    collaborationSections,
+  })
+  const taskCenterCompat = buildTaskCenterCompatFields(taskCenter)
+  const taskSectionCountMap = buildTaskCenterSectionCountMap(taskSections)
+  const riskCountMap = buildTaskCenterRiskCountMap(riskItems)
+  const highRiskGroups = customerGroups
+    .filter((group) => group.hasOverdue || group.highestPriority === 'high')
+    .slice(0, 5)
+  const upcomingTodos = openTodos
+    .filter((item) => item.nextFollowUpAt || item.dueAt)
+    .sort(
+      (a, b) =>
+        new Date(a.nextFollowUpAt || a.dueAt || 0).getTime() -
+        new Date(b.nextFollowUpAt || b.dueAt || 0).getTime(),
+    )
+    .slice(0, 5)
+  const mustTodayCount = taskSectionCountMap['must-today'] || 0
+  const completedTodayCount = bucketCounts.done_today || 0
+  const overdueCount = riskCountMap['overdue'] || 0
+  const mustTodayDone = items.filter(
+    (item) =>
+      item.isCompleted &&
+      (item.bucket === 'must_today' || item.priority === 'overdue' || item.priority === 'high'),
+  ).length
+  const mustTodayTotal = mustTodayCount + mustTodayDone
+  const progressPct = mustTodayTotal > 0 ? Math.round((mustTodayDone / mustTodayTotal) * 100) : 100
+  const summary: SalesTodoDashboardSummary = {
+    totalOpen: openTodos.length,
+    mustTodayCount,
+    overdueCount,
+    completedTodayCount,
+    highRiskGroups,
+    upcomingTodos,
+    mustTodayDone,
+    mustTodayTotal,
+    progressPct,
+  }
+
+  return {
+    todos: items,
+    bucketCounts,
+    customerGroups,
+    summary,
+    ...taskCenterCompat,
+  }
 }
 
 export function aggregateCustomerReplies(params: {
@@ -636,4 +963,43 @@ export function aggregateCustomerReplies(params: {
   }
 
   return replies.sort((a, b) => new Date(b.repliedAt).getTime() - new Date(a.repliedAt).getTime())
+}
+
+// ── Higher-level summary used by SalesManagerTodoCenter and orderManagementCountService ──
+export function computeSalesTodoSummary(input: ComputeSalesTodoSummaryInput): ComputeSalesTodoSummaryResult {
+  const aggregated = aggregateSalesTodosFromContexts({
+    salesEmail: input.salesEmail,
+    inquiries: input.inquiries,
+    quotationRequests: input.quotationRequests,
+    quotations: input.quotations,
+    contracts: input.contracts,
+    purchaseOrders: input.purchaseOrders,
+  })
+
+  const openTodos = aggregated.todos.filter((t) => !t.isCompleted)
+  const totalOpen = openTodos.length
+
+  // Derive module-level counts from open todo types
+  const moduleCounts = {
+    inquiries: openTodos.filter((t) => t.docType === 'ING').length,
+    costInquiry: openTodos.filter((t) => t.docType === 'QR').length,
+    quotations: openTodos.filter((t) => t.docType === 'QT').length,
+    orders: openTodos.filter((t) => t.docType === 'SC').length,
+    collections: openTodos.filter((t) => [
+      'sc_deposit',
+      'payment_followup',
+      'balance_tt_chase',
+      'lc_open_chase',
+      'lc_terms_confirm',
+      'bl_copy_send',
+      'dp_redemption_chase',
+      'da_acceptance_chase',
+      'da_maturity_chase',
+      'oa_period_warning',
+      'oa_overdue_chase',
+    ].includes(t.type)).length,
+    exportService: openTodos.filter((t) => ['freight_confirmation', 'arrival_confirmation', 'clearance_docs', 'receipt_confirmation'].includes(t.type)).length,
+  }
+
+  return { aggregated, totalOpen, moduleCounts }
 }

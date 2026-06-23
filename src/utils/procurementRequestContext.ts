@@ -12,6 +12,8 @@ export interface CustomerRequirementsSnapshot {
   packagingRequirements?: string;
   otherRequirements?: string;
   customerRemarks?: string;
+  documentReleasePreference?: string;
+  certifications?: string[] | string;
   productRequirements?: string[];
 }
 
@@ -19,7 +21,10 @@ export interface CommercialTermsSnapshot {
   expectedQuoteDate?: string;
   deliveryDate?: string;
   tradeTerms?: string;
+  incoterm?: string;
   paymentTerms?: string;
+  paymentMode?: string;
+  balanceTrigger?: string;
   targetCostRange?: string;
   qualityRequirements?: string;
   packagingRequirements?: string;
@@ -162,6 +167,9 @@ export const buildProcurementRequestNotes = (terms: CommercialTermsSnapshot): st
   [
     terms.expectedQuoteDate ? `期望报价日: ${terms.expectedQuoteDate}` : '',
     terms.deliveryDate ? `期望交期: ${terms.deliveryDate}` : '',
+    terms.incoterm ? `Incoterm: ${terms.incoterm}` : '',
+    terms.paymentMode ? `付款模式: ${terms.paymentMode}` : '',
+    terms.balanceTrigger ? `付款触发节点: ${terms.balanceTrigger}` : '',
     terms.paymentTerms ? `付款条款: ${terms.paymentTerms}` : '',
     terms.tradeTerms ? `贸易条款: ${terms.tradeTerms}` : '',
     terms.qualityRequirements ? `验货要求: ${terms.qualityRequirements}` : '',
@@ -189,6 +197,12 @@ export const parseProcurementRequestNotes = (raw: unknown): Partial<CommercialTe
       result.expectedQuoteDate = normalized.replace('期望报价日:', '').trim();
     } else if (normalized.startsWith('期望交期:')) {
       result.deliveryDate = normalized.replace('期望交期:', '').trim();
+    } else if (normalized.startsWith('Incoterm:')) {
+      result.incoterm = normalized.replace('Incoterm:', '').trim();
+    } else if (normalized.startsWith('付款模式:')) {
+      result.paymentMode = normalized.replace('付款模式:', '').trim();
+    } else if (normalized.startsWith('付款触发节点:')) {
+      result.balanceTrigger = normalized.replace('付款触发节点:', '').trim();
     } else if (normalized.startsWith('付款条款:')) {
       result.paymentTerms = normalized.replace('付款条款:', '').trim();
     } else if (normalized.startsWith('贸易条款:')) {
@@ -282,6 +296,7 @@ export const buildCustomerRequirementsSnapshot = (
   const snapshot: CustomerRequirementsSnapshot = {
     packagingRequirements:
       asTrimmedText(inquiry?.requirements?.packagingRequirements) ||
+      asTrimmedText(inquiry?.requirements?.packingRequirements) ||
       asTrimmedText(inquiry?.requirements?.packaging) ||
       asTrimmedText(inquiry?.shippingInfo?.packagingRequirements) ||
       asTrimmedText(inquiry?.packagingRequirements),
@@ -293,6 +308,13 @@ export const buildCustomerRequirementsSnapshot = (
       asTrimmedText(inquiry?.requirements?.remarks) ||
       asTrimmedText(inquiry?.buyerMessage) ||
       asTrimmedText(inquiry?.remarks),
+    documentReleasePreference:
+      asTrimmedText(inquiry?.requirements?.documentReleasePreference) ||
+      asTrimmedText(inquiry?.documentReleasePreference),
+    certifications:
+      inquiry?.requirements?.certifications ||
+      inquiry?.certifications ||
+      undefined,
     productRequirements: productRequirements.length > 0 ? productRequirements : undefined,
   };
 
@@ -300,6 +322,8 @@ export const buildCustomerRequirementsSnapshot = (
     !snapshot.packagingRequirements &&
     !snapshot.otherRequirements &&
     !snapshot.customerRemarks &&
+    !snapshot.documentReleasePreference &&
+    !(Array.isArray(snapshot.certifications) ? snapshot.certifications.length > 0 : asTrimmedText(snapshot.certifications)) &&
     !snapshot.productRequirements?.length
   ) {
     return null;
@@ -338,10 +362,19 @@ export const buildCommercialTermsSnapshotFromInquiry = (
       asTrimmedText(shippingInfo.tradeTerms) ||
       asTrimmedText(requirements.tradeTerms) ||
       asTrimmedText(inquiry.tradeTerms),
+    incoterm:
+      asTrimmedText(requirements.incoterm) ||
+      asTrimmedText(inquiry.incoterm),
     paymentTerms:
       asTrimmedText(shippingInfo.paymentTerms) ||
       asTrimmedText(requirements.paymentTerms) ||
       asTrimmedText(inquiry.paymentTerms),
+    paymentMode:
+      asTrimmedText(requirements.paymentMode) ||
+      asTrimmedText(inquiry.paymentMode),
+    balanceTrigger:
+      asTrimmedText(requirements.balanceTrigger) ||
+      asTrimmedText(inquiry.balanceTrigger),
     targetCostRange:
       asTrimmedText(inquiry.targetCostRange) ||
       asTrimmedText(requirements.targetCostRange),
@@ -362,7 +395,10 @@ export const buildCommercialTermsSnapshotFromInquiry = (
     !snapshot.expectedQuoteDate &&
     !snapshot.deliveryDate &&
     !snapshot.tradeTerms &&
+    !snapshot.incoterm &&
     !snapshot.paymentTerms &&
+    !snapshot.paymentMode &&
+    !snapshot.balanceTrigger &&
     !snapshot.targetCostRange &&
     !snapshot.qualityRequirements &&
     !snapshot.packagingRequirements &&

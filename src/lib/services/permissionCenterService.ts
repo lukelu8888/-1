@@ -24,18 +24,24 @@ export type PermissionCenterRoleId =
 
 export type PermissionModuleId =
   | 'document-test'
+  | 'documentation-center'
   | 'overview'
   | 'messaging'
+  | 'mail-workbench'
   | 'people-admin-center'
   | 'admin-ops-center'
   | 'crm'
   | 'public-pool'
   | 'order-management-center'
-  | 'business-process-center'
   | 'sales-todo-center'
   | 'shipping-document-management'
   | 'documentation-workbench-ultimate'
   | 'finance-management'
+  | 'finance-v2-workbench'
+  | 'finance-v2-todo-center'
+  | 'finance-v2-management-center'
+  | 'management-finance-center'
+  | 'expense-management-center'
   | 'supplier-management'
   | 'purchase-order-management'
   | 'accounts-payable-management'
@@ -51,12 +57,14 @@ export type PermissionModuleId =
   | 'status-flow-simulator'
   | 'role-permission'
   | 'menu-permission-matrix'
+  | 'document-numbering-center'
   | 'permission-center'
   | 'enterprise-backup-center'
   | 'supabase-diagnostic'
   | 'multi-language-currency'
   | 'analytics'
-  | 'global-bi-dashboard';
+  | 'global-bi-dashboard'
+  | 'market-category-research';
 
 export type PermissionActionId =
   | 'view'
@@ -137,6 +145,7 @@ export const PERMISSION_CENTER_STORAGE_KEYS = {
 
 const PERMISSION_CENTER_SUPABASE_TABLE = 'permission_center_state';
 const PERMISSION_CENTER_SUPABASE_ROW_ID = 'default';
+const PERMISSION_CENTER_SUPABASE_TIMEOUT_MS = 8000;
 
 interface PermissionCenterStateSnapshot {
   roles: PermissionRoleDefinition[];
@@ -156,6 +165,22 @@ interface PermissionCenterStateRow {
   user_exceptions: PermissionUserException[] | null;
   change_logs: PermissionChangeLog[] | null;
   updated_by?: string | null;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 export const PERMISSION_CENTER_ROLES: PermissionRoleDefinition[] = [
@@ -183,17 +208,23 @@ export const PERMISSION_CENTER_ROLES: PermissionRoleDefinition[] = [
 export const PERMISSION_CENTER_MODULES: PermissionModuleDefinition[] = [
   { id: 'overview', name: '工作台', category: '核心模块', description: '角色首页与工作台入口' },
   { id: 'messaging', name: '消息中心', category: '核心模块', description: '内部消息与通知' },
+  { id: 'mail-workbench', name: '业务邮件工作台', category: '核心模块', description: '邮件线程、分发与业务挂接中枢' },
   { id: 'people-admin-center', name: '人事中心', category: '核心模块', description: '人事主管的专属工作模板入口' },
   { id: 'admin-ops-center', name: '行政事务中心', category: '核心模块', description: '行政事务、合同与公司主体资料管理入口' },
   { id: 'document-test', name: '文档中心', category: '核心模块', description: '内部文档与模板预览入口' },
+  { id: 'documentation-center', name: '单证管理中心', category: '履约模块', description: '销售合同、商业发票、装箱清单与提单管理入口' },
   { id: 'crm', name: '客户关系管理（CRM）', category: '业务模块', description: '客户主数据与商机管理' },
   { id: 'public-pool', name: '公海客户池', category: '业务模块', description: '线索与公海客户池' },
   { id: 'order-management-center', name: '订单管理中心', category: '业务模块', description: '订单、询价、报价、合同主入口' },
-  { id: 'business-process-center', name: '业务流程中心', category: '业务模块', description: '业务主流程协同' },
   { id: 'sales-todo-center', name: '待办中心', category: '业务模块', description: '执行处理型待办入口' },
   { id: 'shipping-document-management', name: '发货管理', category: '履约模块', description: '出运、发货与履约协同' },
   { id: 'documentation-workbench-ultimate', name: '单证管理', category: '履约模块', description: '单证、报关与放单' },
   { id: 'finance-management', name: '财务管理', category: '财务模块', description: '财务操作与财税资料管理' },
+  { id: 'finance-v2-workbench', name: '赵敏财务工作台（新）', category: '财务模块', description: '财务专员个人工作台（mock 骨架）' },
+  { id: 'finance-v2-todo-center', name: '财务待办中心（新）', category: '财务模块', description: '财务任务分类型列表（mock 骨架）' },
+  { id: 'finance-v2-management-center', name: '财务管理中心（新）', category: '财务模块', description: '财务专业模块导航（mock 骨架）' },
+  { id: 'management-finance-center', name: '内部管理财务中心', category: '财务模块', description: '业财一体化与 AI 分析（Supabase-first）' },
+  { id: 'expense-management-center', name: '费用管理中心', category: '财务模块', description: '报销、审批、付款与入账闭环（独立侧栏入口）' },
   { id: 'supplier-management', name: '供应商管理', category: '供应链模块', description: '供应商档案与合作管理' },
   { id: 'purchase-order-management', name: '采购订单管理', category: '供应链模块', description: '采购订单与采购执行' },
   { id: 'accounts-payable-management', name: '应付账款管理', category: '供应链模块', description: '供应商付款与应付' },
@@ -209,12 +240,14 @@ export const PERMISSION_CENTER_MODULES: PermissionModuleDefinition[] = [
   { id: 'status-flow-simulator', name: '状态流转模拟器', category: '系统管理', description: '状态与流转测试' },
   { id: 'role-permission', name: '角色权限管理', category: '系统管理', description: '旧版角色权限页面' },
   { id: 'menu-permission-matrix', name: '菜单权限配置矩阵', category: '系统管理', description: '旧版菜单矩阵页面' },
+  { id: 'document-numbering-center', name: '编号管理中心', category: '系统管理', description: '正式单据编号计数器维护与审计' },
   { id: 'permission-center', name: '权限中心', category: '系统管理', description: '新权限中心主入口' },
   { id: 'enterprise-backup-center', name: '企业级备份中心', category: '系统管理', description: '系统备份与恢复' },
   { id: 'supabase-diagnostic', name: 'Supabase 诊断面板', category: '系统管理', description: '后端诊断与排查' },
   { id: 'multi-language-currency', name: '多语言/多货币', category: '系统管理', description: '全局语言与货币设置' },
   { id: 'analytics', name: 'CEO 战略驾驶舱', category: '决策模块', description: '经营分析与决策驾驶舱' },
   { id: 'global-bi-dashboard', name: '全局 BI 仪表盘', category: '决策模块', description: '全局数据分析与展示' },
+  { id: 'market-category-research', name: '市场类目研究', category: '运营模块', description: '基于市场数据发现并审核候选类目，发布到正式官网类目树' },
 ];
 
 export const PERMISSION_ACTION_OPTIONS: PermissionActionId[] = [
@@ -241,25 +274,25 @@ function actionSet(...actions: PermissionActionId[]): PermissionActionId[] {
 }
 
 export const DEFAULT_PERMISSION_MENU_MATRIX: PermissionRoleMatrix = {
-  CEO: ['overview', 'messaging', 'crm', 'order-management-center', 'shipping-document-management', 'finance-management', 'analytics', 'global-bi-dashboard'],
-  CFO: ['overview', 'messaging', 'order-management-center', 'finance-management', 'global-bi-dashboard'],
-  Sales_Director: ['overview', 'messaging', 'crm', 'order-management-center', 'business-process-center', 'sales-todo-center', 'shipping-document-management'],
-  Regional_Manager: ['overview', 'messaging', 'crm', 'order-management-center', 'business-process-center', 'sales-todo-center', 'shipping-document-management'],
-  Sales_Rep: ['overview', 'messaging', 'crm', 'order-management-center', 'business-process-center', 'sales-todo-center', 'shipping-document-management'],
-  Sales_Assistant: ['overview', 'messaging', 'crm', 'order-management-center', 'business-process-center'],
-  Order_Coordinator: ['overview', 'messaging', 'order-management-center', 'business-process-center', 'shipping-document-management', 'service-provider-management'],
-  Finance: ['overview', 'messaging', 'order-management-center', 'finance-management'],
-  External_Accountant: ['overview', 'messaging', 'finance-management'],
-  Procurement_Manager: ['overview', 'messaging', 'supplier-management', 'purchase-order-management', 'service-provider-management', 'inspection-management', 'accounts-payable-management'],
-  Procurement: ['overview', 'messaging', 'supplier-management', 'purchase-order-management', 'inspection-management'],
-  Documentation_Officer: ['overview', 'messaging', 'documentation-workbench-ultimate', 'shipping-document-management', 'service-provider-management'],
-  Marketing_Ops: ['overview', 'messaging', 'crm', 'product-management', 'product-push', 'social-media-marketing'],
-  Marketing_Assistant: ['overview', 'messaging', 'crm', 'product-management', 'product-push', 'social-media-marketing'],
-  QC: ['overview', 'messaging', 'inspection-management', 'supplier-management'],
-  Warehouse_Ops: ['overview', 'messaging', 'shipping-document-management', 'service-provider-management'],
-  HR_Admin: ['overview', 'messaging', 'people-admin-center'],
-  Admin_Ops: ['overview', 'messaging', 'admin-ops-center'],
-  Admin: ['overview', 'messaging', 'document-test', 'template-workbench', 'admin-company-profile', 'form-manager', 'workflow-validation', 'status-flow-simulator', 'role-permission', 'menu-permission-matrix', 'permission-center', 'enterprise-backup-center', 'supabase-diagnostic', 'multi-language-currency'],
+  CEO: ['overview', 'messaging', 'mail-workbench', 'crm', 'order-management-center', 'shipping-document-management', 'product-management', 'market-category-research', 'finance-management', 'finance-v2-workbench', 'finance-v2-todo-center', 'finance-v2-management-center', 'management-finance-center', 'expense-management-center', 'document-numbering-center', 'analytics', 'global-bi-dashboard'],
+  CFO: ['overview', 'messaging', 'mail-workbench', 'order-management-center', 'finance-management', 'finance-v2-workbench', 'finance-v2-todo-center', 'finance-v2-management-center', 'management-finance-center', 'expense-management-center', 'document-numbering-center', 'global-bi-dashboard'],
+  Sales_Director: ['overview', 'messaging', 'mail-workbench', 'crm', 'order-management-center', 'sales-todo-center', 'shipping-document-management'],
+  Regional_Manager: ['overview', 'messaging', 'mail-workbench', 'crm', 'order-management-center', 'sales-todo-center', 'shipping-document-management'],
+  Sales_Rep: ['overview', 'messaging', 'mail-workbench', 'crm', 'order-management-center', 'sales-todo-center', 'shipping-document-management'],
+  Sales_Assistant: ['overview', 'messaging', 'mail-workbench', 'crm', 'order-management-center'],
+  Order_Coordinator: ['overview', 'messaging', 'mail-workbench', 'order-management-center', 'shipping-document-management', 'service-provider-management'],
+  Finance: ['overview', 'messaging', 'mail-workbench', 'order-management-center', 'finance-management', 'finance-v2-workbench', 'finance-v2-todo-center', 'finance-v2-management-center', 'management-finance-center', 'expense-management-center'],
+  External_Accountant: ['overview', 'messaging', 'finance-management', 'finance-v2-workbench', 'finance-v2-todo-center', 'finance-v2-management-center', 'management-finance-center', 'expense-management-center'],
+  Procurement_Manager: ['overview', 'messaging', 'mail-workbench', 'supplier-management', 'purchase-order-management', 'service-provider-management', 'inspection-management', 'accounts-payable-management'],
+  Procurement: ['overview', 'messaging', 'mail-workbench', 'supplier-management', 'purchase-order-management', 'inspection-management'],
+  Documentation_Officer: ['overview', 'messaging', 'mail-workbench', 'documentation-center', 'shipping-document-management', 'service-provider-management'],
+  Marketing_Ops: ['overview', 'messaging', 'mail-workbench', 'crm', 'product-management', 'market-category-research', 'product-push', 'social-media-marketing'],
+  Marketing_Assistant: ['overview', 'messaging', 'mail-workbench', 'crm', 'product-management', 'market-category-research', 'product-push', 'social-media-marketing'],
+  QC: ['overview', 'messaging', 'mail-workbench', 'inspection-management', 'supplier-management'],
+  Warehouse_Ops: ['overview', 'messaging', 'mail-workbench', 'shipping-document-management', 'service-provider-management'],
+  HR_Admin: ['overview', 'messaging', 'mail-workbench', 'people-admin-center'],
+  Admin_Ops: ['overview', 'messaging', 'mail-workbench', 'admin-ops-center'],
+  Admin: ['overview', 'messaging', 'mail-workbench', 'document-test', 'template-workbench', 'admin-company-profile', 'form-manager', 'workflow-validation', 'status-flow-simulator', 'role-permission', 'menu-permission-matrix', 'document-numbering-center', 'permission-center', 'enterprise-backup-center', 'supabase-diagnostic', 'multi-language-currency', 'product-management', 'market-category-research', 'finance-management', 'finance-v2-workbench', 'finance-v2-todo-center', 'finance-v2-management-center', 'management-finance-center', 'expense-management-center'],
 } as PermissionRoleMatrix;
 
 export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
@@ -270,6 +303,12 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
     'order-management-center': actionSet('view', 'approve', 'export'),
     'shipping-document-management': actionSet('view', 'export'),
     'finance-management': actionSet('view', 'approve', 'export'),
+    'finance-v2-workbench': actionSet('view', 'approve', 'export'),
+    'finance-v2-todo-center': actionSet('view', 'approve', 'export'),
+    'finance-v2-management-center': actionSet('view', 'approve', 'export'),
+    'management-finance-center': actionSet('view', 'approve', 'export'),
+    'expense-management-center': actionSet('view', 'approve', 'export'),
+    'document-numbering-center': actionSet('view', 'export'),
     analytics: actionSet('view', 'export'),
     'global-bi-dashboard': actionSet('view', 'export'),
   },
@@ -278,6 +317,12 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
     messaging: actionSet('view', 'export'),
     'order-management-center': actionSet('view', 'approve', 'export'),
     'finance-management': actionSet('view', 'create', 'edit', 'delete', 'approve', 'export'),
+    'finance-v2-workbench': actionSet('view', 'create', 'edit', 'delete', 'approve', 'export'),
+    'finance-v2-todo-center': actionSet('view', 'create', 'edit', 'delete', 'approve', 'export'),
+    'finance-v2-management-center': actionSet('view', 'create', 'edit', 'delete', 'approve', 'export'),
+    'management-finance-center': actionSet('view', 'create', 'edit', 'delete', 'approve', 'export'),
+    'expense-management-center': actionSet('view', 'create', 'edit', 'delete', 'approve', 'export'),
+    'document-numbering-center': actionSet('view', 'export'),
     'global-bi-dashboard': actionSet('view', 'export'),
   },
   Sales_Director: {
@@ -285,7 +330,6 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
     messaging: actionSet('view', 'create', 'export'),
     crm: actionSet('view', 'create', 'edit', 'delete', 'approve', 'assign', 'export'),
     'order-management-center': actionSet('view', 'create', 'edit', 'delete', 'approve', 'assign', 'export'),
-    'business-process-center': actionSet('view', 'create', 'edit', 'approve', 'assign'),
     'sales-todo-center': actionSet('view', 'create', 'edit', 'assign'),
     'shipping-document-management': actionSet('view', 'export'),
   },
@@ -294,7 +338,6 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
     messaging: actionSet('view', 'create'),
     crm: actionSet('view', 'create', 'edit', 'approve', 'assign', 'export'),
     'order-management-center': actionSet('view', 'create', 'edit', 'approve', 'assign', 'export'),
-    'business-process-center': actionSet('view', 'create', 'edit', 'approve', 'assign'),
     'sales-todo-center': actionSet('view', 'create', 'edit', 'assign'),
     'shipping-document-management': actionSet('view', 'export'),
   },
@@ -303,7 +346,6 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
     messaging: actionSet('view', 'create'),
     crm: actionSet('view', 'create', 'edit'),
     'order-management-center': actionSet('view', 'create', 'edit'),
-    'business-process-center': actionSet('view', 'create', 'edit'),
     'sales-todo-center': actionSet('view', 'create', 'edit'),
     'shipping-document-management': actionSet('view'),
   },
@@ -312,13 +354,11 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
     messaging: actionSet('view', 'create'),
     crm: actionSet('view', 'create', 'edit'),
     'order-management-center': actionSet('view', 'edit'),
-    'business-process-center': actionSet('view', 'edit'),
   },
   Order_Coordinator: {
     overview: actionSet('view'),
     messaging: actionSet('view', 'create'),
     'order-management-center': actionSet('view', 'edit', 'assign'),
-    'business-process-center': actionSet('view', 'edit', 'assign'),
     'shipping-document-management': actionSet('view', 'create', 'edit', 'assign'),
     'service-provider-management': actionSet('view', 'edit'),
   },
@@ -327,11 +367,21 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
     messaging: actionSet('view', 'create', 'export'),
     'order-management-center': actionSet('view'),
     'finance-management': actionSet('view', 'create', 'edit', 'export'),
+    'finance-v2-workbench': actionSet('view', 'create', 'edit', 'export'),
+    'finance-v2-todo-center': actionSet('view', 'create', 'edit', 'export'),
+    'finance-v2-management-center': actionSet('view', 'create', 'edit', 'export'),
+    'management-finance-center': actionSet('view', 'create', 'edit', 'export'),
+    'expense-management-center': actionSet('view', 'create', 'edit', 'export'),
   },
   External_Accountant: {
     overview: actionSet('view'),
     messaging: actionSet('view'),
     'finance-management': actionSet('view', 'export'),
+    'finance-v2-workbench': actionSet('view', 'export'),
+    'finance-v2-todo-center': actionSet('view', 'export'),
+    'finance-v2-management-center': actionSet('view', 'export'),
+    'management-finance-center': actionSet('view', 'export'),
+    'expense-management-center': actionSet('view', 'export'),
   },
   Procurement_Manager: {
     overview: actionSet('view'),
@@ -352,6 +402,7 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
   Documentation_Officer: {
     overview: actionSet('view'),
     messaging: actionSet('view', 'create'),
+    'documentation-center': actionSet('view', 'create', 'edit', 'export'),
     'documentation-workbench-ultimate': actionSet('view', 'create', 'edit', 'export'),
     'shipping-document-management': actionSet('view', 'create', 'edit', 'export'),
     'service-provider-management': actionSet('view', 'edit'),
@@ -397,6 +448,12 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
   Admin: {
     overview: actionSet('view'),
     messaging: actionSet('view', 'create', 'export'),
+    'finance-management': actionSet('view'),
+    'finance-v2-workbench': actionSet('view'),
+    'finance-v2-todo-center': actionSet('view'),
+    'finance-v2-management-center': actionSet('view'),
+    'management-finance-center': actionSet('view'),
+    'expense-management-center': actionSet('view'),
     'document-test': actionSet('view', 'create', 'edit', 'delete', 'export'),
     'template-workbench': actionSet('view', 'create', 'edit', 'delete', 'export'),
     'admin-company-profile': actionSet('view', 'create', 'edit', 'delete', 'export', 'manage_accounts'),
@@ -405,6 +462,7 @@ export const DEFAULT_PERMISSION_ACTION_MATRIX: PermissionActionMatrix = {
     'status-flow-simulator': actionSet('view', 'create', 'edit', 'delete', 'export'),
     'role-permission': actionSet('view', 'create', 'edit', 'delete', 'export', 'manage_accounts'),
     'menu-permission-matrix': actionSet('view', 'create', 'edit', 'delete', 'export', 'manage_accounts'),
+    'document-numbering-center': actionSet('view', 'create', 'edit', 'delete', 'export', 'manage_accounts'),
     'permission-center': actionSet('view', 'create', 'edit', 'delete', 'export', 'manage_accounts'),
     'enterprise-backup-center': actionSet('view', 'create', 'edit', 'delete', 'export'),
     'supabase-diagnostic': actionSet('view', 'create', 'edit', 'delete', 'export'),
@@ -416,76 +474,102 @@ export const DEFAULT_PERMISSION_SCOPE_MATRIX: PermissionScopeMatrix = {
   CEO: {
     overview: 'all',
     messaging: 'all',
+    'mail-workbench': 'all',
     crm: 'all',
     'order-management-center': 'all',
     'shipping-document-management': 'all',
     'finance-management': 'all',
+    'finance-v2-workbench': 'all',
+    'finance-v2-todo-center': 'all',
+    'finance-v2-management-center': 'all',
+    'management-finance-center': 'all',
+    'expense-management-center': 'all',
+    'document-numbering-center': 'all',
     analytics: 'all',
     'global-bi-dashboard': 'all',
   },
   CFO: {
     overview: 'all',
     messaging: 'all',
+    'mail-workbench': 'all',
     'order-management-center': 'all',
     'finance-management': 'all',
+    'finance-v2-workbench': 'all',
+    'finance-v2-todo-center': 'all',
+    'finance-v2-management-center': 'all',
+    'management-finance-center': 'all',
+    'expense-management-center': 'all',
+    'document-numbering-center': 'all',
     'global-bi-dashboard': 'all',
   },
   Sales_Director: {
     overview: 'department',
     messaging: 'department',
+    'mail-workbench': 'department',
     crm: 'department',
     'order-management-center': 'department',
-    'business-process-center': 'department',
     'sales-todo-center': 'department',
     'shipping-document-management': 'department',
   },
   Regional_Manager: {
     overview: 'region',
     messaging: 'region',
+    'mail-workbench': 'region',
     crm: 'region',
     'order-management-center': 'region',
-    'business-process-center': 'region',
     'sales-todo-center': 'region',
     'shipping-document-management': 'region',
   },
   Sales_Rep: {
     overview: 'assigned',
     messaging: 'self',
+    'mail-workbench': 'assigned',
     crm: 'assigned',
     'order-management-center': 'assigned',
-    'business-process-center': 'assigned',
     'sales-todo-center': 'assigned',
     'shipping-document-management': 'assigned',
   },
   Sales_Assistant: {
     overview: 'assigned',
     messaging: 'self',
+    'mail-workbench': 'assigned',
     crm: 'assigned',
     'order-management-center': 'assigned',
-    'business-process-center': 'assigned',
   },
   Order_Coordinator: {
     overview: 'assigned',
     messaging: 'self',
+    'mail-workbench': 'assigned',
     'order-management-center': 'assigned',
-    'business-process-center': 'assigned',
     'shipping-document-management': 'assigned',
     'service-provider-management': 'assigned',
   },
   Finance: {
     overview: 'assigned',
     messaging: 'department',
+    'mail-workbench': 'department',
     'order-management-center': 'all',
     'finance-management': 'all',
+    'finance-v2-workbench': 'all',
+    'finance-v2-todo-center': 'all',
+    'finance-v2-management-center': 'all',
+    'management-finance-center': 'all',
+    'expense-management-center': 'all',
   },
   External_Accountant: {
     overview: 'assigned',
     messaging: 'self',
     'finance-management': 'assigned',
+    'finance-v2-workbench': 'assigned',
+    'finance-v2-todo-center': 'assigned',
+    'finance-v2-management-center': 'assigned',
+    'management-finance-center': 'assigned',
+    'expense-management-center': 'assigned',
   },
   Procurement_Manager: {
     overview: 'department',
     messaging: 'department',
+    'mail-workbench': 'department',
     'supplier-management': 'department',
     'purchase-order-management': 'department',
     'service-provider-management': 'department',
@@ -495,6 +579,7 @@ export const DEFAULT_PERMISSION_SCOPE_MATRIX: PermissionScopeMatrix = {
   Procurement: {
     overview: 'assigned',
     messaging: 'self',
+    'mail-workbench': 'assigned',
     'supplier-management': 'assigned',
     'purchase-order-management': 'assigned',
     'inspection-management': 'assigned',
@@ -502,6 +587,8 @@ export const DEFAULT_PERMISSION_SCOPE_MATRIX: PermissionScopeMatrix = {
   Documentation_Officer: {
     overview: 'assigned',
     messaging: 'self',
+    'mail-workbench': 'assigned',
+    'documentation-center': 'assigned',
     'documentation-workbench-ultimate': 'assigned',
     'shipping-document-management': 'assigned',
     'service-provider-management': 'assigned',
@@ -509,6 +596,7 @@ export const DEFAULT_PERMISSION_SCOPE_MATRIX: PermissionScopeMatrix = {
   Marketing_Ops: {
     overview: 'assigned',
     messaging: 'assigned',
+    'mail-workbench': 'assigned',
     crm: 'assigned',
     'product-management': 'assigned',
     'product-push': 'assigned',
@@ -517,6 +605,7 @@ export const DEFAULT_PERMISSION_SCOPE_MATRIX: PermissionScopeMatrix = {
   Marketing_Assistant: {
     overview: 'assigned',
     messaging: 'self',
+    'mail-workbench': 'assigned',
     crm: 'assigned',
     'product-management': 'assigned',
     'product-push': 'assigned',
@@ -525,28 +614,39 @@ export const DEFAULT_PERMISSION_SCOPE_MATRIX: PermissionScopeMatrix = {
   QC: {
     overview: 'assigned',
     messaging: 'self',
+    'mail-workbench': 'assigned',
     'inspection-management': 'assigned',
     'supplier-management': 'assigned',
   },
   Warehouse_Ops: {
     overview: 'assigned',
     messaging: 'self',
+    'mail-workbench': 'assigned',
     'shipping-document-management': 'assigned',
     'service-provider-management': 'assigned',
   },
   HR_Admin: {
     overview: 'department',
     messaging: 'department',
+    'mail-workbench': 'department',
     'people-admin-center': 'all',
   },
   Admin_Ops: {
     overview: 'department',
     messaging: 'department',
+    'mail-workbench': 'department',
     'admin-ops-center': 'department',
   },
   Admin: {
     overview: 'all',
     messaging: 'all',
+    'mail-workbench': 'all',
+    'finance-v2-workbench': 'all',
+    'finance-v2-todo-center': 'all',
+    'finance-v2-management-center': 'all',
+    'finance-management': 'all',
+    'management-finance-center': 'all',
+    'expense-management-center': 'all',
     'document-test': 'all',
     'template-workbench': 'all',
     'admin-company-profile': 'all',
@@ -555,6 +655,7 @@ export const DEFAULT_PERMISSION_SCOPE_MATRIX: PermissionScopeMatrix = {
     'status-flow-simulator': 'all',
     'role-permission': 'all',
     'menu-permission-matrix': 'all',
+    'document-numbering-center': 'all',
     'permission-center': 'all',
     'enterprise-backup-center': 'all',
     'supabase-diagnostic': 'all',
@@ -563,23 +664,41 @@ export const DEFAULT_PERMISSION_SCOPE_MATRIX: PermissionScopeMatrix = {
 };
 
 DEFAULT_PERMISSION_ACTION_MATRIX.CEO['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.CEO['mail-workbench'] = actionSet('view', 'create', 'edit', 'approve', 'assign', 'export');
 DEFAULT_PERMISSION_ACTION_MATRIX.CFO['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.CFO['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign', 'export');
 DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Director['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Director['mail-workbench'] = actionSet('view', 'create', 'edit', 'approve', 'assign', 'export');
 DEFAULT_PERMISSION_ACTION_MATRIX.Regional_Manager['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Regional_Manager['mail-workbench'] = actionSet('view', 'create', 'edit', 'approve', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Rep['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Rep['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Assistant['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Assistant['mail-workbench'] = actionSet('view', 'create', 'edit');
 DEFAULT_PERMISSION_ACTION_MATRIX.Order_Coordinator['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Order_Coordinator['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.Finance['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Finance['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign', 'export');
 DEFAULT_PERMISSION_ACTION_MATRIX.External_Accountant['document-test'] = actionSet('view', 'export');
 DEFAULT_PERMISSION_ACTION_MATRIX.Procurement_Manager['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Procurement_Manager['mail-workbench'] = actionSet('view', 'create', 'edit', 'approve', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.Procurement['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Procurement['mail-workbench'] = actionSet('view', 'create', 'edit');
 DEFAULT_PERMISSION_ACTION_MATRIX.Documentation_Officer['document-test'] = actionSet('view', 'create', 'edit', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Documentation_Officer['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.Marketing_Ops['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Marketing_Ops['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.Marketing_Assistant['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Marketing_Assistant['mail-workbench'] = actionSet('view', 'create', 'edit');
 DEFAULT_PERMISSION_ACTION_MATRIX.QC['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.QC['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.Warehouse_Ops['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Warehouse_Ops['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.HR_Admin['document-test'] = actionSet('view', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.HR_Admin['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign');
 DEFAULT_PERMISSION_ACTION_MATRIX.Admin_Ops['document-test'] = actionSet('view', 'edit', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Admin_Ops['mail-workbench'] = actionSet('view', 'create', 'edit', 'assign');
+DEFAULT_PERMISSION_ACTION_MATRIX.Admin['mail-workbench'] = actionSet('view', 'create', 'edit', 'delete', 'approve', 'assign', 'export', 'manage_accounts');
 
 DEFAULT_PERMISSION_ACTION_MATRIX.HR_Admin['admin-company-profile'] = actionSet('view', 'create', 'edit', 'export', 'manage_accounts');
 DEFAULT_PERMISSION_ACTION_MATRIX.Admin_Ops['admin-company-profile'] = actionSet('view', 'edit', 'export');
@@ -628,6 +747,11 @@ DEFAULT_PERMISSION_ACTION_MATRIX.CEO['product-management'] = actionSet('view', '
 DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Director['product-management'] = actionSet('view', 'export');
 DEFAULT_PERMISSION_ACTION_MATRIX.Admin['product-management'] = actionSet('view', 'edit', 'delete', 'export');
 
+DEFAULT_PERMISSION_ACTION_MATRIX.Admin['market-category-research'] = actionSet('view', 'create', 'edit', 'delete', 'approve', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.CEO['market-category-research'] = actionSet('view', 'approve', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Marketing_Ops['market-category-research'] = actionSet('view', 'create', 'edit', 'approve', 'export');
+DEFAULT_PERMISSION_ACTION_MATRIX.Marketing_Assistant['market-category-research'] = actionSet('view', 'create', 'edit', 'export');
+
 DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Director['product-push'] = actionSet('view', 'export');
 DEFAULT_PERMISSION_ACTION_MATRIX.Sales_Rep['product-push'] = actionSet('view');
 
@@ -656,23 +780,41 @@ DEFAULT_PERMISSION_ACTION_MATRIX.CEO['multi-language-currency'] = actionSet('vie
 DEFAULT_PERMISSION_ACTION_MATRIX.CFO['multi-language-currency'] = actionSet('view', 'export');
 
 DEFAULT_PERMISSION_SCOPE_MATRIX.CEO['document-test'] = 'all';
+DEFAULT_PERMISSION_SCOPE_MATRIX.CEO['mail-workbench'] = 'all';
 DEFAULT_PERMISSION_SCOPE_MATRIX.CFO['document-test'] = 'all';
+DEFAULT_PERMISSION_SCOPE_MATRIX.CFO['mail-workbench'] = 'all';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Sales_Director['document-test'] = 'department';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Sales_Director['mail-workbench'] = 'department';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Regional_Manager['document-test'] = 'region';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Regional_Manager['mail-workbench'] = 'region';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Sales_Rep['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Sales_Rep['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Sales_Assistant['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Sales_Assistant['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Order_Coordinator['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Order_Coordinator['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Finance['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Finance['mail-workbench'] = 'department';
 DEFAULT_PERMISSION_SCOPE_MATRIX.External_Accountant['document-test'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Procurement_Manager['document-test'] = 'department';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Procurement_Manager['mail-workbench'] = 'department';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Procurement['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Procurement['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Documentation_Officer['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Documentation_Officer['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Marketing_Ops['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Marketing_Ops['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Marketing_Assistant['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Marketing_Assistant['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.QC['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.QC['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Warehouse_Ops['document-test'] = 'assigned';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Warehouse_Ops['mail-workbench'] = 'assigned';
 DEFAULT_PERMISSION_SCOPE_MATRIX.HR_Admin['document-test'] = 'department';
+DEFAULT_PERMISSION_SCOPE_MATRIX.HR_Admin['mail-workbench'] = 'department';
 DEFAULT_PERMISSION_SCOPE_MATRIX.Admin_Ops['document-test'] = 'department';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Admin_Ops['mail-workbench'] = 'department';
+DEFAULT_PERMISSION_SCOPE_MATRIX.Admin['mail-workbench'] = 'all';
 
 DEFAULT_PERMISSION_SCOPE_MATRIX.CEO['admin-company-profile'] = 'all';
 DEFAULT_PERMISSION_SCOPE_MATRIX.CFO['admin-company-profile'] = 'all';
@@ -746,6 +888,18 @@ DEFAULT_PERMISSION_SCOPE_MATRIX.CEO['supabase-diagnostic'] = 'all';
 DEFAULT_PERMISSION_SCOPE_MATRIX.CEO['multi-language-currency'] = 'all';
 DEFAULT_PERMISSION_SCOPE_MATRIX.CFO['multi-language-currency'] = 'all';
 
+function mergeMenuMatrix(saved: PermissionRoleMatrix): PermissionRoleMatrix {
+  const merged = {} as PermissionRoleMatrix;
+
+  for (const role of PERMISSION_CENTER_ROLES) {
+    const defaultModules = DEFAULT_PERMISSION_MENU_MATRIX[role.id] || [];
+    const savedModules = saved[role.id] || [];
+    merged[role.id] = Array.from(new Set([...defaultModules, ...savedModules])) as PermissionModuleId[];
+  }
+
+  return merged;
+}
+
 function mergeActionMatrix(saved: PermissionActionMatrix): PermissionActionMatrix {
   const merged = {} as PermissionActionMatrix;
 
@@ -799,7 +953,9 @@ function getDefaultStateSnapshot(): PermissionCenterStateSnapshot {
 function getLocalStateSnapshot(): PermissionCenterStateSnapshot {
   return {
     roles: safeParse(localStorage.getItem(PERMISSION_CENTER_STORAGE_KEYS.roles), PERMISSION_CENTER_ROLES),
-    menuMatrix: safeParse(localStorage.getItem(PERMISSION_CENTER_STORAGE_KEYS.menuMatrix), DEFAULT_PERMISSION_MENU_MATRIX),
+    menuMatrix: mergeMenuMatrix(
+      safeParse(localStorage.getItem(PERMISSION_CENTER_STORAGE_KEYS.menuMatrix), DEFAULT_PERMISSION_MENU_MATRIX),
+    ),
     actionMatrix: mergeActionMatrix(
       safeParse(localStorage.getItem(PERMISSION_CENTER_STORAGE_KEYS.actionMatrix), DEFAULT_PERMISSION_ACTION_MATRIX),
     ),
@@ -865,11 +1021,15 @@ function buildSupabaseRow(snapshot: PermissionCenterStateSnapshot, changedBy: st
 
 async function fetchSupabaseState(): Promise<{ snapshot: PermissionCenterStateSnapshot | null; isBlank: boolean }> {
   try {
-    const { data, error } = await supabase
-      .from(PERMISSION_CENTER_SUPABASE_TABLE)
-      .select('*')
-      .eq('id', PERMISSION_CENTER_SUPABASE_ROW_ID)
-      .maybeSingle();
+    const { data, error } = await withTimeout(
+      supabase
+        .from(PERMISSION_CENTER_SUPABASE_TABLE)
+        .select('*')
+        .eq('id', PERMISSION_CENTER_SUPABASE_ROW_ID)
+        .maybeSingle(),
+      PERMISSION_CENTER_SUPABASE_TIMEOUT_MS,
+      'PermissionCenter fetchSupabaseState',
+    );
 
     if (error) {
       console.warn('[PermissionCenter][Supabase] fetch failed:', error.message);
@@ -889,9 +1049,13 @@ async function fetchSupabaseState(): Promise<{ snapshot: PermissionCenterStateSn
 
 async function pushSupabaseState(snapshot: PermissionCenterStateSnapshot, changedBy: string): Promise<boolean> {
   try {
-    const { error } = await supabase
-      .from(PERMISSION_CENTER_SUPABASE_TABLE)
-      .upsert(buildSupabaseRow(snapshot, changedBy), { onConflict: 'id' });
+    const { error } = await withTimeout(
+      supabase
+        .from(PERMISSION_CENTER_SUPABASE_TABLE)
+        .upsert(buildSupabaseRow(snapshot, changedBy), { onConflict: 'id' }),
+      PERMISSION_CENTER_SUPABASE_TIMEOUT_MS,
+      'PermissionCenter pushSupabaseState',
+    );
 
     if (error) {
       console.warn('[PermissionCenter][Supabase] upsert failed:', error.message);

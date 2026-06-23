@@ -1,5 +1,7 @@
 import { canonicalizePersonnelEmail } from '../personnelEmail'
-import { supabase } from '../supabase'
+import { isCurrentLocalDevHost } from '../localDevHost'
+import { supabase, supabaseAnonKey, supabaseUrl } from '../supabase'
+import { internalInquiryAccessService } from './internalInquiryAccessService'
 
 type InquiryServiceDeps = {
   throwSupabaseError: (context: string, error: any) => never
@@ -17,10 +19,16 @@ type InquiryServiceDeps = {
   enrichInquiryRowsWithTemplateData: (rows: any[] | null | undefined) => Promise<any[]>
   enrichInquiryRowWithTemplateData: (row: any) => Promise<any>
   insertInquiryWithServerAssignedNumber: (payload: Record<string, any>, context: string) => Promise<any>
+  isTransientSupabaseRequestError: (error: any) => boolean
+  updateInquiryRowViaRest: (id: string, payload: Record<string, any>, context: string) => Promise<any | null>
   toRegionCode: (region: string | null | undefined) => string | null
   toUUIDOrNull: (id: string | null | undefined) => string | null
   sanitizePersistedInquiryProducts: (products?: any[]) => any[]
   isUuidLike: (value: string | null | undefined) => boolean
+}
+
+function shouldSkipInquiryTemplateBindingInLocalProxy() {
+  return isCurrentLocalDevHost()
 }
 
 function toInquiryRow(i: any, deps: Pick<InquiryServiceDeps, 'toRegionCode' | 'toUUIDOrNull' | 'sanitizePersistedInquiryProducts'>) {
@@ -69,7 +77,7 @@ function toInquiryRow(i: any, deps: Pick<InquiryServiceDeps, 'toRegionCode' | 't
   }
 }
 
-function fromInquiryRow(r: any, deps: Pick<InquiryServiceDeps, 'isUuidLike'>) {
+export function mapInquiryRowToInquiry(r: any, deps: Pick<InquiryServiceDeps, 'isUuidLike'>) {
   if (!r) return null
   const oem = r.document_render_meta?.oemModule || r.document_data_snapshot?.oem || null
   const snapshotInquiryNo = String(r.document_data_snapshot?.inquiryNo || '').trim()
@@ -83,6 +91,9 @@ function fromInquiryRow(r: any, deps: Pick<InquiryServiceDeps, 'isUuidLike'>) {
         inquiryNo: resolvedInquiryNumber || r.document_data_snapshot?.inquiryNo || 'ING-DRAFT',
       }
     : r.document_data_snapshot || {}
+  const snapshotRequirements = resolvedDocumentDataSnapshot?.requirements && typeof resolvedDocumentDataSnapshot.requirements === 'object'
+    ? resolvedDocumentDataSnapshot.requirements
+    : {}
   return {
     id: r.id,
     inquiryNumber: resolvedInquiryNumber || null,
@@ -104,11 +115,32 @@ function fromInquiryRow(r: any, deps: Pick<InquiryServiceDeps, 'isUuidLike'>) {
       email: r.user_email || '',
     },
     shippingInfo: r.shipping_info || { cartons: '0', cbm: '0', totalGrossWeight: '0', totalNetWeight: '0' },
+    requirements: {
+      incoterm: snapshotRequirements.incoterm || '',
+      locationLabel: snapshotRequirements.locationLabel || '',
+      locationValue: snapshotRequirements.locationValue || '',
+      finalDestinationPlan: snapshotRequirements.finalDestinationPlan || '',
+      deliveryTime: snapshotRequirements.deliveryTime || '',
+      portOfDestination: snapshotRequirements.portOfDestination || '',
+      paymentTerms: snapshotRequirements.paymentTerms || '',
+      tradeTerms: snapshotRequirements.tradeTerms || '',
+      paymentMode: snapshotRequirements.paymentMode || '',
+      balanceTrigger: snapshotRequirements.balanceTrigger || '',
+      documentReleasePreference: snapshotRequirements.documentReleasePreference || '',
+      lcType: snapshotRequirements.lcType || '',
+      creditDays: snapshotRequirements.creditDays || '',
+      businessScenario: snapshotRequirements.businessScenario || '',
+      businessScenarioNotes: snapshotRequirements.businessScenarioNotes || '',
+      insuranceRequirement: snapshotRequirements.insuranceRequirement || '',
+      packingRequirements: snapshotRequirements.packingRequirements || '',
+      certifications: snapshotRequirements.certifications || [],
+      otherRequirements: snapshotRequirements.otherRequirements || '',
+    },
     containerInfo: r.container_info,
     products: r.products || [],
     oem: oem || undefined,
     assignedTo: r.assigned_to || null,
-    salesRepEmail: r.assigned_to || null,
+    salesRepEmail: canonicalizePersonnelEmail(r.owner_email || r.assigned_to || '', r.region_code) || null,
     ownerUserId: r.owner_user_id || null,
     ownerEmail: canonicalizePersonnelEmail(r.owner_email || r.assigned_to || '', r.region_code) || null,
     ownerName: r.owner_name || null,
@@ -121,6 +153,10 @@ function fromInquiryRow(r: any, deps: Pick<InquiryServiceDeps, 'isUuidLike'>) {
     createdAt: r.created_at,
     submittedAt: r.submitted_at,
   }
+}
+
+function fromInquiryRow(r: any, deps: Pick<InquiryServiceDeps, 'isUuidLike'>) {
+  return mapInquiryRowToInquiry(r, deps)
 }
 
 function toIsoDate(v: any): string | null {
@@ -161,6 +197,11 @@ export function createInquiryService(deps: InquiryServiceDeps) {
 
     async getAll() {
       const rows = await this.loadAllSortedRows()
+      return (await deps.enrichInquiryRowsWithTemplateData(rows)).map((row: any) => fromInquiryRow(row, deps))
+    },
+
+    async getInternalVisible() {
+      const rows = await internalInquiryAccessService.listVisible()
       return (await deps.enrichInquiryRowsWithTemplateData(rows)).map((row: any) => fromInquiryRow(row, deps))
     },
 
@@ -275,20 +316,77 @@ export function createInquiryService(deps: InquiryServiceDeps) {
       return (await deps.enrichInquiryRowsWithTemplateData(data || [])).map((row: any) => fromInquiryRow(row, deps))
     },
 
+    async getCustomerVisible(options: {
+      email?: string | null
+      companyId?: string | null
+      companyName?: string | null
+    }) {
+      const normalizedEmail = String(options.email || '').trim().toLowerCase()
+      const normalizedCompanyId = String(options.companyId || '').trim()
+      const normalizedCompanyName = String(options.companyName || '').trim()
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      const accessToken = session?.access_token
+      if (!accessToken || !normalizedEmail) return []
+
+      const query = new URLSearchParams()
+      query.set('email', normalizedEmail)
+      if (normalizedCompanyId) query.set('companyId', normalizedCompanyId)
+      if (normalizedCompanyName) query.set('companyName', normalizedCompanyName)
+
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/make-server-880fd43b/auth/customer-inquiries?${query.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            apikey: supabaseAnonKey,
+          },
+        },
+      )
+
+      let payload: any = null
+      try {
+        payload = await response.json()
+      } catch {
+        payload = null
+      }
+
+      if (!response.ok) {
+        const message = String(payload?.message || '').trim() || `HTTP ${response.status}`
+        throw new Error(message)
+      }
+
+      const rows = Array.isArray(payload?.inquiries) ? payload.inquiries : []
+      return (await deps.enrichInquiryRowsWithTemplateData(rows)).map((row: any) => fromInquiryRow(row, deps))
+    },
+
     async createAtomic(inquiry: any) {
       let templateBinding: Record<string, any> = {}
-      try {
-        templateBinding = await deps.withSupabaseTimeout(
-          deps.resolveBusinessDocumentTemplateBinding(inquiry, {
-            documentCode: 'ING',
-            nodeCode: 'ing-create',
-            businessData: inquiry.documentDataSnapshot || inquiry.document_data_snapshot || inquiry,
-          }),
-          8000,
-          'Inquiry template binding request timed out',
-        )
-      } catch (error) {
-        console.warn('[Supabase] inquiry template binding unavailable, creating inquiry without template binding.', error)
+      const shouldDeferTemplateBinding =
+        shouldSkipInquiryTemplateBindingInLocalProxy() ||
+        inquiry?.templateSnapshot?.pendingResolution === true &&
+        !inquiry?.templateId &&
+        !inquiry?.templateVersionId &&
+        !inquiry?.template_id &&
+        !inquiry?.template_version_id
+
+      if (!shouldDeferTemplateBinding) {
+        try {
+          templateBinding = await deps.withSupabaseTimeout(
+            deps.resolveBusinessDocumentTemplateBinding(inquiry, {
+              documentCode: 'ING',
+              nodeCode: 'ing-create',
+              businessData: inquiry.documentDataSnapshot || inquiry.document_data_snapshot || inquiry,
+            }),
+            8000,
+            'Inquiry template binding request timed out',
+          )
+        } catch (error) {
+          console.warn('[Supabase] inquiry template binding unavailable, creating inquiry without template binding.', error)
+        }
       }
 
       const row = toInquiryRow({ ...inquiry, ...templateBinding }, deps)
@@ -299,18 +397,28 @@ export function createInquiryService(deps: InquiryServiceDeps) {
 
     async upsert(inquiry: any) {
       let templateBinding: Record<string, any> = {}
-      try {
-        templateBinding = await deps.withSupabaseTimeout(
-          deps.resolveBusinessDocumentTemplateBinding(inquiry, {
-            documentCode: 'ING',
-            nodeCode: 'ing-create',
-            businessData: inquiry.documentDataSnapshot || inquiry.document_data_snapshot || inquiry,
-          }),
-          8000,
-          'Inquiry template binding request timed out',
-        )
-      } catch (error) {
-        console.warn('[Supabase] inquiry template binding unavailable, saving inquiry without template binding.', error)
+      const shouldDeferTemplateBinding =
+        shouldSkipInquiryTemplateBindingInLocalProxy() ||
+        inquiry?.templateSnapshot?.pendingResolution === true &&
+        !inquiry?.templateId &&
+        !inquiry?.templateVersionId &&
+        !inquiry?.template_id &&
+        !inquiry?.template_version_id
+
+      if (!shouldDeferTemplateBinding) {
+        try {
+          templateBinding = await deps.withSupabaseTimeout(
+            deps.resolveBusinessDocumentTemplateBinding(inquiry, {
+              documentCode: 'ING',
+              nodeCode: 'ing-create',
+              businessData: inquiry.documentDataSnapshot || inquiry.document_data_snapshot || inquiry,
+            }),
+            8000,
+            'Inquiry template binding request timed out',
+          )
+        } catch (error) {
+          console.warn('[Supabase] inquiry template binding unavailable, saving inquiry without template binding.', error)
+        }
       }
 
       const row = toInquiryRow({ ...inquiry, ...templateBinding }, deps)
@@ -358,50 +466,158 @@ export function createInquiryService(deps: InquiryServiceDeps) {
       const row = toInquiryRow({ ...inquiry, id }, deps)
       row.id = id
 
-      const { data, error } = await supabase
-        .from('inquiries')
-        .update({
-          inquiry_number: row.inquiry_number,
-          date: row.date,
-          user_email: row.user_email,
-          company_id: row.company_id,
-          region_code: row.region_code,
-          status: row.status,
-          is_submitted: row.is_submitted,
-          total_price: row.total_price,
-          message: row.message,
-          buyer_info: row.buyer_info,
-          shipping_info: row.shipping_info,
-          container_info: row.container_info,
-          products: row.products,
-          submitted_at: row.submitted_at,
-          template_id: row.template_id,
-          template_version_id: row.template_version_id,
-          template_snapshot: row.template_snapshot,
-          document_data_snapshot: row.document_data_snapshot,
-          document_render_meta: row.document_render_meta,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .select()
-        .single()
+      const { data, error } = await deps.withSupabaseTimeout(
+        supabase
+          .from('inquiries')
+          .update({
+            inquiry_number: row.inquiry_number,
+            date: row.date,
+            user_email: row.user_email,
+            buyer_name: row.buyer_name,
+            buyer_company: row.buyer_company,
+            buyer_country: row.buyer_country,
+            company_id: row.company_id,
+            region_code: row.region_code,
+            status: row.status,
+            is_submitted: row.is_submitted,
+            total_price: row.total_price,
+            notes: row.notes,
+            assigned_to: row.assigned_to,
+            owner_user_id: row.owner_user_id,
+            owner_email: row.owner_email,
+            owner_name: row.owner_name,
+            owner_role: row.owner_role,
+            message: row.message,
+            buyer_info: row.buyer_info,
+            shipping_info: row.shipping_info,
+            container_info: row.container_info,
+            products: row.products,
+            submitted_at: row.submitted_at,
+            template_id: row.template_id,
+            template_version_id: row.template_version_id,
+            template_snapshot: row.template_snapshot,
+            document_data_snapshot: row.document_data_snapshot,
+            document_render_meta: row.document_render_meta,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .select()
+          .maybeSingle(),
+        15000,
+        'Update inquiry request timed out',
+      )
       if (error) deps.throwSupabaseError('update inquiry', error)
+      if (!data) {
+        // Internal staff updates can succeed while follow-up SELECTs are blocked by RLS.
+        // In that case we trust the update call and return the merged local row instead of
+        // triggering an INSERT/UPSERT path that is guaranteed to violate policy.
+        console.warn('[Supabase] update inquiry returned no row; treating as write-success without refetch:', {
+          id,
+          inquiryNumber: row.inquiry_number || null,
+          assignedTo: row.assigned_to || null,
+          ownerEmail: row.owner_email || null,
+        })
+        return fromInquiryRow(row, deps)
+      }
       return fromInquiryRow(await deps.enrichInquiryRowWithTemplateData(data), deps)
     },
 
     async updateStatus(id: string, status: string, extra: Record<string, any> = {}) {
-      const { data, error } = await supabase
-        .from('inquiries')
-        .update({ status, ...extra, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single()
-      if (error) deps.throwSupabaseError('updateStatus inquiry', error)
-      return fromInquiryRow(await deps.enrichInquiryRowWithTemplateData(data), deps)
+      const payload = { status, ...extra, updated_at: new Date().toISOString() }
+      let lastTransientError: any = null
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        let data: any = null
+        let error: any = null
+        try {
+          const result = await deps.withSupabaseTimeout(
+            supabase
+              .from('inquiries')
+              .update(payload)
+              .eq('id', id)
+              .select()
+              .maybeSingle(),
+            15000,
+            'Update inquiry status request timed out',
+          )
+          data = result.data
+          error = result.error
+        } catch (requestError) {
+          error = requestError
+        }
+
+        if (!error) {
+          if (!data) {
+            console.warn('[Supabase] updateStatus inquiry returned no row; treating as write-success without refetch:', {
+              id,
+              status,
+            })
+            return fromInquiryRow({
+              id,
+              ...payload,
+            }, deps)
+          }
+          return fromInquiryRow(await deps.enrichInquiryRowWithTemplateData(data), deps)
+        }
+
+        if (!deps.isTransientSupabaseRequestError(error)) {
+          deps.throwSupabaseError('updateStatus inquiry', error)
+        }
+
+        lastTransientError = error
+      }
+
+      let blindWriteError: any = null
+      try {
+        const blindWriteResult = await deps.withSupabaseTimeout(
+          supabase
+            .from('inquiries')
+            .update(payload)
+            .eq('id', id),
+          12000,
+          'Update inquiry status fallback request timed out',
+        )
+        blindWriteError = blindWriteResult.error
+      } catch (requestError) {
+        blindWriteError = requestError
+      }
+
+      if (!blindWriteError) {
+        console.warn('[Supabase] updateStatus inquiry fallback completed without row echo after transient aborts:', {
+          id,
+          status,
+        })
+        return fromInquiryRow({
+          id,
+          ...payload,
+        }, deps)
+      }
+
+      if (!deps.isTransientSupabaseRequestError(blindWriteError)) {
+        deps.throwSupabaseError('updateStatus inquiry', blindWriteError)
+      }
+
+      try {
+        const restData = await deps.updateInquiryRowViaRest(id, payload, 'updateStatus inquiry')
+        if (restData) {
+          return fromInquiryRow(await deps.enrichInquiryRowWithTemplateData(restData), deps)
+        }
+      } catch (restError) {
+        if (!deps.isTransientSupabaseRequestError(restError)) {
+          deps.throwSupabaseError('updateStatus inquiry', restError)
+        }
+        lastTransientError = restError
+      }
+
+      deps.throwSupabaseError('updateStatus inquiry', lastTransientError || blindWriteError)
     },
 
     async delete(id: string) {
-      const { error } = await supabase.from('inquiries').delete().eq('id', id)
+      const { error } = await deps.withSupabaseTimeout(
+        supabase.from('inquiries').delete().eq('id', id),
+        12000,
+        'Delete inquiry request timed out',
+      )
       if (error) deps.throwSupabaseError('delete inquiry', error)
       return true
     },

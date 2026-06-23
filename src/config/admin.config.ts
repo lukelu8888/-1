@@ -38,7 +38,7 @@ export const ADMIN_CONFIG = {
    * COSUN 管理员权限
    * 拥有完整系统管理权限的账号列表
    */
-  SUPER_ADMINS: ['admin@cosun.com', 'system@cosun.com'],
+  SUPER_ADMINS: ['admin@cosunchina.com', 'admin@cosun.com', 'system@cosun.com'],
 } as const;
 
 /**

@@ -12,13 +12,14 @@ export const exportToPDF = async (
     orientation?: 'portrait' | 'landscape';
   }
 ) => {
+  let toastId: string | number | undefined;
   try {
     // Import modern-screenshot for better CSS support
     const { domToPng } = await import('modern-screenshot');
     const jsPDF = (await import('jspdf')).default;
 
     const { toast } = await import('sonner@2.0.3');
-    const toastId = toast.loading('生成PDF...');
+    toastId = toast.loading('生成PDF...');
 
     const format = options?.format || 'a4';
     const orientation = options?.orientation || 'portrait';
@@ -40,6 +41,36 @@ export const exportToPDF = async (
     console.log('🎨 开始PDF导出...');
     console.log('📐 页面尺寸:', `${pageWidth}mm x ${pageHeight}mm`);
     console.log('📏 可打印区域:', `${printableWidth}mm x ${printableHeight}mm`);
+
+    const pageEls = Array.from(elementRef.querySelectorAll<HTMLElement>('[data-a4-page]'));
+    if (pageEls.length > 0) {
+      console.log('📄 检测到A4分页文档，按单页导出PDF:', pageEls.length);
+      const pdf = new jsPDF({
+        orientation,
+        unit: 'mm',
+        format,
+      });
+
+      for (let index = 0; index < pageEls.length; index += 1) {
+        const pageDataUrl = await domToPng(pageEls[index], {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          quality: 1.0,
+        });
+
+        if (index > 0) {
+          pdf.addPage();
+        }
+
+        pdf.addImage(pageDataUrl, 'PNG', 0, 0, pageWidth, pageHeight);
+        console.log(`📄 页面 ${index + 1}/${pageEls.length}: 单页导出完成`);
+      }
+
+      pdf.save(filename);
+      toast.success('PDF导出成功!', { id: toastId });
+      console.log('✅ A4分页PDF导出完成!');
+      return true;
+    }
 
     // Generate PNG with high quality
     console.log('🖼️ 生成高清图片...');

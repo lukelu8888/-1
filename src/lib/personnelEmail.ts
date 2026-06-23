@@ -1,6 +1,9 @@
 const PERSONNEL_EMAIL_CANONICAL_MAP: Record<string, string> = {
   'admin@cosun.com': 'admin@cosunchina.com',
   'ceo@cosun.com': 'ceo@cosunchina.com',
+  'finance@cosun.com': 'finance@cosunchina.com',
+  'finance@gaoshengda.com': 'finance@cosunchina.com',
+  'finance@cosunchina.com': 'finance@cosunchina.com',
   'john.smith@cosun.com': 'salesmanager-na@cosunchina.com',
   'carlos.silva@cosun.com': 'salesmanager-sa@cosunchina.com',
   'hans.mueller@cosun.com': 'salesmanager-ea@cosunchina.com',

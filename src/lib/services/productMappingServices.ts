@@ -13,10 +13,68 @@ function throwSupabaseError(context: string, error: any): never {
   throw (error instanceof Error ? error : buildSupabaseError(context, error))
 }
 
+function isTransientSupabaseRequestError(error: any): boolean {
+  const message = [
+    error?.name,
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.error,
+    error?.error_description,
+    error?.cause?.message,
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase()
+
+  return (
+    error?.name === 'AbortError' ||
+    error?.name === 'TypeError' ||
+    message.includes('signal is aborted') ||
+    message.includes('request aborted') ||
+    message.includes('timed out') ||
+    message.includes('failed to fetch') ||
+    message.includes('networkerror') ||
+    message.includes('load failed') ||
+    message.includes('connection refused') ||
+    message.includes('err_connection_refused')
+  )
+}
+
+function isMissingFactoryModelNoColumn(error: any): boolean {
+  const message = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.code,
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .toLowerCase()
+
+  return message.includes('factory_model_no')
+}
+
+function withoutFactoryModelNo(row: Record<string, any>) {
+  const { factory_model_no: _factoryModelNo, ...fallbackRow } = row
+  return fallbackRow
+}
+
 function toProductMasterRow(product: any) {
   return {
     id: product.id || undefined,
     internal_model_no: product.internalModelNo || product.modelNo || product.internal_model_no || product.model_no,
+    factory_model_no:
+      product.factoryModelNo ||
+      product.factorySku ||
+      product.factory_model_no ||
+      product.factory_sku ||
+      product.internalFactoryNo ||
+      product.internal_factory_no ||
+      product.internalModelNo ||
+      product.modelNo ||
+      product.internal_model_no ||
+      product.model_no,
     region_code: product.regionCode || product.region_code || 'NA',
     product_name: product.productName || product.product_name || '',
     description: product.description || product.specifications || product.externalSpecification || product.external_specification || null,
@@ -31,6 +89,8 @@ function fromProductMasterRow(row: any) {
     id: row.id,
     internalModelNo: row.internal_model_no,
     modelNo: row.internal_model_no,
+    factoryModelNo: row.factory_model_no || row.internal_model_no || '',
+    factorySku: row.factory_model_no || row.internal_model_no || '',
     regionCode: row.region_code,
     productName: row.product_name,
     description: row.description || '',
@@ -194,16 +254,66 @@ export const productMasterService = {
 
   async create(product: any) {
     const row = toProductMasterRow(product)
-    const { data, error } = await supabase.from('product_master').insert(row).select().single()
+    let { data, error } = await supabase.from('product_master').insert(row).select().single()
+    if (error && isMissingFactoryModelNoColumn(error)) {
+      ;({ data, error } = await supabase.from('product_master').insert(withoutFactoryModelNo(row)).select().single())
+    }
     if (error) throwSupabaseError('create product_master', error)
     return fromProductMasterRow(data)
   },
 
   async upsert(product: any) {
     const row = toProductMasterRow(product)
-    const { data, error } = await supabase.from('product_master').upsert(row, { onConflict: 'internal_model_no' }).select().single()
-    if (error) throwSupabaseError('upsert product_master', error)
-    return fromProductMasterRow(data)
+    let lastTransientError: any = null
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data, error } = await supabase
+        .from('product_master')
+        .upsert(row, { onConflict: 'internal_model_no' })
+        .select()
+        .single()
+      if (!error) return fromProductMasterRow(data)
+      if (isMissingFactoryModelNoColumn(error)) {
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('product_master')
+          .upsert(withoutFactoryModelNo(row), { onConflict: 'internal_model_no' })
+          .select()
+          .single()
+        if (!fallbackError) return fromProductMasterRow(fallbackData)
+        if (!isTransientSupabaseRequestError(fallbackError)) {
+          throwSupabaseError('upsert product_master', fallbackError)
+        }
+        lastTransientError = fallbackError
+        continue
+      }
+      if (!isTransientSupabaseRequestError(error)) {
+        throwSupabaseError('upsert product_master', error)
+      }
+      lastTransientError = error
+    }
+
+    const { error: blindWriteError } = await supabase
+      .from('product_master')
+      .upsert(row, { onConflict: 'internal_model_no' })
+
+    if (!blindWriteError) {
+      const refetched = await this.getByInternalModelNo(row.internal_model_no)
+      if (refetched) return refetched
+    } else if (isMissingFactoryModelNoColumn(blindWriteError)) {
+      const { error: fallbackBlindWriteError } = await supabase
+        .from('product_master')
+        .upsert(withoutFactoryModelNo(row), { onConflict: 'internal_model_no' })
+      if (!fallbackBlindWriteError) {
+        const refetched = await this.getByInternalModelNo(row.internal_model_no)
+        if (refetched) return refetched
+      } else if (!isTransientSupabaseRequestError(fallbackBlindWriteError)) {
+        throwSupabaseError('upsert product_master', fallbackBlindWriteError)
+      }
+    } else if (!isTransientSupabaseRequestError(blindWriteError)) {
+      throwSupabaseError('upsert product_master', blindWriteError)
+    }
+
+    throwSupabaseError('upsert product_master', lastTransientError || blindWriteError)
   },
 }
 
@@ -285,6 +395,22 @@ export const productMappingEventService = {
 }
 
 export const productModelMappingService = {
+  async getAllCompact(partyType?: 'customer' | 'supplier') {
+    let query = supabase
+      .from('product_model_mappings')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1000)
+
+    if (partyType) {
+      query = query.eq('party_type', partyType)
+    }
+
+    const { data, error } = await query
+    if (error) throwSupabaseError('getAllCompact product_model_mappings', error)
+    return (data || []).map(fromProductMappingRow)
+  },
+
   async getAll(partyType?: 'customer' | 'supplier') {
     let query = supabase
       .from('product_model_mappings')

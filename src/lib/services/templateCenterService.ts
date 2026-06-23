@@ -3,6 +3,7 @@ import { supabase } from '../supabase'
 export const DEFAULT_TEMPLATE_BINDING_FLOW_CODE = 'inq_qr_xj_bj_qt_sc_cg'
 export const templateBindingResolutionCache = new Map<string, any>()
 export const documentTemplateDirectReadUnavailableKeys = new Set<string>()
+export const TEMPLATE_CENTER_PUBLISH_EVENT = 'template-center:published'
 export const TEMPLATE_DEFAULT_NODE_BINDINGS: Record<string, string[]> = {
   ing: ['ing-create'],
   qt: ['qt-create'],
@@ -167,6 +168,28 @@ function normalizeTemplateCenterKey(templateKey: string) {
   return String(templateKey || '').trim().toLowerCase()
 }
 
+function notifyTemplatePublished(templateKey: string, version: string, versionId: string | null) {
+  if (typeof window === 'undefined') return
+  const detail = {
+    templateKey,
+    version,
+    versionId,
+    at: Date.now(),
+  }
+
+  try {
+    window.dispatchEvent(new CustomEvent(TEMPLATE_CENTER_PUBLISH_EVENT, { detail }))
+  } catch {
+    // ignore custom event failures
+  }
+
+  try {
+    window.localStorage.setItem('template-center:last-published', JSON.stringify(detail))
+  } catch {
+    // ignore storage failures
+  }
+}
+
 async function runTemplateCenterStep<T>(
   deps: TemplateCenterDeps,
   stepLabel: string,
@@ -182,6 +205,16 @@ async function runTemplateCenterStep<T>(
     console.warn(`[TemplateCenter] ${stepLabel} failed after ${Date.now() - startedAt}ms`, error)
     throw error
   }
+}
+
+function isMissingColumnMessage(error: unknown, column: string) {
+  const message = String((error as any)?.message || error || '').toLowerCase()
+  return (
+    message.includes(`.${column.toLowerCase()}`) ||
+    message.includes(`"${column.toLowerCase()}"`) ||
+    message.includes(`'${column.toLowerCase()}'`) ||
+    message.includes(`${column.toLowerCase()} does not exist`)
+  )
 }
 
 function formatTemplateCenterTime(value: string | null | undefined) {
@@ -365,6 +398,21 @@ async function ensureDocumentTemplate(deps: TemplateCenterDeps, templateKey: str
     is_active: true,
   }
 
+  const readTemplateByCode = async (stepLabel: string, timeoutMs: number) => {
+    const { data, error } = await runTemplateCenterStep(
+      deps,
+      stepLabel,
+      supabase
+        .from('document_templates')
+        .select('id,template_code,document_code,template_name_cn,template_name_en,display_order,business_stage,renderer_type,status,is_active,current_version_id')
+        .eq('template_code', config.templateCode)
+        .single(),
+      timeoutMs,
+    )
+    if (error) throw deps.buildSupabaseError('ensure document_template read by code', error)
+    return data
+  }
+
   if (!documentTemplateDirectReadUnavailableKeys.has(normalizedTemplateKey)) {
     try {
       const { data: existingTemplate, error: existingTemplateError } = await runTemplateCenterStep(
@@ -375,6 +423,7 @@ async function ensureDocumentTemplate(deps: TemplateCenterDeps, templateKey: str
           .select('id,template_code,document_code,template_name_cn,template_name_en,display_order,business_stage,renderer_type,status,is_active,current_version_id')
           .eq('template_code', config.templateCode)
           .maybeSingle(),
+        20000,
       )
 
       if (existingTemplateError) {
@@ -405,27 +454,47 @@ async function ensureDocumentTemplate(deps: TemplateCenterDeps, templateKey: str
     return parallelResolved
   }
 
-  const { error: upsertError } = await runTemplateCenterStep(
-    deps,
-    `ensureDocumentTemplate(${normalizedTemplateKey}) upsert`,
-    supabase
-      .from('document_templates')
-      .upsert(payload, { onConflict: 'template_code', ignoreDuplicates: true }),
-    20000,
-  )
-  if (upsertError) throw deps.buildSupabaseError('ensure document_template upsert', upsertError)
+  try {
+    const { error: upsertError } = await runTemplateCenterStep(
+      deps,
+      `ensureDocumentTemplate(${normalizedTemplateKey}) upsert`,
+      supabase
+        .from('document_templates')
+        .upsert(payload, { onConflict: 'template_code', ignoreDuplicates: true }),
+      45000,
+    )
+    if (upsertError) throw deps.buildSupabaseError('ensure document_template upsert', upsertError)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '')
+    if (message.includes('timed out') || message.includes('超时')) {
+      try {
+        const recovered = await readTemplateByCode(
+          `ensureDocumentTemplate(${normalizedTemplateKey}) read persisted after timeout`,
+          30000,
+        )
+        documentTemplateDirectReadUnavailableKeys.delete(normalizedTemplateKey)
+        documentTemplateMetaCache.set(normalizedTemplateKey, recovered)
+        return recovered
+      } catch {
+        const { error: retryUpsertError } = await runTemplateCenterStep(
+          deps,
+          `ensureDocumentTemplate(${normalizedTemplateKey}) upsert retry`,
+          supabase
+            .from('document_templates')
+            .upsert(payload, { onConflict: 'template_code', ignoreDuplicates: true }),
+          60000,
+        )
+        if (retryUpsertError) throw deps.buildSupabaseError('ensure document_template upsert retry', retryUpsertError)
+      }
+    } else {
+      throw error
+    }
+  }
 
-  const { data, error } = await runTemplateCenterStep(
-    deps,
+  const data = await readTemplateByCode(
     `ensureDocumentTemplate(${normalizedTemplateKey}) read persisted`,
-    supabase
-      .from('document_templates')
-      .select('id,template_code,document_code,template_name_cn,template_name_en,display_order,business_stage,renderer_type,status,is_active,current_version_id')
-      .eq('template_code', config.templateCode)
-      .single(),
-    15000,
+    30000,
   )
-  if (error) throw deps.buildSupabaseError('ensure document_template', error)
 
   documentTemplateDirectReadUnavailableKeys.delete(normalizedTemplateKey)
   documentTemplateMetaCache.set(normalizedTemplateKey, data)
@@ -434,6 +503,24 @@ async function ensureDocumentTemplate(deps: TemplateCenterDeps, templateKey: str
 
 const publishedTemplateSettingsCache = new Map<string, { settings: Record<string, any> | null; fetchedAt: number }>()
 const PUBLISHED_SETTINGS_CACHE_TTL = 5 * 60 * 1000
+
+export function peekPublishedTemplateSettingsCache(templateKey: string): {
+  hasFreshCache: boolean
+  settings: Record<string, any> | null
+} {
+  const normalizedKey = normalizeTemplateCenterKey(templateKey)
+  const cached = publishedTemplateSettingsCache.get(normalizedKey)
+  if (!cached) {
+    return { hasFreshCache: false, settings: null }
+  }
+  if ((Date.now() - cached.fetchedAt) >= PUBLISHED_SETTINGS_CACHE_TTL) {
+    return { hasFreshCache: false, settings: null }
+  }
+  return {
+    hasFreshCache: true,
+    settings: cached.settings,
+  }
+}
 
 export function createTemplateCenterService(deps: TemplateCenterDeps) {
   return {
@@ -610,11 +697,16 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
       }
     },
 
-    async getPublishedTemplateSettings(templateKey: string): Promise<Record<string, any> | null> {
+    async getPublishedTemplateSettings(
+      templateKey: string,
+      options?: { forceRefresh?: boolean },
+    ): Promise<Record<string, any> | null> {
       const normalizedKey = normalizeTemplateCenterKey(templateKey)
       const now = Date.now()
       const cached = publishedTemplateSettingsCache.get(normalizedKey)
-      if (cached && (now - cached.fetchedAt) < PUBLISHED_SETTINGS_CACHE_TTL) return cached.settings
+      if (!options?.forceRefresh && cached && (now - cached.fetchedAt) < PUBLISHED_SETTINGS_CACHE_TTL) {
+        return cached.settings
+      }
       try {
         if (isTemplateCenterSupabaseUnreachable()) return null
         const template = await ensureDocumentTemplate(deps, normalizedKey)
@@ -623,7 +715,7 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
           `getPublishedTemplateSettings(${normalizedKey})`,
           supabase
             .from('document_template_versions')
-            .select('sample_data')
+            .select('id,version_label,sample_data')
             .eq('template_id', template.id)
             .eq('status', 'published')
             .order('version_no', { ascending: false })
@@ -634,7 +726,15 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
           publishedTemplateSettingsCache.set(normalizedKey, { settings: null, fetchedAt: now })
           return null
         }
-        const settings = (data.sample_data as any)?.templateSettings ?? null
+        const templateSettings = (data.sample_data as any)?.templateSettings ?? null
+        const versionLabel = String(data.version_label || '').trim() || null
+        const settings = templateSettings
+          ? {
+              ...templateSettings,
+              __templateVersion: versionLabel,
+              __templateVersionId: data.id || null,
+            }
+          : null
         publishedTemplateSettingsCache.set(normalizedKey, { settings, fetchedAt: now })
         return settings
       } catch {
@@ -678,29 +778,64 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
           .filter(Boolean)
         if (targetNodeCodes.length === 0) return []
 
-        const { data, error } = await runTemplateCenterStep(
-          deps,
-          `getTemplateBindingsStatus(${normalizedTemplateKey})`,
-          supabase
-            .from('document_template_bindings')
-            .select(`
-              node_code,
-              template_version_id,
-              is_default,
-              updated_at,
-              document_template_versions (
-                id,
-                version_label,
-                status,
-                published_at
-              )
-            `)
-            .eq('flow_code', DEFAULT_TEMPLATE_BINDING_FLOW_CODE)
-            .eq('document_code', config.documentCode)
-            .in('node_code', targetNodeCodes)
-            .eq('is_default', true),
-          10000,
-        )
+        let data: any = null
+        let error: any = null
+        try {
+          const result = await runTemplateCenterStep(
+            deps,
+            `getTemplateBindingsStatus(${normalizedTemplateKey})`,
+            supabase
+              .from('document_template_bindings')
+              .select(`
+                node_code,
+                template_version_id,
+                is_default,
+                updated_at,
+                document_template_versions (
+                  id,
+                  version_label,
+                  status,
+                  published_at
+                )
+              `)
+              .eq('flow_code', DEFAULT_TEMPLATE_BINDING_FLOW_CODE)
+              .eq('document_code', config.documentCode)
+              .in('node_code', targetNodeCodes)
+              .eq('is_default', true),
+            10000,
+          )
+          data = result.data
+          error = result.error
+        } catch (queryError) {
+          if (!isMissingColumnMessage(queryError, 'updated_at')) {
+            throw queryError
+          }
+          console.warn(`[TemplateCenter] getTemplateBindingsStatus(${normalizedTemplateKey}) retrying without updated_at due to schema drift.`, queryError)
+          const fallbackResult = await runTemplateCenterStep(
+            deps,
+            `getTemplateBindingsStatus(${normalizedTemplateKey}) fallback`,
+            supabase
+              .from('document_template_bindings')
+              .select(`
+                node_code,
+                template_version_id,
+                is_default,
+                document_template_versions (
+                  id,
+                  version_label,
+                  status,
+                  published_at
+                )
+              `)
+              .eq('flow_code', DEFAULT_TEMPLATE_BINDING_FLOW_CODE)
+              .eq('document_code', config.documentCode)
+              .in('node_code', targetNodeCodes)
+              .eq('is_default', true),
+            10000,
+          )
+          data = fallbackResult.data
+          error = fallbackResult.error
+        }
         if (error) throw deps.buildSupabaseError(`get template bindings status ${normalizedTemplateKey}`, error)
 
         const rowMap = new Map<string, any>()
@@ -728,6 +863,7 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
 
     async saveVersion(input: {
       templateKey: string
+      templateId?: string
       version: string
       status: 'draft' | 'published'
       note: string
@@ -741,12 +877,14 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
         const config = DOCUMENT_TEMPLATE_CENTER_CONFIG[normalizedTemplateKey]
         if (!config) throw new Error(`Unknown template key: ${input.templateKey}`)
 
-        const template = await ensureDocumentTemplate(deps, normalizedTemplateKey)
+        const template = input.templateId?.trim()
+          ? { id: input.templateId.trim() }
+          : await ensureDocumentTemplate(deps, normalizedTemplateKey)
         const { data: latestVersionRow, error: latestVersionError } = await runTemplateCenterStep(
           deps,
           `saveVersion(${normalizedTemplateKey}) read latest version`,
           supabase.from('document_template_versions').select('version_no').eq('template_id', template.id).order('version_no', { ascending: false }).limit(1).maybeSingle(),
-          15000,
+          30000,
         )
         if (latestVersionError) throw deps.buildSupabaseError('read latest document_template_version', latestVersionError)
 
@@ -775,7 +913,7 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
             })
             .select('*')
             .single(),
-          20000,
+          45000,
         )
         if (insertError) throw deps.buildSupabaseError('insert document_template_version', insertError)
 
@@ -790,7 +928,7 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
             deps,
             `saveVersion(${normalizedTemplateKey}) update template current version`,
             supabase.from('document_templates').update(templateUpdatePayload).eq('id', template.id),
-            15000,
+            30000,
           )
           if (templateUpdateError) throw deps.buildSupabaseError('update document_templates current_version', templateUpdateError)
         } else {
@@ -804,31 +942,43 @@ export function createTemplateCenterService(deps: TemplateCenterDeps) {
         if (input.status === 'published') {
           const targetNodeCodes = TEMPLATE_DEFAULT_NODE_BINDINGS[normalizedTemplateKey] || []
           for (const nodeCode of targetNodeCodes) {
-            const { error: resetBindingError } = await deps.updateWithSchemaFallback(
-              'document_template_bindings',
-              { is_default: false, updated_at: nowIso },
-              (query) => query.eq('flow_code', DEFAULT_TEMPLATE_BINDING_FLOW_CODE).eq('document_code', config.documentCode).eq('node_code', nodeCode),
-              `reset template binding ${config.documentCode}/${nodeCode}`,
+            const { error: resetBindingError } = await runTemplateCenterStep(
+              deps,
+              `saveVersion(${normalizedTemplateKey}) reset binding ${config.documentCode}/${nodeCode}`,
+              deps.updateWithSchemaFallback(
+                'document_template_bindings',
+                { is_default: false, updated_at: nowIso },
+                (query) => query.eq('flow_code', DEFAULT_TEMPLATE_BINDING_FLOW_CODE).eq('document_code', config.documentCode).eq('node_code', nodeCode),
+                `reset template binding ${config.documentCode}/${nodeCode}`,
+              ),
+              30000,
             )
             if (resetBindingError) throw resetBindingError
 
-            const { error: bindingUpsertError } = await deps.upsertWithoutSelectWithSchemaFallback(
-              'document_template_bindings',
-              {
-                flow_code: DEFAULT_TEMPLATE_BINDING_FLOW_CODE,
-                node_code: nodeCode,
-                document_code: config.documentCode,
-                template_id: template.id,
-                template_version_id: insertedVersion.id,
-                is_default: true,
-                updated_at: nowIso,
-              },
-              'flow_code,node_code,document_code,template_version_id',
-              `publish template binding ${config.documentCode}/${nodeCode}`,
+            const { error: bindingUpsertError } = await runTemplateCenterStep(
+              deps,
+              `saveVersion(${normalizedTemplateKey}) publish binding ${config.documentCode}/${nodeCode}`,
+              deps.upsertWithoutSelectWithSchemaFallback(
+                'document_template_bindings',
+                {
+                  flow_code: DEFAULT_TEMPLATE_BINDING_FLOW_CODE,
+                  node_code: nodeCode,
+                  document_code: config.documentCode,
+                  template_id: template.id,
+                  template_version_id: insertedVersion.id,
+                  is_default: true,
+                  updated_at: nowIso,
+                },
+                'flow_code,node_code,document_code,template_version_id',
+                `publish template binding ${config.documentCode}/${nodeCode}`,
+              ),
+              30000,
             )
             if (bindingUpsertError) throw bindingUpsertError
             templateBindingResolutionCache.delete(`${config.documentCode}:${nodeCode}`)
           }
+          publishedTemplateSettingsCache.delete(normalizedTemplateKey)
+          notifyTemplatePublished(normalizedTemplateKey, input.version, insertedVersion.id || null)
         }
 
         const { error: logError } = await deps.withSupabaseTimeout(
