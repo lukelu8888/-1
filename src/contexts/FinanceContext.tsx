@@ -19,6 +19,9 @@ export interface AccountReceivable {
   paidAmount: number;
   remainingAmount: number;
   currency: string;
+  creditLimitUsd?: number | null;
+  overdueRiskLevel?: string | null;
+  creditReleaseApprovedBy?: string | null;
   status: 'pending' | 'partially_paid' | 'paid' | 'overdue' | 'proof_uploaded'; // 🔥 添加 proof_uploaded 状态
   paymentTerms: string;
   products: Array<{
@@ -55,6 +58,8 @@ export interface AccountReceivable {
     currency: string;
     notes?: string;
   };
+  depositReceiptProof?: Record<string, any> | null; // 财务确认定金到账凭证
+  balanceReceiptProof?: Record<string, any> | null; // 财务确认余款到账凭证
   createdAt: number;
   createdBy: string;
   notes?: string;
@@ -62,6 +67,7 @@ export interface AccountReceivable {
 
 interface FinanceContextType {
   accountsReceivable: AccountReceivable[];
+  refreshFinanceData: () => Promise<void>;
   addAccountReceivable: (ar: Omit<AccountReceivable, 'id' | 'createdAt'>) => AccountReceivable;
   updateAccountReceivable: (id: string, updates: Partial<AccountReceivable>) => void;
   updateARByOrderNumber: (orderNumber: string, updates: Partial<AccountReceivable>) => void; // 🔥 新增：通过订单号更新
@@ -84,49 +90,52 @@ const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 export function FinanceProvider({ children }: { children: ReactNode }) {
   const [accountsReceivable, setAccountsReceivable] = useState<AccountReceivable[]>([]);
 
+  const loadAccountsReceivable = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setAccountsReceivable([]);
+      return;
+    }
+    let isStaff = isStoredStaffPortalRole();
+    if (!isStaff && getStoredPortalRole() === null) {
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('portal_role')
+        .eq('id', session.user.id)
+        .maybeSingle();
+      isStaff = profile?.portal_role === 'admin' || profile?.portal_role === 'staff';
+    }
+    const rows = isStaff
+      ? await arService.getAll()
+      : await arService.getByEmail(session.user.email || '');
+    if (!Array.isArray(rows)) return;
+    setAccountsReceivable(rows.filter(Boolean) as AccountReceivable[]);
+  };
+
   // Supabase-first: 从 accounts_receivable 表加载
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      let isStaff = isStoredStaffPortalRole();
-      if (!isStaff && getStoredPortalRole() === null) {
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('portal_role')
-          .eq('id', session.user.id)
-          .maybeSingle();
-        isStaff = profile?.portal_role === 'admin' || profile?.portal_role === 'staff';
-      }
-      const rows = isStaff
-        ? await arService.getAll()
-        : await arService.getByEmail(session.user.email || '');
-      if (!alive || !Array.isArray(rows)) return;
-      setAccountsReceivable(rows.filter(Boolean) as AccountReceivable[]);
+      await loadAccountsReceivable();
     };
     void load();
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN') void load();
       else if (event === 'SIGNED_OUT') setAccountsReceivable([]);
     });
-    return () => { alive = false; subscription.unsubscribe(); };
+    const handleFinanceDataUpdated = () => { void load(); };
+    window.addEventListener('financeDataUpdated', handleFinanceDataUpdated);
+    return () => {
+      alive = false;
+      subscription.unsubscribe();
+      window.removeEventListener('financeDataUpdated', handleFinanceDataUpdated);
+    };
   }, []);
 
   // Realtime 订阅
   useEffect(() => {
-    const channel = arService.subscribeToChanges((payload) => {
-      const { eventType, new: newRow, old: oldRow } = payload;
-      if (eventType === 'INSERT' || eventType === 'UPDATE') {
-        const updated = newRow as AccountReceivable;
-        setAccountsReceivable((prev) => {
-          const exists = prev.find((a) => a.id === updated.id);
-          return exists ? prev.map((a) => a.id === updated.id ? { ...a, ...updated } : a) : [updated, ...prev];
-        });
-      } else if (eventType === 'DELETE') {
-        const deletedId = (oldRow as any)?.id;
-        if (deletedId) setAccountsReceivable((prev) => prev.filter((a) => a.id !== deletedId));
-      }
+    const channel = arService.subscribeToChanges(() => {
+      void loadAccountsReceivable();
     });
     return () => { void supabase.removeChannel(channel); };
   }, []);
@@ -235,6 +244,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     <FinanceContext.Provider
       value={{
         accountsReceivable,
+        refreshFinanceData: loadAccountsReceivable,
         addAccountReceivable,
         updateAccountReceivable,
         updateARByOrderNumber,

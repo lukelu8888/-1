@@ -1,15 +1,16 @@
-// Simplified English-only context (no language switching)
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useContext, ReactNode, useEffect, useMemo, useState } from 'react';
+
+export type LanguageCode = 'en' | 'es' | 'pt' | 'fr' | 'ru' | 'ar';
 
 interface LanguageContextType {
-  language: 'en';
-  setLanguage: (lang: 'en') => void;
-  t: any; // English translations object
+  language: LanguageCode;
+  setLanguage: (lang: LanguageCode) => void;
+  t: any;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
+const LANGUAGE_STORAGE_KEY = 'cosun_language';
 
-// Simplified English-only translations
 const englishTranslations = {
   companyName: 'FUJIAN COSUN TUFF BUILDING MATERIALS CO., LTD.',
   companyNameEn: 'YOUR ONE-STOP SOURCING SOLUTION EXPERT IN CHINA',
@@ -61,7 +62,7 @@ const englishTranslations = {
     subtitle: 'Discover our comprehensive range of high-quality building materials',
     all: 'All Products',
     viewDetails: 'View Details',
-    addToCart: 'Add to Cart',
+    addToCart: 'Add to Inquiry',
     categories: {
       appliances: 'Appliances',
       bath: 'Bath',
@@ -350,8 +351,8 @@ const englishTranslations = {
     },
   },
   login: {
-    title: 'Customer Login Portal',
-    subtitle: 'Access your account and manage orders',
+    title: 'COSUN Login Portal',
+    subtitle: 'Choose customer, supplier, or staff access',
     welcomeBack: 'Welcome Back',
     description: 'Sign in to access your dashboard',
     email: 'Email Address',
@@ -535,7 +536,7 @@ const englishTranslations = {
     weight: 'Weight',
     dimensions: 'Dimensions',
     packaging: 'Packaging',
-    addToCart: 'Add to Cart',
+    addToCart: 'Add to Inquiry',
     requestQuote: 'Request Quote',
   },
   socialMedia: {
@@ -565,12 +566,292 @@ const englishTranslations = {
   },
 };
 
+const publicSiteTranslations = {
+  en: {
+    languageNames: {
+      en: 'English',
+      es: 'Español',
+      pt: 'Português',
+      fr: 'Français',
+      ru: 'Русский',
+      ar: 'العربية',
+    },
+    header: {
+      live: 'LIVE',
+      searchPlaceholder: 'Search by product, brand, SKU or supplier...',
+      allCategories: 'All Categories',
+      welcome: 'Welcome',
+      cart: 'Inquiry List',
+      topNav: ['Sourcing Solutions', 'Trade Services', 'Suppliers', 'Deals & Offers', 'New Arrivals', 'Projects', 'Resources'],
+    },
+    home: {
+      departmentTitle: 'Shop by Department',
+      allDepartments: 'All Departments',
+      shopAll: 'Shop All',
+      back: 'Back',
+      from: 'From',
+      startingFrom: 'Starting from',
+      heroSlides: [
+        {
+          eyebrow: 'For Building Material Retail Chains',
+          headline: 'Build More.',
+          accent: 'Source Smarter.',
+          description: 'Container-ready building materials and industrial supplies for chain stores that need stable price, assortment, and delivery.',
+          bullets: ['Competitive wholesale pricing', 'Category sourcing programs', 'Reliable global delivery'],
+          primaryCta: 'Shop Now',
+          secondaryCta: 'Request a Quote',
+        },
+        {
+          eyebrow: 'For Local Fabricators',
+          headline: 'Supply Your Workshop.',
+          accent: 'Keep Production Moving.',
+          description: 'Doors, windows, kitchen, and home furnishing materials matched to the way local processing factories quote, cut, assemble, and deliver.',
+          bullets: ['Profiles, hardware, panels, and fittings', 'Factory-direct sourcing support', 'Batch consistency and replacement planning'],
+          primaryCta: 'Browse Categories',
+          secondaryCta: 'Send Requirements',
+        },
+        {
+          eyebrow: 'For Buyers Seeking a China Agent',
+          headline: 'Find Suppliers.',
+          accent: 'Manage China Orders.',
+          description: 'A China-based sourcing partner for supplier search, price negotiation, samples, contracts, production follow-up, and shipment coordination.',
+          bullets: ['Supplier qualification and comparison', 'Local negotiation and order follow-up', 'Transparent procurement execution'],
+          primaryCta: 'Start Sourcing',
+          secondaryCta: 'Talk to an Agent',
+        },
+        {
+          eyebrow: 'For Inspection Service Clients',
+          headline: 'Inspect Before.',
+          accent: 'Ship With Confidence.',
+          description: 'Independent quality inspection and loading checks across China, with practical reports that help you decide before goods leave the factory.',
+          bullets: ['Pre-shipment and loading inspection', 'AQL sampling and photo reports', 'Issue follow-up before release'],
+          primaryCta: 'View QC Services',
+          secondaryCta: 'Book Inspection',
+        },
+        {
+          eyebrow: 'For Turnkey Project Buyers',
+          headline: 'One Project.',
+          accent: 'One Sourcing Desk.',
+          description: 'Coordinated sourcing for complete building, commercial, and industrial projects from item list to supplier packages, QC, documents, and delivery.',
+          bullets: ['Multi-category bill of materials', 'Consolidated supplier management', 'Project delivery and documentation control'],
+          primaryCta: 'View Project Solutions',
+          secondaryCta: 'Submit Project List',
+        },
+      ],
+      promos: [
+        ['New Customer Offer', '10% Off', 'On Your First Order', 'Use Code: COSUN10'],
+        ['Bulk Order Savings', 'Save More', 'With Volume Pricing', 'Learn More'],
+        ['Global Shipping', '200+ Countries', 'Delivering to', 'View Shipping Options'],
+      ],
+      trustStats: ['Quality Products', 'Verified Suppliers', 'Global Shipping', 'Quality Guarantee', 'Secure Payments'],
+      whyTitle: 'Why Partner with COSUN',
+      whyItems: [
+        ['Global Sourcing', 'Access 5,000+ verified suppliers worldwide'],
+        ['Quality Assurance', 'Rigorous control & certifications'],
+        ['Competitive Pricing', 'Best wholesale prices & bulk discounts'],
+        ['Reliable Delivery', 'On-time delivery to 200+ countries'],
+        ['Trade Services', 'Quotes, contracts, inspections & more'],
+        ['Dedicated Support', 'Expert support for your business 24/7'],
+      ],
+      addToCart: 'Add to Inquiry',
+      viewAllProducts: 'View All Products',
+      trustedTitle: 'Trusted by Businesses Worldwide',
+      logisticsTitle: 'Our Global Logistics Network',
+      logisticsText: 'Delivering reliable service across continents.',
+      logisticsCta: 'View Logistics Options',
+      partnersTitle: 'Our trusted partners',
+      subscribeTitle: 'Stay Ahead with COSUN',
+      subscribeText: 'Subscribe for exclusive deals, new arrivals & industry insights.',
+      subscribePlaceholder: 'Enter your email address',
+      subscribeButton: 'Subscribe',
+      subscribeTags: ['Exclusive Offers', 'New Arrivals', 'Industry Insights'],
+      dealsTitle: 'Deals of the Week',
+      dealsDescription: 'Limited time offers. Maximize your savings.',
+      viewAllDeals: 'View All Deals',
+      shopByCategoryTitle: 'Shop by Category',
+      shopByCategorySubtitle: 'Browse our top departments',
+      viewAllCategories: 'View All Categories',
+      featureCards: [
+        ['Project Solutions', 'End-to-end support for large scale projects.', 'Learn More'],
+        ['Procurement Made Easy', 'One request. Multiple quotes. Best prices.', 'Request a Quote'],
+        ['New Arrivals', 'Latest products from trusted suppliers.', 'Shop New Arrivals'],
+      ],
+      bestValueTitle: 'Best Value Products',
+      bestValueSubtitle: 'High quality. Great prices.',
+      browseDepartmentsDescription: 'Browse all product departments and categories',
+    },
+  },
+  es: {
+    languageNames: { en: 'Inglés', es: 'Español', pt: 'Portugués', fr: 'Francés', ru: 'Ruso', ar: 'Árabe' },
+    header: {
+      live: 'EN VIVO',
+      searchPlaceholder: 'Buscar por producto, marca, SKU o proveedor...',
+      allCategories: 'Todas las categorías',
+      welcome: 'Bienvenido',
+      cart: 'Inquiry List',
+      topNav: ['Soluciones de abastecimiento', 'Servicios comerciales', 'Proveedores', 'Ofertas', 'Novedades', 'Proyectos', 'Recursos'],
+    },
+    home: {
+      departmentTitle: 'Comprar por departamento',
+      allDepartments: 'Todos los departamentos',
+      shopAll: 'Ver todo',
+      back: 'Atrás',
+      from: 'Desde',
+      startingFrom: 'Desde',
+      heroSlides: [
+        { eyebrow: 'Para cadenas de materiales de construcción', headline: 'Construya más.', accent: 'Compre mejor.', description: 'Materiales de construcción e insumos industriales listos para contenedor, con precio, surtido y entrega estables.', bullets: ['Precios mayoristas competitivos', 'Programas de abastecimiento por categoría', 'Entrega global confiable'], primaryCta: 'Comprar ahora', secondaryCta: 'Solicitar cotización' },
+        { eyebrow: 'Para fabricantes locales', headline: 'Abastezca su taller.', accent: 'Mantenga la producción.', description: 'Materiales para puertas, ventanas, cocinas y mobiliario adaptados a talleres y fábricas locales.', bullets: ['Perfiles, herrajes, paneles y accesorios', 'Soporte directo de fábrica', 'Consistencia por lote y reposición'], primaryCta: 'Explorar categorías', secondaryCta: 'Enviar requisitos' },
+        { eyebrow: 'Para compradores que buscan agente en China', headline: 'Encuentre proveedores.', accent: 'Gestione pedidos en China.', description: 'Socio local para búsqueda de proveedores, negociación, muestras, contratos, seguimiento de producción y embarques.', bullets: ['Calificación y comparación de proveedores', 'Negociación local y seguimiento', 'Ejecución transparente de compras'], primaryCta: 'Iniciar abastecimiento', secondaryCta: 'Hablar con un agente' },
+        { eyebrow: 'Para clientes de inspección', headline: 'Inspeccione antes.', accent: 'Envíe con confianza.', description: 'Inspecciones independientes de calidad y carga en China con reportes prácticos antes del embarque.', bullets: ['Inspección previa al embarque y carga', 'Muestreo AQL y reportes fotográficos', 'Seguimiento de incidencias'], primaryCta: 'Ver servicios QC', secondaryCta: 'Reservar inspección' },
+        { eyebrow: 'Para compradores de proyectos llave en mano', headline: 'Un proyecto.', accent: 'Una mesa de compras.', description: 'Abastecimiento coordinado para proyectos completos, desde listas de materiales hasta proveedores, QC, documentos y entrega.', bullets: ['Lista de materiales multi-categoría', 'Gestión consolidada de proveedores', 'Control de entrega y documentación'], primaryCta: 'Ver soluciones de proyecto', secondaryCta: 'Enviar lista de proyecto' },
+      ],
+      promos: [['Oferta nuevo cliente', '10% dto.', 'En el primer pedido', 'Código: COSUN10'], ['Ahorro por volumen', 'Ahorre más', 'Con precios por volumen', 'Más información'], ['Envíos globales', '200+ países', 'Entregamos a', 'Ver opciones']],
+      trustStats: ['Productos de calidad', 'Proveedores verificados', 'Envío global', 'Garantía de calidad', 'Pagos seguros'],
+      whyTitle: 'Por qué asociarse con COSUN',
+      whyItems: [['Abastecimiento global', 'Acceso a 5,000+ proveedores verificados'], ['Garantía de calidad', 'Control riguroso y certificaciones'], ['Precios competitivos', 'Mejores precios mayoristas y descuentos'], ['Entrega confiable', 'Entrega puntual a 200+ países'], ['Servicios comerciales', 'Cotizaciones, contratos, inspecciones y más'], ['Soporte dedicado', 'Soporte experto para su negocio 24/7']],
+      addToCart: 'Add to Inquiry',
+      viewAllProducts: 'Ver todos los productos',
+      trustedTitle: 'Empresas de todo el mundo confían en nosotros',
+      logisticsTitle: 'Nuestra red logística global',
+      logisticsText: 'Servicio confiable en todos los continentes.',
+      logisticsCta: 'Ver opciones logísticas',
+      partnersTitle: 'Nuestros socios de confianza',
+      subscribeTitle: 'Manténgase al día con COSUN',
+      subscribeText: 'Suscríbase para ofertas exclusivas, novedades e información del sector.',
+      subscribePlaceholder: 'Ingrese su correo electrónico',
+      subscribeButton: 'Suscribirse',
+      subscribeTags: ['Ofertas exclusivas', 'Novedades', 'Información del sector'],
+      dealsTitle: 'Ofertas de la semana',
+      dealsDescription: 'Ofertas por tiempo limitado. Maximice sus ahorros.',
+      viewAllDeals: 'Ver todas las ofertas',
+      shopByCategoryTitle: 'Comprar por categoría',
+      shopByCategorySubtitle: 'Explore nuestros departamentos principales',
+      viewAllCategories: 'Ver todas las categorías',
+      featureCards: [
+        ['Soluciones de proyecto', 'Soporte integral para proyectos de gran escala.', 'Más información'],
+        ['Compras más simples', 'Una solicitud. Varias cotizaciones. Mejores precios.', 'Solicitar cotización'],
+        ['Novedades', 'Últimos productos de proveedores confiables.', 'Ver novedades'],
+      ],
+      bestValueTitle: 'Productos de mejor valor',
+      bestValueSubtitle: 'Alta calidad. Buenos precios.',
+      browseDepartmentsDescription: 'Explore todos los departamentos y categorías de productos',
+    },
+  },
+  pt: {
+    languageNames: { en: 'Inglês', es: 'Espanhol', pt: 'Português', fr: 'Francês', ru: 'Russo', ar: 'Árabe' },
+    header: { live: 'AO VIVO', searchPlaceholder: 'Buscar por produto, marca, SKU ou fornecedor...', allCategories: 'Todas as categorias', welcome: 'Bem-vindo', cart: 'Inquiry List', topNav: ['Soluções de sourcing', 'Serviços comerciais', 'Fornecedores', 'Ofertas', 'Novidades', 'Projetos', 'Recursos'] },
+    home: {
+      departmentTitle: 'Comprar por departamento', allDepartments: 'Todos os departamentos', shopAll: 'Ver tudo', back: 'Voltar', from: 'A partir de', startingFrom: 'A partir de',
+      heroSlides: [
+        { eyebrow: 'Para redes de materiais de construção', headline: 'Construa mais.', accent: 'Compre melhor.', description: 'Materiais de construção e suprimentos industriais prontos para contêiner, com preço, sortimento e entrega estáveis.', bullets: ['Preços atacadistas competitivos', 'Programas de sourcing por categoria', 'Entrega global confiável'], primaryCta: 'Comprar agora', secondaryCta: 'Solicitar cotação' },
+        { eyebrow: 'Para fabricantes locais', headline: 'Abasteça sua oficina.', accent: 'Mantenha a produção.', description: 'Materiais para portas, janelas, cozinhas e mobiliário alinhados ao trabalho de fábricas locais.', bullets: ['Perfis, ferragens, painéis e acessórios', 'Suporte direto de fábrica', 'Consistência por lote e reposição'], primaryCta: 'Ver categorias', secondaryCta: 'Enviar requisitos' },
+        { eyebrow: 'Para compradores que buscam agente na China', headline: 'Encontre fornecedores.', accent: 'Gerencie pedidos na China.', description: 'Parceiro local para busca de fornecedores, negociação, amostras, contratos, produção e embarque.', bullets: ['Qualificação e comparação de fornecedores', 'Negociação local e acompanhamento', 'Execução transparente de compras'], primaryCta: 'Iniciar sourcing', secondaryCta: 'Falar com agente' },
+        { eyebrow: 'Para clientes de inspeção', headline: 'Inspecione antes.', accent: 'Embarque com confiança.', description: 'Inspeção independente de qualidade e carregamento na China com relatórios práticos.', bullets: ['Inspeção pré-embarque e carregamento', 'Amostragem AQL e fotos', 'Acompanhamento de problemas'], primaryCta: 'Ver serviços QC', secondaryCta: 'Agendar inspeção' },
+        { eyebrow: 'Para compradores de projetos turnkey', headline: 'Um projeto.', accent: 'Uma mesa de sourcing.', description: 'Sourcing coordenado para projetos completos, da lista de itens a fornecedores, QC, documentos e entrega.', bullets: ['Lista de materiais multicategoria', 'Gestão consolidada de fornecedores', 'Controle de entrega e documentação'], primaryCta: 'Ver soluções', secondaryCta: 'Enviar lista do projeto' },
+      ],
+      promos: [['Oferta para novo cliente', '10% OFF', 'No primeiro pedido', 'Código: COSUN10'], ['Economia por volume', 'Economize mais', 'Com preço por volume', 'Saiba mais'], ['Envio global', '200+ países', 'Entregando para', 'Ver opções']],
+      trustStats: ['Produtos de qualidade', 'Fornecedores verificados', 'Envio global', 'Garantia de qualidade', 'Pagamentos seguros'],
+      whyTitle: 'Por que trabalhar com a COSUN', whyItems: [['Sourcing global', 'Acesso a 5.000+ fornecedores verificados'], ['Garantia de qualidade', 'Controle rigoroso e certificações'], ['Preço competitivo', 'Melhores preços atacadistas e descontos'], ['Entrega confiável', 'Entrega pontual para 200+ países'], ['Serviços comerciais', 'Cotações, contratos, inspeções e mais'], ['Suporte dedicado', 'Suporte especializado 24/7']],
+      addToCart: 'Add to Inquiry', viewAllProducts: 'Ver todos os produtos', trustedTitle: 'Empresas no mundo todo confiam na COSUN', logisticsTitle: 'Nossa rede logística global', logisticsText: 'Serviço confiável entre continentes.', logisticsCta: 'Ver opções logísticas', partnersTitle: 'Parceiros de confiança', subscribeTitle: 'Fique à frente com a COSUN', subscribeText: 'Assine para ofertas exclusivas, novidades e insights do setor.', subscribePlaceholder: 'Digite seu e-mail', subscribeButton: 'Assinar', subscribeTags: ['Ofertas exclusivas', 'Novidades', 'Insights do setor'],
+      dealsTitle: 'Ofertas da semana', dealsDescription: 'Ofertas por tempo limitado. Maximize sua economia.', viewAllDeals: 'Ver todas as ofertas', shopByCategoryTitle: 'Comprar por categoria', shopByCategorySubtitle: 'Explore os principais departamentos', viewAllCategories: 'Ver todas as categorias', featureCards: [['Soluções de projeto', 'Suporte ponta a ponta para grandes projetos.', 'Saiba mais'], ['Compras simplificadas', 'Uma solicitação. Várias cotações. Melhores preços.', 'Solicitar cotação'], ['Novidades', 'Últimos produtos de fornecedores confiáveis.', 'Ver novidades']], bestValueTitle: 'Produtos de melhor valor', bestValueSubtitle: 'Alta qualidade. Ótimos preços.', browseDepartmentsDescription: 'Explore todos os departamentos e categorias de produtos',
+    },
+  },
+  fr: {
+    languageNames: { en: 'Anglais', es: 'Espagnol', pt: 'Portugais', fr: 'Français', ru: 'Russe', ar: 'Arabe' },
+    header: { live: 'LIVE', searchPlaceholder: 'Rechercher produit, marque, SKU ou fournisseur...', allCategories: 'Toutes catégories', welcome: 'Bienvenue', cart: 'Inquiry List', topNav: ['Solutions sourcing', 'Services commerce', 'Fournisseurs', 'Offres', 'Nouveautés', 'Projets', 'Ressources'] },
+    home: {
+      departmentTitle: 'Acheter par département', allDepartments: 'Tous les départements', shopAll: 'Tout voir', back: 'Retour', from: 'À partir de', startingFrom: 'À partir de',
+      heroSlides: [
+        { eyebrow: 'Pour chaînes de matériaux de construction', headline: 'Construisez plus.', accent: 'Sourcez mieux.', description: 'Matériaux de construction et fournitures industrielles prêts conteneur, avec prix, assortiment et livraison stables.', bullets: ['Prix de gros compétitifs', 'Programmes par catégorie', 'Livraison mondiale fiable'], primaryCta: 'Acheter', secondaryCta: 'Demander un devis' },
+        { eyebrow: 'Pour fabricants locaux', headline: 'Approvisionnez votre atelier.', accent: 'Gardez la production.', description: 'Matériaux pour portes, fenêtres, cuisines et ameublement adaptés aux usines locales.', bullets: ['Profilés, quincaillerie, panneaux et accessoires', 'Support usine direct', 'Cohérence des lots et remplacement'], primaryCta: 'Parcourir', secondaryCta: 'Envoyer besoins' },
+        { eyebrow: 'Pour acheteurs cherchant un agent Chine', headline: 'Trouvez des fournisseurs.', accent: 'Gérez vos commandes Chine.', description: 'Partenaire local pour recherche fournisseurs, négociation, échantillons, contrats, suivi production et expédition.', bullets: ['Qualification et comparaison fournisseurs', 'Négociation locale et suivi', 'Exécution transparente'], primaryCta: 'Démarrer sourcing', secondaryCta: 'Parler à un agent' },
+        { eyebrow: 'Pour clients inspection', headline: 'Inspectez avant.', accent: 'Expédiez sereinement.', description: 'Inspection qualité et chargement indépendante en Chine avec rapports pratiques.', bullets: ['Inspection pré-expédition et chargement', 'Échantillonnage AQL et photos', 'Suivi des problèmes'], primaryCta: 'Voir services QC', secondaryCta: 'Réserver inspection' },
+        { eyebrow: 'Pour projets clés en main', headline: 'Un projet.', accent: 'Un bureau sourcing.', description: 'Sourcing coordonné pour projets complets, de la liste articles aux fournisseurs, QC, documents et livraison.', bullets: ['BOM multi-catégories', 'Gestion fournisseurs consolidée', 'Contrôle livraison et documents'], primaryCta: 'Voir solutions', secondaryCta: 'Envoyer liste projet' },
+      ],
+      promos: [['Offre nouveau client', '10% OFF', 'Sur la première commande', 'Code : COSUN10'], ['Économies volume', 'Économisez plus', 'Avec prix volume', 'En savoir plus'], ['Expédition mondiale', '200+ pays', 'Livraison vers', 'Voir options']],
+      trustStats: ['Produits qualité', 'Fournisseurs vérifiés', 'Expédition mondiale', 'Garantie qualité', 'Paiements sécurisés'],
+      whyTitle: 'Pourquoi travailler avec COSUN', whyItems: [['Sourcing mondial', 'Accès à 5 000+ fournisseurs vérifiés'], ['Assurance qualité', 'Contrôle rigoureux et certifications'], ['Prix compétitifs', 'Meilleurs prix gros et remises'], ['Livraison fiable', 'Livraison à temps vers 200+ pays'], ['Services commerce', 'Devis, contrats, inspections et plus'], ['Support dédié', 'Support expert 24/7']],
+      addToCart: 'Add to Inquiry', viewAllProducts: 'Voir tous les produits', trustedTitle: 'Des entreprises du monde entier nous font confiance', logisticsTitle: 'Notre réseau logistique mondial', logisticsText: 'Service fiable à travers les continents.', logisticsCta: 'Voir options logistiques', partnersTitle: 'Nos partenaires de confiance', subscribeTitle: 'Gardez une longueur d’avance avec COSUN', subscribeText: 'Recevez offres exclusives, nouveautés et insights secteur.', subscribePlaceholder: 'Entrez votre email', subscribeButton: 'S’abonner', subscribeTags: ['Offres exclusives', 'Nouveautés', 'Insights secteur'],
+      dealsTitle: 'Offres de la semaine', dealsDescription: 'Offres limitées. Maximisez vos économies.', viewAllDeals: 'Voir toutes les offres', shopByCategoryTitle: 'Acheter par catégorie', shopByCategorySubtitle: 'Parcourez nos principaux départements', viewAllCategories: 'Voir toutes les catégories', featureCards: [['Solutions projet', 'Support de bout en bout pour grands projets.', 'En savoir plus'], ['Approvisionnement simplifié', 'Une demande. Plusieurs devis. Meilleurs prix.', 'Demander un devis'], ['Nouveautés', 'Derniers produits de fournisseurs fiables.', 'Voir nouveautés']], bestValueTitle: 'Produits meilleur rapport qualité-prix', bestValueSubtitle: 'Haute qualité. Bons prix.', browseDepartmentsDescription: 'Parcourir tous les départements et catégories de produits',
+    },
+  },
+  ru: {
+    languageNames: { en: 'Английский', es: 'Испанский', pt: 'Португальский', fr: 'Французский', ru: 'Русский', ar: 'Арабский' },
+    header: { live: 'LIVE', searchPlaceholder: 'Поиск по товару, бренду, SKU или поставщику...', allCategories: 'Все категории', welcome: 'Добро пожаловать', cart: 'Inquiry List', topNav: ['Решения по снабжению', 'Торговые услуги', 'Поставщики', 'Предложения', 'Новинки', 'Проекты', 'Ресурсы'] },
+    home: {
+      departmentTitle: 'Покупки по отделам', allDepartments: 'Все отделы', shopAll: 'Смотреть всё', back: 'Назад', from: 'От', startingFrom: 'От',
+      heroSlides: [
+        { eyebrow: 'Для сетей стройматериалов', headline: 'Стройте больше.', accent: 'Закупайте умнее.', description: 'Стройматериалы и промышленные товары, готовые к контейнерным поставкам, со стабильными ценами и доставкой.', bullets: ['Конкурентные оптовые цены', 'Программы закупок по категориям', 'Надежная глобальная доставка'], primaryCta: 'Купить сейчас', secondaryCta: 'Запросить цену' },
+        { eyebrow: 'Для локальных производств', headline: 'Снабжайте цех.', accent: 'Поддерживайте производство.', description: 'Материалы для дверей, окон, кухонь и мебели под задачи местных фабрик.', bullets: ['Профили, фурнитура, панели и комплектующие', 'Поддержка напрямую с фабрик', 'Стабильность партий и замены'], primaryCta: 'Категории', secondaryCta: 'Отправить требования' },
+        { eyebrow: 'Для покупателей с агентом в Китае', headline: 'Найдите поставщиков.', accent: 'Управляйте заказами в Китае.', description: 'Локальный партнер для поиска поставщиков, переговоров, образцов, контрактов, производства и отгрузки.', bullets: ['Оценка и сравнение поставщиков', 'Локальные переговоры и контроль', 'Прозрачное исполнение закупок'], primaryCta: 'Начать закупки', secondaryCta: 'Связаться с агентом' },
+        { eyebrow: 'Для клиентов инспекции', headline: 'Проверьте заранее.', accent: 'Отгружайте уверенно.', description: 'Независимая инспекция качества и загрузки в Китае с практичными отчетами.', bullets: ['Предотгрузочная инспекция и загрузка', 'AQL выборка и фотоотчеты', 'Контроль исправления проблем'], primaryCta: 'QC услуги', secondaryCta: 'Заказать инспекцию' },
+        { eyebrow: 'Для проектных закупок', headline: 'Один проект.', accent: 'Единый центр закупок.', description: 'Координированные закупки для комплексных проектов: товары, поставщики, QC, документы и доставка.', bullets: ['Мультикатегорийная ведомость материалов', 'Консолидированное управление поставщиками', 'Контроль доставки и документов'], primaryCta: 'Проектные решения', secondaryCta: 'Отправить список' },
+      ],
+      promos: [['Новым клиентам', '10% скидка', 'На первый заказ', 'Код: COSUN10'], ['Экономия на объеме', 'Экономьте больше', 'При объемных ценах', 'Подробнее'], ['Глобальная доставка', '200+ стран', 'Доставка в', 'Варианты доставки']],
+      trustStats: ['Качественные товары', 'Проверенные поставщики', 'Глобальная доставка', 'Гарантия качества', 'Безопасные платежи'],
+      whyTitle: 'Почему COSUN', whyItems: [['Глобальный sourcing', 'Доступ к 5 000+ проверенных поставщиков'], ['Контроль качества', 'Строгий контроль и сертификация'], ['Конкурентные цены', 'Лучшие оптовые цены и скидки'], ['Надежная доставка', 'Своевременная доставка в 200+ стран'], ['Торговые услуги', 'Котировки, контракты, инспекции и другое'], ['Выделенная поддержка', 'Экспертная поддержка 24/7']],
+      addToCart: 'Add to Inquiry', viewAllProducts: 'Все товары', trustedTitle: 'Нам доверяют компании по всему миру', logisticsTitle: 'Наша глобальная логистическая сеть', logisticsText: 'Надежный сервис на разных континентах.', logisticsCta: 'Варианты логистики', partnersTitle: 'Наши надежные партнеры', subscribeTitle: 'Будьте впереди с COSUN', subscribeText: 'Подпишитесь на предложения, новинки и аналитику отрасли.', subscribePlaceholder: 'Введите email', subscribeButton: 'Подписаться', subscribeTags: ['Эксклюзивные предложения', 'Новинки', 'Отраслевая аналитика'],
+      dealsTitle: 'Предложения недели', dealsDescription: 'Ограниченные предложения. Максимальная выгода.', viewAllDeals: 'Все предложения', shopByCategoryTitle: 'Покупки по категориям', shopByCategorySubtitle: 'Основные отделы', viewAllCategories: 'Все категории', featureCards: [['Проектные решения', 'Полная поддержка крупных проектов.', 'Подробнее'], ['Закупки проще', 'Один запрос. Несколько предложений. Лучшие цены.', 'Запросить цену'], ['Новинки', 'Новые товары от надежных поставщиков.', 'Смотреть новинки']], bestValueTitle: 'Товары с лучшей ценой', bestValueSubtitle: 'Высокое качество. Отличные цены.', browseDepartmentsDescription: 'Просмотр всех товарных отделов и категорий',
+    },
+  },
+  ar: {
+    languageNames: { en: 'الإنجليزية', es: 'الإسبانية', pt: 'البرتغالية', fr: 'الفرنسية', ru: 'الروسية', ar: 'العربية' },
+    header: { live: 'مباشر', searchPlaceholder: 'ابحث حسب المنتج أو العلامة أو SKU أو المورد...', allCategories: 'كل الفئات', welcome: 'مرحباً', cart: 'Inquiry List', topNav: ['حلول التوريد', 'خدمات التجارة', 'الموردون', 'العروض', 'وصل حديثاً', 'المشاريع', 'الموارد'] },
+    home: {
+      departmentTitle: 'تسوق حسب القسم', allDepartments: 'كل الأقسام', shopAll: 'عرض الكل', back: 'رجوع', from: 'من', startingFrom: 'ابتداءً من',
+      heroSlides: [
+        { eyebrow: 'لسلاسل مواد البناء', headline: 'ابنِ أكثر.', accent: 'ورّد بذكاء.', description: 'مواد بناء ومستلزمات صناعية جاهزة للشحن بالحاويات مع أسعار وتشكيلة وتسليم مستقر.', bullets: ['أسعار جملة تنافسية', 'برامج توريد حسب الفئة', 'تسليم عالمي موثوق'], primaryCta: 'تسوق الآن', secondaryCta: 'طلب عرض سعر' },
+        { eyebrow: 'للمصنعين المحليين', headline: 'زوّد ورشتك.', accent: 'حافظ على الإنتاج.', description: 'مواد للأبواب والنوافذ والمطابخ والأثاث مناسبة للمصانع المحلية.', bullets: ['قطاعات وإكسسوارات وألواح وملحقات', 'دعم مباشر من المصنع', 'ثبات الدُفعات وخطط الاستبدال'], primaryCta: 'تصفح الفئات', secondaryCta: 'إرسال المتطلبات' },
+        { eyebrow: 'للمشترين الباحثين عن وكيل في الصين', headline: 'اعثر على الموردين.', accent: 'أدر طلباتك في الصين.', description: 'شريك توريد محلي للبحث عن الموردين والتفاوض والعينات والعقود ومتابعة الإنتاج والشحن.', bullets: ['تأهيل ومقارنة الموردين', 'تفاوض ومتابعة محلية', 'تنفيذ شفاف للمشتريات'], primaryCta: 'ابدأ التوريد', secondaryCta: 'تحدث مع وكيل' },
+        { eyebrow: 'لعملاء التفتيش', headline: 'افحص قبل الشحن.', accent: 'اشحن بثقة.', description: 'تفتيش جودة وتحميل مستقل في الصين مع تقارير عملية تساعدك قبل خروج البضائع.', bullets: ['تفتيش قبل الشحن والتحميل', 'عينات AQL وتقارير صور', 'متابعة المشكلات قبل الإطلاق'], primaryCta: 'خدمات الجودة', secondaryCta: 'حجز تفتيش' },
+        { eyebrow: 'لمشتري المشاريع الجاهزة', headline: 'مشروع واحد.', accent: 'مكتب توريد واحد.', description: 'توريد منسق للمشاريع الكاملة من قائمة المواد إلى الموردين والجودة والوثائق والتسليم.', bullets: ['قائمة مواد متعددة الفئات', 'إدارة موردين موحدة', 'تحكم في التسليم والوثائق'], primaryCta: 'حلول المشاريع', secondaryCta: 'إرسال قائمة المشروع' },
+      ],
+      promos: [['عرض للعميل الجديد', 'خصم 10%', 'على الطلب الأول', 'استخدم الرمز: COSUN10'], ['توفير للطلبات الكبيرة', 'وفر أكثر', 'مع تسعير الكميات', 'اعرف المزيد'], ['شحن عالمي', 'أكثر من 200 دولة', 'التوصيل إلى', 'عرض الخيارات']],
+      trustStats: ['منتجات عالية الجودة', 'موردون موثقون', 'شحن عالمي', 'ضمان الجودة', 'مدفوعات آمنة'],
+      whyTitle: 'لماذا الشراكة مع COSUN', whyItems: [['توريد عالمي', 'الوصول إلى أكثر من 5,000 مورد موثق'], ['ضمان الجودة', 'رقابة صارمة وشهادات'], ['أسعار تنافسية', 'أفضل أسعار الجملة وخصومات الكميات'], ['تسليم موثوق', 'تسليم في الوقت إلى أكثر من 200 دولة'], ['خدمات تجارية', 'عروض أسعار وعقود وتفتيش وأكثر'], ['دعم مخصص', 'دعم خبير لأعمالك 24/7']],
+      addToCart: 'Add to Inquiry', viewAllProducts: 'عرض كل المنتجات', trustedTitle: 'تثق بنا الشركات حول العالم', logisticsTitle: 'شبكتنا اللوجستية العالمية', logisticsText: 'خدمة موثوقة عبر القارات.', logisticsCta: 'عرض خيارات اللوجستيات', partnersTitle: 'شركاؤنا الموثوقون', subscribeTitle: 'ابقَ متقدماً مع COSUN', subscribeText: 'اشترك للعروض الحصرية والمنتجات الجديدة ورؤى الصناعة.', subscribePlaceholder: 'أدخل بريدك الإلكتروني', subscribeButton: 'اشتراك', subscribeTags: ['عروض حصرية', 'وصل حديثاً', 'رؤى الصناعة'],
+      dealsTitle: 'عروض الأسبوع', dealsDescription: 'عروض لفترة محدودة. وفر أكثر.', viewAllDeals: 'عرض كل العروض', shopByCategoryTitle: 'تسوق حسب الفئة', shopByCategorySubtitle: 'تصفح الأقسام الرئيسية', viewAllCategories: 'عرض كل الفئات', featureCards: [['حلول المشاريع', 'دعم كامل للمشاريع الكبيرة.', 'اعرف المزيد'], ['مشتريات أسهل', 'طلب واحد. عروض متعددة. أفضل أسعار.', 'طلب عرض سعر'], ['وصل حديثاً', 'أحدث المنتجات من موردين موثوقين.', 'تسوق الجديد']], bestValueTitle: 'أفضل المنتجات قيمة', bestValueSubtitle: 'جودة عالية. أسعار ممتازة.', browseDepartmentsDescription: 'تصفح كل أقسام وفئات المنتجات',
+    },
+  },
+} as const;
+
+const translations: Record<LanguageCode, any> = {
+  en: { ...englishTranslations, publicSite: publicSiteTranslations.en },
+  es: { ...englishTranslations, publicSite: publicSiteTranslations.es },
+  pt: { ...englishTranslations, publicSite: publicSiteTranslations.pt },
+  fr: { ...englishTranslations, publicSite: publicSiteTranslations.fr },
+  ru: { ...englishTranslations, publicSite: publicSiteTranslations.ru },
+  ar: { ...englishTranslations, publicSite: publicSiteTranslations.ar },
+};
+
+function resolveLanguage(value: string | null): LanguageCode {
+  return value === 'es' || value === 'pt' || value === 'fr' || value === 'ru' || value === 'ar' ? value : 'en';
+}
+
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const value = {
-    language: 'en' as const,
-    setLanguage: () => {}, // No-op since we're English-only
-    t: englishTranslations,
-  };
+  const [language, setLanguageState] = useState<LanguageCode>(() => {
+    try {
+      return resolveLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY));
+    } catch {
+      return 'en';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    } catch {
+      // ignore storage errors
+    }
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+  }, [language]);
+
+  const value = useMemo(() => ({
+    language,
+    setLanguage: setLanguageState,
+    t: translations[language],
+  }), [language]);
 
   return (
     <LanguageContext.Provider value={value}>

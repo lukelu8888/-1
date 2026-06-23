@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getCurrentUser } from '../data/authorizedUsers';
+import { getCurrentUser } from '../utils/dataIsolation';
 import { notificationSupabaseService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
+import { getLocalAdminAuth } from '../lib/internalAdminLocalAuth';
+import { fromNotificationRow } from '../lib/services/approvalNotificationServices';
 
 // 通知类型
 export type NotificationType = 
@@ -68,28 +70,90 @@ export const NotificationContext = createContext<NotificationContextType | undef
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  const loadFromSupabase = async (email: string) => {
-    const data = await notificationSupabaseService.getForUser(email);
-    if (data && Array.isArray(data)) {
-      setNotifications(data as Notification[]);
+  const getNotificationStorageKey = (email: string) => `notifications_${String(email || '').trim().toLowerCase()}`;
+
+  const loadLocalNotifications = (email: string): Notification[] => {
+    if (typeof window === 'undefined' || !email) return [];
+    try {
+      const raw = localStorage.getItem(getNotificationStorageKey(email));
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed as Notification[] : [];
+    } catch {
+      return [];
     }
+  };
+
+  const persistLocalNotifications = (email: string, nextNotifications: Notification[]) => {
+    if (typeof window === 'undefined' || !email) return;
+    try {
+      localStorage.setItem(getNotificationStorageKey(email), JSON.stringify(nextNotifications.slice(0, 100)));
+    } catch {
+      // ignore local persistence failures
+    }
+  };
+
+  const getActiveNotificationEmail = async () => {
+    const actingEmail = String(getCurrentUser()?.email || '').trim().toLowerCase();
+    if (actingEmail) return actingEmail;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    return String(session?.user?.email || '').trim().toLowerCase();
+  };
+
+  const loadFromSupabase = async (email: string) => {
+    let remote: Notification[] = [];
+    const { enabled, email: localAdminEmail, password: localAdminPassword } = getLocalAdminAuth();
+
+    if (enabled && localAdminEmail && localAdminPassword) {
+      const { data, error } = await supabase.rpc('get_internal_visible_notifications', {
+        p_login_email: localAdminEmail,
+        p_login_password: localAdminPassword,
+      });
+      if (!error && Array.isArray(data)) {
+        remote = data.map((row: any) => fromNotificationRow(row)).filter(Boolean) as Notification[];
+      } else {
+        console.warn('⚠️ [NotificationContext] get_internal_visible_notifications failed, falling back to direct query:', error);
+      }
+    }
+
+    if (remote.length === 0) {
+      const data = await notificationSupabaseService.getForUser(email);
+      remote = data && Array.isArray(data) ? data as Notification[] : [];
+    }
+
+    const local = loadLocalNotifications(email);
+    const merged = new Map<string, Notification>();
+    [...remote, ...local].forEach((item) => {
+      if (!item?.id) return;
+      merged.set(item.id, item);
+    });
+    const nextNotifications = Array.from(merged.values()).sort((a, b) => b.createdAt - a.createdAt);
+    setNotifications(nextNotifications);
+    persistLocalNotifications(email, nextNotifications);
   };
 
   // 初始加载 & Auth 监听
   useEffect(() => {
     const initLoad = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.email) {
-        await loadFromSupabase(session.user.email);
+      const email = await getActiveNotificationEmail();
+      if (email) {
+        await loadFromSupabase(email);
       }
     };
     void initLoad();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user?.email) {
-        void loadFromSupabase(session.user.email);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+        void getActiveNotificationEmail().then((email) => {
+          if (email) void loadFromSupabase(email);
+        });
       } else if (event === 'SIGNED_OUT') {
-        setNotifications([]);
+        const currentUser = getCurrentUser();
+        if (currentUser?.email) {
+          void loadFromSupabase(String(currentUser.email).trim().toLowerCase());
+        } else {
+          setNotifications([]);
+        }
       }
     });
 
@@ -112,9 +176,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     let channel: ReturnType<typeof notificationSupabaseService.subscribeToUser> | null = null;
 
     const subscribeRealtime = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user?.email) return;
-      const email = session.user.email;
+      const email = await getActiveNotificationEmail();
+      if (!email) return;
       channel = notificationSupabaseService.subscribeToUser(email, (payload) => {
         const newNotif = payload.new as Notification;
         if (!newNotif) return;
@@ -129,8 +192,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     void subscribeRealtime();
 
+    const handleUserChanged = () => {
+      if (channel) void supabase.removeChannel(channel);
+      channel = null;
+      void subscribeRealtime();
+    };
+    window.addEventListener('userChanged', handleUserChanged);
+
     return () => {
       if (channel) void supabase.removeChannel(channel);
+      window.removeEventListener('userChanged', handleUserChanged);
     };
   }, []);
 
@@ -144,7 +215,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         setNotifications(prev => {
           const exists = prev.find(n => n.id === notification.id);
           if (exists) return prev;
-          return [notification, ...prev];
+          const next = [notification, ...prev];
+          persistLocalNotifications(currentUser.email, next);
+          return next;
         });
       }
     };
@@ -161,7 +234,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       createdAt: Date.now(),
       read: false,
     };
-    setNotifications(prev => [newNotification, ...prev]);
+    const recipientEmail = String(notification.recipient || '').trim().toLowerCase();
+    setNotifications(prev => {
+      const next = [newNotification, ...prev];
+      if (recipientEmail) persistLocalNotifications(recipientEmail, next);
+      return next;
+    });
     // 异步写入 Supabase
     void notificationSupabaseService.send({
       recipient_email: notification.recipient,
@@ -177,28 +255,43 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   };
 
   const markAsRead = (id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    const currentEmail = String(getCurrentUser()?.email || '').trim().toLowerCase();
+    setNotifications(prev => {
+      const next = prev.map(n => n.id === id ? { ...n, read: true } : n);
+      if (currentEmail) persistLocalNotifications(currentEmail, next);
+      return next;
+    });
     void notificationSupabaseService.markRead(id).catch(() => {});
   };
 
   const markAllAsRead = async () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user?.email) {
-      void notificationSupabaseService.markAllRead(session.user.email).catch(() => {});
+    const email = await getActiveNotificationEmail();
+    setNotifications(prev => {
+      const next = prev.map(n => ({ ...n, read: true }));
+      if (email) persistLocalNotifications(email, next);
+      return next;
+    });
+    if (email) {
+      void notificationSupabaseService.markAllRead(email).catch(() => {});
     }
   };
 
   const deleteNotification = (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
+    const currentEmail = String(getCurrentUser()?.email || '').trim().toLowerCase();
+    setNotifications(prev => {
+      const next = prev.filter(n => n.id !== id);
+      if (currentEmail) persistLocalNotifications(currentEmail, next);
+      return next;
+    });
     void notificationSupabaseService.delete(id).catch(() => {});
   };
 
   const clearAll = async () => {
+    const email = await getActiveNotificationEmail();
     setNotifications([]);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user?.email) {
-      void notificationSupabaseService.deleteAll(session.user.email).catch(() => {});
+    if (email) persistLocalNotifications(email, []);
+    if (email) {
+      void notificationSupabaseService.deleteAll(email).catch(() => {});
     }
   };
 

@@ -9,6 +9,8 @@ import { subscribeErpEvent } from '../lib/erp-core/event-bus';
 import { ordersDb, fromOrderRow } from '../lib/supabase-db';
 import { supabase } from '../lib/supabase';
 import { orderService } from '../lib/supabaseService';
+import { syncDirectOrderDraftFromOrder } from '../lib/services/direct-order-draft/syncDirectOrderDraftFromOrder';
+import { syncMailThreadFromDirectOrder } from '../lib/services/direct-order-draft/syncMailThreadFromDirectOrder';
 
 // 订单接口
 export interface Order {
@@ -85,6 +87,17 @@ export interface Order {
     bankReference: string; // 银行流水号
     notes?: string;
   };
+  financeReceiptProof?: {
+    uploadedAt: string;
+    uploadedBy: string;
+    fileUrl?: string;
+    fileName?: string;
+    actualAmount: number;
+    currency: string;
+    receiptDate: string;
+    bankReference: string;
+    notes?: string;
+  };
   balancePaymentProof?: { // 🔥 余款付款水单（客户上传）
     uploadedAt: string;
     uploadedBy: string;
@@ -110,6 +123,17 @@ export interface Order {
     bankReference: string; // 银行流水号
     notes?: string;
   };
+  financeBalanceReceiptProof?: {
+    uploadedAt: string;
+    uploadedBy: string;
+    fileUrl?: string;
+    fileName?: string;
+    actualAmount: number;
+    currency: string;
+    receiptDate: string;
+    bankReference: string;
+    notes?: string;
+  };
   contractTerms?: { // 合同条款
     paymentTerms?: string;
     deliveryTerms?: string;
@@ -123,6 +147,7 @@ export interface Order {
 
 interface OrderContextType {
   orders: Order[];
+  loaded: boolean;
   addOrder: (order: Order) => void;
   updateOrder: (orderId: string, updates: Partial<Order>) => void;
   deleteOrder: (orderId: string) => void;
@@ -132,6 +157,32 @@ interface OrderContextType {
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
+const getOrderCacheKey = () => {
+  const currentUser = getCurrentUser() as any;
+  return `order_context_cache_${currentUser?.email || currentUser?.type || 'guest'}`;
+};
+
+const readOrderCache = (): Order[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.sessionStorage.getItem(getOrderCacheKey());
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const persistOrderCache = (orders: Order[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(getOrderCacheKey(), JSON.stringify(orders));
+  } catch {
+    // ignore cache write failures
+  }
+};
+
 const getOrderMarkers = (order: Partial<Order>): string[] => {
   return [order.id, order.orderNumber, order.quotationNumber].filter(Boolean).map((v) => String(v));
 };
@@ -157,7 +208,12 @@ const initialOrders: Order[] = []; // 🗑️ 清空所有旧订单数据
 export function OrderProvider({ children }: { children: ReactNode }) {
   // 🔒 数据隔离：根据用户类型加载数据
   // 🔥 修复：初始化为空数组，所有数据加载都在useEffect中进行
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => readOrderCache());
+  const [loaded, setLoaded] = useState(() => readOrderCache().length > 0);
+
+  useEffect(() => {
+    persistOrderCache(orders);
+  }, [orders]);
 
   // 🔒 监听 orders 变化，自动保存到用户专属存储
   // 🔥 禁用此useEffect，避免与updateOrder/addOrder中的手动保存冲突导致重复
@@ -183,7 +239,13 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     let alive = true;
     const loadOrders = async () => {
       const currentUser = getCurrentUser();
-      if (!currentUser) return;
+      if (!currentUser) {
+        if (alive) {
+          setOrders([]);
+          setLoaded(true);
+        }
+        return;
+      }
 
 
       // Supabase 优先
@@ -196,12 +258,17 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           if (Array.isArray(supabaseOrders) && supabaseOrders.length > 0 && alive) {
             const filtered = filterNotDeleted('order', supabaseOrders as Order[], o => getOrderMarkers(o));
             setOrders(filtered);
+            setLoaded(true);
             return;
           }
         }
       } catch { /* fallback to legacy sources */ }
 
       // Supabase is the only source
+      if (alive) {
+        setOrders([]);
+        setLoaded(true);
+      }
     };
 
     loadOrders();
@@ -247,6 +314,9 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       return exists ? prev.map(o => (o.id === order.id || o.orderNumber === order.orderNumber) ? { ...o, ...order } : o) : [order, ...prev];
     });
 
+    syncDirectOrderDraftFromOrder(order);
+    syncMailThreadFromDirectOrder(order);
+
     window.dispatchEvent(new CustomEvent('ordersUpdated', {
       detail: { action: 'add', orderNumber: order.orderNumber, customerEmail: order.customerEmail }
     }));
@@ -258,6 +328,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
   const updateOrder = (orderId: string, updates: Partial<Order>) => {
     const merged = { ...updates, updatedAt: new Date().toISOString() };
+    const target = orders.find(o => o.id === orderId || o.orderNumber === orderId);
+    const nextOrder = target ? ({ ...target, ...merged } as Order) : null;
 
     // 更新 React State（立即响应 UI）
     setOrders(prev => prev.map(o =>
@@ -265,9 +337,13 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     ));
 
     // Supabase 主写入（异步）
-    const target = orders.find(o => o.id === orderId || o.orderNumber === orderId);
     if (target) {
       void orderService.upsert({ ...target, ...merged }).catch(() => {});
+    }
+
+    if (nextOrder) {
+      syncDirectOrderDraftFromOrder(nextOrder);
+      syncMailThreadFromDirectOrder(nextOrder);
     }
 
     window.dispatchEvent(new CustomEvent('ordersUpdated', { detail: { action: 'update', orderId } }));
@@ -314,6 +390,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     <OrderContext.Provider
       value={{
         orders,
+        loaded,
         addOrder,
         updateOrder,
         deleteOrder,

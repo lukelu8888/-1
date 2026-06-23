@@ -5,10 +5,23 @@ import { addTombstones, filterNotDeleted, removeTombstones } from '../lib/erp-co
 import type { PurchaseOrderData } from '../components/documents/templates/PurchaseOrderDocument';
 import { buildIdentityAuditMetadata, buildIdentityPersistenceFields } from '../utils/dataIsolation';
 import { assertBusinessOwnerEmail } from '../utils/quotationOwnership';
+import { derivePurchaseOrderWorkflowFields } from '../lib/services/purchaseOrderQuoteRequirementServices';
 
 // 🔥 采购订单状态
 export type POStatus = 'pending' | 'confirmed' | 'producing' | 'shipped' | 'completed' | 'cancelled';
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid';
+export type PurchaseOrderPaymentMode =
+  | 'tt_deposit_balance_before_shipment'
+  | 'tt_deposit_balance_against_bl'
+  | 'lc_100'
+  | 'deposit_plus_lc'
+  | 'dp'
+  | 'da'
+  | 'oa'
+  | 'mixed';
+
+export type PurchaseOrderDocumentType = 'PR' | 'CG';
+export type PurchaseOrderApprovalStatus = 'draft' | 'pending_l1' | 'pending_l2' | 'approved' | 'rejected' | 'not_required';
 
 // 🔥 采购订单产品项接口
 export interface PurchaseOrderItem {
@@ -61,7 +74,7 @@ export interface PurchaseOrder {
 
   // On both PR and CG records: position in the procurement request lifecycle.
   // PR lifecycle:  pending_procurement_assignment → partial_allocated | allocated_completed
-  // CG lifecycle:  draft_allocated → pending_boss_approval → approved_boss → pushed_supplier
+  // CG lifecycle:  draft_allocated → pending_manager_approval → pending_ceo_approval? → approved_boss → pushed_supplier
   //               (rejected_boss is a terminal failure state requiring re-initiation)
   // Phase 3c precondition: union completed to include all active CG lifecycle values.
   procurementRequestStatus?:
@@ -69,10 +82,19 @@ export interface PurchaseOrder {
     | 'partial_allocated'               // PR: some items allocated; remainder still in pool
     | 'allocated_completed'             // PR: all items distributed to suppliers
     | 'draft_allocated'                 // CG: created from PR allocation, not yet submitted for review
-    | 'pending_boss_approval'           // CG: submitted for boss review
+    | 'pending_manager_approval'        // CG: submitted for procurement manager review
+    | 'pending_ceo_approval'            // CG: manager approved and amount exceeds CEO threshold
     | 'approved_boss'                   // CG: boss approved, ready to push to supplier
     | 'rejected_boss'                   // CG: boss rejected; requires re-initiation
     | 'pushed_supplier';                // CG: pushed to supplier — execution has started
+  documentType?: PurchaseOrderDocumentType;
+  approvalStatus?: PurchaseOrderApprovalStatus;
+  prValidationStatus?: 'pending' | 'passed' | 'failed';
+  prValidatedAt?: string;
+  prValidatedBy?: string;
+  cgType?: 'standard' | 'urgent' | 'exception' | 'over_budget';
+  selectedBjId?: string | null;
+  bjLockedAt?: string;
   // ────────────────────────────────────────────────────────────────────────────────────────────────
 
   projectId?: string | null;
@@ -126,6 +148,7 @@ export interface PurchaseOrder {
   currency: string;
   
   // 条款信息
+  paymentMode?: PurchaseOrderPaymentMode | null;
   paymentTerms: string;
   deliveryTerms: string;
   
@@ -153,6 +176,9 @@ export interface PurchaseOrder {
   productionCompletedAt?: string;
   supplierSelfInspectionStatus?: string;
   qcInspectionStatus?: string;
+  qcReleaseStatus?: string;
+  qcReleaseBlockReason?: string;
+  releaseApprovedBy?: string;
   inspectionExecutionMode?: string;
   customerDesignatedInspectionAgency?: string;
   customerDesignatedInspectionStatus?: string;
@@ -167,10 +193,17 @@ export interface PurchaseOrder {
   documentReleaseMode?: string;
   customerBalanceGateStatus?: string;
   customerBalanceConfirmedAt?: string;
+  lcType?: string;
+  lcOpenedAt?: string;
+  lcDiscrepancyStatus?: string;
+  lcMaturityDate?: string;
   supplierBalanceConfirmedAt?: string;
   supplierBalanceConfirmedBy?: string;
   bankSubmittedAt?: string;
   bankSubmittedBy?: string;
+  acceptanceStatus?: string;
+  acceptanceDate?: string;
+  acceptanceMaturityDate?: string;
   bookingResponsibility?: string;
   freightConfirmationRequired?: boolean;
   freightConfirmedByCustomerAt?: string;
@@ -259,19 +292,30 @@ const normalizePurchaseOrderWritePayload = (order: PurchaseOrder): PurchaseOrder
     '采购单',
   );
   const ownerName = String(order.ownerName || '').trim() || null;
+  const workflowFields = derivePurchaseOrderWorkflowFields(order);
+  const existingRenderMeta = order.documentRenderMeta || {};
 
   return {
     ...order,
     ownerEmail,
     ownerName,
+    documentType: order.documentType || workflowFields.documentType,
+    approvalStatus: order.approvalStatus || workflowFields.approvalStatus,
+    executionStatus: order.executionStatus || workflowFields.executionStatus,
     documentRenderMeta: {
-      ...(order.documentRenderMeta || {}),
+      ...existingRenderMeta,
       ...buildIdentityAuditMetadata({
         ownerEmail,
         ownerName,
         ownerRole: order.ownerRole || null,
         region: order.region || null,
       }),
+      procurementWorkflow: {
+        ...(existingRenderMeta?.procurementWorkflow || {}),
+        documentType: order.documentType || workflowFields.documentType,
+        approvalStatus: order.approvalStatus || workflowFields.approvalStatus,
+        executionStatus: order.executionStatus || workflowFields.executionStatus,
+      },
     },
     ...buildIdentityPersistenceFields({
       ownerEmail,

@@ -5,10 +5,18 @@ import { filterNotDeleted, removeTombstonesByMarkers } from '../lib/erp-core/del
 import { salesQuotationService } from '../lib/supabaseService';
 import { supabase } from '../lib/supabase';
 import type { QuotationData } from '../components/documents/templates/QuotationDocument';
-import { assertBusinessOwnerEmail, matchesBusinessOwnerEmail } from '../utils/quotationOwnership';
-import { buildIdentityAuditMetadata, buildIdentityPersistenceFields } from '../utils/dataIsolation';
+import type { BalanceTrigger } from '../lib/paymentFlow';
+import { assertBusinessOwnerEmail, matchesBusinessOwnerEmail, pickBusinessOwnerEmail } from '../utils/quotationOwnership';
+import {
+  buildIdentityAuditMetadata,
+  buildIdentityPersistenceFields,
+  clearLegacyScopedStorageKeys,
+  getScopedStorageKey,
+  readScopedStoragePayload,
+} from '../utils/dataIsolation';
 
 const TRACE_QT_NUMBER = 'QT-NA-260326-0001';
+const SALES_QUOTATION_CONTEXT_CACHE_KEY = 'sales_quotation_context_cache_v1';
 
 // 🎯 销售报价单（QT）- 业务员创建，需要审批
 
@@ -42,9 +50,11 @@ export interface SalesQuotationItem {
 export type PaymentMode =
   | 'tt_deposit_balance_before_shipment'
   | 'tt_deposit_balance_against_bl'
+  | 'tt_100_before_production'
   | 'lc_100'
   | 'deposit_plus_lc'
   | 'dp'
+  | 'da'
   | 'oa';
 
 export interface SalesQuotation {
@@ -99,6 +109,13 @@ export interface SalesQuotation {
   currency: string; // USD, EUR, etc.
   paymentTerms: string; // 30天账期, T/T, L/C等（自由文本，文档渲染用）
   paymentMode?: PaymentMode | null; // 结构化付款模式（Phase 1: 仅存储，不影响闸门逻辑）
+  balanceTrigger?: BalanceTrigger | null; // 余款/信用证触发节点（结构化，驱动财务应收阶段）
+  qtType?: 'regular' | 'large_amount' | 'special_price' | 'special_payment' | 'strategic_customer' | null;
+  specialPriceFlag?: boolean;
+  specialPriceReason?: string | null;
+  specialPaymentTermsFlag?: boolean;
+  strategicCustomerFlag?: boolean;
+  qtLastApprovalAt?: string | null;
   deliveryTerms: string; // FOB, CIF, EXW等
   deliveryDate: string;
   
@@ -185,14 +202,32 @@ const assertSalesQuotationWritePayload = (quotation: Partial<SalesQuotation>) =>
   }
 };
 
-const assertSalesQuotationPersistedBinding = (quotation: Partial<SalesQuotation>) => {
-  if (!quotation.templateId || !quotation.templateVersionId || !quotation.templateSnapshot || !quotation.documentDataSnapshot) {
-    throw new Error(`QT ${quotation.qtNumber || quotation.id || ''} 缺少模板绑定字段，Supabase 返回结果不完整`);
-  }
+const ensureSalesQuotationPersistedBinding = (
+  quotation: Partial<SalesQuotation>,
+  fallback?: Partial<SalesQuotation>,
+): SalesQuotation => {
+  return {
+    ...(fallback as SalesQuotation),
+    ...(quotation as SalesQuotation),
+    templateId: quotation.templateId ?? fallback?.templateId ?? null,
+    templateVersionId: quotation.templateVersionId ?? fallback?.templateVersionId ?? null,
+    templateSnapshot: quotation.templateSnapshot ?? fallback?.templateSnapshot ?? {},
+    documentDataSnapshot: quotation.documentDataSnapshot ?? fallback?.documentDataSnapshot,
+    documentRenderMeta: quotation.documentRenderMeta ?? fallback?.documentRenderMeta ?? {},
+  } as SalesQuotation;
 };
 
 const normalizeSalesQuotationWritePayload = (quotation: SalesQuotation): SalesQuotation => {
-  const ownerEmail = assertBusinessOwnerEmail(quotation.salesPerson, quotation.region, '销售报价单');
+  const resolvedOwnerEmail = pickBusinessOwnerEmail(
+    [
+      quotation.salesPerson,
+      quotation.ownerEmail,
+      quotation.owner_email,
+    ],
+    quotation.region,
+    quotation.salesPerson,
+  );
+  const ownerEmail = assertBusinessOwnerEmail(resolvedOwnerEmail, quotation.region, '销售报价单');
   return {
     ...quotation,
     salesPerson: ownerEmail,
@@ -223,6 +258,39 @@ const getSalesQuotationMarkers = (quotation: Partial<SalesQuotation>): string[] 
     .map((v) => String(v));
 };
 
+const readSalesQuotationContextCache = (): SalesQuotation[] => {
+  try {
+    const raw = readScopedStoragePayload(SALES_QUOTATION_CONTEXT_CACHE_KEY, [
+      SALES_QUOTATION_CONTEXT_CACHE_KEY,
+    ]);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeSalesQuotationContextCache = (rows: SalesQuotation[]) => {
+  try {
+    localStorage.setItem(
+      getScopedStorageKey(SALES_QUOTATION_CONTEXT_CACHE_KEY),
+      JSON.stringify(Array.isArray(rows) ? rows : []),
+    );
+    clearLegacyScopedStorageKeys(SALES_QUOTATION_CONTEXT_CACHE_KEY, [SALES_QUOTATION_CONTEXT_CACHE_KEY]);
+  } catch {}
+};
+
+const hasLocalBusinessIdentity = () => {
+  const currentUser = getCurrentUser() as any;
+  return Boolean(
+    currentUser?.email ||
+    currentUser?.id ||
+    currentUser?.role ||
+    currentUser?.userRole ||
+    currentUser?.type,
+  );
+};
+
 const emitSalesQuotationEvent = (
   key: string,
   quotation: Partial<SalesQuotation> & { id: string },
@@ -236,17 +304,42 @@ const emitSalesQuotationEvent = (
     internalNo: String(quotation.qtNumber || quotation.id),
     source: 'admin',
     occurredAt: new Date().toISOString(),
-    metadata,
+    metadata: {
+      ...metadata,
+      quotation,
+    },
   });
 };
 
 export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [quotations, setQuotations] = useState<SalesQuotation[]>([]);
+  const [quotations, setQuotations] = useState<SalesQuotation[]>(() => readSalesQuotationContextCache());
+  const restoreQuotationCacheFallback = React.useCallback(() => {
+    const cached = readSalesQuotationContextCache();
+    if (Array.isArray(cached) && cached.length > 0) {
+      setQuotations(cached);
+      return true;
+    }
+    return false;
+  }, []);
+
+  const preserveQuotationStateOnAuthGap = React.useCallback(() => {
+    const cached = readSalesQuotationContextCache();
+    if (Array.isArray(cached) && cached.length > 0) {
+      setQuotations(cached);
+      return;
+    }
+    setQuotations((prev) => prev);
+  }, []);
 
   // 从 Supabase 加载数据
   const loadFromSupabase = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) {
+      if (!restoreQuotationCacheFallback()) {
+        preserveQuotationStateOnAuthGap();
+      }
+      return;
+    }
     const data = await salesQuotationService.getAll();
     if (data && Array.isArray(data)) {
       removeTombstonesByMarkers(
@@ -255,6 +348,7 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
       );
       const filtered = filterNotDeleted('qt', data as SalesQuotation[], (q) => getSalesQuotationMarkers(q));
       setQuotations(filtered);
+      writeSalesQuotationContextCache(filtered);
     }
   };
 
@@ -266,7 +360,9 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
       if (event === 'SIGNED_IN') {
         void loadFromSupabase();
       } else if (event === 'SIGNED_OUT') {
-        setQuotations([]);
+        if (!hasLocalBusinessIdentity() || !restoreQuotationCacheFallback()) {
+          preserveQuotationStateOnAuthGap();
+        }
       }
     });
 
@@ -279,7 +375,7 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
       window.removeEventListener('userChanged', handleUserChanged);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [preserveQuotationStateOnAuthGap, restoreQuotationCacheFallback]);
 
   // Supabase Realtime 订阅
   useEffect(() => {
@@ -289,14 +385,20 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
         const updated = newRow as SalesQuotation;
         setQuotations(prev => {
           const exists = prev.find(q => q.id === updated.id);
-          return exists
+          const nextRows = exists
             ? prev.map(q => q.id === updated.id ? { ...q, ...updated } : q)
             : [updated, ...prev];
+          writeSalesQuotationContextCache(nextRows);
+          return nextRows;
         });
       } else if (eventType === 'DELETE') {
         const deletedId = (oldRow as any)?.id;
         if (deletedId) {
-          setQuotations(prev => prev.filter(q => q.id !== deletedId));
+          setQuotations(prev => {
+            const nextRows = prev.filter(q => q.id !== deletedId);
+            writeSalesQuotationContextCache(nextRows);
+            return nextRows;
+          });
         }
       }
     });
@@ -327,39 +429,83 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
         updatedAt: (saved as SalesQuotation).updatedAt,
       });
     }
-    assertSalesQuotationPersistedBinding(saved as SalesQuotation);
-    setQuotations(prev => [saved as SalesQuotation, ...prev]);
-    emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, normalizedQuotation, {
-      approvalStatus: normalizedQuotation.approvalStatus,
-      customerStatus: normalizedQuotation.customerStatus,
+    const persistedQuotation = ensureSalesQuotationPersistedBinding(saved as SalesQuotation, normalizedQuotation);
+    setQuotations(prev => {
+      const nextRows = [persistedQuotation, ...prev];
+      writeSalesQuotationContextCache(nextRows);
+      return nextRows;
+    });
+    emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_CREATED, persistedQuotation, {
+      approvalStatus: persistedQuotation.approvalStatus,
+      customerStatus: persistedQuotation.customerStatus,
     });
   };
 
   const updateQuotation = async (id: string, updates: Partial<SalesQuotation>) => {
-    const currentQuotation = quotations.find((qt) => qt.id === id);
-    if (!currentQuotation) {
-      throw new Error(`Sales quotation ${id} not found`);
+    const requestedQtNumber = String(updates.qtNumber || '').trim();
+    let currentQuotation = quotations.find((qt) => qt.id === id)
+      || (requestedQtNumber ? quotations.find((qt) => String(qt.qtNumber || '').trim() === requestedQtNumber) : undefined);
+
+    if (!currentQuotation && requestedQtNumber) {
+      const serverRows = await salesQuotationService.listViaServer({ qtNumber: requestedQtNumber }).catch(() => []);
+      if (Array.isArray(serverRows) && serverRows.length > 0) {
+        currentQuotation = serverRows[0] as SalesQuotation;
+      }
     }
+
+    if (!currentQuotation) {
+      throw new Error(`Sales quotation ${requestedQtNumber || id} not found`);
+    }
+
     const merged = normalizeSalesQuotationWritePayload({ ...currentQuotation, ...updates, updatedAt: new Date().toISOString() } as SalesQuotation);
     assertSalesQuotationWritePayload(merged);
-    const saved = await salesQuotationService.upsert(merged);
+    const updateIdentifier = String(currentQuotation.qtNumber || requestedQtNumber || currentQuotation.id || id).trim();
+    let saved: SalesQuotation | null = null;
+    try {
+      saved = await salesQuotationService.updateStatus(
+        updateIdentifier,
+        String(merged.approvalStatus || currentQuotation.approvalStatus || 'draft'),
+        merged,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || '');
+      if (!/No sales quotation matched identifier/i.test(message)) {
+        throw error;
+      }
+      saved = await salesQuotationService.upsertViaServer(merged);
+    }
     if (!saved) {
       throw new Error('Supabase update sales quotation failed');
     }
-    assertSalesQuotationPersistedBinding(saved as SalesQuotation);
-    setQuotations(prev => prev.map(qt => qt.id === id ? (saved as SalesQuotation) : qt));
+    const persistedQuotation = ensureSalesQuotationPersistedBinding(saved as SalesQuotation, merged);
+    setQuotations(prev => {
+      const matchedExisting = prev.some((qt) => qt.id === currentQuotation?.id || String(qt.qtNumber || '').trim() === String(currentQuotation?.qtNumber || '').trim());
+      const nextRows = matchedExisting
+        ? prev.map((qt) => (
+            qt.id === currentQuotation?.id || String(qt.qtNumber || '').trim() === String(currentQuotation?.qtNumber || '').trim()
+              ? persistedQuotation
+              : qt
+          ))
+        : [persistedQuotation, ...prev];
+      writeSalesQuotationContextCache(nextRows);
+      return nextRows;
+    });
     if (updates.customerStatus === 'sent' || updates.customerStatus === 'viewed') {
-      emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_SENT, { id, qtNumber: String(currentQuotation?.qtNumber || id) }, { customerStatus: updates.customerStatus });
+      emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_SENT, { id: String(persistedQuotation.id || id), qtNumber: String(currentQuotation?.qtNumber || requestedQtNumber || id) }, { customerStatus: updates.customerStatus });
     }
     if (updates.customerStatus === 'accepted') {
-      emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_ACCEPTED, { id, qtNumber: String(currentQuotation?.qtNumber || id) }, { customerStatus: updates.customerStatus });
+      emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_ACCEPTED, { id: String(persistedQuotation.id || id), qtNumber: String(currentQuotation?.qtNumber || requestedQtNumber || id) }, { customerStatus: updates.customerStatus });
     }
   };
 
   const deleteQuotation = async (id: string) => {
     const currentQuotation = quotations.find((qt) => qt.id === id);
     await salesQuotationService.delete(id);
-    setQuotations((prev) => prev.filter((qt) => qt.id !== id));
+    setQuotations((prev) => {
+      const nextRows = prev.filter((qt) => qt.id !== id);
+      writeSalesQuotationContextCache(nextRows);
+      return nextRows;
+    });
     emitSalesQuotationEvent(ERP_EVENT_KEYS.QUOTATION_DELETED, { id, qtNumber: String(currentQuotation?.qtNumber || id) });
   };
 
@@ -368,7 +514,21 @@ export const SalesQuotationProvider: React.FC<{ children: ReactNode }> = ({ chil
   };
 
   const getQuotationByNumber = (qtNumber: string) => {
-    return quotations.find(qt => qt.qtNumber === qtNumber);
+    const normalizedTarget = String(qtNumber || '').trim().toUpperCase();
+    if (!normalizedTarget) return undefined;
+
+    return quotations.find((qt: any) => {
+      const candidates = [
+        qt?.qtNumber,
+        qt?.quotationNumber,
+        qt?.documentDataSnapshot?.quotationNo,
+        qt?.documentDataSnapshot?.quotationNumber,
+        qt?.documentRenderMeta?.quotationNumber,
+        qt?.id,
+      ];
+
+      return candidates.some((candidate) => String(candidate || '').trim().toUpperCase() === normalizedTarget);
+    });
   };
 
   const getQuotationsByQR = (qrNumber: string) => {

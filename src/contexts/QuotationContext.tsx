@@ -157,25 +157,35 @@ export function QuotationProvider({ children }: { children: ReactNode }) {
   const [quotations, setQuotations] = useState<Quotation[]>([]);
 
   const loadQuotations = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-    const currentUser = getCurrentUser();
-    if (!currentUser) return;
+      const currentUser = getCurrentUser();
+      if (!currentUser) return;
 
-    const raw = currentUser.type === 'admin'
-      ? await salesQuotationService.getAll()
-      : await salesQuotationService.getByCustomerEmail(currentUser.email);
+      if (currentUser.type === 'supplier' || currentUser.type === 'manufacturer') {
+        setQuotations([]);
+        return;
+      }
 
-    if (!Array.isArray(raw)) return;
+      const raw = currentUser.type === 'admin'
+        ? await salesQuotationService.getAll()
+        : await salesQuotationService.getByCustomerEmail(currentUser.email);
 
-    const mapped = raw.filter(Boolean).map(fromServicePayload);
-    removeTombstonesByMarkers(
-      'qt',
-      mapped.flatMap((q) => [q?.id, (q as any)?.qtNumber, q?.quotationNumber]),
-    );
-    const visible = filterNotDeleted('qt', mapped, (q) => getQuotationMarkers(q));
-    setQuotations(visible);
+      if (!Array.isArray(raw)) return;
+
+      const mapped = raw.filter(Boolean).map(fromServicePayload);
+      removeTombstonesByMarkers(
+        'qt',
+        mapped.flatMap((q) => [q?.id, (q as any)?.qtNumber, q?.quotationNumber]),
+      );
+      const visible = filterNotDeleted('qt', mapped, (q) => getQuotationMarkers(q));
+      setQuotations(visible);
+    } catch (error) {
+      console.warn('[QuotationContext] loadQuotations failed:', error);
+      setQuotations([]);
+    }
   };
 
   useEffect(() => {

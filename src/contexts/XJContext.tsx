@@ -10,8 +10,12 @@ export type XJStatus = 'pending' | 'sent' | 'quoted' | 'accepted' | 'rejected' |
 export interface XJProduct {
   id: string;
   productName: string;
+  productNameEn?: string;
+  productNameZh?: string;
   modelNo: string;
   specification?: string;
+  specificationEn?: string;
+  specificationZh?: string;
   quantity: number;
   unit: string;
   targetPrice?: number;
@@ -35,7 +39,12 @@ export interface XJ {
   sourceInquiryId?: string;
   sourceInquiryNumber?: string;
   customerName?: string;
+  customerCompany?: string;
   customerRegion?: string;
+  buyerCompany?: string;
+  buyerContact?: string;
+  buyerEmail?: string;
+  buyerAddress?: string;
   projectId?: string | null;
   projectCode?: string | null;
   projectName?: string | null;
@@ -52,8 +61,12 @@ export interface XJ {
   products?: XJProduct[];
 
   productName: string;
+  productNameEn?: string;
+  productNameZh?: string;
   modelNo: string;
   specification?: string;
+  specificationEn?: string;
+  specificationZh?: string;
   quantity: number;
   unit: string;
   targetPrice?: number;

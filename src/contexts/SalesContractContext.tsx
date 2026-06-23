@@ -10,20 +10,38 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef as _useRef } from 'react';
 import { toast } from 'sonner@2.0.3';
-import { useOptionalApproval } from './ApprovalContext'; // 客户端可在无审批 Provider 时继续运行
 import { useOrders } from './OrderContext'; // 🔥 新增：同步订单到客户端，以及监听客户确认状态
 import { useOptionalPurchaseOrders } from './PurchaseOrderContext'; // Phase 7A: snapshot needs CG data
-import { useSalesQuotations } from './SalesQuotationContext'; // Phase 7A: snapshot needs QT data
+import { useSalesQuotations, type SalesQuotation } from './SalesQuotationContext'; // Phase 7A: snapshot needs QT data
 import { computeSCProfit } from '../utils/scProfitUtils'; // Phase 7A: reuse Phase 6 actual profit logic
-import { getCurrentUser, getStoredPortalRole, isStoredStaffPortalRole } from '../utils/dataIsolation';
-import { addTombstones, filterNotDeleted, listTombstones, removeTombstones } from '../lib/erp-core/deletion-tombstone';
+import {
+  getCurrentUser,
+  getScopedStorageKey,
+  getStoredPortalRole,
+  isStoredStaffPortalRole,
+  resolveCurrentStorageIdentity,
+} from '../utils/dataIsolation';
+import { addTombstones, filterNotDeleted, listTombstones, removeTombstones, removeTombstonesByMarkers } from '../lib/erp-core/deletion-tombstone';
+import { buildCustomerContractTombstoneMarkers } from '../lib/customerPortalScope';
 import { salesContractsDb, fromContractRow } from '../lib/supabase-db';
-import { contractService, orderService, arService } from '../lib/supabaseService';
-import { supabase } from '../lib/supabase';
+import { contractService, orderService, arService, salesQuotationService } from '../lib/supabaseService';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase';
+import { getLocalAdminAuth } from '../lib/internalAdminLocalAuth';
 import type { SalesContractData } from '../components/documents/templates/SalesContractDocument';
 import type { PaymentMode } from './SalesQuotationContext';
+import {
+  buildPaymentTermsText,
+  deriveBalanceTrigger,
+  getDefaultBalancePercentage,
+  getDefaultDepositPercentage,
+  type BalanceTrigger,
+} from '../lib/paymentFlow';
 import { assertBusinessOwnerEmail } from '../utils/quotationOwnership';
 import { buildIdentityAuditMetadata, buildIdentityPersistenceFields } from '../utils/dataIsolation';
+import { sendNotificationToUsers } from '../utils/notificationUtils';
+import { buildScArNotes, getFinanceNotificationRecipients } from '../utils/financeWorkflow';
+import { deriveSalesContractSplitFields, normalizeCustomerContractStatus } from '../lib/customerPortalContractStatus';
+import { adaptSalesContractToDocumentData } from '../utils/documentDataAdapters';
 
 // ── Phase 7A: Profit snapshot — frozen at SC completion ───────────────────────
 /**
@@ -86,12 +104,49 @@ export interface ContractApprovalHistory {
   amount?: number;
 }
 
+export type SalesContractApprovalStatus =
+  | 'draft'
+  | 'pending_l1'
+  | 'pending_l2'
+  | 'approved'
+  | 'rejected';
+
+export type SalesContractExecutionStatus =
+  | 'draft'
+  | 'sent_to_customer'
+  | 'customer_confirmed'
+  | 'customer_requested_changes'
+  | 'customer_rejected'
+  | 'awaiting_deposit'
+  | 'deposit_uploaded'
+  | 'deposit_confirmed'
+  | 'in_procurement'
+  | 'in_pre_production'
+  | 'in_production'
+  | 'qc_pending'
+  | 'qc_passed'
+  | 'awaiting_balance'
+  | 'balance_uploaded'
+  | 'balance_confirmed'
+  | 'ready_to_ship'
+  | 'shipped'
+  | 'delivered'
+  | 'completed'
+  | 'cancelled';
+
+export type SalesContractPaymentStageStatus =
+  | 'not_required'
+  | 'pending'
+  | 'uploaded'
+  | 'confirmed';
+
 // 🔥 销售合同接口
 export interface SalesContract {
   // 基本信息
   id: string;                          // 合同ID
   contractNumber: string;              // 合同编号: SC-{REGION}-{YYMMDD}-{序号}
   quotationNumber: string;             // 关联的报价单号（QT）- 一对一
+  qrNumber?: string;                   // 关联的报价请求单号（QR）
   inquiryNumber?: string;              // 原始询价单号（ING）
   projectId?: string | null;
   projectCode?: string | null;
@@ -141,6 +196,13 @@ export interface SalesContract {
   tradeTerms: string;                  // FOB/CIF/EXW等
   paymentTerms: string;                // 付款条款（自由文本，文档渲染用）
   paymentMode?: PaymentMode | null;    // 结构化付款模式（Phase 1: 仅存储，不影响闸门逻辑）
+  balanceTrigger?: BalanceTrigger | null; // 余款/信用证触发节点（财务流程唯一依据）
+  scType?: 'regular' | 'large_amount' | 'exceptional_clause' | 'strategic_customer' | 'special_account_period' | null;
+  exceptionalClauseFlag?: boolean;
+  exceptionalClauseNotes?: string | null;
+  specialAccountPeriodFlag?: boolean;
+  strategicCustomerFlag?: boolean;
+  scLastApprovalAt?: string | null;
   depositPercentage: number;           // 定金比例（默认30%）
   depositAmount: number;               // 定金金额
   balancePercentage: number;           // 余款比例（默认70%）
@@ -173,6 +235,10 @@ export interface SalesContract {
     | 'shipped'                     // 已发货
     | 'completed'                   // 已完成
     | 'cancelled';                  // 已取消（内部/业务取消）
+  approvalStatus?: SalesContractApprovalStatus;
+  executionStatus?: SalesContractExecutionStatus;
+  paymentStatusDeposit?: SalesContractPaymentStageStatus;
+  paymentStatusBalance?: 'not_due' | SalesContractPaymentStageStatus;
   
   // 审批流程
   approvalFlow: ContractApprovalFlow;
@@ -223,6 +289,7 @@ export interface SalesContract {
 
 interface SalesContractContextType {
   contracts: SalesContract[];
+  loaded: boolean;
   
   // CRUD操作
   createContract: (contractData: Partial<SalesContract>) => Promise<SalesContract>;
@@ -237,7 +304,7 @@ interface SalesContractContextType {
   submitForApproval: (id: string, notes?: string) => Promise<void>;
   approveContract: (id: string, approverRole: 'supervisor' | 'director', notes?: string) => Promise<void>;
   rejectContract: (id: string, reason: string, approverRole: 'supervisor' | 'director') => Promise<void>;
-  sendToCustomer: (id: string) => void;
+  sendToCustomer: (id: string) => Promise<void>;
   customerConfirmContract: (id: string, signature: ElectronicSignature, silent?: boolean, customerFeedback?: Record<string, any>) => Promise<void>;
   customerRejectContract: (id: string, reason: string) => Promise<void>;
   customerRequestChanges: (id: string, requestedChanges: string) => Promise<void>;
@@ -266,7 +333,7 @@ interface SalesContractContextType {
   advanceSCToProduction: (contractNumber: string) => Promise<void>;
 
   // 🔥 尾款确认 & 履约推进 [Phase 2a: Mode 1 / null default]
-  confirmBalancePayment: (id: string, confirmedBy: string, notes?: string) => Promise<void>;
+  confirmBalancePayment: (id: string, confirmedBy: string, notes?: string, receiptProof?: Record<string, any>) => Promise<void>;
   advanceSCToShipped: (id: string) => Promise<void>;
   advanceSCToCompleted: (id: string) => Promise<void>;
   
@@ -279,6 +346,82 @@ interface SalesContractContextType {
 }
 
 const SalesContractContext = createContext<SalesContractContextType | undefined>(undefined);
+const SALES_CONTRACT_CONTEXT_CACHE_BASE_KEY = 'sales_contract_context_cache_v1';
+
+const getSalesContractCacheKey = () => {
+  return getScopedStorageKey(SALES_CONTRACT_CONTEXT_CACHE_BASE_KEY);
+};
+
+const getLegacySalesContractCacheKeys = () => {
+  if (typeof window === 'undefined') return [] as string[];
+
+  const { email, role } = resolveCurrentStorageIdentity();
+  const currentUser = getCurrentUser() as any;
+  const keys = new Set<string>([
+    getSalesContractCacheKey(),
+    `sales_contract_context_cache_${currentUser?.email || currentUser?.type || 'guest'}`,
+    `${SALES_CONTRACT_CONTEXT_CACHE_BASE_KEY}:${email}:${role}`,
+    `${SALES_CONTRACT_CONTEXT_CACHE_BASE_KEY}:${email}:customer`,
+    `${SALES_CONTRACT_CONTEXT_CACHE_BASE_KEY}:${email}:admin`,
+    `${SALES_CONTRACT_CONTEXT_CACHE_BASE_KEY}:${email}:staff`,
+    `${SALES_CONTRACT_CONTEXT_CACHE_BASE_KEY}:${email}:supplier`,
+  ]);
+
+  try {
+    const prefix = `${SALES_CONTRACT_CONTEXT_CACHE_BASE_KEY}:${email}:`;
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith(prefix)) {
+        keys.add(key);
+      }
+    }
+  } catch {
+    // ignore storage scan failures
+  }
+
+  return Array.from(keys);
+};
+
+const readSalesContractCache = (): SalesContract[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    for (const key of getLegacySalesContractCacheKeys()) {
+      const raw = window.sessionStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+    return [];
+  } catch {
+    return [];
+  }
+};
+
+const persistSalesContractCache = (contracts: SalesContract[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(getSalesContractCacheKey(), JSON.stringify(contracts));
+    for (const key of getLegacySalesContractCacheKeys()) {
+      if (key === getSalesContractCacheKey()) continue;
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    // ignore cache write failures
+  }
+};
+
+const hasLocalContractIdentity = () => {
+  const currentUser = getCurrentUser() as any;
+  return Boolean(
+    currentUser?.email ||
+    currentUser?.id ||
+    currentUser?.role ||
+    currentUser?.userRole ||
+    currentUser?.type,
+  );
+};
 
 const assertSalesContractWritePayload = (contract: Partial<SalesContract>) => {
   if (!contract.templateSnapshot || !contract.documentDataSnapshot) {
@@ -294,10 +437,20 @@ const assertSalesContractPersistedBinding = (contract: Partial<SalesContract>) =
 
 const normalizeSalesContractWritePayload = (contract: SalesContract): SalesContract => {
   const ownerEmail = assertBusinessOwnerEmail(contract.salesPerson, contract.region, '销售合同');
+  const logicalStatus = normalizeCustomerContractStatus(contract);
+  const splitFields = deriveSalesContractSplitFields({
+    ...contract,
+    status: logicalStatus,
+  });
+  const existingRenderMeta = contract.documentRenderMeta || {};
   return {
     ...contract,
     salesPerson: ownerEmail,
     ownerEmail,
+    approvalStatus: (contract.approvalStatus || splitFields.approvalStatus) as SalesContractApprovalStatus,
+    executionStatus: (contract.executionStatus || splitFields.executionStatus) as SalesContractExecutionStatus,
+    paymentStatusDeposit: (contract.paymentStatusDeposit || splitFields.paymentStatusDeposit) as SalesContractPaymentStageStatus,
+    paymentStatusBalance: (contract.paymentStatusBalance || splitFields.paymentStatusBalance) as ('not_due' | SalesContractPaymentStageStatus),
     ownerName: contract.salesPersonName || null,
     ownerRole: 'Sales_Rep',
     ...buildIdentityPersistenceFields({
@@ -306,22 +459,162 @@ const normalizeSalesContractWritePayload = (contract: SalesContract): SalesContr
       ownerRole: 'Sales_Rep',
     }),
     documentRenderMeta: {
-      ...(contract.documentRenderMeta || {}),
+      ...existingRenderMeta,
       ...buildIdentityAuditMetadata({
         ownerEmail,
         ownerName: contract.salesPersonName || null,
         ownerRole: 'Sales_Rep',
         region: contract.region || null,
       }),
+      erpWorkflow: {
+        ...(existingRenderMeta?.erpWorkflow || {}),
+        logicalStatus,
+        approvalStatus: contract.approvalStatus || splitFields.approvalStatus,
+        executionStatus: contract.executionStatus || splitFields.executionStatus,
+        paymentStatusDeposit: contract.paymentStatusDeposit || splitFields.paymentStatusDeposit,
+        paymentStatusBalance: contract.paymentStatusBalance || splitFields.paymentStatusBalance,
+      },
     },
   };
 };
 
+const pushSalesContractViaServer = async (contract: SalesContract): Promise<SalesContract> => {
+  const localAdminAuth = getLocalAdminAuth();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    apikey: supabaseAnonKey,
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/functions/v1/make-server-880fd43b/auth/push-sales-contract`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        contract,
+        ...(localAdminAuth.enabled && localAdminAuth.email && localAdminAuth.password
+          ? {
+              localAdminAuth: {
+                email: localAdminAuth.email,
+                password: localAdminAuth.password,
+              },
+            }
+          : {}),
+      }),
+    },
+  );
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(String(payload?.message || '服务端保存 SC 失败'));
+  }
+
+  return fromContractRow(payload?.contract) as SalesContract;
+};
+
+const pushCustomerOrderViaServer = async (order: Record<string, any>): Promise<Record<string, any>> => {
+  const localAdminAuth = getLocalAdminAuth();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    apikey: supabaseAnonKey,
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/functions/v1/make-server-880fd43b/auth/push-customer-order`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        order,
+        ...(localAdminAuth.enabled && localAdminAuth.email && localAdminAuth.password
+          ? {
+              localAdminAuth: {
+                email: localAdminAuth.email,
+                password: localAdminAuth.password,
+              },
+            }
+          : {}),
+      }),
+    },
+  );
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(String(payload?.message || '服务端保存订单失败'));
+  }
+
+  return payload?.order || order;
+};
+
+const customerConfirmSalesContractViaServer = async (
+  contractId: string,
+  signature: ElectronicSignature,
+  customerFeedback?: Record<string, any>,
+): Promise<SalesContract | null> => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    apikey: supabaseAnonKey,
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
+  const response = await fetch(
+    `${supabaseUrl}/functions/v1/make-server-880fd43b/auth/customer-confirm-sales-contract`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        contractId,
+        signature,
+        customerFeedback: customerFeedback || null,
+      }),
+    },
+  );
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success === false) {
+    throw new Error(String(payload?.message || '客户确认销售合同失败'));
+  }
+
+  return payload?.contract ? (fromContractRow(payload.contract) as SalesContract) : null;
+};
+
+const persistSalesContractViaServerFirst = async (contract: SalesContract): Promise<SalesContract> => {
+  const normalizedContract = normalizeSalesContractWritePayload(contract);
+
+  assertSalesContractWritePayload(normalizedContract);
+  try {
+    return await pushSalesContractViaServer(normalizedContract);
+  } catch (serverError) {
+    console.warn('⚠️ [SalesContractContext] 服务端保存 SC 失败，回退前端直写:', serverError);
+    return await contractService.upsert(normalizedContract);
+  }
+};
+
 // ─── paymentMode classification helpers ───────────────────────────────────────
 // Ship-first modes: balance payment is received AFTER shipment
-// (tt_deposit_balance_against_bl = Mode 2, dp = Mode 5, oa = Mode 6)
+// (tt_deposit_balance_against_bl = Mode 2, dp/da collection = Mode 5, oa = Mode 6)
 const isShipFirstMode = (mode: PaymentMode | null | undefined): boolean =>
-  mode === 'tt_deposit_balance_against_bl' || mode === 'dp' || mode === 'oa';
+  mode === 'tt_deposit_balance_against_bl' || mode === 'dp' || mode === 'da' || mode === 'oa';
 
 // No-deposit modes: skip the deposit stage entirely
 // lc_100: 100% LC — no deposit required; oa: open account — no deposit required
@@ -357,25 +650,509 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     filterNotDeleted('contract', list, (contract: any) => [
       String(contract?.id || ''),
       String(contract?.contractNumber || ''),
-      String(contract?.quotationNumber || ''),
     ]);
 
   const clearingRef = React.useRef(false);
 
 
-  const [contracts, setContracts] = useState<SalesContract[]>([]);
-  
-  // 🔥 获取审批Context（监听审批状态变化）
-  const approvalContext = useOptionalApproval();
-  const approvalRequests = approvalContext?.requests || [];
+  const [contracts, setContracts] = useState<SalesContract[]>(() => readSalesContractCache());
+  const [loaded, setLoaded] = useState(() => readSalesContractCache().length > 0);
+  const restoreContractCacheFallback = React.useCallback(() => {
+    const cached = readSalesContractCache();
+    if (Array.isArray(cached) && cached.length > 0) {
+      setContracts(cached);
+      setLoaded(true);
+      return true;
+    }
+    return false;
+  }, []);
+
+  const preserveContractStateOnAuthGap = React.useCallback(() => {
+    const cached = readSalesContractCache();
+    if (Array.isArray(cached) && cached.length > 0) {
+      setContracts(cached);
+      setLoaded(true);
+      return;
+    }
+    setContracts((prev) => prev);
+    setLoaded(true);
+  }, []);
+
+  const pickLatestContract = React.useCallback((items: SalesContract[]): SalesContract | undefined => {
+    if (!Array.isArray(items) || items.length === 0) return undefined;
+    return [...items].sort((a, b) => {
+      const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      if (timeA !== timeB) return timeB - timeA;
+      return String(b.contractNumber || '').localeCompare(String(a.contractNumber || ''));
+    })[0];
+  }, []);
   
   // 🔥 获取订单Context（用于同步订单到客户端，以及监听客户确认状态）
   const { addOrder, orders: allOrders } = useOrders();
 
+  useEffect(() => {
+    persistSalesContractCache(contracts);
+  }, [contracts]);
+
+  const contractApprovalReconcileSignature = React.useMemo(() => (
+    contracts
+      .map((contract) => `${String(contract.contractNumber || '').trim()}:${String(contract.status || '').trim()}`)
+      .filter((value) => value.startsWith('SC-'))
+      .join('|')
+  ), [contracts]);
+
+  useEffect(() => {
+    if (!contractApprovalReconcileSignature || clearingRef.current) return;
+    let cancelled = false;
+
+    const reconcileFromApprovalRecords = async () => {
+      const contractNumbers = Array.from(new Set(
+        contracts
+          .map((contract) => String(contract.contractNumber || '').trim())
+          .filter((contractNumber) => /^SC-/i.test(contractNumber)),
+      ));
+      if (contractNumbers.length === 0) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('approval_records')
+          .select('related_document_id,status,updated_at,approval_history')
+          .eq('type', 'sales_contract')
+          .in('related_document_id', contractNumbers)
+          .in('status', ['approved', 'forwarded', 'rejected'])
+          .order('updated_at', { ascending: false });
+        if (error) throw error;
+        if (cancelled || !Array.isArray(data) || data.length === 0) return;
+
+        const latestByContract = new Map<string, any>();
+        data.forEach((record: any) => {
+          const contractNumber = String(record?.related_document_id || '').trim();
+          if (contractNumber && !latestByContract.has(contractNumber)) {
+            latestByContract.set(contractNumber, record);
+          }
+        });
+
+        setContracts((prev) => {
+          let changed = false;
+          const next = prev.map((contract) => {
+            const contractNumber = String(contract.contractNumber || '').trim();
+            const record = latestByContract.get(contractNumber);
+            if (!record) return contract;
+
+            const approvalStatus = String(record.status || '').trim();
+            if (approvalStatus === 'approved' && contract.status !== 'approved') {
+              changed = true;
+              return {
+                ...contract,
+                status: 'approved' as const,
+                approvalStatus: 'approved' as const,
+                executionStatus: contract.executionStatus || 'draft',
+                approvedAt: contract.approvedAt || record.updated_at || new Date().toISOString(),
+                updatedAt: record.updated_at || contract.updatedAt,
+              };
+            }
+            if (approvalStatus === 'forwarded' && contract.status !== 'pending_director') {
+              changed = true;
+              return {
+                ...contract,
+                status: 'pending_director' as const,
+                approvalStatus: 'pending_l2' as const,
+                executionStatus: contract.executionStatus || 'draft',
+                updatedAt: record.updated_at || contract.updatedAt,
+              };
+            }
+            if (approvalStatus === 'rejected' && contract.status !== 'rejected') {
+              changed = true;
+              return {
+                ...contract,
+                status: 'rejected' as const,
+                approvalStatus: 'rejected' as const,
+                executionStatus: contract.executionStatus || 'draft',
+                updatedAt: record.updated_at || contract.updatedAt,
+              };
+            }
+            return contract;
+          });
+          return changed ? next : prev;
+        });
+      } catch (error: any) {
+        console.warn('⚠️ [SalesContractContext] SC 审批记录对账失败:', error?.message || error);
+      }
+    };
+
+    void reconcileFromApprovalRecords();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contractApprovalReconcileSignature, contracts]);
+
   // Phase 7A: profit snapshot at completion — needs CG cost data and QT estimates
   const purchaseOrderContext = useOptionalPurchaseOrders();
   const purchaseOrders = purchaseOrderContext?.purchaseOrders || [];
-  const { getQuotationByNumber } = useSalesQuotations();
+  const { getQuotationByNumber, updateQuotation } = useSalesQuotations();
+
+  const getQuotationBridgeApprovalStatus = (status?: SalesContract['status']) => {
+    if (!status) return 'draft';
+    if (status === 'rejected') return 'rejected';
+    if (['approved', 'sent', 'customer_confirmed', 'customer_rejected', 'customer_requested_changes', 'deposit_uploaded', 'deposit_confirmed', 'po_generated', 'production', 'balance_confirmed', 'shipped', 'completed'].includes(status)) {
+      return 'approved';
+    }
+    if (['pending_supervisor', 'pending_director'].includes(status)) return 'pending_approval';
+    return 'draft';
+  };
+
+  const getQuotationBridgeCustomerStage = (status?: SalesContract['status']) => {
+    if (!status) return 'not_started';
+    if (status === 'sent') return 'sent';
+    if (status === 'customer_confirmed') return 'confirmed';
+    if (status === 'customer_rejected') return 'rejected';
+    if (status === 'customer_requested_changes') return 'requested_changes';
+    if (['deposit_uploaded', 'deposit_confirmed', 'po_generated', 'production', 'balance_confirmed', 'shipped', 'completed'].includes(status)) {
+      return 'confirmed';
+    }
+    return 'pending';
+  };
+
+  const extractQuotationFinancialSummary = React.useCallback((quotationLike: Partial<SalesQuotation> | Record<string, any> | null | undefined) => {
+    if (!quotationLike) return null;
+
+    const snapshot =
+      (quotationLike as any)?.documentDataSnapshot?.financialSummary ||
+      (quotationLike as any)?.documentDataSnapshot?.financials ||
+      (quotationLike as any)?.documentRenderMeta?.financialSummary ||
+      (quotationLike as any)?.documentRenderMeta?.financials ||
+      null;
+
+    const items = Array.isArray((quotationLike as any)?.items)
+      ? (quotationLike as any).items
+      : Array.isArray((quotationLike as any)?.documentDataSnapshot?.products)
+        ? (quotationLike as any).documentDataSnapshot.products
+        : Array.isArray((quotationLike as any)?.templateSnapshot?.products)
+          ? (quotationLike as any).templateSnapshot.products
+          : [];
+    const itemsTotalAmount = items.reduce((sum: number, item: any) => {
+      const quantity = Number(item?.quantity ?? item?.qty ?? item?.pcs ?? item?.count ?? 0);
+      const unitPrice = Number(
+        item?.salesPrice ??
+        item?.unitPrice ??
+        item?.quotePrice ??
+        item?.sales_price ??
+        item?.quote_price ??
+        0,
+      );
+      const lineAmount = Number(item?.totalPrice ?? item?.totalAmount ?? item?.total_price);
+      if (Number.isFinite(lineAmount)) return sum + lineAmount;
+      return sum + ((Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(unitPrice) ? unitPrice : 0));
+    }, 0);
+    const itemsTotalCost = items.reduce((sum: number, item: any) => {
+      const quantity = Number(item?.quantity ?? item?.qty ?? item?.pcs ?? item?.count ?? 0);
+      const costPrice = Number(
+        item?.costPrice ??
+        item?.costUSD ??
+        item?.cost_price ??
+        item?.cost_usd ??
+        0,
+      );
+      const lineCost = Number(item?.totalCost ?? item?.total_cost);
+      if (Number.isFinite(lineCost)) return sum + lineCost;
+      return sum + ((Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(costPrice) ? costPrice : 0));
+    }, 0);
+
+    const totalAmount = Number(
+      (quotationLike as any)?.totalAmount ??
+      (quotationLike as any)?.totalPrice ??
+      snapshot?.totalAmount ??
+      snapshot?.totalPrice ??
+      itemsTotalAmount,
+    );
+    const totalCost = Number(
+      (quotationLike as any)?.totalCost ??
+      (quotationLike as any)?.total_cost ??
+      snapshot?.totalCost ??
+      snapshot?.total_cost ??
+      itemsTotalCost,
+    );
+    const rawTotalProfit =
+      (quotationLike as any)?.totalProfit ??
+      (quotationLike as any)?.total_profit ??
+      snapshot?.totalProfit ??
+      snapshot?.total_profit;
+    const totalProfit = Number.isFinite(Number(rawTotalProfit))
+      ? Number(rawTotalProfit)
+      : (totalAmount - totalCost);
+    const rawProfitRate = Number(
+      (quotationLike as any)?.profitRate ??
+      (quotationLike as any)?.profit_rate ??
+      (quotationLike as any)?.profitMargin ??
+      (quotationLike as any)?.profit_margin ??
+      snapshot?.profitRate ??
+      snapshot?.profit_rate ??
+      snapshot?.profitMargin ??
+      snapshot?.profit_margin,
+    );
+    const profitRate = Number.isFinite(rawProfitRate)
+      ? (rawProfitRate > 0 && rawProfitRate < 1 ? rawProfitRate * 100 : rawProfitRate)
+      : (totalCost > 0 ? (totalProfit / totalCost) * 100 : Number.NaN);
+
+    if (
+      !Number.isFinite(totalAmount) &&
+      !Number.isFinite(totalCost) &&
+      !Number.isFinite(totalProfit) &&
+      !Number.isFinite(profitRate)
+    ) {
+      return null;
+    }
+
+    return {
+      quotationNumber: String(
+        (quotationLike as any)?.qtNumber ||
+        (quotationLike as any)?.quotationNumber ||
+        '',
+      ).trim() || null,
+      totalAmount: Number.isFinite(totalAmount) ? totalAmount : 0,
+      totalCost: Number.isFinite(totalCost) ? totalCost : 0,
+      totalProfit: Number.isFinite(totalProfit) ? totalProfit : 0,
+      profitRate: Number.isFinite(profitRate) ? profitRate : null,
+      syncedAt: new Date().toISOString(),
+      source: 'quotation_to_contract_bridge',
+    };
+  }, []);
+
+  const hasContractFinancialBridge = React.useCallback((contractLike: Partial<SalesContract> | null | undefined) => {
+    if (!contractLike) return false;
+    const documentData = (contractLike as any)?.documentDataSnapshot || (contractLike as any)?.document_data_snapshot || {};
+    const renderMeta = (contractLike as any)?.documentRenderMeta || (contractLike as any)?.document_render_meta || {};
+    const financialSummary =
+      documentData?.financialSummary ||
+      documentData?.financials ||
+      renderMeta?.financialSummary ||
+      renderMeta?.financials ||
+      renderMeta?.quotationFinancialBridge ||
+      null;
+
+    return Boolean(
+      financialSummary &&
+      (
+        Number.isFinite(Number(financialSummary?.profitRate ?? financialSummary?.profit_rate)) ||
+        Number.isFinite(Number(financialSummary?.totalCost ?? financialSummary?.total_cost)) ||
+        Number.isFinite(Number(financialSummary?.totalProfit ?? financialSummary?.total_profit))
+      ),
+    );
+  }, []);
+
+  const attachQuotationFinancialBridge = React.useCallback((
+    contractLike: Partial<SalesContract>,
+    quotationLike?: Partial<SalesQuotation> | Record<string, any> | null,
+  ) => {
+    const quotation =
+      quotationLike ||
+      getQuotationByNumber(String(contractLike.quotationNumber || '').trim()) ||
+      null;
+    const financialSummary = extractQuotationFinancialSummary(quotation);
+    if (!financialSummary) return contractLike;
+
+    const existingDocumentData = (contractLike.documentDataSnapshot || {}) as Record<string, any>;
+    const existingRenderMeta = (contractLike.documentRenderMeta || {}) as Record<string, any>;
+
+    return {
+      ...contractLike,
+      qrNumber:
+        String(
+          contractLike.qrNumber ||
+          (quotation as any)?.qrNumber ||
+          (quotation as any)?.requirementNo ||
+          '',
+        ).trim() || undefined,
+      documentDataSnapshot: {
+        ...existingDocumentData,
+        qrNumber:
+          String(
+            existingDocumentData?.qrNumber ||
+            (quotation as any)?.qrNumber ||
+            (quotation as any)?.requirementNo ||
+            '',
+          ).trim() || undefined,
+        financialSummary,
+        financials: financialSummary,
+      } as any,
+      documentRenderMeta: {
+        ...existingRenderMeta,
+        qrNumber:
+          String(
+            existingRenderMeta?.qrNumber ||
+            (quotation as any)?.qrNumber ||
+            (quotation as any)?.requirementNo ||
+            '',
+          ).trim() || undefined,
+        financialSummary,
+        financials: financialSummary,
+        quotationFinancialBridge: financialSummary,
+      },
+    };
+  }, [extractQuotationFinancialSummary, getQuotationByNumber]);
+
+  const syncQuotationBridgeFromContract = async (
+    contractLike: Partial<SalesContract>,
+    options: {
+      contractStatus?: SalesContract['status'];
+      soNumber?: string | null;
+      pushedContractAt?: string | null;
+      sentToCustomerAt?: string | null;
+      customerConfirmedAt?: string | null;
+      customerFeedback?: Record<string, any> | null;
+      rejectionReason?: string | null;
+      purchaseOrderNumbers?: string[];
+    } = {},
+  ) => {
+    const quotationNumber = String(contractLike.quotationNumber || '').trim();
+    const contractNumber = String(contractLike.contractNumber || '').trim();
+    if (!quotationNumber || !contractNumber) return;
+
+    const quotation = getQuotationByNumber(quotationNumber);
+    const currentApprovalStatus = quotation?.approvalStatus || 'approved';
+    const now = new Date().toISOString();
+    const existingRenderMeta = quotation?.documentRenderMeta || {};
+    const existingBridge = existingRenderMeta?.contractBridge || {};
+    const contractStatus = options.contractStatus || contractLike.status || 'draft';
+    const soNumber = options.soNumber ?? quotation?.soNumber ?? existingBridge?.soNumber ?? null;
+    const nextBridge = {
+      ...existingBridge,
+      contractNumber,
+      quotationNumber,
+      contractStatus,
+      approvalStatus: getQuotationBridgeApprovalStatus(contractStatus),
+      customerStage: getQuotationBridgeCustomerStage(contractStatus),
+      lastSyncedAt: now,
+      linkedAt: existingBridge?.linkedAt || options.pushedContractAt || contractLike.createdAt || now,
+      pushedContractAt: quotation?.pushedContractAt || options.pushedContractAt || contractLike.createdAt || now,
+      sentToCustomerAt: options.sentToCustomerAt ?? contractLike.sentToCustomerAt ?? existingBridge?.sentToCustomerAt ?? null,
+      customerConfirmedAt: options.customerConfirmedAt ?? contractLike.customerConfirmedAt ?? existingBridge?.customerConfirmedAt ?? null,
+      rejectionReason: options.rejectionReason ?? contractLike.rejectionReason ?? existingBridge?.rejectionReason ?? null,
+      customerFeedback: options.customerFeedback ?? contractLike.customerFeedback ?? existingBridge?.customerFeedback ?? null,
+      purchaseOrderNumbers: options.purchaseOrderNumbers ?? contractLike.purchaseOrderNumbers ?? existingBridge?.purchaseOrderNumbers ?? [],
+      soNumber,
+    };
+
+    const quotationPatch: Partial<SalesQuotation> = {
+      pushedToContract: true,
+      pushedContractNumber: contractNumber,
+      pushedContractAt: quotation?.pushedContractAt || options.pushedContractAt || contractLike.createdAt || now,
+      pushedBy: quotation?.pushedBy || contractLike.salesPerson || contractLike.salesPersonName || null,
+      documentRenderMeta: {
+        ...existingRenderMeta,
+        contractBridge: nextBridge,
+      },
+    };
+
+    if (soNumber) {
+      quotationPatch.soNumber = soNumber;
+    }
+
+    try {
+      if (quotation?.id) {
+        await updateQuotation(quotation.id, quotationPatch);
+      } else {
+        await salesQuotationService.updateStatus(quotationNumber, currentApprovalStatus, quotationPatch as Record<string, any>);
+      }
+    } catch (error: any) {
+      console.warn('⚠️ [SalesContractContext] 回写关联 QT 失败:', error?.message || error);
+    }
+  };
+
+  useEffect(() => {
+    if (!loaded || contracts.length === 0 || !isStoredStaffPortalRole()) return;
+
+    let cancelled = false;
+    const candidates = contracts.filter((contract) => {
+      if (!contract.quotationNumber || hasContractFinancialBridge(contract)) return false;
+      return Boolean(getQuotationByNumber(String(contract.quotationNumber || '').trim()));
+    });
+    if (candidates.length === 0) return;
+
+    const backfill = async () => {
+      for (const contract of candidates) {
+        if (cancelled) return;
+        const quotation = getQuotationByNumber(String(contract.quotationNumber || '').trim());
+        const enriched = attachQuotationFinancialBridge(contract, quotation);
+        if (
+          enriched.documentDataSnapshot === contract.documentDataSnapshot &&
+          enriched.documentRenderMeta === contract.documentRenderMeta
+        ) {
+          continue;
+        }
+
+        try {
+          const saved = await contractService.upsert(enriched as SalesContract);
+          if (!saved || cancelled) continue;
+          setContracts((prev) => prev.map((item) => (
+            item.id === saved.id ? (saved as SalesContract) : item
+          )));
+        } catch (error: any) {
+          console.warn(`⚠️ [SalesContractContext] 回填 SC 利润快照失败 ${contract.contractNumber}:`, error?.message || error);
+        }
+      }
+    };
+
+    void backfill();
+    return () => {
+      cancelled = true;
+    };
+  }, [attachQuotationFinancialBridge, contracts, getQuotationByNumber, hasContractFinancialBridge, loaded]);
+
+  const clearQuotationBridgeForDeletedContract = async (
+    contractLike: Partial<SalesContract>,
+    remainingLatestContract?: Partial<SalesContract> | null,
+  ) => {
+    const quotationNumber = String(contractLike.quotationNumber || '').trim();
+    const deletedContractNumber = String(contractLike.contractNumber || '').trim();
+    if (!quotationNumber || !deletedContractNumber) return;
+
+    if (remainingLatestContract?.quotationNumber && remainingLatestContract?.contractNumber) {
+      await syncQuotationBridgeFromContract(remainingLatestContract as Partial<SalesContract>, {
+        contractStatus: remainingLatestContract.status,
+      });
+      return;
+    }
+
+    const quotation = getQuotationByNumber(quotationNumber);
+    const currentApprovalStatus = quotation?.approvalStatus || 'approved';
+    const existingRenderMeta = quotation?.documentRenderMeta || {};
+    const existingBridge = existingRenderMeta?.contractBridge || {};
+    const currentBridgeContractNumber = String(
+      quotation?.pushedContractNumber ||
+      existingBridge?.contractNumber ||
+      '',
+    ).trim();
+
+    if (currentBridgeContractNumber && currentBridgeContractNumber !== deletedContractNumber) {
+      return;
+    }
+
+    const nextRenderMeta = { ...existingRenderMeta };
+    if (nextRenderMeta.contractBridge) {
+      delete nextRenderMeta.contractBridge;
+    }
+
+    const quotationPatch: Partial<SalesQuotation> = {
+      pushedToContract: false,
+      pushedContractNumber: null,
+      pushedContractAt: null,
+      soNumber: null,
+      documentRenderMeta: nextRenderMeta,
+    };
+
+    try {
+      if (quotation?.id) {
+        await updateQuotation(quotation.id, quotationPatch);
+      } else {
+        await salesQuotationService.updateStatus(quotationNumber, currentApprovalStatus, quotationPatch as Record<string, any>);
+      }
+    } catch (error: any) {
+      console.warn('⚠️ [SalesContractContext] 清理关联 QT 合同桥接失败:', error?.message || error);
+    }
+  };
 
   // 🔥 从 Supabase 加载合同列表（Supabase-first）
   useEffect(() => {
@@ -387,7 +1164,12 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           data: { session },
         } = await supabase.auth.getSession();
         if (!session) {
-          if (alive) setContracts([]);
+          if (alive) {
+            if (!restoreContractCacheFallback()) {
+              preserveContractStateOnAuthGap();
+            }
+            setLoaded(true);
+          }
           return;
         }
 
@@ -400,19 +1182,32 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
             .maybeSingle();
           isStaff = profile?.portal_role === 'admin' || profile?.portal_role === 'staff';
         }
-        const data = isStaff
+      const data = isStaff
           ? await contractService.getAll()
           : await contractService.getByEmail(session.user.email || '');
         if (!alive || clearingRef.current) return;
         if (Array.isArray(data) && data.length > 0) {
-          const filtered = filterDeletedContracts(data as SalesContract[]);
+          const rawContracts = data as SalesContract[];
+          const filtered = filterDeletedContracts(rawContracts);
+          if (!isStaff && filtered.length === 0) {
+            const removed = removeTombstonesByMarkers('contract', rawContracts.flatMap((contract) => buildCustomerContractTombstoneMarkers(contract)));
+            if (removed > 0) {
+              console.warn(`⚠️ [SalesContractProvider] removed ${removed} stale contract tombstones after backend reload`);
+            }
+            setContracts(rawContracts);
+            setLoaded(true);
+            return;
+          }
           setContracts(filtered);
+          setLoaded(true);
         } else if (alive) {
           setContracts([]);
+          setLoaded(true);
         }
       } catch (e: any) {
         if (e?.name === 'AbortError') return;
         console.warn('⚠️ [SalesContractProvider] Supabase 加载合同失败:', e?.message || e);
+        if (alive) setLoaded(true);
       }
     };
 
@@ -421,14 +1216,36 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     // 监听 Auth 状态变化，登录后重新加载
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN') void load();
-      else if (event === 'SIGNED_OUT') setContracts([]);
+      else if (event === 'SIGNED_OUT') {
+        if (!hasLocalContractIdentity() || !restoreContractCacheFallback()) {
+          preserveContractStateOnAuthGap();
+        }
+      }
     });
+
+    const handleUserChanged = () => void load();
+    const handleOrdersUpdated = () => void load();
+    const handleWindowFocus = () => void load();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void load();
+      }
+    };
+
+    window.addEventListener('userChanged', handleUserChanged);
+    window.addEventListener('ordersUpdated', handleOrdersUpdated);
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       alive = false;
       subscription.unsubscribe();
+      window.removeEventListener('userChanged', handleUserChanged);
+      window.removeEventListener('ordersUpdated', handleOrdersUpdated);
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [preserveContractStateOnAuthGap, restoreContractCacheFallback]);
 
   const refreshFromBackend = React.useCallback(async (): Promise<void> => {
     if (clearingRef.current) return;
@@ -437,7 +1254,9 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        setContracts([]);
+        if (!restoreContractCacheFallback()) {
+          preserveContractStateOnAuthGap();
+        }
         return;
       }
 
@@ -455,161 +1274,150 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         : await contractService.getByEmail(session.user.email || '');
       if (clearingRef.current) return;
       if (Array.isArray(data) && data.length > 0) {
-        const filtered = filterDeletedContracts(data as SalesContract[]);
+        const rawContracts = data as SalesContract[];
+        const filtered = filterDeletedContracts(rawContracts);
+        if (!isStaff && filtered.length === 0) {
+          const removed = removeTombstonesByMarkers('contract', rawContracts.flatMap((contract) => buildCustomerContractTombstoneMarkers(contract)));
+          if (removed > 0) {
+            console.warn(`⚠️ [SalesContractProvider] removed ${removed} stale contract tombstones during refresh`);
+          }
+          setContracts(rawContracts);
+          setLoaded(true);
+          return;
+        }
         setContracts(filtered);
+        setLoaded(true);
       } else {
         setContracts([]);
+        setLoaded(true);
       }
     } catch (e: any) {
       console.warn('⚠️ [SalesContractProvider] refreshFromBackend 失败:', e?.message || e);
+      setLoaded(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [preserveContractStateOnAuthGap, restoreContractCacheFallback]);
   
-  // 🔥 监听客户确认订单，同步更新销售合同状态
+  // 🔥 监听客户确认订单，同步更新销售合同状态（内存 + Supabase 双写）
   useEffect(() => {
-    
-    let hasChanges = false;
-    
+    type PendingSync = {
+      key: string; // contract id 或 contractNumber
+      status: string;
+      extra: Record<string, any>;
+    };
+    const pendingSync: PendingSync[] = [];
+
     setContracts(prev => {
       if (clearingRef.current) return prev;
+      let hasChanges = false;
       const updated = prev.map(contract => {
         const order = allOrders.find(o => o.orderNumber === contract.contractNumber);
-        
+
         if (!order) {
           return contract;
         }
-        
-        console.log(`  - 检查合同 ${contract.contractNumber}:`, {
-          contractStatus: contract.status,
-          orderStatus: order.status,
-          customerFeedback: order.customerFeedback,
-          depositPaymentProof: order.depositPaymentProof
-        });
-        
+
         // 🔥 如果客户已确认（Accept），更新合同状态
-        if (order.customerFeedback?.status === 'accepted' && 
+        const feedbackStatus = String((order.customerFeedback as any)?.status || (order.customerFeedback as any)?.type || '').trim().toLowerCase();
+        if (['accepted', 'accept'].includes(feedbackStatus) &&
             contract.status !== 'customer_confirmed' &&
-            (contract.status === 'sent' || contract.status === 'approved')) {  // 🔥 修复：允许从approved或sent状态同步
-          
+            contract.status !== 'deposit_uploaded' &&
+            !['deposit_confirmed', 'po_generated', 'production', 'balance_uploaded', 'balance_confirmed', 'shipped', 'completed'].includes(contract.status) &&
+            (contract.status === 'sent' || contract.status === 'approved')) {
+
           hasChanges = true;
-          
+          const confirmedAt = new Date().toISOString();
+          const buyerSignature = {
+            signedBy: (order.customerFeedback as any)?.submittedBy || order.customerEmail || 'Customer',
+            signedByEmail: order.customerEmail || '',
+            signedAt: new Date((order.customerFeedback as any)?.submittedAt || Date.now()).toISOString(),
+            signatureData: `Electronically confirmed by ${(order.customerFeedback as any)?.submittedBy || 'customer'}`,
+          };
+
+          // 🔥 如果同时已有定金凭证，直接跳级到 deposit_uploaded（避免两次 effect 运行）
+          if (order.depositPaymentProof) {
+            const depositProof = {
+              fileName: (order.depositPaymentProof as any).fileName || 'deposit-proof.pdf',
+              fileUrl: (order.depositPaymentProof as any).fileUrl || '',
+              uploadedBy: (order.depositPaymentProof as any).uploadedBy || order.customerEmail || 'Customer',
+              uploadedAt: (order.depositPaymentProof as any).uploadedAt || new Date().toISOString(),
+            };
+            pendingSync.push({
+              key: contract.id || contract.contractNumber,
+              status: 'deposit_uploaded',
+              extra: {
+                customer_confirmed_at: confirmedAt,
+                buyer_signature: buyerSignature,
+                deposit_proof: depositProof,
+              },
+            });
+            return {
+              ...contract,
+              status: 'deposit_uploaded',
+              customerConfirmedAt: confirmedAt,
+              updatedAt: new Date().toISOString(),
+              buyerSignature,
+              depositProof,
+            };
+          }
+
+          pendingSync.push({
+            key: contract.id || contract.contractNumber,
+            status: 'customer_confirmed',
+            extra: {
+              customer_confirmed_at: confirmedAt,
+              buyer_signature: buyerSignature,
+            },
+          });
           return {
             ...contract,
             status: 'customer_confirmed',
-            customerConfirmedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            // 🔥 记录客户确认信息
-            buyerSignature: {
-              signedBy: order.customerFeedback.submittedBy || order.customerEmail || 'Customer',
-              signedByEmail: order.customerEmail || '',
-              signedAt: new Date(order.customerFeedback.submittedAt || Date.now()).toISOString(),
-              signatureData: `Electronically confirmed by ${order.customerFeedback.submittedBy || 'customer'}`
-            }
+            customerConfirmedAt: confirmedAt,
+            updatedAt: confirmedAt,
+            buyerSignature,
           };
         }
-        
-        // 🔥 如果客户已上传定金凭证，更新合同状态
-        if (order.depositPaymentProof && 
+
+        // 🔥 如果客户已上传定金凭证，更新合同状态（合同已是 customer_confirmed 的情况）
+        if (order.depositPaymentProof &&
             contract.status === 'customer_confirmed' &&
-            !contract.depositProof) {  // 防止重复更新
-          
+            !contract.depositProof) {
+
           hasChanges = true;
-          
+          const depositProof = {
+            fileName: (order.depositPaymentProof as any).fileName || 'deposit-proof.pdf',
+            fileUrl: (order.depositPaymentProof as any).fileUrl || '',
+            uploadedBy: (order.depositPaymentProof as any).uploadedBy || order.customerEmail || 'Customer',
+            uploadedAt: (order.depositPaymentProof as any).uploadedAt || new Date().toISOString(),
+          };
+          pendingSync.push({
+            key: contract.id || contract.contractNumber,
+            status: 'deposit_uploaded',
+            extra: { deposit_proof: depositProof },
+          });
           return {
             ...contract,
             status: 'deposit_uploaded',
             updatedAt: new Date().toISOString(),
-            // 🔥 记录定金凭证信息
-            depositProof: {
-              fileName: order.depositPaymentProof.fileName || 'deposit-proof.pdf',
-              fileUrl: order.depositPaymentProof.fileUrl || '',
-              uploadedBy: order.depositPaymentProof.uploadedBy || order.customerEmail || 'Customer',
-              uploadedAt: order.depositPaymentProof.uploadedAt
-            }
+            depositProof,
           };
         }
-        
+
         return contract;
       });
-      
-      if (hasChanges) {
-        return updated;
-      } else {
-        return prev;
-      }
+
+      return hasChanges ? updated : prev;
     });
-  }, [allOrders]); // 🔥 监听订单变化
-  
-  // 🔥 监听审批状态变化，同步更新销售合同状态
-  useEffect(() => {
-    // 遍历所有销售合同类型的审批请求
-    const salesContractApprovals = approvalRequests.filter(req => req.type === 'sales_contract');
-    
-    if (salesContractApprovals.length === 0) {
-      return;
-    }
-    
-    let hasChanges = false;
-    
-    setContracts(prev => {
-      if (clearingRef.current) return prev;
-      const updated = prev.map(contract => {
-        const approval = salesContractApprovals.find(req => req.relatedDocumentId === contract.contractNumber);
-        
-        if (!approval) {
-          return contract;
-        }
-        
-        console.log(`  - 检查合同 ${contract.contractNumber}:`, {
-          contractStatus: contract.status,
-          approvalStatus: approval.status,
-          currentApproverRole: approval.currentApproverRole
+
+    // 将推导出的状态变更持久化到 Supabase（静默，不阻塞 UI）
+    if (pendingSync.length > 0) {
+      pendingSync.forEach(({ key, status, extra }) => {
+        contractService.updateStatus(key, status, extra).catch((err: any) => {
+          console.warn(`[SalesContractContext] 合同状态同步 Supabase 失败 (${key} → ${status}):`, err?.message || err);
         });
-        
-        // 🔥 根据审批状态同步合同状态
-        let newStatus = contract.status;
-        
-        if (approval.status === 'pending') {
-          // 待审批
-          if (approval.currentApproverRole === 'Regional_Manager') {
-            newStatus = 'pending_supervisor';
-          } else if (approval.currentApproverRole === 'Sales_Director') {
-            newStatus = 'pending_director';
-          }
-        } else if (approval.status === 'forwarded') {
-          // 已转发给总监
-          newStatus = 'pending_director';
-        } else if (approval.status === 'approved') {
-          // 审批通过
-          newStatus = 'approved';
-        } else if (approval.status === 'rejected') {
-          // 审批驳回
-          newStatus = 'rejected';
-        }
-        
-        // 如果状态有变化，更新合同
-        if (newStatus !== contract.status) {
-          hasChanges = true;
-          
-          return {
-            ...contract,
-            status: newStatus,
-            updatedAt: new Date().toISOString(),
-            ...(newStatus === 'approved' && { approvedAt: new Date().toISOString() })
-          };
-        }
-        
-        return contract;
       });
-      
-      if (hasChanges) {
-        return updated;
-      } else {
-        return prev;
-      }
-    });
-  }, [approvalRequests]); // 监听审批请求变化
+    }
+  }, [allOrders]); // 🔥 监听订单变化
   
   // Supabase-first: 写操作直接调用 contractService.upsert，不再写 localStorage
   
@@ -647,11 +1455,22 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   const createContract = async (contractData: Partial<SalesContract>): Promise<SalesContract> => {
     clearingRef.current = false;
     const now = new Date().toISOString();
+    const existingForQuotation = pickLatestContract(
+      contracts.filter((contract) => String(contract.quotationNumber || '').trim() === String(contractData.quotationNumber || '').trim()),
+    );
+    if (existingForQuotation) {
+      return existingForQuotation;
+    }
     
     // 计算金额
     const totalAmount = contractData.totalAmount || 0;
-    const depositPercentage = contractData.depositPercentage || 30;
-    const balancePercentage = contractData.balancePercentage || 70;
+    const resolvedPaymentMode = contractData.paymentMode || null;
+    const resolvedBalanceTrigger = deriveBalanceTrigger(resolvedPaymentMode, contractData.balanceTrigger);
+    const resolvedPaymentTerms = String(
+      contractData.paymentTerms || buildPaymentTermsText(resolvedPaymentMode, resolvedBalanceTrigger),
+    ).trim();
+    const depositPercentage = contractData.depositPercentage ?? getDefaultDepositPercentage(resolvedPaymentMode);
+    const balancePercentage = contractData.balancePercentage ?? getDefaultBalancePercentage(resolvedPaymentMode);
     const depositAmount = totalAmount * (depositPercentage / 100);
     const balanceAmount = totalAmount * (balancePercentage / 100);
     
@@ -659,52 +1478,69 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     const requiresDirectorApproval = totalAmount >= 20000;
 
     const contractNumber = await generateContractNumber(contractData.region || 'NA');
-    
-    const newContract: SalesContract = {
-      id: `SC-${Date.now()}`,
+    const bridgedContractData = attachQuotationFinancialBridge({
+      ...contractData,
       contractNumber,
-      quotationNumber: contractData.quotationNumber || '',
-      inquiryNumber: contractData.inquiryNumber,
-      projectId: contractData.projectId || null,
-      projectCode: contractData.projectCode || null,
-      projectName: contractData.projectName || null,
-      projectRevisionId: contractData.projectRevisionId || null,
-      projectRevisionCode: contractData.projectRevisionCode || null,
-      projectRevisionStatus: contractData.projectRevisionStatus || null,
-      finalRevisionId: contractData.finalRevisionId || null,
-      finalQuotationId: contractData.finalQuotationId || null,
-      finalQuotationNumber: contractData.finalQuotationNumber || contractData.quotationNumber || null,
-      quotationRole: contractData.quotationRole || null,
+    });
+    
+    const contractCurrency = String(contractData.currency || 'USD').trim().toUpperCase() || 'USD';
+    const normalizedProducts = (bridgedContractData.products || []).map((product: any) => ({
+      ...product,
+      currency: contractCurrency,
+    }));
+
+    const newContract: SalesContract = {
+      id: crypto.randomUUID(),
+      contractNumber,
+      quotationNumber: bridgedContractData.quotationNumber || '',
+      qrNumber: String(bridgedContractData.qrNumber || '').trim() || undefined,
+      inquiryNumber: bridgedContractData.inquiryNumber,
+      projectId: bridgedContractData.projectId || null,
+      projectCode: bridgedContractData.projectCode || null,
+      projectName: bridgedContractData.projectName || null,
+      projectRevisionId: bridgedContractData.projectRevisionId || null,
+      projectRevisionCode: bridgedContractData.projectRevisionCode || null,
+      projectRevisionStatus: bridgedContractData.projectRevisionStatus || null,
+      finalRevisionId: bridgedContractData.finalRevisionId || null,
+      finalQuotationId: bridgedContractData.finalQuotationId || null,
+      finalQuotationNumber: bridgedContractData.finalQuotationNumber || bridgedContractData.quotationNumber || null,
+      quotationRole: bridgedContractData.quotationRole || null,
       
-      customerName: contractData.customerName || '',
-      customerEmail: contractData.customerEmail || '',
-      customerCompany: contractData.customerCompany || '',
-      customerAddress: contractData.customerAddress || '',
-      customerCountry: contractData.customerCountry || '',
-      contactPerson: contractData.contactPerson || '',
-      contactPhone: contractData.contactPhone || '',
+      customerName: bridgedContractData.customerName || '',
+      customerEmail: bridgedContractData.customerEmail || '',
+      customerCompany: bridgedContractData.customerCompany || '',
+      customerAddress: bridgedContractData.customerAddress || '',
+      customerCountry: bridgedContractData.customerCountry || '',
+      contactPerson: bridgedContractData.contactPerson || '',
+      contactPhone: bridgedContractData.contactPhone || '',
       
-      salesPerson: contractData.salesPerson || '',
-      salesPersonName: contractData.salesPersonName || '',
-      supervisor: contractData.supervisor,
-      region: normalizeContractRegionCode(contractData.region || 'NA'),
+      salesPerson: bridgedContractData.salesPerson || '',
+      salesPersonName: bridgedContractData.salesPersonName || '',
+      supervisor: bridgedContractData.supervisor,
+      region: normalizeContractRegionCode(bridgedContractData.region || 'NA'),
       
-      products: contractData.products || [],
+      products: normalizedProducts,
       
       totalAmount,
-      currency: contractData.currency || 'USD',
+      currency: contractCurrency,
       tradeTerms: contractData.tradeTerms || 'FOB Xiamen',
-      paymentTerms: contractData.paymentTerms || '30% T/T deposit, 70% before shipment',
+      paymentTerms: resolvedPaymentTerms,
+      paymentMode: resolvedPaymentMode,
+      balanceTrigger: resolvedBalanceTrigger,
       depositPercentage,
       depositAmount,
       balancePercentage,
       balanceAmount,
-      deliveryTime: contractData.deliveryTime || '25-30 days after deposit received',
-      portOfLoading: contractData.portOfLoading || 'Xiamen, China',
-      portOfDestination: contractData.portOfDestination || '',
-      packing: contractData.packing || 'Export standard carton',
+      deliveryTime: bridgedContractData.deliveryTime || '25-30 days after deposit received',
+      portOfLoading: bridgedContractData.portOfLoading || 'Xiamen, China',
+      portOfDestination: bridgedContractData.portOfDestination || '',
+      packing: bridgedContractData.packing || 'Export standard carton',
       
       status: 'draft',
+      approvalStatus: 'draft',
+      executionStatus: 'draft',
+      paymentStatusDeposit: isNoDepositMode(resolvedPaymentMode) ? 'not_required' : 'pending',
+      paymentStatusBalance: 'not_due',
       
       approvalFlow: {
         requiresDirectorApproval,
@@ -716,25 +1552,47 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       createdAt: now,
       updatedAt: now,
       
-      remarks: contractData.remarks,
-      attachments: contractData.attachments || [],
-      templateId: contractData.templateId || null,
-      templateVersionId: contractData.templateVersionId || null,
-      templateSnapshot: contractData.templateSnapshot || null,
-      documentDataSnapshot: contractData.documentDataSnapshot,
-      documentRenderMeta: contractData.documentRenderMeta || null,
+      remarks: bridgedContractData.remarks,
+      attachments: bridgedContractData.attachments || [],
+      templateId: bridgedContractData.templateId || null,
+      templateVersionId: bridgedContractData.templateVersionId || null,
+      templateSnapshot: bridgedContractData.templateSnapshot || null,
+      documentDataSnapshot: adaptSalesContractToDocumentData({
+        ...bridgedContractData,
+        contractNumber,
+        createdAt: now,
+        totalAmount,
+        currency: contractCurrency,
+        products: normalizedProducts,
+        depositAmount,
+        balanceAmount,
+        paymentTerms: resolvedPaymentTerms,
+        paymentMode: resolvedPaymentMode,
+        balanceTrigger: resolvedBalanceTrigger,
+      }),
+      documentRenderMeta: bridgedContractData.documentRenderMeta || null,
     };
 
     const normalizedContract = normalizeSalesContractWritePayload(newContract);
 
     
     assertSalesContractWritePayload(normalizedContract);
-    const saved = await contractService.upsert(normalizedContract);
+    let saved: SalesContract | null = null;
+    try {
+      saved = await pushSalesContractViaServer(normalizedContract);
+    } catch (serverError) {
+      console.warn('⚠️ [SalesContractContext] 服务端下推 SC 失败，回退前端直写:', serverError);
+      saved = await contractService.upsert(normalizedContract);
+    }
     if (!saved) {
       throw new Error(`销售合同 ${normalizedContract.contractNumber} 创建失败`);
     }
     assertSalesContractPersistedBinding(saved as SalesContract);
     setContracts(prev => [...prev.filter(c => c.id !== saved.id), saved as SalesContract]);
+    await syncQuotationBridgeFromContract(saved as SalesContract, {
+      contractStatus: (saved as SalesContract).status,
+      pushedContractAt: (saved as SalesContract).createdAt,
+    });
     toast.success(`销售合同 ${normalizedContract.contractNumber} 创建成功！`);
     return saved as SalesContract;
   };
@@ -759,25 +1617,20 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     }
     assertSalesContractPersistedBinding(saved as SalesContract);
     setContracts(prev => prev.map(contract => contract.id === id ? saved as SalesContract : contract));
+    await syncQuotationBridgeFromContract(saved as SalesContract, {
+      contractStatus: (saved as SalesContract).status,
+    });
     toast.success('合同已更新！');
   };
   
   // 🔥 删除合同
   const deleteContract = async (id: string) => {
-    const target = contracts.find((c) => c.id === id);
-    await contractService.delete(id);
-    const markers = [
-      String(id || ''),
-      String(target?.contractNumber || ''),
-      String(target?.quotationNumber || ''),
-    ].filter(Boolean);
-    if (markers.length > 0) {
-      addTombstones('contract', markers, {
-        reason: 'manual-delete-sales-contract',
-        deletedBy: getCurrentUser()?.email || 'unknown',
-      });
-    }
-    setContracts(prev => filterDeletedContracts(prev.filter(c => c.id !== id)));
+    const deletionResult = await contractService.delete(id);
+    setContracts(prev => prev.filter(c => c.id !== id));
+    await clearQuotationBridgeForDeletedContract(
+      deletionResult?.deletedContract || contracts.find((c) => c.id === id) || {},
+      deletionResult?.remainingLatestContract || null,
+    );
     toast.success('合同已删除！');
   };
   
@@ -795,7 +1648,9 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   
   // 🔥 根据报价单号获取合同
   const getContractByQuotationNumber = (quotationNumber: string) => {
-    return contracts.find(c => c.quotationNumber === quotationNumber);
+    return pickLatestContract(
+      contracts.filter(c => String(c.quotationNumber || '').trim() === String(quotationNumber || '').trim()),
+    );
   };
   
   // 🔥 根据合同编号获取合同
@@ -805,60 +1660,108 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   
   // 🔥 提交审批
   const submitForApproval = async (id: string, notes?: string) => {
-    const submittedContract = contracts.find(c => c.id === id);
-    if (!submittedContract) return;
-    const updatedContract = {
+    const contractKey = String(id || '').trim();
+    const submittedContract = contracts.find(c =>
+      String(c.id || '').trim() === contractKey ||
+      String(c.contractNumber || '').trim() === contractKey
+    );
+    if (!submittedContract) {
+      throw new Error(`未找到销售合同 ${contractKey || '未知编号'}，请刷新后重试`);
+    }
+
+    const now = new Date().toISOString();
+    const updatedContract = normalizeSalesContractWritePayload({
       ...submittedContract,
       status: 'pending_supervisor',
-      submittedAt: new Date().toISOString(),
+      approvalStatus: 'pending_l1',
+      executionStatus: 'draft',
+      paymentStatusDeposit: submittedContract.paymentStatusDeposit || 'pending',
+      paymentStatusBalance: submittedContract.paymentStatusBalance || 'not_due',
+      submittedAt: now,
       approvalNotes: notes,
+      approvalFlow: {
+        ...(submittedContract.approvalFlow || {}),
+        currentStep: 'supervisor',
+      },
       approvalHistory: [...(submittedContract.approvalHistory || []), {
         action: 'submitted',
         actor: submittedContract.salesPersonName,
         actorRole: 'salesperson',
-        timestamp: new Date().toISOString(),
+        timestamp: now,
         notes,
         amount: submittedContract.totalAmount
       }],
-    };
-    const saved = await contractService.upsert(updatedContract);
+      updatedAt: now,
+    } as SalesContract);
+
+    assertSalesContractWritePayload(updatedContract);
+    const saved = await persistSalesContractViaServerFirst(updatedContract);
     if (!saved) {
       throw new Error(`合同 ${submittedContract.contractNumber || id} 提交审批失败`);
     }
-    setContracts(prev => prev.map(contract => contract.id === id ? saved as SalesContract : contract));
+    assertSalesContractPersistedBinding(saved as SalesContract);
+    setContracts(prev => prev.map(contract =>
+      contract.id === submittedContract.id || contract.contractNumber === submittedContract.contractNumber
+        ? saved as SalesContract
+        : contract
+    ));
+    await syncQuotationBridgeFromContract(saved as SalesContract, {
+      contractStatus: (saved as SalesContract).status,
+    });
   };
   
   // 🔥 审批通过
   const approveContract = async (id: string, approverRole: 'supervisor' | 'director', notes?: string) => {
-    const contract = contracts.find(c => c.id === id);
-    if (!contract) return;
+    const contractKey = String(id || '').trim();
+    const contract = contracts.find(c =>
+      String(c.id || '').trim() === contractKey ||
+      String(c.contractNumber || '').trim() === contractKey
+    );
+    if (!contract) {
+      throw new Error(`未找到销售合同 ${contractKey || '未知编号'}，无法同步审批结果`);
+    }
+    const now = new Date().toISOString();
     const updated = { ...contract };
     updated.approvalHistory.push({
       action: 'approved',
       actor: approverRole === 'supervisor' ? '区域主管' : '销售总监',
       actorRole: approverRole,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       notes
     });
     if (approverRole === 'supervisor') {
       if (contract.approvalFlow.requiresDirectorApproval) {
         updated.status = 'pending_director';
+        updated.approvalStatus = 'pending_l2';
+        updated.executionStatus = 'draft';
         updated.approvalFlow.currentStep = 'director';
       } else {
         updated.status = 'approved';
+        updated.approvalStatus = 'approved';
+        updated.executionStatus = 'draft';
         updated.approvalFlow.currentStep = 'completed';
-        updated.approvedAt = new Date().toISOString();
+        updated.approvedAt = now;
       }
     } else if (approverRole === 'director') {
       updated.status = 'approved';
+      updated.approvalStatus = 'approved';
+      updated.executionStatus = 'draft';
       updated.approvalFlow.currentStep = 'completed';
-      updated.approvedAt = new Date().toISOString();
+      updated.approvedAt = now;
     }
-    const saved = await contractService.upsert(updated);
+    updated.updatedAt = now;
+    const saved = await persistSalesContractViaServerFirst(normalizeSalesContractWritePayload(updated as SalesContract));
     if (!saved) {
       throw new Error(`合同 ${contract.contractNumber || id} 审批同步失败`);
     }
-    setContracts(prev => prev.map(item => item.id === id ? saved as SalesContract : item));
+    setContracts(prev => prev.map(item =>
+      item.id === contract.id || item.contractNumber === contract.contractNumber
+        ? saved as SalesContract
+        : item
+    ));
+    await syncQuotationBridgeFromContract(saved as SalesContract, {
+      contractStatus: (saved as SalesContract).status,
+    });
 
     if (contract?.approvalFlow.requiresDirectorApproval && approverRole === 'supervisor') {
       toast.success('主管审批通过！合同已提交给销售总监审批。');
@@ -886,12 +1789,20 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       throw new Error(`合同 ${rejectedContract.contractNumber || id} 驳回同步失败`);
     }
     setContracts(prev => prev.map(contract => contract.id === id ? saved as SalesContract : contract));
+    await syncQuotationBridgeFromContract(saved as SalesContract, {
+      contractStatus: (saved as SalesContract).status,
+      rejectionReason: (saved as SalesContract).rejectionReason || reason,
+    });
     toast.error('合同已被驳回，请修改后重新提交！');
   };
   
   // 🔥 发送给客户（先调后端接口落库，再刷新列表并同步订单到客户视角）
-  const sendToCustomer = async (id: string) => {
-    const contract = contracts.find(c => c.id === id);
+  const sendToCustomer = async (id: string): Promise<void> => {
+    const contractKey = String(id || '').trim();
+    const contract = contracts.find(c =>
+      String(c.id || '').trim() === contractKey ||
+      String(c.contractNumber || '').trim() === contractKey
+    );
     if (!contract || contract.status !== 'approved') {
       console.error('❌ [sendToCustomer] 状态不是approved，实际:', contract?.status);
       toast.error('只能发送审批通过的合同！');
@@ -944,10 +1855,15 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       }
 
 
+      if (!resolvedCustomerEmail) {
+        throw new Error('未找到有效客户邮箱，无法把合同下推到客户订单');
+      }
+
       // 构建订单数据
       const orderData = {
         id: contract.id,
         orderNumber: contract.contractNumber,
+        contractNumber: contract.contractNumber,
         customer: contract.customerName,
         customerEmail: resolvedCustomerEmail,
         quotationNumber: contract.quotationNumber,
@@ -978,11 +1894,16 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         updatedAt: now,
       };
 
-      // 1. 写入 Supabase orders 表（主数据源）
+      // 1. 写入 orders 主数据表；只有写入成功才允许继续发送
+      let savedOrder: Record<string, any> | null = null;
       try {
-        await orderService.upsert(orderData);
-      } catch (_e) {
-        console.warn('⚠️ [sendToCustomer] Supabase orders 写入失败，仅本地处理');
+        savedOrder = await pushCustomerOrderViaServer(orderData);
+      } catch (serverError) {
+        console.warn('⚠️ [sendToCustomer] 服务端写入 orders 失败，回退客户端直写:', serverError);
+        savedOrder = await orderService.upsert(orderData);
+      }
+      if (!savedOrder) {
+        throw new Error('客户订单主数据写入失败，合同未发送');
       }
 
       // 2. 持久化 SC 状态到 sales_contracts（status='sent' + sent_to_customer_at）
@@ -992,15 +1913,25 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         if (resolvedCustomerEmail && resolvedCustomerEmail !== contract.customerEmail) {
           scExtra.customer_email = resolvedCustomerEmail;
         }
-        await contractService.updateStatus(id, 'sent', scExtra);
+        await contractService.updateStatus(contract.id || contract.contractNumber, 'sent', scExtra);
       } catch (_e) {
         console.warn('⚠️ [sendToCustomer] Supabase sales_contracts 状态写入失败，仅本地处理');
       }
 
       // 3. 更新本地 React state（DB write 完成后同步）
       setContracts(prev => prev.map(c =>
-        c.id === contract.id
-          ? { ...c, status: 'sent' as const, sentToCustomerAt: now, updatedAt: now, customerEmail: resolvedCustomerEmail || c.customerEmail }
+        c.id === contract.id || c.contractNumber === contract.contractNumber
+          ? {
+              ...c,
+              status: 'sent' as const,
+              approvalStatus: 'approved',
+              executionStatus: 'sent_to_customer',
+              paymentStatusDeposit: c.paymentStatusDeposit || (isNoDepositMode(c.paymentMode) ? 'not_required' : 'pending'),
+              paymentStatusBalance: c.paymentStatusBalance || 'not_due',
+              sentToCustomerAt: now,
+              updatedAt: now,
+              customerEmail: resolvedCustomerEmail || c.customerEmail,
+            }
           : c
       ));
 
@@ -1012,11 +1943,45 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         detail: { action: 'add', orderNumber: orderData.orderNumber, customerEmail: resolvedCustomerEmail }
       }));
 
+      await syncQuotationBridgeFromContract({
+        ...contract,
+        status: 'sent',
+        sentToCustomerAt: now,
+        customerEmail: resolvedCustomerEmail || contract.customerEmail,
+      }, {
+        contractStatus: 'sent',
+        soNumber: orderData.orderNumber,
+        sentToCustomerAt: now,
+      });
+
+      sendNotificationToUsers(getFinanceNotificationRecipients(), {
+        type: 'contract_review',
+        title: `📄 SC Sent To Customer - ${contract.contractNumber}`,
+        message: `Sales contract ${contract.contractNumber} has been sent to customer ${contract.customerName}. Current status: Sent to Customer.`,
+        relatedId: contract.contractNumber,
+        relatedType: 'sales_contract',
+        sender: contract.salesPerson || 'system-auto',
+        metadata: {
+          contractNumber: contract.contractNumber,
+          quotationNumber: contract.quotationNumber || 'N/A',
+          customerName: contract.customerName,
+          customerEmail: resolvedCustomerEmail || contract.customerEmail,
+          amount: `${contract.currency || 'USD'} ${(contract.totalAmount || 0).toLocaleString()}`,
+          status: 'sent',
+          sentToCustomerAt: now,
+        },
+      });
+
       toast.success('合同已发送给客户！客户可在 My Orders → Active Orders 查看。');
     };
 
     // 直接走本地逻辑（Supabase-first：doLocalSend 内部查 Supabase 获取 email 并 upsert 合同）
-    void doLocalSend();
+    try {
+      await doLocalSend();
+    } catch (error: any) {
+      console.error('❌ [sendToCustomer] 发送合同失败:', error);
+      toast.error(error?.message || '发送合同失败，请稍后重试');
+    }
   };
   
   // 🔥 客户确认合同 — 单一写入路径（状态 + 签名 + feedback + AR 自动创建）
@@ -1027,17 +1992,21 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
     customerFeedback?: Record<string, any>,
   ): Promise<void> => {
     const now = new Date().toISOString();
+    const contractKey = String(id || '').trim();
 
-    // Single authoritative DB write — bypasses full upsert assertion, writes all confirmation columns atomically
-    const saved = await contractService.updateStatus(id, 'customer_confirmed', {
-      buyer_signature: signature,
-      customer_confirmed_at: now,
-      customer_feedback: customerFeedback || null,
-    });
+    // Single authoritative DB write. Customer portal confirmation must go through
+    // the server because the logged-in account may be the enterprise account
+    // while the SC contact email is a different business contact.
+    const saved = await customerConfirmSalesContractViaServer(contractKey, signature, customerFeedback);
 
     // Sync local state: update in-place if present, otherwise no-op (realtime subscription will catch it)
     setContracts(prev => {
-      const idx = prev.findIndex(c => c.id === id);
+      const idx = prev.findIndex(c =>
+        String(c.id || '').trim() === contractKey ||
+        String(c.contractNumber || '').trim() === contractKey ||
+        String((saved as any)?.id || '').trim() === String(c.id || '').trim() ||
+        String((saved as any)?.contractNumber || '').trim() === String(c.contractNumber || '').trim()
+      );
       if (idx === -1) return prev;
       const merged = saved
         ? { ...prev[idx], ...saved }
@@ -1045,8 +2014,28 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       return [...prev.slice(0, idx), merged, ...prev.slice(idx + 1)];
     });
 
+    const confirmedContract = (saved || contracts.find(c =>
+      String(c.id || '').trim() === contractKey ||
+      String(c.contractNumber || '').trim() === contractKey
+    ) || null) as SalesContract | null;
+    if (confirmedContract) {
+      await syncQuotationBridgeFromContract({
+        ...confirmedContract,
+        status: 'customer_confirmed',
+        customerConfirmedAt: now,
+        customerFeedback: customerFeedback || null,
+      }, {
+        contractStatus: 'customer_confirmed',
+        customerConfirmedAt: now,
+        customerFeedback: customerFeedback || null,
+      });
+    }
+
     // AR auto-creation with idempotency guard
-    const contract = contracts.find(c => c.id === id) || saved;
+    const contract = contracts.find(c =>
+      String(c.id || '').trim() === contractKey ||
+      String(c.contractNumber || '').trim() === contractKey
+    ) || saved;
     const contractNumber = (contract as any)?.contractNumber || (contract as any)?.contract_number;
     if (contractNumber) {
       try {
@@ -1087,7 +2076,12 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
             createdAt: now,
             updatedAt: now,
             createdBy: 'system-auto',
-            notes: `Auto-generated from customer contract acceptance. Quotation: ${c.quotationNumber || 'N/A'}`,
+            notes: buildScArNotes({
+              contractNumber,
+              quotationNumber: c.quotationNumber || null,
+              contractStatus: 'customer_confirmed',
+              extraNotes: 'Auto-generated from customer contract acceptance.',
+            }),
           };
           await arService.upsert(newAR);
           console.log(`✅ [SC→AR] AR created: ${arNumber} for contract ${contractNumber}`);
@@ -1095,6 +2089,30 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       } catch (arErr: any) {
         console.warn(`⚠️ [SC→AR] AR auto-creation failed for ${contractNumber}:`, arErr?.message);
       }
+    }
+
+    const contractForFinance = (contracts.find(c =>
+      String(c.id || '').trim() === contractKey ||
+      String(c.contractNumber || '').trim() === contractKey
+    ) || saved) as any;
+    if (contractForFinance?.contractNumber) {
+      sendNotificationToUsers(getFinanceNotificationRecipients(), {
+        type: 'contract_review',
+        title: `💰 AR Created For SC - ${contractForFinance.contractNumber}`,
+        message: `Customer confirmed sales contract ${contractForFinance.contractNumber}. Accounts receivable has been created and is waiting for deposit.`,
+        relatedId: contractForFinance.contractNumber,
+        relatedType: 'accounts_receivable',
+        sender: signature.signedByEmail || 'system-auto',
+        metadata: {
+          contractNumber: contractForFinance.contractNumber,
+          quotationNumber: contractForFinance.quotationNumber || 'N/A',
+          customerName: contractForFinance.customerName || '',
+          customerEmail: contractForFinance.customerEmail || '',
+          amount: `${contractForFinance.currency || 'USD'} ${Number(contractForFinance.totalAmount || 0).toLocaleString()}`,
+          status: 'customer_confirmed',
+          customerConfirmedAt: now,
+        },
+      });
     }
 
     if (!silent) toast.success('客户已确认合同！应收账款已自动创建。');
@@ -1115,10 +2133,29 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
 
     setContracts(prev => prev.map(contract => {
       if (contract.id === id) {
-        return { ...contract, status: 'customer_rejected' as const, rejectionReason: reason, updatedAt: new Date().toISOString() };
+        return {
+          ...contract,
+          status: 'customer_rejected' as const,
+          approvalStatus: contract.approvalStatus || 'approved',
+          executionStatus: 'customer_rejected',
+          rejectionReason: reason,
+          updatedAt: new Date().toISOString(),
+        };
       }
       return contract;
     }));
+
+    const rejectedContract = contracts.find(c => c.id === id);
+    if (rejectedContract) {
+      await syncQuotationBridgeFromContract({
+        ...rejectedContract,
+        status: 'customer_rejected',
+        rejectionReason: reason,
+      }, {
+        contractStatus: 'customer_rejected',
+        rejectionReason: reason,
+      });
+    }
 
     toast.error('客户拒绝了合同！');
   };
@@ -1139,10 +2176,27 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
 
     setContracts(prev => prev.map(c => {
       if (c.id === id) {
-        return { ...c, status: 'customer_requested_changes' as const, remarks: updatedRemarks, updatedAt: new Date().toISOString() };
+        return {
+          ...c,
+          status: 'customer_requested_changes' as const,
+          approvalStatus: c.approvalStatus || 'approved',
+          executionStatus: 'customer_requested_changes',
+          remarks: updatedRemarks,
+          updatedAt: new Date().toISOString(),
+        };
       }
       return c;
     }));
+
+    if (contract) {
+      await syncQuotationBridgeFromContract({
+        ...contract,
+        status: 'customer_requested_changes',
+        remarks: updatedRemarks,
+      }, {
+        contractStatus: 'customer_requested_changes',
+      });
+    }
 
     toast.info('客户请求修改合同内容！');
   };
@@ -1216,6 +2270,10 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
         return {
           ...contract,
           status: 'deposit_uploaded' as const,
+          approvalStatus: contract.approvalStatus || 'approved',
+          executionStatus: 'deposit_uploaded',
+          paymentStatusDeposit: 'uploaded',
+          paymentStatusBalance: contract.paymentStatusBalance || 'not_due',
           depositProof: depositProofPayload,
           updatedAt: uploadedAt,
         };
@@ -1229,33 +2287,34 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
   // 🔥 确认定金
   const confirmDeposit = async (id: string, confirmedBy: string, notes?: string): Promise<void> => {
     const confirmedAt = new Date().toISOString();
+    const contract = contracts.find(c => c.id === id || c.contractNumber === id);
+    if (!contract) return;
 
     try {
-      await contractService.updateStatus(id, 'deposit_confirmed', {
-        deposit_confirmed_by: confirmedBy,
-        deposit_confirmed_at: confirmedAt,
-        deposit_confirm_notes: notes || null,
+      const saved = await persistSalesContractViaServerFirst({
+        ...contract,
+        status: 'deposit_confirmed',
+        depositConfirmedBy: confirmedBy,
+        depositConfirmedAt: confirmedAt,
+        depositConfirmNotes: notes || null,
+        updatedAt: confirmedAt,
+      } as SalesContract);
+
+      setContracts(prev => prev.map(current =>
+        current.id === saved.id
+          ? saved
+          : current
+      ));
+
+      await syncQuotationBridgeFromContract(saved, {
+        contractStatus: 'deposit_confirmed',
       });
     } catch (err: any) {
       toast.error(`定金确认失败：${err?.message || '请重试'}`);
       return;
     }
 
-    setContracts(prev => prev.map(contract => {
-      if (contract.id === id) {
-        return {
-          ...contract,
-          status: 'deposit_confirmed' as const,
-          depositConfirmedBy: confirmedBy,
-          depositConfirmedAt: confirmedAt,
-          depositConfirmNotes: notes,
-          updatedAt: confirmedAt,
-        };
-      }
-      return contract;
-    }));
-
-    toast.success('定金已确认！现在可以生成采购订单了。');
+    toast.success('定金已确认！现在可以创建 CG。');
   };
   
   // ⚠️ DEPRECATED (Phase 3a): Non-authoritative SC-side placeholder.
@@ -1275,29 +2334,38 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
 
     if (!contract || !poEligible.includes(contract.status)) {
       toast.error(isNoDepositMode(contract?.paymentMode)
-        ? '无法生成采购订单，请确认合同已被客户确认。'
-        : '无法生成采购订单，请确认定金已收到。');
+        ? '无法创建 CG，请确认合同已被客户确认。'
+        : '无法创建 CG，请确认定金已收到。');
       return [];
     }
 
-    const poNumber = `PO-${contract.contractNumber}`;
+    const poNumber = `CG-${contract.contractNumber}`;
 
     try {
       await contractService.updateStatus(id, 'po_generated', {
         purchase_order_numbers: [poNumber],
       });
     } catch (err: any) {
-      toast.error(`采购订单生成失败：${err?.message || '请重试'}`);
+      toast.error(`CG 创建失败：${err?.message || '请重试'}`);
       return [];
     }
 
     setContracts(prev => prev.map(c =>
       c.id === id
-        ? { ...c, status: 'po_generated' as const, purchaseOrderNumbers: [poNumber], updatedAt: new Date().toISOString() }
+        ? {
+            ...c,
+            status: 'po_generated' as const,
+            approvalStatus: c.approvalStatus || 'approved',
+            executionStatus: 'in_procurement',
+            paymentStatusDeposit: c.paymentStatusDeposit || 'confirmed',
+            paymentStatusBalance: c.paymentStatusBalance || 'not_due',
+            purchaseOrderNumbers: [poNumber],
+            updatedAt: new Date().toISOString(),
+          }
         : c
     ));
 
-    toast.success(`采购订单 ${poNumber} 已生成！`);
+    toast.success(`CG ${poNumber} 已创建！`);
     return [poNumber];
   };
 
@@ -1331,9 +2399,26 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
 
     setContracts(prev => prev.map(c =>
       c.id === id
-        ? { ...c, status: 'po_generated' as const, purchaseOrderNumbers: updated, updatedAt: new Date().toISOString() }
+        ? {
+            ...c,
+            status: 'po_generated' as const,
+            approvalStatus: c.approvalStatus || 'approved',
+            executionStatus: 'in_procurement',
+            paymentStatusDeposit: c.paymentStatusDeposit || 'confirmed',
+            paymentStatusBalance: c.paymentStatusBalance || 'not_due',
+            purchaseOrderNumbers: updated,
+            updatedAt: new Date().toISOString(),
+          }
         : c
     ));
+    await syncQuotationBridgeFromContract({
+      ...contract,
+      status: 'po_generated',
+      purchaseOrderNumbers: updated,
+    }, {
+      contractStatus: 'po_generated',
+      purchaseOrderNumbers: updated,
+    });
   };
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1373,16 +2458,38 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
 
     setContracts(prev => prev.map(c =>
       c.id === contract.id
-        ? { ...c, status: 'production' as const, updatedAt: new Date().toISOString() }
+        ? {
+            ...c,
+            status: 'production' as const,
+            approvalStatus: c.approvalStatus || 'approved',
+            executionStatus: 'in_production',
+            paymentStatusDeposit: c.paymentStatusDeposit || 'confirmed',
+            paymentStatusBalance: c.paymentStatusBalance || 'pending',
+            updatedAt: new Date().toISOString(),
+          }
         : c
     ));
+    await syncQuotationBridgeFromContract({
+      ...contract,
+      status: 'production',
+    }, {
+      contractStatus: 'production',
+    });
   };
   // ─────────────────────────────────────────────────────────────────────────────────────────────
 
   // 🔥 确认尾款收到 / 确认信用证落实 [Phase 2b-ii: mode-aware eligible statuses]
-  // For LC modes, balance_confirmed means "LC readiness confirmed" rather than a cash receipt.
-  const confirmBalancePayment = async (id: string, confirmedBy: string, notes?: string): Promise<void> => {
-    const contract = contracts.find(c => c.id === id);
+  // 当前线上 sales_contracts.status 实际仅接受较早期的一组枚举值，
+  // 因此这里不再强行把合同写成 balance_confirmed，避免财务回款成功后
+  // 又因为合同状态枚举不兼容而额外报错。尾款/信用证的完成态以订单、
+  // 应收与凭证为主数据源，合同保留现有合法状态即可。
+  const confirmBalancePayment = async (
+    id: string,
+    confirmedBy: string,
+    notes?: string,
+    receiptProof?: Record<string, any>,
+  ): Promise<void> => {
+    const contract = contracts.find(c => c.id === id || c.contractNumber === id);
     if (!contract) return;
 
     // Ship-first modes (2/5/6): balance confirmed AFTER shipment — includes 'shipped' in eligible set.
@@ -1401,15 +2508,41 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      await contractService.updateStatus(id, 'balance_confirmed');
-      setContracts(prev => prev.map(c =>
-        c.id === id ? { ...c, status: 'balance_confirmed' as const, updatedAt: new Date().toISOString() } : c
+      const confirmedAt = new Date().toISOString();
+      const existingRenderMeta = contract.documentRenderMeta || {};
+      const existingWorkflow = existingRenderMeta?.erpWorkflow || {};
+      const saved = await persistSalesContractViaServerFirst({
+        ...contract,
+        status: 'balance_confirmed',
+        documentRenderMeta: {
+          ...existingRenderMeta,
+          erpWorkflow: {
+            ...existingWorkflow,
+            logicalStatus: 'balance_confirmed',
+            persistedStatus: 'deposit_confirmed',
+            balanceConfirmedBy: confirmedBy,
+            balanceConfirmedAt: confirmedAt,
+            balanceConfirmNotes: notes || null,
+            ...(receiptProof ? { balanceReceiptProof: receiptProof } : {}),
+          },
+        },
+        updatedAt: confirmedAt,
+      } as SalesContract);
+
+      setContracts(prev => prev.map(current =>
+        current.id === saved.id
+          ? saved
+          : current
       ));
+
+      await syncQuotationBridgeFromContract(saved, {
+        contractStatus: saved.status,
+      });
       toast.success(isShipFirstMode(contract.paymentMode)
-        ? '尾款已确认！合同可以标记为完成。'
+        ? '尾款确认已记录。'
         : isLCMode(contract.paymentMode)
-          ? '信用证已落实！合同现在可以安排发货。'
-          : '尾款已确认！合同现在可以安排发货。');
+          ? '信用证确认已记录。'
+          : '尾款确认已记录。');
     } catch (err: any) {
       toast.error(`确认失败：${err?.message || '请重试'}`);
     }
@@ -1447,6 +2580,12 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
       setContracts(prev => prev.map(c =>
         c.id === id ? { ...c, status: 'shipped' as const, updatedAt: new Date().toISOString() } : c
       ));
+      await syncQuotationBridgeFromContract({
+        ...contract,
+        status: 'shipped',
+      }, {
+        contractStatus: 'shipped',
+      });
       toast.success('合同已标记为已发货！');
     } catch (err: any) {
       toast.error(`标记发货失败：${err?.message || '请重试'}`);
@@ -1510,6 +2649,13 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
           ...(snapshotExtra ? { profitSnapshot: snapshotExtra.profit_snapshot as ProfitSnapshot } : {}),
         } : c
       ));
+      await syncQuotationBridgeFromContract({
+        ...contract,
+        status: 'completed',
+        ...(snapshotExtra ? { profitSnapshot: snapshotExtra.profit_snapshot as ProfitSnapshot } : {}),
+      }, {
+        contractStatus: 'completed',
+      });
       toast.success('合同已完成！');
     } catch (err: any) {
       toast.error(`标记完成失败：${err?.message || '请重试'}`);
@@ -1518,6 +2664,7 @@ export function SalesContractProvider({ children }: { children: ReactNode }) {
 
   const value: SalesContractContextType = {
     contracts,
+    loaded,
     createContract,
     updateContract,
     deleteContract,

@@ -68,6 +68,19 @@ import React, {
   ReactNode,
 } from 'react';
 import { adminOrganizationService, staffDirectoryService } from '../lib/supabaseService';
+import { canonicalizePersonnelEmail } from '../lib/personnelEmail';
+import { adminOrganizationSnapshotService } from '../lib/services/adminOrganizationSnapshotService';
+import { getAdminAuthMode, type AdminAuthIdentitySource } from '../config/adminPortalPolicy';
+import {
+  hasLegacyAdminRosterArtifacts as hasSharedLegacyAdminRosterArtifacts,
+  normalizeAdminRosterAccounts,
+  normalizeAdminRosterContacts,
+} from '../lib/services/adminRosterNormalizer';
+import {
+  deriveAccountRoleDefaults,
+  getDepartmentAndTitleForRole,
+  inferRegionCode,
+} from '../components/admin/admin-organization-profile/roleMappingEngine';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bank account sub-types
@@ -132,6 +145,7 @@ export interface InternalContact {
   name: string;
   department: string;
   title: string;
+  region: string;
   managerId?: string;
   extension: string;
   phone: string;
@@ -156,6 +170,19 @@ export interface InternalAccount {
   forcePasswordReset: boolean;
   lastLoginAt: string;
   notes: string;
+  authMode?: 'test' | 'dual' | 'production';
+  activationStatus?: 'draft' | 'invited' | 'email_verified' | 'phone_verified' | 'active' | 'disabled';
+  primaryIdentitySource?: AdminAuthIdentitySource;
+  phoneLogin?: string;
+  phoneVerified?: boolean;
+  emailVerified?: boolean;
+  wechatOpenId?: string;
+  enterpriseWechatUserId?: string;
+  whatsappAccount?: string;
+  invitedAt?: string;
+  inviteExpiresAt?: string;
+  lastInviteChannel?: AdminAuthIdentitySource;
+  activatedAt?: string;
 }
 
 export interface DocumentDefaults {
@@ -235,59 +262,65 @@ const INTERNAL_STAFF_SEEDS: InternalStaffSeed[] = [
     id: 'admin',
     username: 'admin',
     name: '系统管理员',
-    email: 'admin@cosun.com',
+    email: 'admin@cosunchina.com',
     role: 'Admin',
     region: 'all',
     department: 'IT部',
+    legacyEmails: ['admin@cosun.com'],
   },
   {
     id: 'ceo',
     username: 'ceo',
     name: '张明',
-    email: 'ceo@cosun.com',
+    email: 'ceo@cosunchina.com',
     role: 'CEO',
     region: 'all',
     department: '管理层',
     title: 'CEO',
+    legacyEmails: ['ceo@cosun.com'],
   },
   {
     id: 'hr',
     username: 'hr',
     name: '卢招',
-    email: 'hr@cosun.com',
+    email: 'hr@cosunchina.com',
     role: 'HR_Admin',
     region: 'all',
     department: '人力资源',
     title: '招聘经理',
+    legacyEmails: ['hr@cosun.com'],
   },
   {
     id: 'cfo',
     username: 'cfo',
     name: '李华',
-    email: 'cfo@cosun.com',
+    email: 'cfo@cosunchina.com',
     role: 'CFO',
     region: 'all',
     department: '财务部',
     title: 'CFO',
+    legacyEmails: ['cfo@cosun.com'],
   },
   {
     id: 'external-accountant',
-    username: 'finance_agent',
+    username: 'finance_agency',
     name: '杨立',
-    email: 'finance_agent@cosun.com',
+    email: 'finance_agency@cosunchina.com',
     role: 'External_Accountant',
     region: 'all',
     department: '财务部',
-    title: '财务专员',
+    title: '代理记账财务',
+    legacyEmails: ['finance_agent@cosun.com'],
   },
   {
     id: 'sales-director',
     username: 'sales.director',
     name: '王强',
-    email: 'sales.director@cosun.com',
+    email: 'sales.director@cosunchina.com',
     role: 'Sales_Director',
     region: 'all',
     department: '销售部',
+    legacyEmails: ['sales.director@cosun.com'],
   },
   {
     id: 'regional-manager-na',
@@ -331,78 +364,134 @@ const INTERNAL_STAFF_SEEDS: InternalStaffSeed[] = [
     legacyEmails: ['maria.garcia@cosun.com', 'maria@cosun.com', 'zhangwei@cosun.com'],
   },
   {
+    id: 'sales-rep-na-2',
+    username: 'sales02-na',
+    name: '艾青',
+    email: 'sales02-na@cosunchina.com',
+    role: 'Sales_Rep',
+    region: 'NA',
+    department: '销售部-北美',
+    title: '业务员',
+    legacyEmails: [],
+  },
+  {
     id: 'sales-rep-sa',
-    username: 'lifang',
-    name: '李芳',
-    email: 'lifang@cosun.com',
+    username: 'sales01-sa',
+    name: '安娜',
+    email: 'sales01-sa@cosunchina.com',
     role: 'Sales_Rep',
     region: 'SA',
     department: '销售部-南美',
-    legacyEmails: ['ana.santos@cosun.com'],
+    title: '业务员',
+    legacyEmails: ['ana.santos@cosun.com', 'lifang@cosun.com'],
   },
   {
     id: 'sales-rep-ea',
-    username: 'wangfang',
-    name: '王芳',
-    email: 'wangfang@cosun.com',
+    username: 'sales02-ea',
+    name: '艾玛',
+    email: 'sales02-ea@cosunchina.com',
     role: 'Sales_Rep',
     region: 'EA',
     department: '销售部-欧非',
-    legacyEmails: ['emma.thompson@cosun.com'],
+    title: '业务员',
+    legacyEmails: ['emma.thompson@cosun.com', 'wangfang@cosun.com'],
   },
   {
     id: 'finance',
     username: 'finance',
     name: '赵敏',
-    email: 'finance@cosun.com',
+    email: 'finance@cosunchina.com',
     role: 'Finance',
     region: 'all',
     department: '财务部',
+    legacyEmails: ['finance@cosun.com'],
+  },
+  {
+    id: 'procurement-manager',
+    username: 'procurement.manager',
+    name: '王芳',
+    email: 'procurement.manager@cosunchina.com',
+    role: 'Procurement_Manager',
+    region: 'all',
+    department: '采购部',
+    title: '采购主管',
+    legacyEmails: ['procurement.manager@cosun.com'],
   },
   {
     id: 'procurement',
     username: 'procurement',
     name: '刘刚',
-    email: 'procurement@cosun.com',
+    email: 'procurement@cosunchina.com',
     role: 'Procurement',
     region: 'all',
     department: '采购部',
+    title: '采购员',
+    legacyEmails: ['procurement@cosun.com'],
   },
   {
     id: 'marketing',
     username: 'marketing',
     name: '李娜',
-    email: 'marketing@cosun.com',
+    email: 'marketing@cosunchina.com',
     role: 'Marketing_Ops',
     region: 'all',
     department: '市场部',
+    title: '运营专员',
+    legacyEmails: ['marketing@cosun.com'],
+  },
+  {
+    id: 'marketing-assistant',
+    username: 'marketing.assistance',
+    name: '王市',
+    email: 'marketing.assistance@cosunchina.com',
+    role: 'Marketing_Assistant',
+    region: 'all',
+    department: '市场部',
+    title: '运营助理',
+    legacyEmails: ['marketing.assistant@cosunchina.com', 'marketing.assistance@cosun.com'],
   },
   {
     id: 'qc',
-    username: 'luyi',
-    name: 'Luyi',
-    email: 'luyi@cosun.com',
+    username: 'qc',
+    name: '卢毅',
+    email: 'qc@cosunchina.com',
     role: 'QC',
     region: 'all',
     department: '品控部',
+    title: '验货员',
+    legacyEmails: ['luyi@cosun.com', 'qc@cosun.com'],
   },
   {
     id: 'admin-ops',
     username: 'xingzheng',
-    name: 'Xingzheng',
+    name: '邢政',
     email: 'xingzheng@cosunchina.com',
     role: 'Admin_Ops',
     region: 'all',
     department: '行政部',
+    title: '行政专员',
   },
   {
-    id: 'documentation-officer',
-    username: 'zhanghui',
-    name: '张晖',
-    email: 'zhanghui@cosun.com',
+    id: 'documentation-officer-track',
+    username: 'track',
+    name: '李根',
+    role: 'Order_Coordinator',
+    email: 'track@cosunchina.com',
+    region: 'all',
+    department: '销售部',
+    title: '跟单员',
+    legacyEmails: ['track@cosun.com'],
+  },
+  {
+    id: 'documentation-officer-docs',
+    username: 'documents',
+    name: '李敏',
+    email: 'documents@cosunchina.com',
     role: 'Documentation_Officer',
     region: 'all',
     department: '单证管理部',
+    title: '单证员',
+    legacyEmails: ['documents@cosun.com', 'zhanghui@cosun.com'],
   },
 ];
 
@@ -419,13 +508,18 @@ export interface AdminOrgSaveResult {
   remoteSaved: boolean;
 }
 
+export interface UpdateAdminOrgOptions {
+  allowPasswordWriteAccountIds?: string[];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Context type
 // ─────────────────────────────────────────────────────────────────────────────
 interface AdminOrganizationContextType {
   adminOrg: AdminOrgProfile;
   adminUserProfile: AdminUserProfile;
-  updateAdminOrg: (patch: Partial<Omit<AdminOrgProfile, 'id'>>) => Promise<AdminOrgSaveResult>;
+  updateAdminOrg: (patch: Partial<Omit<AdminOrgProfile, 'id'>>, options?: UpdateAdminOrgOptions) => Promise<AdminOrgSaveResult>;
+  restoreLatestAdminOrgSnapshot: () => Promise<(AdminOrgSaveResult & { restoredAt: string; source: string; summary: string }) | null>;
   /** Returns true if logo saved to disk; false = quota exceeded (still visible this session) */
   uploadAdminLogo: (file: File) => Promise<boolean>;
   updateAdminUserProfile: (patch: Partial<Omit<AdminUserProfile, 'id' | 'email'>>) => void;
@@ -448,7 +542,8 @@ const ORG_BAK_KEY  = 'cosun_admin_org_profile_v3_backup';
 const ORG_LOGO_KEY = 'cosun_admin_org_logo';       // separate key for logo data-URI
 const USER_KEY     = 'cosun_admin_user_profile';
 const USER_AVT_KEY = 'cosun_admin_user_avatar';    // separate key for avatar data-URI
-const ADMIN_ORG_REMOTE_SAVE_TIMEOUT_MS = 8000;
+const ADMIN_ORG_REMOTE_SAVE_TIMEOUT_MS = 4500;
+const LOCAL_ADMIN_AUTH_STORAGE_KEY = 'cosun_admin_local_auth';
 
 const ORG_MASTER_SEED = {
   nameCN: '福建高盛达富建材有限公司',
@@ -534,11 +629,33 @@ function getNextEmployeeNo(contacts: InternalContact[]): string {
   return formatEmployeeNo(maxNo + 1);
 }
 
+const PRIMARY_ADMIN_EMAIL = 'admin@cosunchina.com';
+const PRIMARY_ADMIN_MANAGED_PASSWORD = 'Zi39@cosun';
+
+function isManagedSeededInternalAccount(account: Partial<InternalAccount>): boolean {
+  const normalizedEmail = canonicalizePersonnelEmail(account.loginEmail, account.region) || String(account.loginEmail || '').trim().toLowerCase();
+  const normalizedAuthUserId = String(account.authUserId || '').trim().toLowerCase();
+  const normalizedUsername = String(account.username || '').trim().toLowerCase();
+
+  return INTERNAL_STAFF_SEEDS.some((seed) => {
+    const seededEmail = canonicalizePersonnelEmail(seed.email, seed.region || 'all');
+    return (
+      normalizedEmail === seededEmail ||
+      normalizedAuthUserId === String(seed.id || '').trim().toLowerCase() ||
+      normalizedUsername === String(seed.username || '').trim().toLowerCase()
+    );
+  });
+}
+
 function generateManagedInternalPassword(seed = ''): string {
-  const source = `${seed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const normalizedSeed = String(seed || '').trim().toLowerCase();
+  if (normalizedSeed === 'admin' || normalizedSeed === 'user_admin') {
+    return PRIMARY_ADMIN_MANAGED_PASSWORD;
+  }
+
   let hash = 0;
-  for (let index = 0; index < source.length; index += 1) {
-    hash = (hash * 31 + source.charCodeAt(index)) >>> 0;
+  for (let index = 0; index < normalizedSeed.length; index += 1) {
+    hash = (hash * 31 + normalizedSeed.charCodeAt(index)) >>> 0;
   }
 
   const upperChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -549,12 +666,37 @@ function generateManagedInternalPassword(seed = ''): string {
   return `${upper}${lower}${digits}@cosun`;
 }
 
-function isManagedInternalPassword(value: string): boolean {
-  return /^[A-Z][a-z]\d{2}@cosun$/.test(String(value || '').trim());
+function getManagedInternalPasswordSeed(account: Partial<InternalAccount>) {
+  return (
+    String(account.username || '').trim()
+    || String(account.loginEmail || '').trim().toLowerCase()
+    || String(account.employeeId || '').trim()
+    || String(account.authUserId || '').trim()
+    || String(account.id || '').trim()
+  );
+}
+
+function buildDefaultIdentityProfile() {
+  const authMode = getAdminAuthMode();
+  return {
+    authMode,
+    activationStatus: authMode === 'production' ? ('invited' as const) : ('active' as const),
+    primaryIdentitySource: 'email' as const,
+    emailVerified: false,
+    phoneLogin: '',
+    phoneVerified: false,
+    wechatOpenId: '',
+    enterpriseWechatUserId: '',
+    whatsappAccount: '',
+    invitedAt: '',
+    inviteExpiresAt: '',
+    lastInviteChannel: 'email' as const,
+    activatedAt: '',
+  };
 }
 
 function resolveInternalStaffSeed(email?: string | null): InternalStaffSeed | null {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = canonicalizePersonnelEmail(email).trim().toLowerCase();
   if (!normalizedEmail) return null;
   return INTERNAL_STAFF_SEED_BY_EMAIL.get(normalizedEmail) || null;
 }
@@ -562,52 +704,20 @@ function resolveInternalStaffSeed(email?: string | null): InternalStaffSeed | nu
 const INTERNAL_ACCOUNT_ROLE_OVERRIDES: Record<string, { role: string; region?: string }> = {
   'marketing@cosun.com': { role: 'Marketing_Ops', region: 'all' },
   'luyi@cosun.com': { role: 'QC', region: 'all' },
+  'track@cosunchina.com': { role: 'Order_Coordinator', region: 'all' },
+  'track@cosun.com': { role: 'Order_Coordinator', region: 'all' },
 };
 
-function normalizeRoleDepartment(role?: string, region?: string): { department: string; title: string } {
-  const normalizedRegion = String(region || '').trim().toUpperCase();
-  const regionLabel =
-    normalizedRegion === 'NA' ? '北美' :
-    normalizedRegion === 'SA' ? '南美' :
-    normalizedRegion === 'EA' ? '欧非' :
-    '';
+export const MANUAL_ROLE_OVERRIDE_TAG = '[manual-role-override]';
 
-  switch (role) {
-    case 'CEO':
-      return { department: '管理层', title: 'CEO' };
-    case 'Admin':
-      return { department: 'IT部', title: '系统管理员' };
-    case 'CFO':
-      return { department: '财务部', title: 'CFO' };
-    case 'Finance':
-      return { department: '财务部', title: '财务专员' };
-    case 'Sales_Director':
-      return { department: '销售部', title: '销售总监' };
-    case 'Regional_Manager':
-      return { department: regionLabel ? `销售部-${regionLabel}` : '销售部', title: '区域主管' };
-    case 'Sales_Manager':
-      return { department: regionLabel ? `销售部-${regionLabel}` : '销售部', title: '销售经理' };
-    case 'Sales_Rep':
-      return { department: regionLabel ? `销售部-${regionLabel}` : '销售部', title: '业务员' };
-    case 'Procurement':
-      return { department: '采购部', title: '采购经理' };
-    case 'Marketing_Ops':
-      return { department: '市场部', title: '运营专员' };
-    case 'Admin_Ops':
-      return { department: '行政部', title: '行政专员' };
-    case 'HR_Admin':
-      return { department: '人力资源', title: '人事主管' };
-    case 'External_Accountant':
-      return { department: '财务部', title: '代理记账财务' };
-    case 'Procurement_Manager':
-      return { department: '采购部', title: '采购主管' };
-    case 'Documentation_Officer':
-      return { department: '单证管理部', title: '单证员' };
-    case 'QC':
-      return { department: '品控部', title: '验货员' };
-    default:
-      return { department: role || '', title: role || '' };
-  }
+export function hasManualRoleOverride(account: Pick<InternalAccount, 'notes'>) {
+  return String(account.notes || '').includes(MANUAL_ROLE_OVERRIDE_TAG);
+}
+
+export function appendManualRoleOverrideTag(notes?: string) {
+  const normalized = String(notes || '').trim();
+  if (normalized.includes(MANUAL_ROLE_OVERRIDE_TAG)) return normalized;
+  return normalized ? `${normalized}\n${MANUAL_ROLE_OVERRIDE_TAG}` : MANUAL_ROLE_OVERRIDE_TAG;
 }
 
 function getInternalAccountProfile(user: { id: string; email: string; username: string; userRole?: string; region?: string }) {
@@ -621,12 +731,15 @@ function getInternalAccountProfile(user: { id: string; email: string; username: 
   const override = INTERNAL_ACCOUNT_ROLE_OVERRIDES[email];
   const role = matchedStaff?.rbacRole || override?.role || seededProfile?.role || user.userRole || '';
   const region = matchedStaff?.region || override?.region || seededProfile?.region || user.region || '';
-  const roleProfile = normalizeRoleDepartment(role, region);
+  const roleProfile = getDepartmentAndTitleForRole(role, region);
+  const fallbackRoleProfile = roleProfile.department || roleProfile.title
+    ? roleProfile
+    : { department: role || '', title: role || '' };
 
   return {
     name: matchedStaff?.name || seededProfile?.name || fallbackNameFromEmail(email, user.username),
-    department: seededProfile?.department || roleProfile.department,
-    title: seededProfile?.title || roleProfile.title,
+    department: seededProfile?.department || fallbackRoleProfile.department,
+    title: seededProfile?.title || fallbackRoleProfile.title,
     employeeNo: '',
     role,
     region,
@@ -700,6 +813,7 @@ function buildDefaultInternalContacts(): InternalContact[] {
       name: profile.name,
       department: profile.department,
       title: profile.title,
+      region: profile.region || '',
       managerId: '',
       extension: '',
       phone: '',
@@ -735,7 +849,7 @@ function buildDefaultInternalAccounts(contacts: InternalContact[]): InternalAcco
       authUserId: seed.id,
       username: seed.username,
       loginEmail: profile.email,
-      loginPassword: generateManagedInternalPassword(seed.id || seed.email),
+      loginPassword: generateManagedInternalPassword(seed.username || seed.id || seed.email),
       role: profile.role || seed.role,
       region: profile.region || seed.region || 'all',
       department: profile.department || seed.department,
@@ -744,24 +858,21 @@ function buildDefaultInternalAccounts(contacts: InternalContact[]): InternalAcco
       forcePasswordReset: false,
       lastLoginAt: '',
       notes: '',
+      ...buildDefaultIdentityProfile(),
     } satisfies InternalAccount;
   });
 }
 
 function normalizeInternalContactRecords(contacts: InternalContact[]): InternalContact[] {
   const normalized = contacts
-    .map((contact) => {
-      const seed = resolveInternalStaffSeed(contact.email);
-      if (!seed) return contact;
-      const roleProfile = normalizeRoleDepartment(seed.role, seed.region);
-      return {
-        ...contact,
-        name: seed.name,
-        email: seed.email,
-        department: seed.department,
-        title: seed.title || roleProfile.title,
-      };
-    })
+    .map((contact) => ({
+      ...contact,
+      name: String(contact.name || '').trim(),
+      email: canonicalizePersonnelEmail(contact.email) || String(contact.email || '').trim(),
+      department: String(contact.department || '').trim(),
+      title: String(contact.title || '').trim(),
+      region: String(contact.region || '').trim(),
+    }))
     .filter((contact, index, array) =>
       array.findIndex((candidate) => String(candidate.email || '').trim().toLowerCase() === String(contact.email || '').trim().toLowerCase()) === index,
     );
@@ -774,19 +885,34 @@ function normalizeInternalContactRecords(contacts: InternalContact[]): InternalC
 
 function normalizeInternalAccountRecords(accounts: InternalAccount[]): InternalAccount[] {
   return accounts
-    .map((account) => {
-      const seed = resolveInternalStaffSeed(account.loginEmail);
-      if (!seed) return account;
-      return {
-        ...account,
-        authUserId: account.authUserId || seed.id,
-        username: seed.username,
-        loginEmail: seed.email,
-        role: seed.role,
-        region: seed.region,
-        department: seed.department,
-      };
-    })
+    .map((account) => ({
+      ...account,
+      authUserId: String(account.authUserId || '').trim(),
+      username: String(account.username || '').trim(),
+      loginEmail: canonicalizePersonnelEmail(account.loginEmail, account.region) || String(account.loginEmail || '').trim(),
+      role: String(account.role || '').trim(),
+      region: String(account.region || '').trim(),
+      department: String(account.department || '').trim(),
+      authMode: account.authMode === 'production' || account.authMode === 'dual' ? account.authMode : 'test',
+      activationStatus: ['draft', 'invited', 'email_verified', 'phone_verified', 'active', 'disabled'].includes(String(account.activationStatus || ''))
+        ? account.activationStatus
+        : 'active',
+      primaryIdentitySource: ['email', 'phone', 'wechat', 'enterprise_wechat', 'whatsapp'].includes(String(account.primaryIdentitySource || ''))
+        ? account.primaryIdentitySource
+        : 'email',
+      phoneLogin: String(account.phoneLogin || '').trim(),
+      phoneVerified: Boolean(account.phoneVerified),
+      emailVerified: Boolean(account.emailVerified),
+      wechatOpenId: String(account.wechatOpenId || '').trim(),
+      enterpriseWechatUserId: String(account.enterpriseWechatUserId || '').trim(),
+      whatsappAccount: String(account.whatsappAccount || '').trim(),
+      invitedAt: String(account.invitedAt || '').trim(),
+      inviteExpiresAt: String(account.inviteExpiresAt || '').trim(),
+      lastInviteChannel: ['email', 'phone', 'wechat', 'enterprise_wechat', 'whatsapp'].includes(String(account.lastInviteChannel || ''))
+        ? account.lastInviteChannel
+        : 'email',
+      activatedAt: String(account.activatedAt || '').trim(),
+    }))
     .filter((account, index, array) =>
       array.findIndex((candidate) => String(candidate.loginEmail || '').trim().toLowerCase() === String(account.loginEmail || '').trim().toLowerCase()) === index,
     );
@@ -920,46 +1046,100 @@ function healAdminOrg(base: AdminOrgProfile): { next: AdminOrgProfile; changed: 
   });
 
   if (Array.isArray(next.internalContacts)) {
+    const primaryAccountByEmployeeId = new Map(
+      (Array.isArray(next.internalAccounts) ? next.internalAccounts : []).map((account) => [account.employeeId, account] as const),
+    );
+
     next.internalContacts = normalizeInternalContactRecords(next.internalContacts).map((contact) => {
       const email = String(contact.email || '').trim().toLowerCase();
       const override = INTERNAL_ACCOUNT_ROLE_OVERRIDES[email];
-      if (!override) return contact;
+      const linkedAccount = primaryAccountByEmployeeId.get(contact.id);
+      const derivedRegion = override?.region
+        || inferRegionCode(contact.region || linkedAccount?.region, contact.department || '');
 
-      const profile = normalizeRoleDepartment(override.role, override.region);
-      const desiredDepartment = profile.department || contact.department;
-      const desiredTitle = profile.title || contact.title;
+      if (override) {
+        const profile = getDepartmentAndTitleForRole(override.role, override.region);
+        const desiredDepartment = profile.department;
+        const desiredTitle = profile.title;
 
-      if (contact.department === desiredDepartment && contact.title === desiredTitle) {
-        return contact;
+        if (
+          contact.department === desiredDepartment
+          && contact.title === desiredTitle
+          && String(contact.region || '').trim() === derivedRegion
+        ) {
+          return contact;
+        }
+
+        changed = true;
+        return {
+          ...contact,
+          department: desiredDepartment,
+          title: desiredTitle,
+          region: derivedRegion,
+        };
       }
+
+      if (String(contact.region || '').trim() === derivedRegion) return contact;
 
       changed = true;
       return {
         ...contact,
-        department: desiredDepartment,
-        title: desiredTitle,
+        region: derivedRegion,
       };
     });
   }
 
   if (Array.isArray(next.internalAccounts)) {
+    const contactById = new Map(
+      (Array.isArray(next.internalContacts) ? next.internalContacts : []).map((contact) => [contact.id, contact] as const),
+    );
+
     next.internalAccounts = normalizeInternalAccountRecords(next.internalAccounts).map((account) => {
       const email = String(account.loginEmail || '').trim().toLowerCase();
       const override = INTERNAL_ACCOUNT_ROLE_OVERRIDES[email];
-      if (!override) return account;
+      if (override) {
+        const desiredRole = override.role;
+        const desiredRegion = override.region || String(account.region || '').trim() || 'all';
 
-      const desiredRole = override.role;
-      const desiredRegion = override.region || account.region || 'all';
+        if (account.role === desiredRole && account.region === desiredRegion) {
+          return account;
+        }
 
-      if (account.role === desiredRole && account.region === desiredRegion) {
+        changed = true;
+        return {
+          ...account,
+          role: desiredRole,
+          region: desiredRegion,
+        };
+      }
+
+      const linkedContact = contactById.get(account.employeeId);
+      if (!linkedContact || hasManualRoleOverride(account)) return account;
+
+      const inferredDefaults = deriveAccountRoleDefaults({
+        rawRole: account.role,
+        title: linkedContact.title,
+        department: linkedContact.department,
+        region: account.region,
+      });
+      const desiredRole = inferredDefaults.role;
+      const desiredRegion = inferredDefaults.region;
+      const desiredDepartment = String(linkedContact.department || '').trim();
+
+      if (
+        (!desiredRole || account.role === desiredRole)
+        && (!desiredRegion || account.region === desiredRegion)
+        && (!desiredDepartment || account.department === desiredDepartment)
+      ) {
         return account;
       }
 
       changed = true;
       return {
         ...account,
-        role: desiredRole,
-        region: desiredRegion,
+        role: desiredRole || account.role,
+        region: desiredRegion || account.region,
+        department: desiredDepartment || account.department,
       };
     });
   }
@@ -976,22 +1156,39 @@ function loadAdminOrg(): AdminOrgProfile {
   let passwordChanged = false;
   const defaultContacts = buildDefaultInternalContacts();
   const defaultAccounts = buildDefaultInternalAccounts(defaultContacts);
+  const baseContacts = normalizeAdminRosterContacts(base.internalContacts) as InternalContact[];
+  const baseAccounts = normalizeAdminRosterAccounts(base.internalAccounts) as InternalAccount[];
+  const shouldRestoreCuratedRoster = hasSharedLegacyAdminRosterArtifacts(
+    baseContacts,
+    baseAccounts,
+    INTERNAL_STAFF_SEEDS.map((seed) => canonicalizePersonnelEmail(seed.email, seed.region || 'all')),
+  );
   const internalContacts =
-    Array.isArray(base.internalContacts) &&
-    base.internalContacts.length > 0 &&
-    !isBlankInternalContactList(base.internalContacts)
-      ? mergeMissingInternalContacts(base.internalContacts, defaultContacts)
+    Array.isArray(baseContacts) &&
+    baseContacts.length > 0 &&
+    !isBlankInternalContactList(baseContacts) &&
+    !shouldRestoreCuratedRoster
+      ? mergeRequiredInternalContacts(baseContacts, defaultContacts)
       : defaultContacts;
   const internalAccounts =
-    Array.isArray(base.internalAccounts) && base.internalAccounts.length > 0
-      ? mergeMissingInternalAccounts(base.internalAccounts, buildDefaultInternalAccounts(internalContacts))
+    Array.isArray(baseAccounts) &&
+    baseAccounts.length > 0 &&
+    !shouldRestoreCuratedRoster
+      ? mergeRequiredInternalAccounts(baseAccounts, buildDefaultInternalAccounts(internalContacts))
       : buildDefaultInternalAccounts(internalContacts);
   const normalizedInternalAccounts = internalAccounts.map((account) => {
-    if (isManagedInternalPassword(account.loginPassword)) return account;
+    const normalizedPassword = String(account.loginPassword || '').trim();
+    const passwordSeed = getManagedInternalPasswordSeed(account);
+    const shouldNormalizeManagedTestPassword =
+      isManagedSeededInternalAccount(account) &&
+      String(account.authMode || 'test').trim().toLowerCase() === 'test' &&
+      normalizedPassword !== generateManagedInternalPassword(passwordSeed);
+
+    if (normalizedPassword && !shouldNormalizeManagedTestPassword) return account;
     passwordChanged = true;
     return {
       ...account,
-      loginPassword: generateManagedInternalPassword(account.employeeId || account.authUserId || account.id),
+      loginPassword: generateManagedInternalPassword(passwordSeed),
     };
   });
   // Logo key wins over any logoUrl that might be embedded in the JSON blob
@@ -1041,14 +1238,34 @@ function pickPreferredAdminArray<T extends { id?: string }>(localList: T[] | und
   if (remote.length === 0) return local;
   if (local.length === 0) return remote;
 
+  const remoteById = new Map(
+    remote
+      .map((item) => [String(item?.id || '').trim(), item] as const)
+      .filter(([id]) => Boolean(id)),
+  );
   const remoteIds = new Set(remote.map((item) => String(item?.id || '').trim()).filter(Boolean));
   const hasAllLocalItems = local.every((item) => {
     const id = String(item?.id || '').trim();
     return !id || remoteIds.has(id);
   });
 
-  if (hasAllLocalItems && remote.length >= local.length) {
-    return remote;
+  if (hasAllLocalItems) {
+    const merged = local.map((item) => {
+      const id = String(item?.id || '').trim();
+      if (!id || !remoteById.has(id)) return item;
+      return {
+        ...remoteById.get(id)!,
+        ...item,
+      };
+    });
+
+    const localIds = new Set(local.map((item) => String(item?.id || '').trim()).filter(Boolean));
+    const remoteOnly = remote.filter((item) => {
+      const id = String(item?.id || '').trim();
+      return id && !localIds.has(id);
+    });
+
+    return [...merged, ...remoteOnly];
   }
 
   return local;
@@ -1140,6 +1357,62 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
+function isRecoverableAdminOrgRemoteSaveError(error: unknown) {
+  const message = String((error as Error)?.message || error || '').toLowerCase();
+  const isValidationError =
+    message.includes('admin roster validation failed') ||
+    message.includes('legacy internal roster artifacts detected') ||
+    message.includes('duplicate internal contact email') ||
+    message.includes('duplicate internal account email') ||
+    message.includes('invalid internal account role') ||
+    message.includes('is not linked to any internal contact');
+  if (isValidationError) return false;
+
+  return (
+    message.includes('timed out after') ||
+    message.includes('not authenticated') ||
+    message.includes('jwt') ||
+    message.includes('permission denied') ||
+    message.includes('failed to fetch') ||
+    message.includes('networkerror') ||
+    message.includes('load failed') ||
+    message.includes('fetch failed')
+  );
+}
+
+function enqueueAdminOrgRemoteSave(next: AdminOrgProfile, context: string) {
+  void adminOrganizationService.save(next).catch((error) => {
+    console.warn(`[AdminOrg] deferred remote save failed after ${context}:`, error);
+  });
+}
+
+function preserveProtectedAccountFields(
+  currentAccounts: InternalAccount[] | undefined,
+  nextAccounts: InternalAccount[] | undefined,
+  options?: UpdateAdminOrgOptions,
+): InternalAccount[] {
+  const current = Array.isArray(currentAccounts) ? currentAccounts : [];
+  const next = Array.isArray(nextAccounts) ? nextAccounts : [];
+  const allowPasswordWriteIds = new Set(
+    (options?.allowPasswordWriteAccountIds || []).map((value) => String(value || '').trim()).filter(Boolean),
+  );
+  const currentById = new Map(
+    current.map((account) => [String(account.id || '').trim(), account] as const).filter(([id]) => Boolean(id)),
+  );
+
+  return next.map((account) => {
+    const accountId = String(account.id || '').trim();
+    const currentAccount = currentById.get(accountId);
+    if (!currentAccount) return account;
+    if (allowPasswordWriteIds.has(accountId)) return account;
+
+    return {
+      ...account,
+      loginPassword: currentAccount.loginPassword,
+    };
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Context + Provider
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1157,24 +1430,72 @@ export function AdminOrganizationProvider({ children }: { children: ReactNode })
     let cancelled = false
 
     void (async () => {
+      if (typeof window !== 'undefined' && localStorage.getItem(LOCAL_ADMIN_AUTH_STORAGE_KEY) === 'true') {
+        hasHydratedFromSupabase.current = true
+        return
+      }
       try {
         const remote = await adminOrganizationService.get()
         if (cancelled) return
 
         if (remote) {
           const localSnapshot = loadAdminOrg()
+          const remoteContacts = normalizeAdminRosterContacts(remote.internalContacts) as InternalContact[]
+          const remoteAccounts = normalizeAdminRosterAccounts(remote.internalAccounts) as InternalAccount[]
+          const remoteHasLegacyArtifacts = hasSharedLegacyAdminRosterArtifacts(
+            remoteContacts,
+            remoteAccounts,
+            INTERNAL_STAFF_SEEDS.map((seed) => canonicalizePersonnelEmail(seed.email, seed.region || 'all')),
+          )
+          const sanitizedRemote = {
+            ...remote,
+            internalContacts: remoteHasLegacyArtifacts
+              ? buildDefaultInternalContacts()
+              : mergeRequiredInternalContacts(
+                  remoteContacts,
+                  buildDefaultInternalContacts(),
+                ),
+            internalAccounts: remoteHasLegacyArtifacts
+              ? buildDefaultInternalAccounts(buildDefaultInternalContacts())
+              : mergeRequiredInternalAccounts(
+                  remoteAccounts,
+                  buildDefaultInternalAccounts(
+                    remoteContacts.length > 0
+                      ? mergeRequiredInternalContacts(remoteContacts, buildDefaultInternalContacts())
+                      : buildDefaultInternalContacts(),
+                  ),
+                ),
+          }
+          const mergedContacts = pickPreferredAdminArray(
+            normalizeAdminRosterContacts(localSnapshot.internalContacts) as InternalContact[],
+            sanitizedRemote.internalContacts,
+          )
+          const mergedAccounts = pickPreferredAdminArray(
+            normalizeAdminRosterAccounts(localSnapshot.internalAccounts) as InternalAccount[],
+            sanitizedRemote.internalAccounts,
+          )
           const candidate = {
-            ...deepMerge(localSnapshot, remote as Partial<AdminOrgProfile>),
-            internalContacts: pickPreferredAdminArray(localSnapshot.internalContacts, remote.internalContacts),
-            internalAccounts: pickPreferredAdminArray(localSnapshot.internalAccounts, remote.internalAccounts),
-            logoUrl: remote.logoUrl ?? localSnapshot.logoUrl,
+            ...deepMerge(localSnapshot, sanitizedRemote as Partial<AdminOrgProfile>),
+            internalContacts: mergedContacts,
+            internalAccounts: mergedAccounts,
+            logoUrl: sanitizedRemote.logoUrl ?? localSnapshot.logoUrl,
           }
           const { next } = healAdminOrg(candidate)
           persistAdminOrgSnapshot(next)
           persistImage(ORG_LOGO_KEY, next.logoUrl)
+          adminOrganizationSnapshotService.save('auto_heal', next)
           setAdminOrg(next)
+          if (
+            JSON.stringify(sanitizedRemote.internalContacts || []) !== JSON.stringify(next.internalContacts || []) ||
+            JSON.stringify(sanitizedRemote.internalAccounts || []) !== JSON.stringify(next.internalAccounts || [])
+          ) {
+            void adminOrganizationService.save(next).catch((saveError) => {
+              console.warn('[AdminOrg] failed to persist healed roster to Supabase:', saveError)
+            })
+          }
         } else {
           await adminOrganizationService.save(adminOrg)
+          adminOrganizationSnapshotService.save('bootstrap', adminOrg)
         }
 
         hasHydratedFromSupabase.current = true
@@ -1190,11 +1511,22 @@ export function AdminOrganizationProvider({ children }: { children: ReactNode })
 
   // ── Org ──────────────────────────────────────────────────────────────────
   const updateAdminOrg = useCallback(
-    async (patch: Partial<Omit<AdminOrgProfile, 'id'>>) => {
+    async (patch: Partial<Omit<AdminOrgProfile, 'id'>>, options?: UpdateAdminOrgOptions) => {
       const current = hasHydratedFromSupabase.current ? adminOrg : loadAdminOrg()
-      const next = deepMerge(current, patch as Partial<AdminOrgProfile>)
+      const protectedPatch = patch.internalAccounts
+        ? {
+            ...patch,
+            internalAccounts: preserveProtectedAccountFields(
+              current.internalAccounts,
+              patch.internalAccounts as InternalAccount[],
+              options,
+            ),
+          }
+        : patch
+      const next = deepMerge(current, protectedPatch as Partial<AdminOrgProfile>)
       // Persist local cache first so refreshes never lose the draft, then sync cloud.
       const localSaved = persistAdminOrgSnapshot(next)
+      adminOrganizationSnapshotService.save('manual_save', next)
       if ('logoUrl' in patch) {
         persistImage(ORG_LOGO_KEY, patch.logoUrl ?? null)
       } else if (next.logoUrl !== current.logoUrl) {
@@ -1202,6 +1534,9 @@ export function AdminOrganizationProvider({ children }: { children: ReactNode })
       }
 
       let remoteSaved = false
+      const isLocalAdminAuth = typeof window !== 'undefined' && localStorage.getItem(LOCAL_ADMIN_AUTH_STORAGE_KEY) === 'true'
+      setAdminOrg(next)
+      hasHydratedFromSupabase.current = true
       try {
         await withTimeout(
           adminOrganizationService.save(next),
@@ -1210,14 +1545,57 @@ export function AdminOrganizationProvider({ children }: { children: ReactNode })
         )
         remoteSaved = true
       } catch (error) {
-        console.warn('[AdminOrg] remote save timed out, local snapshot kept:', error)
+        if (!isRecoverableAdminOrgRemoteSaveError(error)) {
+          setAdminOrg(current)
+          hasHydratedFromSupabase.current = true
+          throw error
+        }
+        console.warn('[AdminOrg] remote save skipped, local snapshot kept:', error)
+        enqueueAdminOrgRemoteSave(next, 'recoverable save error')
       }
-      setAdminOrg(next)
-      hasHydratedFromSupabase.current = true
       return { localSaved, remoteSaved }
     },
     [adminOrg]
   );
+
+  const restoreLatestAdminOrgSnapshot = useCallback(async () => {
+    const latestSnapshot = adminOrganizationSnapshotService.latest();
+    if (!latestSnapshot?.payload) return null;
+
+    const restored = deepMerge(DEFAULT_ORG, latestSnapshot.payload as Partial<AdminOrgProfile>);
+    const { next } = healAdminOrg(restored);
+    const localSaved = persistAdminOrgSnapshot(next);
+    persistImage(ORG_LOGO_KEY, next.logoUrl ?? null);
+    setAdminOrg(next);
+    hasHydratedFromSupabase.current = true;
+
+    let remoteSaved = false;
+    try {
+      await withTimeout(
+        adminOrganizationService.save(next),
+        ADMIN_ORG_REMOTE_SAVE_TIMEOUT_MS,
+        'admin organization snapshot restore'
+      );
+      remoteSaved = true;
+    } catch (error) {
+      const message = String((error as Error)?.message || error || '');
+      if (!message.includes('timed out after')) {
+        throw error;
+      }
+      console.warn('[AdminOrg] snapshot restore remote save timed out, local snapshot kept:', error);
+      enqueueAdminOrgRemoteSave(next, 'snapshot restore recoverable save error');
+    }
+
+    adminOrganizationSnapshotService.save('manual_save', next);
+
+    return {
+      localSaved,
+      remoteSaved,
+      restoredAt: latestSnapshot.createdAt,
+      source: latestSnapshot.source,
+      summary: latestSnapshot.summary,
+    };
+  }, []);
 
   const uploadAdminLogo = useCallback(async (file: File): Promise<boolean> => {
     const dataUri = await fileToDataUri(file);
@@ -1273,6 +1651,7 @@ export function AdminOrganizationProvider({ children }: { children: ReactNode })
         adminOrg,
         adminUserProfile,
         updateAdminOrg,
+        restoreLatestAdminOrgSnapshot,
         uploadAdminLogo,
         updateAdminUserProfile,
         uploadAdminAvatar,

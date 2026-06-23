@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { departments } from '../data/departmentsData';
 
 type Page = 'home' | 'projectsolution' | 'qcmaster' | 'shipmenthub' | 'specials' | 'products' | 'catalog' | 'failurecases' | 'services' | 'socialmedia' | 'news' | 'about' | 'member' | 'login' | 'admin-login' | 'register' | 'supplier' | 'dashboard' | 'furnitureinspection' | 'textilesinspection' | 'toysinspection' | 'electronicsinspection' | 'appliancesinspection' | 'lightinginspection' | 'shoesinspection' | 'packaginginspection' | 'privacy-policy' | 'terms-of-service' | 'category' | 'cart' | 'live' | 'live-archive' | 'ai-content-studio' | string;
 
@@ -10,7 +11,26 @@ interface RouterContextType {
 
 const RouterContext = createContext<RouterContextType | undefined>(undefined);
 
+function isSupabaseAuthHash(hash: string): boolean {
+  const raw = String(hash || '').trim();
+  if (!raw.startsWith('#')) return false;
+  const fragment = raw.slice(1);
+  if (!fragment || fragment.startsWith('/')) return false;
+  return (
+    fragment.includes('access_token=') ||
+    fragment.includes('refresh_token=') ||
+    fragment.includes('error_description=') ||
+    fragment.includes('error=') ||
+    fragment.includes('type=magiclink') ||
+    fragment.includes('type=recovery') ||
+    fragment.includes('type=invite')
+  );
+}
+
 function parsePageFromHash(hash: string): string | null {
+  if (isSupabaseAuthHash(hash)) {
+    return 'admin-formal-login';
+  }
   // Supports: "#/admin-login" or "#admin-login"
   const raw = (hash || '').trim();
   if (!raw) return null;
@@ -19,12 +39,30 @@ function parsePageFromHash(hash: string): string | null {
   const withoutHash = raw.slice(1);
   const cleaned = withoutHash.startsWith('/') ? withoutHash.slice(1) : withoutHash;
   const page = decodeURIComponent(cleaned).trim();
+  if (['deals', 'offers', 'deals-offers', 'deals-and-offers'].includes(page.toLowerCase())) {
+    return 'specials';
+  }
   return page ? page : null;
 }
 
 function buildHashFromPage(page: string): string {
   const safe = encodeURIComponent(page);
   return `#/${safe}`;
+}
+
+function slugifyCategoryName(categoryName: string): string {
+  return categoryName
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function getCategoryParamsFromPage(page: string): { category: string } | undefined {
+  if (!page.startsWith('category-')) return undefined;
+  const slug = page.replace(/^category-/, '');
+  const department = departments.find((dept) => slugifyCategoryName(dept.name) === slug);
+  return department ? { category: department.name } : undefined;
 }
 
 // Storage keys
@@ -48,6 +86,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
 
   const [categoryParams, setCategoryParams] = useState<{ category: string; subcategory?: string } | undefined>(() => {
     try {
+      const fromHash = parsePageFromHash(window.location.hash);
+      const paramsFromHash = fromHash ? getCategoryParamsFromPage(fromHash) : undefined;
+      if (paramsFromHash) return paramsFromHash;
       const saved = localStorage.getItem(STORAGE_KEYS.categoryParams);
       return saved ? JSON.parse(saved) : undefined;
     } catch {
@@ -67,6 +108,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   // Keep URL hash in sync (so users can use a fixed URL like /#/admin-login)
   useEffect(() => {
     try {
+      if (isSupabaseAuthHash(window.location.hash)) {
+        return;
+      }
       const desired = buildHashFromPage(String(currentPage));
       if (window.location.hash !== desired) {
         window.location.hash = desired;
@@ -82,6 +126,12 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       const next = parsePageFromHash(window.location.hash);
       if (!next) return;
       setCurrentPage((prev) => (String(prev) === next ? prev : (next as Page)));
+      const paramsFromHash = getCategoryParamsFromPage(next);
+      if (paramsFromHash) {
+        setCategoryParams(paramsFromHash);
+      } else if (!next.startsWith('category-')) {
+        setCategoryParams(undefined);
+      }
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
@@ -104,6 +154,8 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     setCurrentPage(page as Page);
     if (params) {
       setCategoryParams(params);
+    } else if (page.startsWith('category-')) {
+      setCategoryParams(getCategoryParamsFromPage(page));
     } else if (!page.startsWith('category-')) {
       // Clear category params when navigating away from category pages
       setCategoryParams(undefined);

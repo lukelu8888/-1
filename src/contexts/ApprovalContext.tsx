@@ -4,7 +4,20 @@ import { getCurrentUser } from '../utils/dataIsolation';
 import { supabase } from '../lib/supabase';
 
 // 🎯 审批类型
-export type ApprovalType = 'qt' | 'order' | 'payment' | 'contract' | 'sales_contract' | 'price_change';
+export type ApprovalType =
+  | 'qt'
+  | 'lc_discrepancy'
+  | 'order'
+  | 'payment'
+  | 'contract'
+  | 'sales_contract'
+  | 'price_change'
+  | 'ing'
+  | 'cg_approval'
+  | 'exceptional_release'
+  | 'qc_exception_release'
+  | 'overdue_release'
+  | 'low_margin_exception';
 
 // 🎯 审批状态
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'forwarded';
@@ -75,36 +88,52 @@ interface ApprovalContextType {
 
 export const ApprovalContext = createContext<ApprovalContextType | undefined>(undefined);
 
+const isProcurementApprovalRequest = (req: Partial<ApprovalRequest> | null | undefined): boolean =>
+  req?.type === 'cg_approval' ||
+  req?.relatedDocumentType === '采购请求审批' ||
+  String(req?.relatedDocumentId || '').startsWith('PRQ-');
+
 export function ApprovalProvider({ children }: { children: ReactNode }) {
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const loadFromSupabase = useCallback(async () => {
-    // Prefer Supabase auth session; fall back to localStorage user for apps
-    // that authenticate via the local RBAC system rather than Supabase auth.
+  const getActiveApprovalEmail = useCallback(async () => {
+    const actingEmail = String(getCurrentUser()?.email || '').trim().toLowerCase();
+    if (actingEmail) return actingEmail;
+
     const { data: { session } } = await supabase.auth.getSession();
-    const email = session?.user?.email || getCurrentUser()?.email || '';
+    return String(session?.user?.email || '').trim().toLowerCase();
+  }, []);
+
+  const loadFromSupabase = useCallback(async () => {
+    const email = await getActiveApprovalEmail();
     if (!email) return;
     setLoading(true);
     try {
       const data = await approvalRecordService.getForApprover(email);
-      if (data && Array.isArray(data)) {
-        setRequests(data.filter(Boolean) as ApprovalRequest[]);
-      }
+      const nextRequests = Array.isArray(data)
+        ? data.filter(Boolean) as ApprovalRequest[]
+        : [];
+      setRequests(nextRequests);
     } catch (err: any) {
       console.error('[ApprovalContext] loadFromSupabase failed:', err?.message || err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getActiveApprovalEmail]);
 
   useEffect(() => {
     void loadFromSupabase();
 
     // Re-load when Supabase auth state changes (real login/logout)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user?.email) void loadFromSupabase();
-      else if (event === 'SIGNED_OUT') setRequests([]);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+        void loadFromSupabase();
+      } else if (event === 'SIGNED_OUT') {
+        const currentUser = getCurrentUser();
+        if (currentUser?.email) void loadFromSupabase();
+        else setRequests([]);
+      }
     });
 
     // Re-load when localStorage user changes (role switching via RBAC system)
@@ -227,8 +256,34 @@ export function ApprovalProvider({ children }: { children: ReactNode }) {
       timestamp: new Date().toISOString(),
     };
 
+    const isProcurementApproval = isProcurementApprovalRequest(req);
+
     let updated: ApprovalRequest;
-    if (req.requiresDirectorApproval && approverRole !== 'Sales_Director') {
+    if (isProcurementApproval) {
+      const shouldForwardToCeo =
+        String(req.currentApproverRole || '') === 'Procurement_Manager' &&
+        Boolean(req.nextApprover);
+
+      if (shouldForwardToCeo && !['CEO', 'Boss'].includes(String(approverRole || ''))) {
+        updated = {
+          ...req,
+          status: 'forwarded' as ApprovalStatus,
+          currentApprover: req.nextApprover!,
+          currentApproverRole: req.nextApproverRole || 'CEO',
+          nextApprover: null,
+          nextApproverRole: null,
+          approvalHistory: [...req.approvalHistory, historyItem],
+        };
+      } else {
+        updated = {
+          ...req,
+          status: 'approved' as ApprovalStatus,
+          nextApprover: null,
+          nextApproverRole: null,
+          approvalHistory: [...req.approvalHistory, historyItem],
+        };
+      }
+    } else if (req.requiresDirectorApproval && approverRole !== 'Sales_Director') {
       // 主管批准，转发给销售总监
       updated = {
         ...req,

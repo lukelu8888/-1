@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
-import { fetchProfile } from '../hooks/useSupabaseAuth';
+import { fetchProfile, signInWithEmail } from '../hooks/useSupabaseAuth';
 import { nextInquiryNumber } from '../lib/supabaseService';
 import { normalizeManagedAdminIdentity } from '../lib/internalAdminIdentity';
 
@@ -52,6 +52,48 @@ const defaultUserInfo: UserInfo = {
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
+const LOCAL_ADMIN_AUTH_STORAGE_KEY = 'cosun_admin_local_auth';
+const LOCAL_ADMIN_AUTH_EMAIL_STORAGE_KEY = 'cosun_admin_local_auth_email';
+const LOCAL_ADMIN_AUTH_PASSWORD_STORAGE_KEY = 'cosun_admin_local_auth_password';
+
+const buildLocalFallbackInquiryNumber = (region: string) => {
+  const date = new Date();
+  const dateStr = String(date.getFullYear()).slice(2)
+    + String(date.getMonth() + 1).padStart(2, '0')
+    + String(date.getDate()).padStart(2, '0');
+  const normalizedRegion = String(region || 'NA').trim().toUpperCase() || 'NA';
+  const prefix = `ING-${normalizedRegion}-${dateStr}-`;
+  const storageKey = `ing_local_fallback_counter_v4:${prefix}`;
+  const legacyStorageKeyV3 = `ing_local_fallback_counter_v3:${normalizedRegion}`;
+  const legacyStorageKeyV2 = `ing_local_fallback_counter_v2:${prefix}`;
+  const legacyStorageKeyV1 = `ing_local_fallback_counter:${prefix}`;
+  let nextSuffix = 1;
+
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = Number.parseInt(String(window.localStorage.getItem(storageKey) || '0'), 10);
+      const legacyStoredV2 = Number.parseInt(String(window.localStorage.getItem(legacyStorageKeyV2) || '0'), 10);
+      const legacyStoredV1 = Number.parseInt(String(window.localStorage.getItem(legacyStorageKeyV1) || '0'), 10);
+      const seededCounter =
+        Number.isFinite(stored) && stored > 0 && stored < 9000
+          ? stored
+          : (
+              Number.isFinite(legacyStoredV2) && legacyStoredV2 > 0 && legacyStoredV2 < 9000
+                ? legacyStoredV2
+                : (Number.isFinite(legacyStoredV1) && legacyStoredV1 > 0 && legacyStoredV1 < 9000 ? legacyStoredV1 : 0)
+            );
+      nextSuffix = seededCounter > 0 ? seededCounter + 1 : 1;
+      window.localStorage.setItem(storageKey, String(nextSuffix));
+      window.localStorage.removeItem(legacyStorageKeyV3);
+      window.localStorage.removeItem(legacyStorageKeyV2);
+      window.localStorage.removeItem(legacyStorageKeyV1);
+    } catch {
+      nextSuffix = 1;
+    }
+  }
+
+  return `${prefix}${String(nextSuffix).padStart(4, '0')}`;
+};
 
 export function UserProvider({ children }: { children: ReactNode }) {
   // Load user info from localStorage on initialization
@@ -93,8 +135,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return null;
   };
 
-  const readCachedPortalRole = (sessionUser: any): 'admin' | 'supplier' | 'customer' => {
-    if (typeof window === 'undefined') return 'customer';
+  const normalizePortalRole = (value: unknown): 'admin' | 'supplier' | 'customer' | null => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'admin' || normalized === 'staff') return 'admin';
+    if (normalized === 'supplier') return 'supplier';
+    if (normalized === 'customer') return 'customer';
+    return null;
+  };
+
+  const readCachedPortalRole = (sessionUser: any): 'admin' | 'supplier' | 'customer' | null => {
+    if (typeof window === 'undefined') return null;
     try {
       const authUserRaw = localStorage.getItem('cosun_auth_user');
       if (authUserRaw) {
@@ -102,9 +152,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
         const sameIdentity =
           (authUser?.id && sessionUser?.id && authUser.id === sessionUser.id) ||
           (authUser?.email && sessionUser?.email && String(authUser.email).toLowerCase() === String(sessionUser.email).toLowerCase());
-        const cachedType = String(authUser?.type || '').toLowerCase();
-        if (sameIdentity && (cachedType === 'admin' || cachedType === 'supplier' || cachedType === 'customer')) {
-          return cachedType as 'admin' | 'supplier' | 'customer';
+        const cachedType = normalizePortalRole(authUser?.type);
+        if (sameIdentity && cachedType) {
+          return cachedType;
         }
       }
 
@@ -114,16 +164,63 @@ export function UserProvider({ children }: { children: ReactNode }) {
         const sameIdentity =
           (backendUser?.id && sessionUser?.id && backendUser.id === sessionUser.id) ||
           (backendUser?.email && sessionUser?.email && String(backendUser.email).toLowerCase() === String(sessionUser.email).toLowerCase());
-        const cachedRole = String(backendUser?.portal_role || '').toLowerCase();
-        if (sameIdentity && (cachedRole === 'admin' || cachedRole === 'supplier' || cachedRole === 'customer' || cachedRole === 'staff')) {
-          return cachedRole === 'staff' ? 'admin' : (cachedRole as 'admin' | 'supplier' | 'customer');
+        const cachedRole = normalizePortalRole(backendUser?.portal_role);
+        if (sameIdentity && cachedRole) {
+          return cachedRole;
         }
       }
     } catch {
       // ignore cache parse failures and fall back to session metadata
     }
 
-    return 'customer';
+    return null;
+  };
+
+  const preserveResolvedSessionUser = (
+    prev: AuthUser | null,
+    sessionUser: any,
+    resolvedUser: AuthUser | null,
+  ): AuthUser | null => {
+    if (resolvedUser) return resolvedUser;
+    if (!prev) return null;
+
+    const sessionId = String(sessionUser?.id || '').trim();
+    const sessionEmail = String(sessionUser?.email || '').trim().toLowerCase();
+    const prevId = String(prev.id || '').trim();
+    const prevEmail = String(prev.email || '').trim().toLowerCase();
+    const sameIdentity =
+      (prevId && sessionId && prevId === sessionId) ||
+      (prevEmail && sessionEmail && prevEmail === sessionEmail);
+
+    // Keep an already-resolved portal user for the same account if the fresh
+    // SIGNED_IN payload is still missing portal_role metadata.
+    return sameIdentity ? prev : null;
+  };
+
+  const tryRestoreLocalAdminSession = async (cachedUser?: AuthUser | null) => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const localAdminEnabled = localStorage.getItem(LOCAL_ADMIN_AUTH_STORAGE_KEY) === 'true';
+      if (!localAdminEnabled) return false;
+
+      const storedEmail = String(localStorage.getItem(LOCAL_ADMIN_AUTH_EMAIL_STORAGE_KEY) || '').trim().toLowerCase();
+      const storedPassword = String(sessionStorage.getItem(LOCAL_ADMIN_AUTH_PASSWORD_STORAGE_KEY) || '').trim();
+      const targetEmail = String(cachedUser?.email || storedEmail || '').trim().toLowerCase();
+      if (!targetEmail || !storedPassword) return false;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const sessionEmail = String(session?.user?.email || '').trim().toLowerCase();
+      if (session?.user && sessionEmail === targetEmail) return true;
+
+      console.info('[UserContext] restoring Supabase session for local admin fallback user:', targetEmail);
+      const { session: restoredSession } = await signInWithEmail(targetEmail, storedPassword);
+      return Boolean(restoredSession?.user);
+    } catch (error) {
+      console.warn('[UserContext] failed to restore local admin Supabase session:', error);
+      return false;
+    }
   };
 
   // Save to localStorage whenever userInfo changes
@@ -154,18 +251,24 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (cachedUser) {
       setUserState(cachedUser);
       setAuthLoading(false);
+      void tryRestoreLocalAdminSession(cachedUser);
     }
 
     // 从 session.user_metadata 立即构建用户对象（无需网络请求）
-    const userFromMeta = (sessionUser: any): AuthUser => {
+    const userFromMeta = (sessionUser: any): AuthUser | null => {
       const meta = sessionUser.user_metadata ?? {};
-      const portalRole = meta.portal_role ?? readCachedPortalRole(sessionUser);
+      const portalRole =
+        normalizePortalRole(meta.portal_role)
+        ?? normalizePortalRole(sessionUser?.app_metadata?.portal_role)
+        ?? readCachedPortalRole(sessionUser);
+      if (!portalRole) {
+        return null;
+      }
       return normalizeManagedAdminIdentity({
         id: sessionUser.id,
         email: sessionUser.email!,
         name: meta.name ?? sessionUser.email!.split('@')[0],
         type: portalRole === 'admin' ? 'admin'
-            : portalRole === 'staff' ? 'admin'
             : portalRole === 'supplier' ? 'supplier'
             : 'customer',
         role: meta.rbac_role ?? undefined,
@@ -211,7 +314,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         // 有 session：立即解锁 UI
         initialDone = true;
-        setUserState(userFromMeta(session.user));
+        setUserState((prev) => preserveResolvedSessionUser(prev, session.user, userFromMeta(session.user)));
         void enrichFromProfile(session.user);
         setAuthLoading(false);
       } else if (!cachedUser) {
@@ -238,6 +341,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
               console.warn('[Auth] hard timeout — Supabase unreachable, restored from localStorage cache');
               setUserState(cached as AuthUser);
               setAuthLoading(false);
+              void tryRestoreLocalAdminSession(cached as AuthUser);
               return;
             }
           }
@@ -253,10 +357,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
       (event, session) => {
         if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           if (session?.user) {
-            setUserState(userFromMeta(session.user));
+            setUserState((prev) => preserveResolvedSessionUser(prev, session.user, userFromMeta(session.user)));
             void enrichFromProfile(session.user);
           } else {
-            setUserState(null);
+            const cachedUser = readCachedAuthUser();
+            setUserState(cachedUser);
           }
           setAuthLoading(false);
         } else if (event === 'SIGNED_OUT') {
@@ -280,6 +385,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const clearUser = () => {
     // 清理 API token / mock session / RBAC 用户
     try {
+      localStorage.removeItem('cosun_admin_local_auth');
+      localStorage.removeItem('cosun_admin_local_auth_email');
+      sessionStorage.removeItem('cosun_admin_local_auth_password');
       localStorage.removeItem('cosun_api_token');
       localStorage.removeItem('backend_user');
       localStorage.removeItem('cosun_user_session');
@@ -314,13 +422,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
     try {
       return await nextInquiryNumber(region, customerId ?? user?.id ?? undefined);
     } catch (err) {
-      // RPC 失败时本地降级（极端网络异常兜底，格式一致但序号可能重复）
+      // RPC 失败时本地降级，仍按当天前缀递增，避免出现随机尾号。
       console.error('[UserContext] next_inquiry_number RPC failed, falling back to local:', err);
-      const date = new Date();
-      const dateStr = String(date.getFullYear()).slice(2)
-        + String(date.getMonth() + 1).padStart(2, '0')
-        + String(date.getDate()).padStart(2, '0');
-      return `ING-${region}-${dateStr}-${String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0')}`;
+      return buildLocalFallbackInquiryNumber(region);
     }
   };
 

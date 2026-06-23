@@ -1,11 +1,22 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { isCurrentLocalDevHost } from '../lib/localDevHost';
 
 export type Region = 'north-america' | 'south-america' | 'europe-africa' | null;
+
+const REGION_STORAGE_KEY = 'cosun-region';
+const LOCATION_STORAGE_KEY = 'cosun-location-info';
 
 interface LocationInfo {
   city: string;
   country: string;
   countryCode: string;
+}
+
+interface ReverseGeocodeResult {
+  city: string;
+  country: string;
+  countryCode: string;
+  continentCode: string;
 }
 
 interface RegionContextType {
@@ -21,6 +32,10 @@ interface RegionContextType {
 
 const RegionContext = createContext<RegionContextType | undefined>(undefined);
 
+function isLocalDevHost() {
+  return isCurrentLocalDevHost();
+}
+
 export function RegionProvider({ children }: { children: ReactNode }) {
   const [region, setRegionState] = useState<Region>(null);
   const [detectedRegion, setDetectedRegion] = useState<Region | null>(null);
@@ -29,6 +44,13 @@ export function RegionProvider({ children }: { children: ReactNode }) {
   const [showRegionSelector, setShowRegionSelector] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isChangingRegion, setIsChangingRegion] = useState(false);
+
+  const persistLocationInfo = (nextLocationInfo: LocationInfo) => {
+    setLocationInfo(nextLocationInfo);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(nextLocationInfo));
+    }
+  };
 
   // Map country/continent to our three regions
   const mapToRegion = (countryCode: string, continentCode: string): Region => {
@@ -52,12 +74,67 @@ export function RegionProvider({ children }: { children: ReactNode }) {
     return 'europe-africa';
   };
 
-  // Detect user's region based on IP
-  const detectRegion = async () => {
+  const detectLocationByGeolocation = async (): Promise<Region | null> => {
+    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+      return null;
+    }
+
     try {
-      if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: false,
+          timeout: 8000,
+          maximumAge: 1000 * 60 * 60,
+        });
+      });
+
+      const { latitude, longitude } = position.coords;
+      const response = await fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+      );
+      if (!response.ok) {
         return null;
       }
+
+      const data = await response.json() as Partial<ReverseGeocodeResult> & {
+        locality?: string;
+        principalSubdivision?: string;
+        countryName?: string;
+        countryCode?: string;
+        continent?: string;
+        continentCode?: string;
+      };
+
+      const city = data.city || data.locality || data.principalSubdivision || '';
+      const country = data.country || data.countryName || '';
+      const countryCode = data.countryCode || '';
+      const continentCode = data.continentCode || '';
+
+      if (!countryCode || !continentCode) {
+        return null;
+      }
+
+      const detected = mapToRegion(countryCode, continentCode);
+      setDetectedRegion(detected);
+      persistLocationInfo({
+        city,
+        country,
+        countryCode,
+      });
+      return detected;
+    } catch (error) {
+      console.log('Browser geolocation failed, falling back to IP lookup');
+      return null;
+    }
+  };
+
+  // Detect user's region based on IP
+  const detectRegion = async () => {
+    if (isLocalDevHost()) {
+      return null;
+    }
+
+    try {
       // ipwho.is: 免费、支持 HTTPS、无需 API key
       const response = await fetch('https://ipwho.is/');
       if (!response.ok) {
@@ -68,7 +145,7 @@ export function RegionProvider({ children }: { children: ReactNode }) {
       if (data.success && data.country_code && data.continent_code) {
         const detected = mapToRegion(data.country_code, data.continent_code);
         setDetectedRegion(detected);
-        setLocationInfo({
+        persistLocationInfo({
           city: data.city || '',
           country: data.country || '',
           countryCode: data.country_code,
@@ -84,18 +161,37 @@ export function RegionProvider({ children }: { children: ReactNode }) {
   // Initialize region on mount
   useEffect(() => {
     const initRegion = async () => {
-      // Always detect location for displaying city info
-      const detected = await detectRegion();
-      
-      // Check if user has previously selected a region
-      const savedRegion = localStorage.getItem('cosun-region') as Region;
-      
+      const savedRegion = localStorage.getItem(REGION_STORAGE_KEY) as Region;
+      const savedLocationInfo = localStorage.getItem(LOCATION_STORAGE_KEY);
+
+      if (savedLocationInfo) {
+        try {
+          setLocationInfo(JSON.parse(savedLocationInfo));
+        } catch {
+          localStorage.removeItem(LOCATION_STORAGE_KEY);
+        }
+      }
+
       if (savedRegion) {
         // Returning user with saved preference
         setRegionState(savedRegion);
         setIsFirstVisit(false);
         setIsLoading(false);
+        return;
       } else {
+        if (isLocalDevHost()) {
+          // Keep localhost usable during development: do not block the page
+          // behind the first-visit region chooser.
+          setIsFirstVisit(false);
+          setShowRegionSelector(false);
+          setIsLoading(false);
+          return;
+        }
+
+        // Use IP-based detection only when we have no saved preference,
+        // so we do not trigger unnecessary third-party requests on every visit.
+        await detectRegion();
+
         // First-time visitor
         setIsFirstVisit(true);
         
@@ -117,7 +213,7 @@ export function RegionProvider({ children }: { children: ReactNode }) {
       setTimeout(() => {
         setRegionState(newRegion);
         if (newRegion) {
-          localStorage.setItem('cosun-region', newRegion);
+          localStorage.setItem(REGION_STORAGE_KEY, newRegion);
         }
         
         // Reset changing state after content updates
@@ -129,7 +225,7 @@ export function RegionProvider({ children }: { children: ReactNode }) {
       // First time setting region (no animation needed)
       setRegionState(newRegion);
       if (newRegion) {
-        localStorage.setItem('cosun-region', newRegion);
+        localStorage.setItem(REGION_STORAGE_KEY, newRegion);
       }
     }
   };
