@@ -1,0 +1,14 @@
+<svg width="700" height="500" viewBox="0 0 700 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="700" height="500" fill="#f5f6f8"/>
+  <g transform="translate(205 72)">
+    <path d="M45 10h260l34 52v340l-34 38H45L12 398V60L45 10z" fill="#d8c49d"/>
+    <path d="M54 36h238l22 32v310l-22 26H54l-20-28V68l20-32z" fill="#e7d7b7"/>
+    <path d="M58 108h230v150H58z" fill="#cf3330"/>
+    <circle cx="133" cy="183" r="50" fill="#b91c1c"/>
+    <path d="M114 183c0-21 17-38 38-38h48v76h-48c-21 0-38-17-38-38z" fill="#e7d7b7"/>
+    <path d="M136 183c0-9 7-16 16-16h28v32h-28c-9 0-16-7-16-16z" fill="#cf3330"/>
+    <text x="170" y="206" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="800" fill="#e7d7b7">PCMENT</text>
+    <rect x="72" y="294" width="212" height="16" rx="8" fill="#c4ad82"/>
+    <rect x="72" y="326" width="180" height="12" rx="6" fill="#c4ad82"/>
+  </g>
+</svg>

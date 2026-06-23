@@ -93,6 +93,13 @@
 | `[x]` | 补 `import_clearance_coordination` 类型 | ARCH-2 / Workstream C | 本轮已补入 `database.types.ts` |
 | `[x]` | 补 container loading 系列表类型 | ARCH-2 / Workstream C | 本轮已一并补入后合同核心表：装柜、订舱、清关、到港、反馈、仓储集货等类型 |
 | `[x]` | 设计并落库 `audit_logs` 表 | ARCH-4 / Workstream F | 已完成（migration + 类型已落地，待后续业务接入写入） |
+
+## G. 下一阶段基础治理
+
+| 状态 | 任务 | 对应报告 | 备注 |
+|---|---|---|---|
+| `[~]` | KPI 口径树 | Next / Governance | 已完成第一版口径目录、时间窗口快照与区域/本人视角切片基础，`AdminDataAnalyticsNew`、`GlobalBIDashboardCompact` 已开始接统一快照；当前仍待继续替换各 dashboard mock 值，并补财务类统一口径 |
+| `[~]` | 全局字段级审计 | Next / Governance | 当前只有 `audit_logs` 底座与验证样本，仍待继续把关键写入口接入字段级审计 |
 | `[x]` | 销售链字段级审计接入 | MAN-5 / Workstream F | 已完成（已接 `QT upsert/status`、`SC upsert/status`、`CG upsert` 关键写入口） |
 | `[x]` | 拆分 `postContractExecutionServices.ts` | ARCH-1 | 已抽出 `shipmentWorkflowRiskService`（收款/放单风控 + L/C 备注解析）、`shipmentWorkflowSummaryBuilderService`（履约摘要 builder）、`purchaseOrderExecutionStatusService`（执行态读写与状态更新）、`shipmentProgressServices`（在途/到港/清关/交付/反馈）、`bookingAndShippingServices`（订舱询价/发运单）、`loadingExecutionServices`（装柜计划/装柜任务/装柜明细）、`exportDocumentationServices`（出口要求/单证/报关）、`warehouseConsolidationServices`（国内转运/收货/第三方仓/集货）；主文件已压缩到可维护范围 |
 

@@ -1,0 +1,27 @@
+<svg width="700" height="500" viewBox="0 0 700 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="700" height="500" fill="#f5f6f8"/>
+  <g transform="translate(70 88) rotate(-18 280 160)">
+    <rect x="28" y="52" width="500" height="26" rx="13" fill="#1f2933"/>
+    <rect x="50" y="92" width="500" height="26" rx="13" fill="#333b45"/>
+    <rect x="72" y="132" width="500" height="26" rx="13" fill="#1f2933"/>
+    <rect x="94" y="172" width="500" height="26" rx="13" fill="#333b45"/>
+    <rect x="116" y="212" width="500" height="26" rx="13" fill="#1f2933"/>
+    <rect x="138" y="252" width="500" height="26" rx="13" fill="#333b45"/>
+    <g fill="#111827">
+      <circle cx="28" cy="65" r="13"/>
+      <circle cx="50" cy="105" r="13"/>
+      <circle cx="72" cy="145" r="13"/>
+      <circle cx="94" cy="185" r="13"/>
+      <circle cx="116" cy="225" r="13"/>
+      <circle cx="138" cy="265" r="13"/>
+    </g>
+    <g stroke="#6b7280" stroke-width="4" opacity=".55">
+      <path d="M60 54l470 0"/>
+      <path d="M82 94l470 0"/>
+      <path d="M104 134l470 0"/>
+      <path d="M126 174l470 0"/>
+      <path d="M148 214l470 0"/>
+      <path d="M170 254l470 0"/>
+    </g>
+  </g>
+</svg>
