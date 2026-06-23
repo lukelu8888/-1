@@ -1,4 +1,70 @@
 /*! tailwindcss v4.1.3 | MIT License | https://tailwindcss.com */
+.customer-enterprise-center .text-\[10px\] { font-size: 12px !important; }
+.customer-enterprise-center .text-\[11px\] { font-size: 13px !important; }
+.customer-enterprise-center .text-\[12px\] { font-size: 14px !important; }
+.customer-enterprise-center .text-\[13px\] { font-size: 15px !important; }
+.customer-enterprise-center .text-\[14px\] { font-size: 16px !important; }
+.customer-enterprise-center .text-\[15px\] { font-size: 17px !important; }
+.customer-enterprise-center .text-\[16px\] { font-size: 18px !important; }
+.customer-enterprise-center .text-\[20px\] { font-size: 22px !important; }
+.customer-enterprise-center .text-\[22px\] { font-size: 24px !important; }
+.customer-enterprise-center .text-sm { font-size: 16px !important; }
+.customer-enterprise-center .text-lg { font-size: 20px !important; }
+
+.cosun-department-menu-item {
+  height: 28px;
+  min-height: 28px;
+}
+
+.cosun-department-title {
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cosun-top-region-badge > div {
+  color: #ffffff;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.cosun-top-region-badge svg {
+  color: #f87171;
+}
+
+.cosun-top-region-switcher > div > button {
+  color: #ffffff;
+  padding: 0;
+  font-size: 12px;
+}
+
+.cosun-top-region-switcher > div > button:hover {
+  color: #fca5a5;
+}
+
+.port-dropdown-scrollbar {
+  scrollbar-width: auto;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+
+.port-dropdown-scrollbar::-webkit-scrollbar {
+  width: 12px;
+}
+
+.port-dropdown-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.port-dropdown-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 9999px;
+  border: 2px solid #f1f5f9;
+}
+
+.port-dropdown-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
 @layer properties {
   @supports (((-webkit-hyphens: none)) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color: rgb(from red r g b)))) {
     *, :before, :after, ::backdrop {

@@ -1,9 +1,26 @@
 
   import { defineConfig } from 'vite';
   import react from '@vitejs/plugin-react-swc';
+  import fs from 'node:fs';
   import path from 'path';
 
+  const localHttpsKeyPath = path.resolve(__dirname, '.cert/localhost-key.pem');
+  const localHttpsCertPath = path.resolve(__dirname, '.cert/localhost-cert.pem');
+  const localDevHttps =
+    process.env.VITE_DEV_HTTPS === 'true' &&
+    fs.existsSync(localHttpsKeyPath) &&
+    fs.existsSync(localHttpsCertPath)
+      ? {
+          key: fs.readFileSync(localHttpsKeyPath),
+          cert: fs.readFileSync(localHttpsCertPath),
+        }
+      : undefined;
+
   export default defineConfig({
+  test: {
+    environment: 'node',
+    globals: true,
+  },
     plugins: [react()],
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
@@ -81,8 +98,10 @@
     },
     server: {
       host: '0.0.0.0',
-      port: 5173,
+      port: 5174,
       strictPort: true,
+      allowedHosts: ['localhost', '127.0.0.1', 'localhost.com', 'www.localhost.com'],
+      https: localDevHttps,
       open: true,
       proxy: {
         // Local dev: forward frontend `/api/*` to Laravel backend
@@ -99,6 +118,21 @@
           target: 'https://oaavirpytvemskjooeyg.supabase.co',
           changeOrigin: true,
           rewrite: (requestPath) => requestPath.replace(/^\/__supabase_rest__/, '/rest/v1'),
+        },
+        '/__fred__': {
+          target: 'https://fred.stlouisfed.org',
+          changeOrigin: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/__fred__/, ''),
+        },
+        '/__frankfurter__': {
+          target: 'https://api.frankfurter.dev',
+          changeOrigin: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/__frankfurter__/, ''),
+        },
+        '/__coingecko__': {
+          target: 'https://api.coingecko.com',
+          changeOrigin: true,
+          rewrite: (requestPath) => requestPath.replace(/^\/__coingecko__/, ''),
         },
       },
     },

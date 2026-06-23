@@ -30,8 +30,16 @@ yarn-error.log*
 .cache/
 .eslintcache
 *.tsbuildinfo
+.cert/
 
 # ZIP files
 *.zip
 .claude/
 .claude/
+
+# Python virtualenv & AI model cache (DO NOT COMMIT)
+.venv-paddle310/
+.paddlex-cache/
+.paddlex-home/
+.env.development
+.vercel
