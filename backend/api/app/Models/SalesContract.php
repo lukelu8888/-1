@@ -31,6 +31,12 @@ class SalesContract extends Model
         'currency',
         'trade_terms',
         'payment_terms',
+        'sc_type',
+        'exceptional_clause_flag',
+        'exceptional_clause_notes',
+        'special_account_period_flag',
+        'strategic_customer_flag',
+        'sc_last_approval_at',
         'deposit_percentage',
         'deposit_amount',
         'balance_percentage',
@@ -69,6 +75,9 @@ class SalesContract extends Model
             'balance_amount' => 'decimal:2',
             'approval_flow' => 'array',
             'approval_history' => 'array',
+            'exceptional_clause_flag' => 'boolean',
+            'special_account_period_flag' => 'boolean',
+            'strategic_customer_flag' => 'boolean',
             'deposit_proof' => 'array',
             'purchase_order_numbers' => 'array',
             'seller_signature' => 'array',
@@ -76,6 +85,7 @@ class SalesContract extends Model
             'attachments' => 'array',
             'submitted_at' => 'datetime',
             'approved_at' => 'datetime',
+            'sc_last_approval_at' => 'datetime',
             'sent_to_customer_at' => 'datetime',
             'customer_confirmed_at' => 'datetime',
             'deposit_confirmed_at' => 'datetime',
@@ -87,4 +97,3 @@ class SalesContract extends Model
         return $this->hasMany(SalesContractProduct::class, 'sales_contract_id');
     }
 }
-

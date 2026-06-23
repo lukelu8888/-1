@@ -10,6 +10,7 @@ use App\Models\SalesQuotationItem;
 use App\Models\PurchaseRequirement;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
@@ -150,14 +151,14 @@ class SalesQuotationController extends Controller
             'customerPhone' => ['nullable', 'string', 'max:64'],
             'customerAddress' => ['nullable', 'string', 'max:512'],
             'items' => ['required', 'array', 'min:1'],
-            'items.*.productName' => ['required', 'string', 'max:255'],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
-            'items.*.unit' => ['required', 'string', 'max:32'],
-            'items.*.costPrice' => ['required', 'numeric', 'min:0'],
-            'items.*.salesPrice' => ['required', 'numeric', 'min:0'],
-            'items.*.profitMargin' => ['required', 'numeric', 'min:0'],
-            'items.*.totalCost' => ['required', 'numeric', 'min:0'],
-            'items.*.totalPrice' => ['required', 'numeric', 'min:0'],
+            'items.*.productName' => ['nullable', 'string', 'max:255'],
+            'items.*.quantity' => ['nullable', 'numeric', 'min:0.0001'],
+            'items.*.unit' => ['nullable', 'string', 'max:32'],
+            'items.*.costPrice' => ['nullable', 'numeric', 'min:0'],
+            'items.*.salesPrice' => ['nullable', 'numeric', 'min:0'],
+            'items.*.profitMargin' => ['nullable', 'numeric', 'min:0'],
+            'items.*.totalCost' => ['nullable', 'numeric', 'min:0'],
+            'items.*.totalPrice' => ['nullable', 'numeric', 'min:0'],
             'totalCost' => ['required', 'numeric', 'min:0'],
             'totalPrice' => ['required', 'numeric', 'min:0'],
             'totalProfit' => ['required', 'numeric'],
@@ -171,12 +172,68 @@ class SalesQuotationController extends Controller
         ]);
 
         // 检查是否已存在相同 qt_number 的报价单
-        $existing = SalesQuotation::where('qt_number', $validated['qtNumber'])->first();
+        $existing = SalesQuotation::with('items')
+            ->where('qt_number', $validated['qtNumber'])
+            ->orderByDesc('updated_at')
+            ->first();
         if ($existing) {
-            return response()->json([
-                'message' => '报价单号已存在',
-                'quotation' => $this->toDto($existing),
-            ], 200);
+            DB::beginTransaction();
+            try {
+                $existing->qr_number = $validated['qrNumber'];
+                $existing->inq_number = $validated['inqNumber'] ?? $existing->inq_number;
+                $existing->region = $validated['region'];
+                $existing->customer_name = $validated['customerName'];
+                $existing->customer_email = $validated['customerEmail'];
+                $existing->customer_company = $validated['customerCompany'];
+                $existing->customer_phone = $validated['customerPhone'] ?? null;
+                $existing->customer_address = $validated['customerAddress'] ?? null;
+                $existing->sales_person_email = $user->email;
+                $existing->sales_person_name = $user->name ?? $user->email;
+                $existing->total_cost = (float) $validated['totalCost'];
+                $existing->total_price = (float) $validated['totalPrice'];
+                $existing->total_profit = (float) $validated['totalProfit'];
+                $existing->profit_rate = (float) $validated['profitRate'];
+                $existing->currency = $validated['currency'];
+                $existing->payment_terms = $validated['paymentTerms'] ?? null;
+                $existing->delivery_terms = $validated['deliveryTerms'] ?? null;
+                $existing->delivery_date = $validated['deliveryDate'] ?? null;
+                $existing->valid_until = $validated['validUntil'] ?? $existing->valid_until;
+                $existing->notes = $validated['notes'] ?? null;
+                $existing->save();
+
+                SalesQuotationItem::where('quotation_id', $existing->id)->delete();
+                foreach ($this->normalizePortalItems($validated['items'], $validated['currency']) as $itemData) {
+                    SalesQuotationItem::create([
+                        'quotation_id' => $existing->id,
+                        'product_id' => $itemData['id'] ?? null,
+                        'product_name' => $itemData['productName'],
+                        'model_no' => $itemData['modelNo'] ?? null,
+                        'specification' => $itemData['specification'] ?? null,
+                        'quantity' => (int) $itemData['quantity'],
+                        'unit' => $itemData['unit'],
+                        'cost_price' => (float) $itemData['costPrice'],
+                        'sales_price' => (float) $itemData['salesPrice'],
+                        'profit_margin' => (float) $itemData['profitMargin'],
+                        'total_cost' => (float) $itemData['totalCost'],
+                        'total_price' => (float) $itemData['totalPrice'],
+                        'currency' => $itemData['currency'] ?? $validated['currency'],
+                        'hs_code' => $itemData['hsCode'] ?? null,
+                        'remarks' => $itemData['remarks'] ?? null,
+                    ]);
+                }
+
+                DB::commit();
+
+                return response()->json([
+                    'message' => '报价单已同步更新',
+                    'quotation' => $this->toDto($existing->fresh('items')),
+                ], 200);
+            } catch (\Exception $e) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => '同步失败: ' . $e->getMessage(),
+                ], 500);
+            }
         }
 
         DB::beginTransaction();
@@ -209,7 +266,7 @@ class SalesQuotationController extends Controller
                 'notes' => $validated['notes'] ?? null,
             ]);
 
-            foreach ($validated['items'] as $itemData) {
+            foreach ($this->normalizePortalItems($validated['items'], $validated['currency']) as $itemData) {
                 SalesQuotationItem::create([
                     'quotation_id' => $quotation->id,
                     'product_id' => $itemData['id'] ?? null,
@@ -235,13 +292,15 @@ class SalesQuotationController extends Controller
                 ]);
             }
 
-            // 更新 QR 的 pushed_to_quotation 标记
-            PurchaseRequirement::where('requirement_no', $validated['qrNumber'])
-                ->update([
-                    'pushed_to_quotation' => true,
-                    'pushed_to_quotation_date' => now(),
-                    'pushed_by' => $user->email,
-                ]);
+            // 某些本地环境尚未同步 QR 表结构；缺表时不阻断 QT 同步/发送链路。
+            if (Schema::hasTable('purchase_requirements')) {
+                PurchaseRequirement::where('requirement_no', $validated['qrNumber'])
+                    ->update([
+                        'pushed_to_quotation' => true,
+                        'pushed_to_quotation_date' => now(),
+                        'pushed_by' => $user->email,
+                    ]);
+            }
 
             DB::commit();
 
@@ -255,6 +314,35 @@ class SalesQuotationController extends Controller
                 'message' => '创建失败: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    private function normalizePortalItems(array $items, string $currency): array
+    {
+        $normalized = [];
+
+        foreach ($items as $index => $itemData) {
+            $quantity = max(1, (int) round((float) ($itemData['quantity'] ?? 1)));
+            $salesPrice = (float) ($itemData['salesPrice'] ?? $itemData['unitPrice'] ?? $itemData['quotePrice'] ?? 0);
+            $costPrice = (float) ($itemData['costPrice'] ?? 0);
+            $totalCost = (float) ($itemData['totalCost'] ?? ($costPrice * $quantity));
+            $totalPrice = (float) ($itemData['totalPrice'] ?? ($salesPrice * $quantity));
+            $productName = trim((string) ($itemData['productName'] ?? $itemData['name'] ?? $itemData['product_name'] ?? $itemData['title'] ?? ''));
+
+            $normalized[] = [
+                ...$itemData,
+                'productName' => $productName !== '' ? $productName : ('Product ' . ($index + 1)),
+                'quantity' => $quantity,
+                'unit' => trim((string) ($itemData['unit'] ?? 'PCS')) ?: 'PCS',
+                'costPrice' => $costPrice,
+                'salesPrice' => $salesPrice,
+                'profitMargin' => (float) ($itemData['profitMargin'] ?? 0),
+                'totalCost' => $totalCost,
+                'totalPrice' => $totalPrice,
+                'currency' => trim((string) ($itemData['currency'] ?? $currency)) ?: $currency,
+            ];
+        }
+
+        return $normalized;
     }
 
     /**
@@ -434,8 +522,13 @@ class SalesQuotationController extends Controller
         /** @var SalesQuotation|null $qt */
         $qt = SalesQuotation::with('items')
             ->where('quotation_uid', $quotationUid)
-            ->orWhere('qt_number', $quotationUid)
             ->first();
+        if (!$qt) {
+            $qt = SalesQuotation::with('items')
+                ->where('qt_number', $quotationUid)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
 
         if (!$qt) {
             return response()->json(['message' => 'Quotation not found'], 404);
@@ -484,8 +577,13 @@ class SalesQuotationController extends Controller
         /** @var SalesQuotation|null $qt */
         $qt = SalesQuotation::with('items')
             ->where('quotation_uid', $quotationUid)
-            ->orWhere('qt_number', $quotationUid)
             ->first();
+        if (!$qt) {
+            $qt = SalesQuotation::with('items')
+                ->where('qt_number', $quotationUid)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
 
         if (!$qt) {
             return response()->json(['message' => 'Quotation not found'], 404);
@@ -659,6 +757,10 @@ class SalesQuotationController extends Controller
             'approvalChain.*.comment' => ['nullable', 'string'],
             'amount' => ['nullable', 'numeric'],
             'totalPrice' => ['nullable', 'numeric'],
+            'specialPriceFlag' => ['nullable', 'boolean'],
+            'specialPriceReason' => ['nullable', 'string'],
+            'specialPaymentTermsFlag' => ['nullable', 'boolean'],
+            'strategicCustomerFlag' => ['nullable', 'boolean'],
             'items' => ['nullable', 'array'],
             'items.*.productName' => ['nullable', 'string'],
             'items.*.salesPrice' => ['nullable', 'numeric'],
@@ -670,8 +772,13 @@ class SalesQuotationController extends Controller
         /** @var SalesQuotation|null $qt */
         $qt = SalesQuotation::with('items')
             ->where('quotation_uid', $quotationUid)
-            ->orWhere('qt_number', $quotationUid)
             ->first();
+        if (!$qt) {
+            $qt = SalesQuotation::with('items')
+                ->where('qt_number', $quotationUid)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
 
         if (!$qt) {
             return response()->json(['message' => 'Quotation not found'], 404);
@@ -688,8 +795,19 @@ class SalesQuotationController extends Controller
             return response()->json(['message' => 'Only draft quotation can be submitted for approval'], 400);
         }
 
+        $amount = (float) ($validated['totalPrice'] ?? $qt->total_price ?? 0);
+        $profitRate = (float) ($qt->profit_rate ?? 0);
+        $specialPriceFlag = (bool) ($validated['specialPriceFlag'] ?? $qt->special_price_flag ?? ($profitRate > 0 && $profitRate < 15));
+        $specialPaymentTermsFlag = (bool) ($validated['specialPaymentTermsFlag'] ?? $qt->special_payment_terms_flag ?? $this->hasSpecialPaymentTerms($qt->payment_terms, null));
+        $strategicCustomerFlag = (bool) ($validated['strategicCustomerFlag'] ?? $qt->strategic_customer_flag ?? false);
+
         $qt->approval_status = 'pending_approval';
         $qt->approval_chain = $validated['approvalChain'];
+        $qt->qt_type = $this->deriveQtType($amount, $specialPriceFlag, $specialPaymentTermsFlag, $strategicCustomerFlag);
+        $qt->special_price_flag = $specialPriceFlag;
+        $qt->special_price_reason = $validated['specialPriceReason'] ?? $qt->special_price_reason;
+        $qt->special_payment_terms_flag = $specialPaymentTermsFlag;
+        $qt->strategic_customer_flag = $strategicCustomerFlag;
 
         // 同步更新业务员最新定价（避免发给客户时被 DB 旧价格覆盖）
         if (!empty($validated['totalPrice'])) {
@@ -733,8 +851,13 @@ class SalesQuotationController extends Controller
 
         $qt = SalesQuotation::with('items')
             ->where('quotation_uid', $quotationUid)
-            ->orWhere('qt_number', $quotationUid)
             ->first();
+        if (!$qt) {
+            $qt = SalesQuotation::with('items')
+                ->where('qt_number', $quotationUid)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
         if (!$qt) return response()->json(['message' => 'Quotation not found'], 404);
 
         $email = (string) ($user->email ?? '');
@@ -766,6 +889,7 @@ class SalesQuotationController extends Controller
             $qt->approval_status = 'pending_director';
         } else {
             $qt->approval_status = 'approved';
+            $qt->qt_last_approval_at = now();
         }
 
         $qt->approval_chain = $chain;
@@ -842,8 +966,13 @@ class SalesQuotationController extends Controller
         /** @var SalesQuotation|null $qt */
         $qt = SalesQuotation::with('items')
             ->where('quotation_uid', $quotationUid)
-            ->orWhere('qt_number', $quotationUid)
             ->first();
+        if (!$qt) {
+            $qt = SalesQuotation::with('items')
+                ->where('qt_number', $quotationUid)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
 
         if (!$qt) {
             return response()->json(['message' => 'Quotation not found'], 404);
@@ -898,8 +1027,13 @@ class SalesQuotationController extends Controller
         /** @var SalesQuotation|null $qt */
         $qt = SalesQuotation::with('items')
             ->where('quotation_uid', $quotationUid)
-            ->orWhere('qt_number', $quotationUid)
             ->first();
+        if (!$qt) {
+            $qt = SalesQuotation::with('items')
+                ->where('qt_number', $quotationUid)
+                ->orderByDesc('updated_at')
+                ->first();
+        }
 
         if (!$qt) {
             return response()->json(['message' => 'Quotation not found'], 404);
@@ -963,6 +1097,12 @@ class SalesQuotationController extends Controller
             'profitRate' => (float) $qt->profit_rate,
             'currency' => $qt->currency,
             'paymentTerms' => $qt->payment_terms,
+            'qtType' => $qt->qt_type,
+            'specialPriceFlag' => (bool) $qt->special_price_flag,
+            'specialPriceReason' => $qt->special_price_reason,
+            'specialPaymentTermsFlag' => (bool) $qt->special_payment_terms_flag,
+            'strategicCustomerFlag' => (bool) $qt->strategic_customer_flag,
+            'qtLastApprovalAt' => $qt->qt_last_approval_at ? $qt->qt_last_approval_at->toIso8601String() : null,
             'deliveryTerms' => $qt->delivery_terms,
             'deliveryDate' => $qt->delivery_date ? (string) $qt->delivery_date : null,
             'validUntil' => $qt->valid_until ? (string) $qt->valid_until : null,
@@ -1031,5 +1171,40 @@ class SalesQuotationController extends Controller
             'updatedAt' => $qt->updated_at->toIso8601String(),
             'sentAt' => $qt->sent_at ? $qt->sent_at->toIso8601String() : null,
         ];
+    }
+
+    private function hasSpecialPaymentTerms(?string $paymentTerms, ?string $paymentMode): bool
+    {
+        $text = strtolower(trim((string) ($paymentTerms ?? '')));
+        $mode = strtolower(trim((string) ($paymentMode ?? '')));
+        if (in_array($mode, ['oa', 'da', 'dp'], true)) {
+            return true;
+        }
+
+        foreach (['open account', 'oa', 'net ', '账期', '赊销', 'd/a', 'd/p', '远期', '分期'] as $keyword) {
+            if ($text !== '' && str_contains($text, $keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function deriveQtType(float $amount, bool $specialPriceFlag, bool $specialPaymentTermsFlag, bool $strategicCustomerFlag): string
+    {
+        if ($specialPriceFlag) {
+            return 'special_price';
+        }
+        if ($specialPaymentTermsFlag) {
+            return 'special_payment';
+        }
+        if ($strategicCustomerFlag) {
+            return 'strategic_customer';
+        }
+        if ($amount >= 20000) {
+            return 'large_amount';
+        }
+
+        return 'regular';
     }
 }

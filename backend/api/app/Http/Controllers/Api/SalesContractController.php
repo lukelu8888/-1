@@ -278,7 +278,14 @@ class SalesContractController extends Controller
 
         // 与 QT 一致：按金额决定是否需要总监审批（≥20000 两级）
         $amount = (float) ($sc->total_amount ?? 0);
-        $requiresDirector = $amount >= 20000;
+        $specialAccountPeriodFlag = (bool) ($sc->special_account_period_flag ?? $this->hasSpecialPaymentTerms($sc->payment_terms, null));
+        $exceptionalClauseFlag = (bool) ($sc->exceptional_clause_flag ?? !empty($sc->exceptional_clause_notes));
+        $strategicCustomerFlag = (bool) ($sc->strategic_customer_flag ?? false);
+        $requiresDirector = $amount >= 20000 || $specialAccountPeriodFlag || $exceptionalClauseFlag;
+        $sc->sc_type = $this->deriveScType($amount, $exceptionalClauseFlag, $specialAccountPeriodFlag, $strategicCustomerFlag);
+        $sc->special_account_period_flag = $specialAccountPeriodFlag;
+        $sc->exceptional_clause_flag = $exceptionalClauseFlag;
+        $sc->strategic_customer_flag = $strategicCustomerFlag;
         $sc->approval_flow = [
             'requiresDirectorApproval' => $requiresDirector,
             'currentStep' => 'supervisor',
@@ -367,6 +374,7 @@ class SalesContractController extends Controller
         } else {
             $sc->status = 'approved';
             $sc->approved_at = now();
+            $sc->sc_last_approval_at = now();
         }
 
         $sc->save();
@@ -873,6 +881,12 @@ class SalesContractController extends Controller
             'currency' => $sc->currency,
             'tradeTerms' => $sc->trade_terms,
             'paymentTerms' => $sc->payment_terms,
+            'scType' => $sc->sc_type,
+            'exceptionalClauseFlag' => (bool) $sc->exceptional_clause_flag,
+            'exceptionalClauseNotes' => $sc->exceptional_clause_notes,
+            'specialAccountPeriodFlag' => (bool) $sc->special_account_period_flag,
+            'strategicCustomerFlag' => (bool) $sc->strategic_customer_flag,
+            'scLastApprovalAt' => optional($sc->sc_last_approval_at)->toISOString(),
             'depositPercentage' => (float) $sc->deposit_percentage,
             'depositAmount' => (float) $sc->deposit_amount,
             'balancePercentage' => (float) $sc->balance_percentage,
@@ -903,5 +917,39 @@ class SalesContractController extends Controller
             'customerConfirmedAt' => optional($sc->customer_confirmed_at)->toISOString(),
         ];
     }
-}
 
+    private function hasSpecialPaymentTerms(?string $paymentTerms, ?string $paymentMode): bool
+    {
+        $text = strtolower(trim((string) ($paymentTerms ?? '')));
+        $mode = strtolower(trim((string) ($paymentMode ?? '')));
+        if (in_array($mode, ['oa', 'da', 'dp'], true)) {
+            return true;
+        }
+
+        foreach (['open account', 'oa', 'net ', '账期', '赊销', 'd/a', 'd/p', '远期', '分期'] as $keyword) {
+            if ($text !== '' && str_contains($text, $keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function deriveScType(float $amount, bool $exceptionalClauseFlag, bool $specialAccountPeriodFlag, bool $strategicCustomerFlag): string
+    {
+        if ($exceptionalClauseFlag) {
+            return 'exceptional_clause';
+        }
+        if ($specialAccountPeriodFlag) {
+            return 'special_account_period';
+        }
+        if ($strategicCustomerFlag) {
+            return 'strategic_customer';
+        }
+        if ($amount >= 20000) {
+            return 'large_amount';
+        }
+
+        return 'regular';
+    }
+}

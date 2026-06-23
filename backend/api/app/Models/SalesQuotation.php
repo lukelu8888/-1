@@ -30,6 +30,12 @@ class SalesQuotation extends Model
         'profit_rate',
         'currency',
         'payment_terms',
+        'qt_type',
+        'special_price_flag',
+        'special_price_reason',
+        'special_payment_terms_flag',
+        'strategic_customer_flag',
+        'qt_last_approval_at',
         'delivery_terms',
         'delivery_date',
         'valid_until',
@@ -59,6 +65,7 @@ class SalesQuotation extends Model
             'valid_until' => 'date',
             'pushed_contract_at' => 'datetime',
             'sent_at' => 'datetime',
+            'qt_last_approval_at' => 'datetime',
             'total_cost' => 'decimal:2',
             'total_price' => 'decimal:2',
             'total_profit' => 'decimal:2',
@@ -67,6 +74,9 @@ class SalesQuotation extends Model
             'approval_chain' => 'array',
             'customer_response' => 'array',
             'trade_terms' => 'array',
+            'special_price_flag' => 'boolean',
+            'special_payment_terms_flag' => 'boolean',
+            'strategic_customer_flag' => 'boolean',
         ];
     }
 

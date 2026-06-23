@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\InquiryController;
 use App\Http\Controllers\Api\OrderController;
+use App\Http\Controllers\Api\PaymentSlipOcrController;
 use App\Http\Controllers\Api\PurchaseRequirementController;
 use App\Http\Controllers\Api\PurchaseOrderController;
 use App\Http\Controllers\Api\SupplierController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Api\SupplierQuotationController;
 use App\Http\Controllers\Api\SalesQuotationController;
 use App\Http\Controllers\Api\SalesContractController;
 use App\Http\Controllers\Api\ApprovalCenterController;
+use App\Http\Controllers\Api\MarketCategoryResearchController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -93,7 +95,25 @@ Route::middleware('auth:sanctum')->group(function () {
     // 审批中心：主管/总监的待审列表（从数据库读取）
     Route::get('approval-center/quotation-requests', [ApprovalCenterController::class, 'quotationRequests']);
     Route::get('approval-center/contract-requests', [ApprovalCenterController::class, 'contractRequests']);
+    Route::post('payment-slip-ocr', [PaymentSlipOcrController::class, 'recognize']);
 });
+
+    // ─── Market Category Research (MCR) ─────────────────────────────────────────
+    Route::get('mcr/kpis',                                    [MarketCategoryResearchController::class, 'kpis']);
+    Route::get('mcr/runs',                                    [MarketCategoryResearchController::class, 'indexRuns']);
+    Route::post('mcr/runs',                                   [MarketCategoryResearchController::class, 'storeRun']);
+    Route::get('mcr/runs/{id}',                               [MarketCategoryResearchController::class, 'showRun']);
+    Route::patch('mcr/runs/{id}/start',                       [MarketCategoryResearchController::class, 'startRun']);
+    Route::get('mcr/candidates',                              [MarketCategoryResearchController::class, 'indexCandidates']);
+    Route::get('mcr/candidates/{id}',                         [MarketCategoryResearchController::class, 'showCandidate']);
+    Route::patch('mcr/candidates/{id}/status',                [MarketCategoryResearchController::class, 'updateCandidateStatus']);
+    Route::get('mcr/evidence',                                [MarketCategoryResearchController::class, 'indexEvidence']);
+    Route::post('mcr/evidence',                               [MarketCategoryResearchController::class, 'storeEvidence']);
+    Route::get('mcr/retailer-scans/{candidateId}',            [MarketCategoryResearchController::class, 'retailerScans']);
+    Route::get('mcr/review-queue',                            [MarketCategoryResearchController::class, 'reviewQueue']);
+    Route::post('mcr/publish',                                [MarketCategoryResearchController::class, 'publish']);
+    Route::get('mcr/publish-logs',                            [MarketCategoryResearchController::class, 'publishLogs']);
+
 
 // ✅ CORS preflight fallback (must be LAST to avoid intercepting other routes)
 Route::options('{any}', function () {
