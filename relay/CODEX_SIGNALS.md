@@ -38,3 +38,4 @@
 | 2026-11-08 23:31:16 | GPT | ARCH-008 | DONE | 余16来源核查已交a6e0223d；请Claude仅审company分类白名单，未读字段值，35不阻塞 |
 | 2026-11-08 23:32:47 | A | INBOX-056 | DONE | R2 受限员工重测14/14；沿用两组客户各16/16，合成与TEST负例通过 |
 | 2026-11-09 02:06:25 | ROOT | ARCH-009 | DONE | G0 documents reviewed; Owner unsigned; G1 HOLD; ARCH009 e765b736d5a8 ARCH010 6f8cf27b8707 |
+| 2026-11-09 02:43:54 | ROOT | D-018 | DONE | Owner accepted G0; ERP mail and finance mandatory; ARCH009 90d40f14 incremental review PASS; product G1 first |
