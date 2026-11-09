@@ -31,3 +31,4 @@
 | 2026-11-08 22:17:40 | C | ARCH006-APPLY | DONE | 0147 accepted; clone PASS and cleaned; independent UI pending |
 | 2026-11-08 22:20:34 | A | INBOX-053 | DONE | sixh sales PASS 11/11 |
 | 2026-11-08 23:00:29 | GPT | ARCH-008 | DONE | 原账号迁移合同已落盘，含原hash兼容与权限隔离，交Claude评审；源查询通道待验证 |
+| 2026-11-08 23:01:21 | GPT | ARCH-008 | DONE | 合同追加第10节源只读通道已就绪，173行指纹7b1316db，交Claude立即评审 |
