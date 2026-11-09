@@ -43,3 +43,5 @@
 | 2026-11-09 03:23:56 | ROOT | D-020 | RUNNING | Owner authorized five real-source editable drafts in local 8038; current priority is source images/models, save-reopen and five working links; no publication or invented business values |
 | 2026-11-09 04:03:00 | ROOT | D-020 | DONE | Five source drafts imported; save/reopen and desktop/mobile verified; Owner login pending; TEST ING 0150 deviation recorded |
 | 2026-11-09 04:23:44 | ROOT | G1-R4 | RUNNING | D-021: r4 is sole product UI baseline; integrate existing five drafts and complete product-to-storefront lifecycle; no standalone pages or ING writes |
+| 2026-11-09 04:38:32 | ROOT | G1-R4 | RUNNING | r4 workbench API verified; Claude integrate per INBOX-063 |
+| 2026-11-09 04:38:52 | ROOT | G1-R4 | RUNNING | r4 workbench API verified; Claude integrate per INBOX-063 |
